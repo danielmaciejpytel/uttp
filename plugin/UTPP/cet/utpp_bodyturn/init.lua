@@ -1145,6 +1145,7 @@ function M.Status()
       E.aimSmooth and E.aimSmoothStart or E.aimAlignStart, E.aimSmooth and E.aimSmoothRate or E.aimAlignRate)
     .. string.format(" | shooterMode=%s eff=%s native=%s align=%s motion=%s", tostring(SM.on), tostring(SM.effective),
       tostring(SM.nativeState), tostring(SM.align), tostring(SM.motionOk))
+    .. string.format(" | strikeTurn=%s turned=%.1f turns=%d", tostring(E.strikeTurn), E.strikeSum, xs.strikeTurns or 0)
 end
 
 -- ---------------------------------------------------------------- in-game wiring (skipped by the offline test)
