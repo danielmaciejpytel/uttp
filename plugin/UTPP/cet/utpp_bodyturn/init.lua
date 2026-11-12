@@ -85,13 +85,14 @@ local E = {
   -- melee strike turn (setting bodyturn.meleeStrikeTurn, default off): while a fists strike runs and the game has a tracked target,
   -- V turns toward the direction the game's hit will take (api.meleeStrikeYaw, utpp_melee.reds UTPPMeleeStrikeYaw)
   strikeTurn = false,
-  strikeMax = 50,       -- deg: most V turns in one episode (a strike series); the rest stays with the melee aim tilt
-  strikeRate = 720,     -- deg/s cap
-  strikeGain = 16,      -- 1/s ease-out gain (time constant 0.06 s: a 40 deg turn is within 5 deg after 0.2 s)
-  strikeDeadband = 4,   -- deg: no turn within this of the target
+  strikeMax = 50,       -- deg: V ends within this of the facing it had when the episode (a strike series) started; the rest stays with the tilt
+  strikeRate = 540,     -- deg/s cap
+  strikeGain = 20,      -- 1/s ease-out gain (time constant 0.05 s)
+  strikeStartDeg = 8,   -- deg: a turn starts beyond this error ...
+  strikeDeadband = 4,   -- deg: ... and ends within this one (hysteresis)
   strikeGap = 0.5,      -- s without a signal that ends an episode
   strikeMaxSpeed = 1.0, -- m/s: no strike turn while V moves faster (the legs are motion matching then; the tilt covers it)
-  strikeSum = 0, strikeSeen = -1e9, strikeLogged = false,
+  strikeSum = 0, strikeStart = nil, strikeSeen = -1e9, strikeLogged = false, strikeTurning = false, strikeHeld = false,
   -- vehicle hand-over: the aim align (the body turn onto the camera) waits this long after utpp_camera ends a
   -- vehicle hold (api.vehicleHeld true -> false), so it does not land on the same frames as the release end and the aim pose;
   -- afterwards it starts through the normal hysteresis / rate. Never armed without a vehicle hold (api.vehicleHeld nil / false).
@@ -597,16 +598,21 @@ function M.ShooterModeAlignStep(api, dt)
 end
 
 -- Melee strike turn. While a fists strike runs (api.meleeStrikeYaw returns the world yaw of the game's hit direction, 1000 = none:
--- no tracked target, other weapon, first person) V is turned toward it so the visible fist and the hit agree. One eased turn of at
--- most E.strikeMax degrees per episode (an episode ends E.strikeGap s after the last signal), then V holds; no turn within
--- E.strikeDeadband of the target. The same request path as the aim align (applyAim, FPP heading lock, game look step): the game
--- look keeps its world heading. Returns a why string when it owns this frame (turning / aligned / hold), nil when not applicable.
+-- no tracked target, other weapon, first person) V is turned toward it so the visible fist and the hit agree. The goal is that
+-- yaw limited to E.strikeMax degrees around V's facing at the start of the episode (an episode ends E.strikeGap s after the last
+-- signal); a turn starts beyond E.strikeStartDeg and ends within E.strikeDeadband (hysteresis); no turn while V moves. The same
+-- request path as the aim align (applyAim, FPP heading lock, game look step); the goal is computed from V's measured yaw every
+-- frame, so late or dropped requests only slow the turn. The heading lock taken here (E.strikeHeld) is released only here and
+-- never while the aim align holds it (E.alignHeld). Returns a why string when it owns this frame, nil when not applicable.
 function M.StrikeTurnStep(api, dt)
   if not E.strikeTurn then return nil end
   local okR, reasons = try(api.locomotionReasons)
   reasons = (okR and finite(reasons)) and reasons or 0
   local function release()
-    if E.alignHeld then try(api.alignHold, false); E.alignHeld = false end
+    if E.strikeHeld then
+      if not E.alignHeld then try(api.alignHold, false) end
+      E.strikeHeld = false
+    end
   end
   -- melee attack state (bit 2048) in third person (bit 65536 clear); anything else: no signal, the episode ends after the gap
   local signal = nil
@@ -617,7 +623,9 @@ function M.StrikeTurnStep(api, dt)
     if signal ~= nil and okS and finite(speed) and speed > E.strikeMaxSpeed then signal = nil end
   end
   if signal == nil then
-    if E.clock - E.strikeSeen > E.strikeGap then E.strikeSum, E.strikeLogged = 0, false end
+    if E.clock - E.strikeSeen > E.strikeGap then
+      E.strikeStart, E.strikeSum, E.strikeLogged, E.strikeTurning = nil, 0, false, false
+    end
     release()
     return nil
   end
@@ -625,19 +633,32 @@ function M.StrikeTurnStep(api, dt)
   local okB, cur = try(api.bodyYaw)
   local okA, armed = try(api.arm, true)
   if not (okB and finite(cur) and okA and armed == true) then release(); return nil end
-  local err = norm(signal - cur)
-  local budget = E.strikeMax - E.strikeSum
+  if E.strikeStart == nil then E.strikeStart = cur end
   E.prevBody, E.prevCam, E.prevStep = nil, nil, 0
-  if math.abs(err) <= E.strikeDeadband then release(); E.why = "strike aligned"; return E.why end
-  if budget <= 0.01 then release(); E.why = "strike hold"; return E.why end
-  local goal = math.max(-budget, math.min(budget, err))
+  local off = norm(signal - E.strikeStart)
+  local goal = E.strikeStart + math.max(-E.strikeMax, math.min(E.strikeMax, off))
+  local err = norm(goal - cur)
+  local atLimit = math.abs(off) > E.strikeMax
+  E.strikeSum = math.abs(norm(cur - E.strikeStart))
+  if E.strikeTurning then
+    if math.abs(err) <= E.strikeDeadband then E.strikeTurning = false end
+  elseif math.abs(err) > E.strikeStartDeg then
+    E.strikeTurning = true
+  end
+  if not E.strikeTurning then
+    release()
+    E.why = atLimit and "strike hold" or "strike aligned"
+    return E.why
+  end
   local turnDt = math.min(math.max(dt, 1 / 240), 0.1)
   local lim = E.strikeRate * turnDt
-  local step = math.max(-lim, math.min(lim, goal * (1 - math.exp(-E.strikeGain * turnDt))))
-  if not E.alignHeld then try(api.alignHold, true); E.alignHeld = true end
+  local step = math.max(-lim, math.min(lim, err * (1 - math.exp(-E.strikeGain * turnDt))))
+  if not E.strikeHeld then
+    if not E.alignHeld then try(api.alignHold, true) end
+    E.strikeHeld = true
+  end
   local okP, res = try(api.applyAim or api.apply, norm(cur + step))
   if okP and res == true then
-    E.strikeSum = E.strikeSum + math.abs(step)
     xs.strikeTurns = (xs.strikeTurns or 0) + 1
     xs.adjSeq, xs.lastAdjStep = (xs.adjSeq or 0) + 1, step
     xs.lastAimStep = step
@@ -645,7 +666,7 @@ function M.StrikeTurnStep(api, dt)
     if not E.strikeLogged then
       E.strikeLogged = true
       M.log(string.format("[utpp_bodyturn] melee strike turn: hit direction %.0f deg from V's facing - turning V toward the tracked target (<= %d deg per series)",
-        err, E.strikeMax))
+        norm(signal - cur), E.strikeMax))
     end
     E.why = "strike turn"
   else
@@ -657,8 +678,11 @@ end
 
 function M.SetStrikeTurn(on)
   E.strikeTurn = on == true
-  E.strikeSum, E.strikeSeen, E.strikeLogged = 0, -1e9, false
-  if not E.strikeTurn and E.alignHeld then try((M.api or {}).alignHold, false); E.alignHeld = false end
+  E.strikeStart, E.strikeSum, E.strikeSeen, E.strikeLogged, E.strikeTurning = nil, 0, -1e9, false, false
+  if E.strikeHeld then
+    if not E.alignHeld then try((M.api or {}).alignHold, false) end
+    E.strikeHeld = false
+  end
   return E.strikeTurn
 end
 
