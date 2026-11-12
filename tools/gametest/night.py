@@ -1451,10 +1451,10 @@ class Night:
         """Fist fight against a REAL opponent (`--set melee_fists_target`, not in 'all'). Nobody had seen the third-person
         melee on a target: no `src=lock` line in any log; reach, hit direction and the look of a hit are unknown.
 
-        Console (every command echo-verified, gt_night.enemy_*): Codeware entity of a Character record (first that works of
-        --enemy-record) 6 m ahead of V, tagged gn.ENEMY_TAG (NightAuto then reports it in `v=`), Immortal god mode (the
-        health drops but it cannot die), the attitude set to Neutral once when it is Friendly (GetTargetObject skips a
-        Friendly target). Phases (the target is TELEPORTED along the camera forward before each; it restores to 100 %):
+        Console (every command echo-verified, gt_night.enemy_*; typed at ~12 ms per character, so they are short): Codeware
+        entity of a Character record (first that works of --enemy-record) 6 m ahead of V, tagged gn.ENEMY_TAG (NightAuto
+        then reports it in `v=`), Immortal god mode (the health drops but it cannot die), the attitude set to Neutral once
+        when it is Friendly (GetTargetObject skips a Friendly target). Phases (the target is TELEPORTED along the camera forward before each; it restores to 100 %):
         far 2.0 m, near 1.2 m, orbit (camera turned 60 deg, target 1.2 m along the new forward), block 1.5 m - each with 3
         punches (melee_punch) or the LT block (melee_block). Evidence per phase from the UTPP log: MELEEAIM src= (lock?
         tgtPitch / tgtYaw), MMMASK / MMMELEEFULL, V <-> target distance from the NightAuto POS lines, and the health read
@@ -1482,13 +1482,12 @@ class Night:
                                             f'no "[night] {tag} ok=" echo (console command lost)'))
             return ok
 
-        def enemy_call(label: str, dist: float | None = None, heal: bool = False, god: bool = False,
-                       neutral: bool = False) -> dict | None:
+        def enemy_call(label: str, dist: float | None = None, heal: bool = False) -> dict | None:
             """One UTPPENEMY state command. The first call carries the definition; when a later echo says the global is
             gone (or is lost) the same command is sent once more WITH the definition (the one cheap alternative)."""
             e = None
             for define in ([True] if not st['defined'] else [False, True]):
-                cmd = gn.enemy_cmd(label, dist, heal=heal, god=god, neutral=neutral, define=define)
+                cmd = gn.enemy_cmd(label, dist, heal=heal, define=define)
                 text = self.console_verified(pad, guard, cmd, lambda t: '[night] ENEMY ok=' in t, f'enemy/{label}')
                 e = gn.parse_enemy(text)
                 if e is not None and e['ok']:
@@ -1591,13 +1590,18 @@ class Night:
                 warns.append('no record could be spawned and found (tried ' + ', '.join(enemy['tried']) + ')')
             else:
                 neutral = first['att'] == 0
-                prep = enemy_call('prep', heal=True, god=True, neutral=neutral)
+                ptext = self.console_verified(pad, guard, gn.enemy_prep_cmd(neutral),
+                                              lambda t: '[night] ENEMY_PREP ok=' in t, 'enemy_prep')
+                prep = gn.parse_enemy(ptext, 'ENEMY_PREP')
+                res['checks'].append({'phase': 'enemy_prep', 'echo': prep['raw'] if prep else None,
+                                      'ok': prep['ok'] if prep else None})
+                say('prep: ' + (prep['raw'] if prep else 'echo LOST'))
                 spawn_info = dict(first)
-                if prep is not None and prep['ok']:
-                    if prep['god'] is not True:
-                        warns.append('Immortal god mode not set: the target can die')
-                    if prep['heal'] is not True:
-                        warns.append('health restore (RequestSettingStatPoolValue) failed: the drops are cumulative')
+                if prep is None or not prep['ok'] or prep['god'] is not True:
+                    warns.append('Immortal god mode not set (' + ('echo LOST' if prep is None else prep['raw'][:80])
+                                 + '): the target can die')
+                if neutral and (prep is None or prep['attset'] is not True):
+                    warns.append('SetAttitudeTowards(Neutral) did not run: the Friendly attitude stays')
                 if neutral:   # the one alternative: did the attitude change take?
                     chk = enemy_call('recheck')
                     if chk is not None and chk['ok']:
@@ -1605,7 +1609,7 @@ class Night:
                         if chk['att'] == 0:
                             warns.append('attitude still Friendly after SetAttitudeTowards(Neutral): phases skipped')
                 enemy['spawn'] = spawn_info
-                say(f'target {spawn_info.get("rec") or enemy["record"]}: att={spawn_info.get("att_name")} '
+                say(f'target {enemy["record"]}: att={spawn_info.get("att_name")} '
                     f'act={spawn_info.get("act")} hp={spawn_info.get("hp")}% hv={spawn_info.get("hv")} '
                     f'd2={spawn_info.get("d2")} m')
                 base = {'hv': first['hv'], 'hp': first['hp']}   # a fresh spawn: full health
@@ -1639,6 +1643,10 @@ class Night:
                     ph['place'] = place
                     ph['placed'] = place is not None and place['ok'] and place['found']
                     ph['place_raw'] = place['raw'] if place else None
+                    if place is not None and place['ok'] and place['heal'] is not True and not st.get('heal_warned'):
+                        st['heal_warned'] = True
+                        warns.append('health restore (RequestSettingStatPoolValue) failed: the drops are measured from '
+                                     'the state read of the previous phase')
                     if phases:
                         phases[-1]['after'] = place
                     off = file_size(self.utpp_log)
@@ -2995,6 +3003,12 @@ def dry_run(args) -> int:
           '60 deg) / 1.5 m before 3 punches / 3 punches / 3 punches / LT block; PASS = target found (not Friendly), >= 1 '
           'MELEEAIM src=lock, health drop at 1.2 m; target deleted and god mode removed in a finally'
           + (' ; --punch-report: tools\\analysis\\punch_direction_report.py on the log' if args.punch_report else ''))
+    if 'melee_fists_target' in names:
+        rec0 = args.enemy_record.split(',')[0]
+        print(f'       spawn ({args.enemy_spawn_dist:.0f} m, Codeware, tag {gn.ENEMY_TAG}): {gn.enemy_spawn_cmd(rec0, args.enemy_spawn_dist)}')
+        print(f'       state/place (first call defines UTPPENEMY, {len(gn.ENEMY_DEFINE)} chars): '
+              f'{gn.enemy_cmd("near", 1.2, heal=True)}')
+        print(f'       despawn: {gn.enemy_off_cmd()}')
     print('     aim_probe (--set aim_probe only): perspective.aiming=tpp + utpp_probe AimProbe(true) by script, LT held 4 s with '
           '2 RT shots, AimProbe(false) + aiming=fpp always restored (finally); PASS = >= 4 aimprobe samples, >= 1 shot, '
           'a summary line (weapon_draw first if NightPos shows w=0)')

@@ -2731,7 +2731,7 @@ class EnemyPureTests(unittest.TestCase):
 
     def test_commands_are_one_ascii_line_with_their_own_tag(self):
         cmds = [gn.enemy_spawn_cmd('Character.x'), gn.enemy_cmd('far', 2.0, heal=True, define=True),
-                gn.enemy_cmd('prep', heal=True, god=True, neutral=True), gn.enemy_off_cmd(), gn.ENEMY_DEFINE]
+                gn.enemy_prep_cmd(True), gn.enemy_prep_cmd(False), gn.enemy_off_cmd(), gn.ENEMY_DEFINE]
         for c in cmds:
             self.assertNotIn(chr(10), c)
             self.assertTrue(all(32 <= ord(ch) < 127 for ch in c))
@@ -2742,30 +2742,39 @@ class EnemyPureTests(unittest.TestCase):
                      's.persistState=false', 's.persistSpawn=false', "s.tags={'" + gn.ENEMY_TAG + "'}", 'a.x+x*6.00',
                      "TweakDB:GetRecord(id)", 'record missing', "[night] ENEMY_SPAWN ok="):
             self.assertIn(part, sp)
-        self.assertIn('Immortal', gn.ENEMY_DEFINE)
-        self.assertNotIn('Invulnerable', gn.ENEMY_DEFINE + gn.enemy_off_cmd())      # Invulnerable would block the damage
+        self.assertIn('Immortal', gn.enemy_prep_cmd())
+        self.assertNotIn('Invulnerable', gn.enemy_prep_cmd() + gn.enemy_off_cmd())  # Invulnerable would block the damage
+        self.assertIn('AIA_Neutral', gn.enemy_prep_cmd(True))
+        self.assertNotIn('AIA_Neutral', gn.enemy_prep_cmd(False))
+        self.assertTrue(gn.enemy_prep_cmd().endswith("Game.UTPPLogLine('[night] ENEMY_PREP ok='..tostring(ok)..' '..tostring(e))"))
         self.assertIn('RemoveGodMode', gn.enemy_off_cmd())
         self.assertIn("DeleteTagged('" + gn.ENEMY_TAG + "')", gn.enemy_off_cmd())
         self.assertTrue(gn.enemy_off_cmd().endswith("Game.UTPPLogLine('[night] ENEMY_OFF ok=true')"))
         c = gn.enemy_cmd('near', 1.2, heal=True)
-        self.assertTrue(c.startswith('local ok,e=pcall(function() return UTPPENEMY(1.20,true,false,false) end)'))
+        self.assertTrue(c.startswith('local ok,e=pcall(function() return UTPPENEMY(1.20,true) end)'))
         self.assertIn('label=near', c)
-        self.assertTrue(gn.enemy_cmd('x', define=True).startswith('UTPPENEMY=function(D,H,G,N)'))
-        self.assertIn('UTPPENEMY(nil,false,false,false)', gn.enemy_cmd('wait'))
-        self.assertLess(len(gn.enemy_cmd('far', 2.0, heal=True)), 200)               # later calls are short
+        self.assertTrue(gn.enemy_cmd('x', define=True).startswith('UTPPENEMY=function(D,H)'))
+        self.assertIn('UTPPENEMY(nil,false)', gn.enemy_cmd('wait'))
+        # typed at ~12 ms per character: later calls are short, the one-off commands stay small
+        self.assertLess(len(gn.enemy_cmd('far', 2.0, heal=True)), 200)
+        self.assertLess(len(gn.enemy_cmd('wait', define=True)), 1500)
+        self.assertLess(len(gn.enemy_spawn_cmd('Character.humanoid_tutorial_idle_ma')), 900)
+        self.assertLess(len(gn.enemy_prep_cmd(True)), 600)
+        self.assertLess(len(gn.enemy_off_cmd()), 600)
         self.assertEqual(gn.nightauto_cmd(0.5), 'GetMod("utpp_core").NightAuto(true, 0.50, "UTPPNight")')   # unchanged
         self.assertEqual(gn.nightauto_cmd(0.2, True, gn.ENEMY_TAG),
                          'GetMod("utpp_core").NightAuto(true, 0.20, "' + gn.ENEMY_TAG + '")')
 
     def test_parse_enemy(self):
         txt = ('[2026-11-13 10:00:00.000] [info] [1] [UTPP] UTPP CET [night] ENEMY ok=true label=far found=1 pre_d2=2.31 '
-               'pre_dz=0.02 pre_hp=88.5 pre_hv=177.0 att=2 act=1 rec=Character.humanoid_tutorial_idle_ma heal=true '
-               'god=true attset=false want=2.00 moved=true pp=1.00,2.00,3.00 np=1.00,4.00,3.00')
+               'pre_hv=177.0 pre_hp=88.5 att=2 act=true heal=true moved=true')
         e = gn.parse_enemy(txt)
         self.assertEqual((e['ok'], e['label'], e['found'], e['d2'], e['hp'], e['hv']), (True, 'far', True, 2.31, 88.5, 177.0))
-        self.assertEqual((e['att'], e['att_name'], e['act'], e['rec']), (2, 'hostile', True, 'Character.humanoid_tutorial_idle_ma'))
-        self.assertEqual((e['heal'], e['god'], e['attset'], e['want'], e['moved']), (True, True, False, 2.0, True))
-        self.assertEqual((e['pp'], e['np']), ((1.0, 2.0, 3.0), (1.0, 4.0, 3.0)))
+        self.assertEqual((e['att'], e['att_name'], e['act']), (2, 'hostile', True))
+        self.assertEqual((e['heal'], e['moved']), (True, True))
+        prep = gn.parse_enemy('[night] ENEMY_PREP ok=true god=true attset=false\n[night] ENEMY ok=true label=x found=0',
+                              'ENEMY_PREP')
+        self.assertEqual((prep['ok'], prep['god'], prep['attset']), (True, True, False))
         self.assertIsNone(gn.parse_enemy('[night] ENEMY_SPAWN ok=true Character.x'))     # another tag is not this echo
         self.assertIsNone(gn.parse_enemy(''))
         gone = gn.parse_enemy("[night] ENEMY ok=false label=far [string]:1: attempt to call global 'UTPPENEMY' (a nil value)")
@@ -2952,22 +2961,22 @@ class EnemyLuaTests(unittest.TestCase):
 
     def test_spawn_state_place_off(self):
         self.run_chunk(gn.enemy_spawn_cmd('Character.humanoid_tutorial_idle_ma', 6.0))
-        self.assertIn('[night] ENEMY_SPAWN ok=true Character.humanoid_tutorial_idle_ma', self.log())
+        self.assertIn('[night] ENEMY_SPAWN ok=true', self.log())
         # spawned 6 m ahead along the camera forward (0,1), facing V (yaw 180)
         self.assertEqual(self.lua_str(f"TAGGED['{gn.ENEMY_TAG}'][1].pos.y"), '6')
         self.run_chunk(gn.enemy_cmd('wait', define=True))
         e = gn.parse_enemy(self.log(), 'ENEMY')
         self.assertEqual((e['ok'], e['label'], e['found'], e['d2'], e['hp'], e['hv'], e['att'], e['act']),
                          (True, 'wait', True, 6.0, 80.0, 80.0, 2, True))
-        self.run_chunk(gn.enemy_cmd('prep', heal=True, god=True, neutral=True))
-        e = gn.parse_enemy(self.log())
-        self.assertEqual((e['label'], e['god'], e['heal'], e['attset'], e['att']), ('prep', True, True, True, 2))
+        self.run_chunk(gn.enemy_prep_cmd(True))
+        e = gn.parse_enemy(self.log(), 'ENEMY_PREP')
+        self.assertEqual((e['ok'], e['god'], e['attset']), (True, True, True))
         self.assertEqual(self.lua_str('ATT'), '1')                                   # Neutral now
         self.assertEqual(self.lua_str('GODSET'), 'gameGodModeType.Immortal/' + gn.ENEMY_TAG)
-        self.assertEqual(self.lua_str('HEALTH'), '100')
         self.run_chunk(gn.enemy_cmd('near', 1.2, heal=True))                         # the global is already defined
         e = gn.parse_enemy(self.log())
-        self.assertEqual((e['label'], e['want'], e['moved'], e['hp']), ('near', 1.2, True, 100.0))
+        self.assertEqual((e['label'], e['moved'], e['heal'], e['hp'], e['att']), ('near', True, True, 80.0, 1))
+        self.assertEqual(self.lua_str('HEALTH'), '100')                              # restored after the read
         self.assertEqual(self.lua_str(f"string.format('%.2f', TAGGED['{gn.ENEMY_TAG}'][1].pos.y)"), '1.20')
         self.assertEqual(self.lua_str(f"TAGGED['{gn.ENEMY_TAG}'][1].pos.z"), '0.05')
         self.run_chunk(gn.enemy_off_cmd())
@@ -2995,9 +3004,10 @@ class EnemyLuaTests(unittest.TestCase):
         self.assertIn('UTPPENEMY', e['raw'])
         self.run_chunk(gn.enemy_spawn_cmd('Character.x'))
         self.run_chunk('POOL.GetStatPoolValue=function() error("no pool") end HEALOK=false')
-        self.run_chunk(gn.enemy_cmd('prep', heal=True, god=True, define=True))
+        self.run_chunk(gn.enemy_cmd('prep', 2.0, heal=True, define=True))
         e = gn.parse_enemy(self.log())
-        self.assertEqual((e['ok'], e['found'], e['hp'], e['hv'], e['heal'], e['god']), (True, True, None, None, False, True))
+        self.assertEqual((e['ok'], e['found'], e['hp'], e['hv'], e['heal'], e['moved'], e['att']),
+                         (True, True, None, None, False, True, 2))
 
 
 class EnemyMacroTests(unittest.TestCase):
@@ -3035,14 +3045,14 @@ class EnemyMacroTests(unittest.TestCase):
         self.assertEqual((r['verdict'], r['fails']), ('PASS', []), r)
         self.assertEqual(w.played, ['melee_draw', 'melee_punch', 'melee_punch', 'melee_punch', 'melee_block'])
         labels = [lab for lab, _ in w.cmds]
-        self.assertEqual(labels, ['nightauto_enemy', 'enemy_spawn', 'enemy/wait', 'enemy/prep', 'fists_cmd',
+        self.assertEqual(labels, ['nightauto_enemy', 'enemy_spawn', 'enemy/wait', 'enemy_prep', 'fists_cmd',
                                   'enemy/far', 'enemy/near', 'enemy/orbit', 'enemy/block', 'enemy_off',
                                   'nightauto_restore', 'fists_off_cmd'])
         cmds = dict((lab, c) for lab, c in w.cmds)
         self.assertEqual(cmds['nightauto_enemy'], gn.nightauto_cmd(0.2, True, gn.ENEMY_TAG))
         self.assertEqual(cmds['nightauto_restore'], gn.nightauto_cmd(self.n.args.night_auto_period))   # the vehicle tag again
         self.assertEqual(cmds['enemy_spawn'], gn.enemy_spawn_cmd(gn.ENEMY_RECORDS[0], 6.0))
-        self.assertEqual(cmds['enemy/prep'], gn.enemy_cmd('prep', None, heal=True, god=True, neutral=False))
+        self.assertEqual(cmds['enemy_prep'], gn.enemy_prep_cmd(False))
         self.assertEqual(cmds['enemy/near'], gn.enemy_cmd('near', 1.2, heal=True))
         self.assertEqual(cmds['enemy_off'], gn.enemy_off_cmd())
         self.assertEqual(sum('UTPPENEMY=function' in c for _, c in w.cmds), 1)       # defined once (the first state call)
@@ -3095,8 +3105,8 @@ class EnemyMacroTests(unittest.TestCase):
         self.assertEqual(r['verdict'], 'FAIL')
         self.assertTrue(any('Friendly' in f for f in r['fails']), r['fails'])
         self.assertEqual(w.played, [])                                               # phases skipped
-        prep = [c for lab, c in w.cmds if lab == 'enemy/prep']
-        self.assertEqual(prep, [gn.enemy_cmd('prep', None, heal=True, god=True, neutral=True)])
+        prep = [c for lab, c in w.cmds if lab == 'enemy_prep']
+        self.assertEqual(prep, [gn.enemy_prep_cmd(True)])
         self.assertIn('enemy/recheck', [lab for lab, _ in w.cmds])
         self.assertIn('enemy_off', [lab for lab, _ in w.cmds])
 
@@ -3228,20 +3238,15 @@ class _EnemyWorld:
             return f'[night] ENEMY ok=true label={label} found=0'
         att = self.att_neutral if s['neutral'] else self.att
         hp = '-' if self.hp_unreadable else f'{s["hv"]:.1f}'
-        body = (f'[night] ENEMY ok=true label={label} found=1 pre_d2={s["dist"]:.2f} pre_dz=0.02 pre_hp={hp} pre_hv={hp} '
-                f'att={att} act=1 rec={s["spawned"]}')
-        dist, heal, god, neutral = call
-        if neutral == 'true':
-            body += ' attset=true'
-            s['neutral'] = True
-        if god == 'true':
-            body += f' god={"true" if self.god_ok else "false"}'
+        body = (f'[night] ENEMY ok=true label={label} found=1 pre_d2={s["dist"]:.2f} pre_hv={hp} pre_hp={hp} '
+                f'att={att} act=true')
+        dist, heal = call
         if heal == 'true':
             body += f' heal={"true" if self.heal_ok else "false"}'
             if self.heal_ok:
                 s['hv'] = 100.0
         if dist != 'nil':
-            body += f' want={float(dist):.2f} moved=true'
+            body += ' moved=true'
             s['dist'] = float(dist)
         return body
 
@@ -3266,12 +3271,17 @@ class _EnemyWorld:
             else:
                 s['spawned'], s['polls'] = rec, 0
                 self.emit(f'[night] ENEMY_SPAWN ok=true {rec}', cet=True)
+        elif '[night] ENEMY_PREP ok=' in cmd:
+            neutral = 'AIA_Neutral' in cmd
+            self.emit(f'[night] ENEMY_PREP ok=true god={"true" if self.god_ok else "false"}'
+                      + (' attset=true' if neutral else ''), cet=True)
+            s['neutral'] = s['neutral'] or neutral
         elif '[night] ENEMY_OFF ok=' in cmd:
-            self.emit(self.enemy_body('off', ('nil', 'false', 'false', 'false')), cet=True)
+            self.emit(self.enemy_body('off', ('nil', 'false')), cet=True)
             s['spawned'] = None
             self.emit('[night] ENEMY_OFF ok=true', cet=True)
         elif 'UTPPENEMY(' in cmd:
-            call = cmd.split('return UTPPENEMY(', 1)[1].split(')', 1)[0].split(',')
+            call = tuple(cmd.split('return UTPPENEMY(', 1)[1].split(')', 1)[0].split(','))
             lab = cmd.split('label=', 1)[1].split(' ', 1)[0]
             if 'UTPPENEMY=function' in cmd:
                 s['defined'] = True

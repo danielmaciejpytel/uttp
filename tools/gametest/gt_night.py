@@ -222,73 +222,71 @@ ENEMY_PHASES = (('far', 2.0, False, 0.0, 'melee_punch'), ('near', 1.2, True, 0.0
 def enemy_spawn_cmd(record: str, dist: float = ENEMY_SPAWN_DIST) -> str:
     """Console: Codeware entity of Character record `record`, `dist` m along the flattened camera forward, facing V,
     not persisted, tagged ENEMY_TAG (an older one is deleted first). Echo `[night] ENEMY_SPAWN ok=..`: only the request is
-    proven (CreateEntity is asynchronous) - the state echo shows `found=1`. `record missing` = TweakDB has no such record."""
+    proven (CreateEntity is asynchronous) - the state echo shows `found=1`. `record missing` = TweakDB has no such record.
+    Kept short: the console is typed at ~12 ms per character."""
+    d = f'{dist:.2f}'
     return (
-        "local ok,e=pcall(function() local des=Game.GetDynamicEntitySystem() "
-        "if not des:IsReady() then error('DynamicEntitySystem not ready') end des:DeleteTagged('" + ENEMY_TAG + "') "
-        "local id=TweakDBID.new('" + record + "') "
-        "local okr,r=pcall(function() return TweakDB:GetRecord(id) end) if okr and r==nil then error('record missing') end "
+        "local ok,e=pcall(function() local d=Game.GetDynamicEntitySystem() d:DeleteTagged('" + ENEMY_TAG + "') "
+        "local id=TweakDBID.new('" + record + "') if TweakDB:GetRecord(id)==nil then error('record missing') end "
         "local a=Game.GetPlayer():GetWorldPosition() local c=Game.GetCameraSystem():GetActiveCameraForward() "
-        "local m=math.sqrt(c.x*c.x+c.y*c.y) if m<0.01 then error('no camera forward') end local x,y=c.x/m,c.y/m "
-        "local s=DynamicEntitySpec.new() s.recordID=id "
-        "s.position=Vector4.new(a.x+x*" + f'{dist:.2f}' + ",a.y+y*" + f'{dist:.2f}' + ",a.z+0.1,1) "
+        "local m=math.sqrt(c.x*c.x+c.y*c.y) local x,y=c.x/m,c.y/m local s=DynamicEntitySpec.new() s.recordID=id "
+        "s.position=Vector4.new(a.x+x*" + d + ",a.y+y*" + d + ",a.z+0.1,1) "
         "s.orientation=EulerAngles.new(0,0,Vector4.new(-x,-y,0,0):ToRotation().yaw):ToQuat() "
         "s.persistState=false s.persistSpawn=false s.alwaysSpawned=true s.spawnInView=true s.active=true "
-        "s.tags={'" + ENEMY_TAG + "'} des:CreateEntity(s) return '" + record + "' end) "
+        "s.tags={'" + ENEMY_TAG + "'} d:CreateEntity(s) end) "
         "Game.UTPPLogLine('[night] ENEMY_SPAWN ok='..tostring(ok)..' '..tostring(e))")
 
 
-# UTPPENEMY(dist, heal, god, neutral) -> info string (global, defined once by the first state command): reads the target (state
-# BEFORE this call changes anything: distance, health, attitude, active, record), then optionally sets the attitude towards V
-# to Neutral, adds Immortal god mode, restores the health to 100 % and teleports the target `dist` m along the camera forward
-# (facing V). The reads are pcall'd one by one (a failed read prints nothing / '-' instead of losing the line).
+# UTPPENEMY(dist, heal) -> info string (global, defined once by the first state command): reads the target BEFORE it changes
+# anything (horizontal distance to V, health absolute and percent, attitude towards V 0/1/2, IsActive), then optionally
+# restores the health to 100 % and teleports the target `dist` m along the camera forward (facing V). The reads are pcall'd
+# (a failed read leaves the field out instead of losing the line); the target position itself is in the POS lines (v=).
 ENEMY_DEFINE = (
-    "UTPPENEMY=function(D,H,G,N) local p=Game.GetPlayer() "
-    "local t=Game.GetDynamicEntitySystem():GetTagged('" + ENEMY_TAG + "') local n=t and t[1] "
-    "if not n then return 'found=0' end local a=p:GetWorldPosition() local b=n:GetWorldPosition() "
-    "local s='found=1 pre_d2='..string.format('%.2f',math.sqrt((a.x-b.x)^2+(a.y-b.y)^2))"
-    "..' pre_dz='..string.format('%.2f',b.z-a.z) local pool=nil local hp=Enum.new('gamedataStatPoolType','Health') "
-    "pcall(function() pool=Game.GetStatPoolsSystem() local i=n:GetEntityID() "
-    "s=s..' pre_hp='..string.format('%.1f',pool:GetStatPoolValue(i,hp,true))"
-    "..' pre_hv='..string.format('%.1f',pool:GetStatPoolValue(i,hp,false)) end) "
-    "pcall(function() local x=n:GetAttitudeTowards(p) local k,i=pcall(EnumInt,x) s=s..' att='..tostring(k and i or x) end) "
-    "pcall(function() s=s..' act='..(n:IsActive() and '1' or '0') end) "
-    "pcall(function() s=s..' rec='..TDBID.ToStringDEBUG(n:GetRecordID()) end) "
-    "if N then s=s..' attset='..tostring(pcall(function() n:GetAttitudeAgent():SetAttitudeTowards(p:GetAttitudeAgent(),"
-    "Enum.new('EAIAttitude','AIA_Neutral')) end)) end "
-    "if G then s=s..' god='..tostring(pcall(function() Game.GetGodModeSystem():AddGodMode(n:GetEntityID(),"
-    "Enum.new('gameGodModeType','Immortal'),CName.new('" + ENEMY_TAG + "')) end)) end "
-    "if H then s=s..' heal='..tostring(pcall(function() pool:RequestSettingStatPoolValue(n:GetEntityID(),hp,100,p,true) end)) end "
+    "UTPPENEMY=function(D,H) local p=Game.GetPlayer() local t=Game.GetDynamicEntitySystem():GetTagged('" + ENEMY_TAG + "') "
+    "local n=t and t[1] if not n then return 'found=0' end local a=p:GetWorldPosition() local b=n:GetWorldPosition() "
+    "local s='found=1 pre_d2='..string.format('%.2f',math.sqrt((a.x-b.x)^2+(a.y-b.y)^2)) "
+    "local i,q,h=n:GetEntityID(),Game.GetStatPoolsSystem(),Enum.new('gamedataStatPoolType','Health') "
+    "pcall(function() s=s..' pre_hv='..string.format('%.1f',q:GetStatPoolValue(i,h,false))"
+    "..' pre_hp='..string.format('%.1f',q:GetStatPoolValue(i,h,true)) end) "
+    "pcall(function() s=s..' att='..EnumInt(n:GetAttitudeTowards(p)) end) "
+    "pcall(function() s=s..' act='..tostring(n:IsActive()) end) "
+    "if H then s=s..' heal='..tostring(pcall(function() q:RequestSettingStatPoolValue(i,h,100,p,true) end)) end "
     "if D then local c=Game.GetCameraSystem():GetActiveCameraForward() local m=math.sqrt(c.x*c.x+c.y*c.y) "
-    "if m>0.01 then local x,y=c.x/m,c.y/m s=s..' want='..string.format('%.2f',D)..' moved='..tostring(pcall(function() "
-    "Game.GetTeleportationFacility():Teleport(n,Vector4.new(a.x+x*D,a.y+y*D,a.z+0.05,1),"
-    "EulerAngles.new(0,0,Vector4.new(-x,-y,0,0):ToRotation().yaw)) end)) end end "
-    "return s..' pp='..string.format('%.2f,%.2f,%.2f',a.x,a.y,a.z)..' np='..string.format('%.2f,%.2f,%.2f',b.x,b.y,b.z) end ")
+    "local x,y=c.x/m,c.y/m s=s..' moved='..tostring(pcall(function() Game.GetTeleportationFacility():Teleport(n,"
+    "Vector4.new(a.x+x*D,a.y+y*D,a.z+0.05,1),EulerAngles.new(0,0,Vector4.new(-x,-y,0,0):ToRotation().yaw)) end)) end "
+    "return s end ")
 
 
-def _lua_flag(v) -> str:
-    return 'true' if v else 'false'
-
-
-def enemy_cmd(label: str, dist: float | None = None, heal: bool = False, god: bool = False, neutral: bool = False,
-              define: bool = False) -> str:
-    """Console: one state read (+ the optional changes of UTPPENEMY). Echo `[night] ENEMY ok=.. label=<label> found=1 pre_d2=..`.
-    `define=True` carries the UTPPENEMY definition (first call, or after an echo that says the global is gone)."""
+def enemy_cmd(label: str, dist: float | None = None, heal: bool = False, define: bool = False) -> str:
+    """Console: one state read (+ the optional heal / teleport of UTPPENEMY). Echo `[night] ENEMY ok=.. label=<label>
+    found=1 pre_d2=..`. `define=True` carries the UTPPENEMY definition (first call, or after an echo that says the global
+    is gone)."""
     arg = 'nil' if dist is None else f'{dist:.2f}'
     return ((ENEMY_DEFINE if define else '') +
-            f"local ok,e=pcall(function() return UTPPENEMY({arg},{_lua_flag(heal)},{_lua_flag(god)},{_lua_flag(neutral)}) end) "
+            f"local ok,e=pcall(function() return UTPPENEMY({arg},{'true' if heal else 'false'}) end) "
             f"Game.UTPPLogLine('[night] ENEMY ok='..tostring(ok)..' label={label} '..tostring(e))")
+
+
+def enemy_prep_cmd(neutral: bool = False) -> str:
+    """Console, once after the target is found: Immortal god mode (+ the attitude towards V set to Neutral when `neutral`).
+    Echo `[night] ENEMY_PREP ok=.. god=<bool> [attset=<bool>]`."""
+    return (
+        "local ok,e=pcall(function() local n=Game.GetDynamicEntitySystem():GetTagged('" + ENEMY_TAG + "')[1] "
+        "local p=Game.GetPlayer() local s='god='..tostring(pcall(function() Game.GetGodModeSystem():AddGodMode("
+        "n:GetEntityID(),Enum.new('gameGodModeType','Immortal'),CName.new('" + ENEMY_TAG + "')) end)) "
+        + ("s=s..' attset='..tostring(pcall(function() n:GetAttitudeAgent():SetAttitudeTowards(p:GetAttitudeAgent(),"
+           "Enum.new('EAIAttitude','AIA_Neutral')) end)) " if neutral else "") +
+        "return s end) Game.UTPPLogLine('[night] ENEMY_PREP ok='..tostring(ok)..' '..tostring(e))")
 
 
 def enemy_off_cmd() -> str:
     """Console: last state read (label=off), Immortal removed, the tagged entity deleted. Echo `[night] ENEMY_OFF ok=true`
     (always printed last, also when the state read failed). Everything is undone; nothing here touches the save."""
     return (
-        "local ok,e=pcall(function() return UTPPENEMY(nil,false,false,false) end) "
+        "local ok,e=pcall(function() return UTPPENEMY(nil,false) end) "
         "Game.UTPPLogLine('[night] ENEMY ok='..tostring(ok)..' label=off '..tostring(e)) "
-        "pcall(function() local t=Game.GetDynamicEntitySystem():GetTagged('" + ENEMY_TAG + "') if t and t[1] then "
-        "Game.GetGodModeSystem():RemoveGodMode(t[1]:GetEntityID(),Enum.new('gameGodModeType','Immortal'),"
-        "CName.new('" + ENEMY_TAG + "')) end end) "
+        "pcall(function() Game.GetGodModeSystem():RemoveGodMode(Game.GetDynamicEntitySystem():GetTagged('" + ENEMY_TAG +
+        "')[1]:GetEntityID(),Enum.new('gameGodModeType','Immortal'),CName.new('" + ENEMY_TAG + "')) end) "
         "pcall(function() Game.GetDynamicEntitySystem():DeleteTagged('" + ENEMY_TAG + "') end) "
         "Game.UTPPLogLine('[night] ENEMY_OFF ok=true')")
 
@@ -319,15 +317,10 @@ def _att_value(s) -> int | None:
     return None
 
 
-def _xyz(s):
-    parts = [_num(x) for x in (s or '').split(',')]
-    return tuple(parts) if len(parts) == 3 and all(p is not None for p in parts) else None
-
-
 def parse_enemy(text: str, tag: str = 'ENEMY') -> dict | None:
-    """The last `[night] <tag> ok=..` line of `text` (UTPPENEMY echo) -> {'ok', 'label', 'found', 'd2', 'dz', 'hp' (percent),
-    'hv' (absolute), 'att' (0/1/2/None), 'att_name', 'act', 'rec', 'heal', 'god', 'attset', 'want', 'moved', 'pp', 'np',
-    'raw'}; d2 / dz / hp / hv describe the state BEFORE the call changed anything. None = no such line (command lost)."""
+    """The last `[night] <tag> ok=..` line of `text` (UTPPENEMY / ENEMY_PREP echo) -> {'ok', 'label', 'found', 'd2', 'hp'
+    (percent), 'hv' (absolute), 'att' (0/1/2/None), 'att_name', 'act', 'heal', 'god', 'attset', 'moved', 'raw'}; d2 / hp /
+    hv / att describe the state BEFORE the call changed anything. None = no such line (command lost)."""
     last = None
     for line in (text or '').splitlines():
         if f'[night] {tag} ok=' in line:
@@ -339,12 +332,10 @@ def parse_enemy(text: str, tag: str = 'ENEMY') -> dict | None:
     flag = {'true': True, 'false': False}
     att = _att_value(kv.get('att'))
     return {'ok': kv.get('ok') == 'true', 'label': kv.get('label'), 'found': kv.get('found') == '1',
-            'd2': _num(kv.get('pre_d2')), 'dz': _num(kv.get('pre_dz')), 'hp': _num(kv.get('pre_hp')),
-            'hv': _num(kv.get('pre_hv')), 'att': att, 'att_name': ENEMY_ATT_NAMES.get(att),
-            'act': {'1': True, '0': False}.get(kv.get('act')), 'rec': kv.get('rec'),
+            'd2': _num(kv.get('pre_d2')), 'hp': _num(kv.get('pre_hp')), 'hv': _num(kv.get('pre_hv')), 'att': att,
+            'att_name': ENEMY_ATT_NAMES.get(att), 'act': {'1': True, '0': False}.get(kv.get('act'), flag.get(kv.get('act'))),
             'heal': flag.get(kv.get('heal')), 'god': flag.get(kv.get('god')), 'attset': flag.get(kv.get('attset')),
-            'want': _num(kv.get('want')), 'moved': flag.get(kv.get('moved')), 'pp': _xyz(kv.get('pp')),
-            'np': _xyz(kv.get('np')), 'raw': body[:300]}
+            'moved': flag.get(kv.get('moved')), 'raw': body[:300]}
 
 
 def enemy_hp_drop(before: dict | None, after: dict | None) -> float | None:
