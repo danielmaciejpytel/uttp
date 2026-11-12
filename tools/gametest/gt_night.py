@@ -23,16 +23,18 @@ LOCO_SET = ['slow_walk_half_stick', 'run_arc_left', 'run_arc_right', 'slalom_sti
 VEHICLE_PARTS = ['veh_call', 'veh_enter', 'veh_drive', 'veh_exit']
 WEAPON_PARTS = ['weapon_draw', 'weapon_aim', 'weapon_holster', 'weapon_walk']
 MELEE_PARTS = ['melee_draw', 'melee_punch', 'melee_punch_walk', 'melee_block', 'melee_holster']
+ENEMY_PARTS = ['melee_draw', 'melee_punch', 'melee_block', 'melee_holster']   # fist fight on a real target
 RECOVERY_PARTS = ['wheel_probe']
 # executed by night.py (CET + pad + log waits); parts are plain pad scenarios in scenarios.json
 AIM_PARTS = ['aim_probe_hold', 'weapon_draw']
 MACROS = {'vehicle_mount_exit': VEHICLE_PARTS + RECOVERY_PARTS, 'weapon_draw_aim_holster': WEAPON_PARTS + RECOVERY_PARTS,
-          'melee_fists': MELEE_PARTS, 'aim_probe': AIM_PARTS, 'shoulder_key': []}
+          'melee_fists': MELEE_PARTS, 'melee_fists_target': ENEMY_PARTS, 'aim_probe': AIM_PARTS, 'shoulder_key': []}
 SETS = {
     'loco': LOCO_SET,
     'sprint_dash': ['sprint_dash'],
     'weapon_draw_aim_holster': ['weapon_draw_aim_holster'],
     'melee_fists': ['melee_fists'],
+    'melee_fists_target': ['melee_fists_target'],   # a real opponent (Codeware NPC); not in 'all'
     'shoulder_key': ['shoulder_key'],   # keyboard L shoulder swap (not in 'all')
     'aim_probe': ['aim_probe'],      # not in 'all' (needs the utpp_probe AimProbe)
     'vehicle_mount_exit': ['vehicle_mount_exit'],
@@ -187,6 +189,273 @@ def night_echo(text: str, tag: str) -> tuple[bool | None, str]:
     return f'[night] {tag} ok=true' in found, info
 
 
+# ---------------------------------------------------------------------------------------------- fist fight target
+# A real opponent for the melee scenario `melee_fists_target` (nobody had seen the third-person melee on a target: no
+# `src=lock` line in any log). Evidence (game scripts 2.31 read-only, Codeware 1.21.2 installed):
+#   Codeware DynamicEntitySpec / CreateEntity / GetTagged / DeleteTagged: as the vehicle spawn above; spawnInView / active
+#     as the project's ragdoll probe (plugin\UTPP\scripts\utpp_ragdoll_probe.reds UTPPRdEngSpawnNpc: Character record, 2.5 m ahead)
+#   Character records: names of the installed game's TweakDB (CET tweakdb\tweakdbstr.kark, decoded read-only):
+#     humanoid_tutorial_idle_ma (melee tutorial dummy, "idle"), q000_tutorial_course_04_fistfigher_idle, dummy_test_npc.
+#     Only the names are known, not the values (attitude, AI): the state echo (`att=`, `act=`, `hp=`) reports them.
+#   The game's melee target: DefaultTransition.GetTargetObject (defaultTransition.script:171-203) = the active puppet closest
+#     to the crosshair that is NOT Friendly (:196) - a Friendly target is never locked (so no `src=lock`).
+#   AttitudeAgent.SetAttitudeTowards(agent, EAIAttitude) orphans.script:22493; EAIAttitude Friendly 0 / Neutral 1 / Hostile 2 :67.
+#   GodModeSystem.AddGodMode / RemoveGodMode orphans.script:20708-20710, gameGodModeType Immortal = 1 (:531): damage is clamped
+#     (statPoolsManager.script:309), Invulnerable would block it and the health could never drop.
+#   StatPoolsSystem.GetStatPoolValue(objID, type, perc) orphans.script:20547, RequestSettingStatPoolValue :20569.
+#   TeleportationFacility.Teleport(obj, Vector4, EulerAngles) orphans.script:31935 (as UNMOUNT_CMD); GameObject.IsActive :1371.
+# Tag: ENEMY_TAG, NOT NIGHT_TAG - NightPos / mount_cmd / DESPAWN_CMD read the NIGHT_TAG entity as "the vehicle". The macro
+# points NightAuto at ENEMY_TAG for its duration, so every POS line carries the target position in `v=` (src=tag).
+ENEMY_TAG = 'UTPPFightTarget'
+ENEMY_RECORDS = tuple(r.strip() for r in os.environ.get('UTPP_NIGHT_ENEMY', '').split(',') if r.strip()) or (
+    'Character.humanoid_tutorial_idle_ma', 'Character.q000_tutorial_course_04_fistfigher_idle',
+    'Character.dummy_test_npc')
+ENEMY_SPAWN_DIST = 6.0       # first spawn: beyond the 5 m melee lock range, so the draw tap cannot hit it
+ENEMY_POS_PERIOD = 0.2       # NightAuto period during the macro (distance resolution around a punch)
+ENEMY_ORBIT_TOL = 8.0        # camera orbit tolerance (deg)
+ENEMY_MIN_DROP = 0.5         # health drop (absolute, else percent points) that counts as "the punch hit"
+# (phase, target distance along the camera forward in m, health drop required, camera orbit deg, pad part)
+ENEMY_PHASES = (('far', 2.0, False, 0.0, 'melee_punch'), ('near', 1.2, True, 0.0, 'melee_punch'),
+                ('orbit', 1.2, False, 60.0, 'melee_punch'), ('block', 1.5, False, 0.0, 'melee_block'))
+
+
+def enemy_spawn_cmd(record: str, dist: float = ENEMY_SPAWN_DIST) -> str:
+    """Console: Codeware entity of Character record `record`, `dist` m along the flattened camera forward, facing V,
+    not persisted, tagged ENEMY_TAG (an older one is deleted first). Echo `[night] ENEMY_SPAWN ok=..`: only the request is
+    proven (CreateEntity is asynchronous) - the state echo shows `found=1`. `record missing` = TweakDB has no such record."""
+    return (
+        "local ok,e=pcall(function() local des=Game.GetDynamicEntitySystem() "
+        "if not des:IsReady() then error('DynamicEntitySystem not ready') end des:DeleteTagged('" + ENEMY_TAG + "') "
+        "local id=TweakDBID.new('" + record + "') "
+        "local okr,r=pcall(function() return TweakDB:GetRecord(id) end) if okr and r==nil then error('record missing') end "
+        "local a=Game.GetPlayer():GetWorldPosition() local c=Game.GetCameraSystem():GetActiveCameraForward() "
+        "local m=math.sqrt(c.x*c.x+c.y*c.y) if m<0.01 then error('no camera forward') end local x,y=c.x/m,c.y/m "
+        "local s=DynamicEntitySpec.new() s.recordID=id "
+        "s.position=Vector4.new(a.x+x*" + f'{dist:.2f}' + ",a.y+y*" + f'{dist:.2f}' + ",a.z+0.1,1) "
+        "s.orientation=EulerAngles.new(0,0,Vector4.new(-x,-y,0,0):ToRotation().yaw):ToQuat() "
+        "s.persistState=false s.persistSpawn=false s.alwaysSpawned=true s.spawnInView=true s.active=true "
+        "s.tags={'" + ENEMY_TAG + "'} des:CreateEntity(s) return '" + record + "' end) "
+        "Game.UTPPLogLine('[night] ENEMY_SPAWN ok='..tostring(ok)..' '..tostring(e))")
+
+
+# UTPPENEMY(dist, heal, god, neutral) -> info string (global, defined once by the first state command): reads the target (state
+# BEFORE this call changes anything: distance, health, attitude, active, record), then optionally sets the attitude towards V
+# to Neutral, adds Immortal god mode, restores the health to 100 % and teleports the target `dist` m along the camera forward
+# (facing V). The reads are pcall'd one by one (a failed read prints nothing / '-' instead of losing the line).
+ENEMY_DEFINE = (
+    "UTPPENEMY=function(D,H,G,N) local p=Game.GetPlayer() "
+    "local t=Game.GetDynamicEntitySystem():GetTagged('" + ENEMY_TAG + "') local n=t and t[1] "
+    "if not n then return 'found=0' end local a=p:GetWorldPosition() local b=n:GetWorldPosition() "
+    "local s='found=1 pre_d2='..string.format('%.2f',math.sqrt((a.x-b.x)^2+(a.y-b.y)^2))"
+    "..' pre_dz='..string.format('%.2f',b.z-a.z) local pool=nil local hp=Enum.new('gamedataStatPoolType','Health') "
+    "pcall(function() pool=Game.GetStatPoolsSystem() local i=n:GetEntityID() "
+    "s=s..' pre_hp='..string.format('%.1f',pool:GetStatPoolValue(i,hp,true))"
+    "..' pre_hv='..string.format('%.1f',pool:GetStatPoolValue(i,hp,false)) end) "
+    "pcall(function() local x=n:GetAttitudeTowards(p) local k,i=pcall(EnumInt,x) s=s..' att='..tostring(k and i or x) end) "
+    "pcall(function() s=s..' act='..(n:IsActive() and '1' or '0') end) "
+    "pcall(function() s=s..' rec='..TDBID.ToStringDEBUG(n:GetRecordID()) end) "
+    "if N then s=s..' attset='..tostring(pcall(function() n:GetAttitudeAgent():SetAttitudeTowards(p:GetAttitudeAgent(),"
+    "Enum.new('EAIAttitude','AIA_Neutral')) end)) end "
+    "if G then s=s..' god='..tostring(pcall(function() Game.GetGodModeSystem():AddGodMode(n:GetEntityID(),"
+    "Enum.new('gameGodModeType','Immortal'),CName.new('" + ENEMY_TAG + "')) end)) end "
+    "if H then s=s..' heal='..tostring(pcall(function() pool:RequestSettingStatPoolValue(n:GetEntityID(),hp,100,p,true) end)) end "
+    "if D then local c=Game.GetCameraSystem():GetActiveCameraForward() local m=math.sqrt(c.x*c.x+c.y*c.y) "
+    "if m>0.01 then local x,y=c.x/m,c.y/m s=s..' want='..string.format('%.2f',D)..' moved='..tostring(pcall(function() "
+    "Game.GetTeleportationFacility():Teleport(n,Vector4.new(a.x+x*D,a.y+y*D,a.z+0.05,1),"
+    "EulerAngles.new(0,0,Vector4.new(-x,-y,0,0):ToRotation().yaw)) end)) end end "
+    "return s..' pp='..string.format('%.2f,%.2f,%.2f',a.x,a.y,a.z)..' np='..string.format('%.2f,%.2f,%.2f',b.x,b.y,b.z) end ")
+
+
+def _lua_flag(v) -> str:
+    return 'true' if v else 'false'
+
+
+def enemy_cmd(label: str, dist: float | None = None, heal: bool = False, god: bool = False, neutral: bool = False,
+              define: bool = False) -> str:
+    """Console: one state read (+ the optional changes of UTPPENEMY). Echo `[night] ENEMY ok=.. label=<label> found=1 pre_d2=..`.
+    `define=True` carries the UTPPENEMY definition (first call, or after an echo that says the global is gone)."""
+    arg = 'nil' if dist is None else f'{dist:.2f}'
+    return ((ENEMY_DEFINE if define else '') +
+            f"local ok,e=pcall(function() return UTPPENEMY({arg},{_lua_flag(heal)},{_lua_flag(god)},{_lua_flag(neutral)}) end) "
+            f"Game.UTPPLogLine('[night] ENEMY ok='..tostring(ok)..' label={label} '..tostring(e))")
+
+
+def enemy_off_cmd() -> str:
+    """Console: last state read (label=off), Immortal removed, the tagged entity deleted. Echo `[night] ENEMY_OFF ok=true`
+    (always printed last, also when the state read failed). Everything is undone; nothing here touches the save."""
+    return (
+        "local ok,e=pcall(function() return UTPPENEMY(nil,false,false,false) end) "
+        "Game.UTPPLogLine('[night] ENEMY ok='..tostring(ok)..' label=off '..tostring(e)) "
+        "pcall(function() local t=Game.GetDynamicEntitySystem():GetTagged('" + ENEMY_TAG + "') if t and t[1] then "
+        "Game.GetGodModeSystem():RemoveGodMode(t[1]:GetEntityID(),Enum.new('gameGodModeType','Immortal'),"
+        "CName.new('" + ENEMY_TAG + "')) end end) "
+        "pcall(function() Game.GetDynamicEntitySystem():DeleteTagged('" + ENEMY_TAG + "') end) "
+        "Game.UTPPLogLine('[night] ENEMY_OFF ok=true')")
+
+
+ENEMY_ATT_NAMES = {0: 'friendly', 1: 'neutral', 2: 'hostile'}
+_ENEMY_KV_RE = re.compile(r'(\w+)=(\S*)')
+
+
+def _num(s):
+    try:
+        v = float(s)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _att_value(s) -> int | None:
+    """EnumInt value '0'/'1'/'2' or the enum text ('...Friendly...') -> 0/1/2; None = not readable."""
+    if s is None or s == '':
+        return None
+    if s.lstrip('-').isdigit():
+        v = int(s)
+        return v if v in ENEMY_ATT_NAMES else None
+    low = s.lower()
+    for v, name in ENEMY_ATT_NAMES.items():
+        if name in low:
+            return v
+    return None
+
+
+def _xyz(s):
+    parts = [_num(x) for x in (s or '').split(',')]
+    return tuple(parts) if len(parts) == 3 and all(p is not None for p in parts) else None
+
+
+def parse_enemy(text: str, tag: str = 'ENEMY') -> dict | None:
+    """The last `[night] <tag> ok=..` line of `text` (UTPPENEMY echo) -> {'ok', 'label', 'found', 'd2', 'dz', 'hp' (percent),
+    'hv' (absolute), 'att' (0/1/2/None), 'att_name', 'act', 'rec', 'heal', 'god', 'attset', 'want', 'moved', 'pp', 'np',
+    'raw'}; d2 / dz / hp / hv describe the state BEFORE the call changed anything. None = no such line (command lost)."""
+    last = None
+    for line in (text or '').splitlines():
+        if f'[night] {tag} ok=' in line:
+            last = line
+    if last is None:
+        return None
+    body = last.split(f'[night] {tag} ', 1)[1].strip()
+    kv = dict(_ENEMY_KV_RE.findall(body))
+    flag = {'true': True, 'false': False}
+    att = _att_value(kv.get('att'))
+    return {'ok': kv.get('ok') == 'true', 'label': kv.get('label'), 'found': kv.get('found') == '1',
+            'd2': _num(kv.get('pre_d2')), 'dz': _num(kv.get('pre_dz')), 'hp': _num(kv.get('pre_hp')),
+            'hv': _num(kv.get('pre_hv')), 'att': att, 'att_name': ENEMY_ATT_NAMES.get(att),
+            'act': {'1': True, '0': False}.get(kv.get('act')), 'rec': kv.get('rec'),
+            'heal': flag.get(kv.get('heal')), 'god': flag.get(kv.get('god')), 'attset': flag.get(kv.get('attset')),
+            'want': _num(kv.get('want')), 'moved': flag.get(kv.get('moved')), 'pp': _xyz(kv.get('pp')),
+            'np': _xyz(kv.get('np')), 'raw': body[:300]}
+
+
+def enemy_hp_drop(before: dict | None, after: dict | None) -> float | None:
+    """Health drop between two parsed echoes: `before` = the state right after a restore to 100 % (or the previous state),
+    `after` = the state read at the next call. Absolute value (hv) when both have it, else percent points. None = unreadable."""
+    if not before or not after:
+        return None
+    for key in ('hv', 'hp'):
+        if before.get(key) is not None and after.get(key) is not None:
+            return round(before[key] - after[key], 2)
+    return None
+
+
+_MELEEAIM_RE = re.compile(r'UTPP MELEEAIM src=(\w+) tiltW=(-?[\d.]+) tgtPitch=(-?[\d.]+) tgtYaw=(-?[\d.]+) '
+                          r'rawPitch=(-?[\d.]+) rawYaw=(-?[\d.]+) pitch=(-?[\d.]+) yaw=(-?[\d.]+)')
+
+
+def meleeaim_stats(log_text: str) -> dict:
+    """`UTPP MELEEAIM src=<lock|hit|cam> ...` lines of a log window (mm.trace on, 4 Hz). Pure.
+    -> {'lines', 'src': {name: count}, 'lock', 'lock_pitch': (min, max) | None, 'lock_yaw': (min, max) | None,
+        'applied_pitch_max', 'applied_yaw_max'} (tgt* = the angle towards the target, applied = what the tilt did)."""
+    src: dict = {}
+    lp, ly, ap, ay = [], [], [], []
+    n = 0
+    for m in _MELEEAIM_RE.finditer(log_text or ''):
+        n += 1
+        src[m.group(1)] = src.get(m.group(1), 0) + 1
+        if m.group(1) == 'lock':
+            lp.append(float(m.group(3)))
+            ly.append(float(m.group(4)))
+        ap.append(abs(float(m.group(7))))
+        ay.append(abs(float(m.group(8))))
+    return {'lines': n, 'src': src, 'lock': src.get('lock', 0),
+            'lock_pitch': (min(lp), max(lp)) if lp else None, 'lock_yaw': (min(ly), max(ly)) if ly else None,
+            'applied_pitch_max': max(ap) if ap else None, 'applied_yaw_max': max(ay) if ay else None}
+
+
+def target_distance_stats(log_text: str) -> dict | None:
+    """V <-> target distance (m, horizontal) from the NightAuto POS lines of a window that carry the target in `v=` (src=tag).
+    -> {'n', 'first', 'min', 'max', 'last'} or None (no such line)."""
+    ds = []
+    for line in (log_text or '').splitlines():
+        if '[night] POS p=' not in line:
+            continue
+        pos = parse_pos(line)
+        if pos and pos.get('v') and pos.get('src') == 'tag':
+            ds.append(math.hypot(pos['p'][0] - pos['v'][0], pos['p'][1] - pos['v'][1]))
+    if not ds:
+        return None
+    return {'n': len(ds), 'first': round(ds[0], 2), 'min': round(min(ds), 2), 'max': round(max(ds), 2),
+            'last': round(ds[-1], 2)}
+
+
+def enemy_evaluate(spawn: dict | None, phases: list[dict], min_drop: float = ENEMY_MIN_DROP) -> dict:
+    """Verdict of the fist fight on a target. PASS = the target was spawned and found (not Friendly), at least one
+    `src=lock` line in the punch windows, the health dropped in the phases that require it (`near`; `orbit` and `far` are
+    report-only: warnings / metrics), no abort (raised elsewhere). Pure.
+    A phase dict: {'name', 'required', 'lock', 'drop' (None = unreadable), 'placed' (False = the placement echo was lost),
+    'aim': meleeaim_stats}. -> {'fails', 'warns', 'locks', 'hits': {phase: bool | None}}"""
+    fails, warns = [], []
+    if not spawn or not spawn.get('found'):
+        fails.append('target: spawned but never found (no `found=1` state echo)' if spawn is not None else
+                     'target: spawn failed (no record spawned)')
+    elif spawn.get('att') == 0:
+        fails.append('target is Friendly towards V (att=0): the game never locks a Friendly target '
+                     '(defaultTransition.script:196); the neutral-attitude alternative did not change it')
+    elif spawn.get('att') is None:
+        warns.append('target attitude not readable (att missing): lock not guaranteed')
+    if spawn and spawn.get('found') and spawn.get('act') is False:
+        warns.append('target reports IsActive=false: GetTargetObject skips an inactive puppet')
+    locks = sum(p.get('lock') or 0 for p in phases)
+    lines = sum((p.get('aim') or {}).get('lines', 0) for p in phases)
+    if phases and locks == 0:
+        if lines == 0:
+            fails.append('no `MELEEAIM` line at all in the punch windows (mm.trace off or "Melee aim tilt" disabled): '
+                         'src=lock cannot be judged')
+        else:
+            srcs = {}
+            for p in phases:
+                for k, v in ((p.get('aim') or {}).get('src') or {}).items():
+                    srcs[k] = srcs.get(k, 0) + v
+            fails.append(f'no `src=lock` MELEEAIM line (only {srcs}): the game did not track the target '
+                         '(GetTargetObject: not closest to the crosshair / out of 5 m / Friendly / inactive)')
+    hits: dict = {}
+    for p in phases:
+        name, drop = p['name'], p.get('drop')
+        hit = None if drop is None else drop >= min_drop
+        hits[name] = hit
+        if p.get('placed') is False:
+            (fails if p.get('required') else warns).append(f'{name}: the placement command was lost (no echo)')
+            continue
+        if p.get('required'):
+            if drop is None:
+                fails.append(f'{name}: health unreadable (no hp/hv in the state echo): "health dropped" cannot be shown')
+            elif not hit:
+                fails.append(f'{name}: health did not drop (drop {drop}): the punches did not connect')
+        elif name == 'orbit' and hit is False:
+            warns.append(f'orbit: the punch after the camera orbit did not connect (drop {drop}): the hit follows the '
+                         'camera / target, not the body (report)')
+    return {'fails': fails, 'warns': warns, 'locks': locks, 'hits': hits}
+
+
+def punch_report_cmd(python: str, script: str, log_path: str) -> list[str]:
+    """Command line of the offline measuring tool (Source\\tools\\analysis\\punch_direction_report.py, another worker): the
+    UTPP log of the run as its only argument. The one place to adapt when its interface is fixed."""
+    return [python, '-I', script, log_path]
+
+
+PUNCH_REPORT_REL = os.path.join('..', 'analysis', 'punch_direction_report.py')
+
+
 DESPAWN_CMD = "pcall(function() Game.GetDynamicEntitySystem():DeleteTagged('" + NIGHT_TAG + "') end)"
 # fallback 2 (manual procedure): hold keyboard V ~1 s (vehicle selector), Enter; scan codes
 SCAN_V, SCAN_F = 0x2F, 0x21
@@ -209,9 +478,10 @@ POS_CALL = 'NIGHTPOS()'
 NIGHTPOS_CMD = 'GetMod("utpp_core").NightPos("' + NIGHT_TAG + '")'
 
 
-def nightauto_cmd(period: float = 0.5, on: bool = True) -> str:
-    """utpp_core 0.5.4: POS line every `period` s from onUpdate (echo '[night] auto on period=...')."""
-    return f'GetMod("utpp_core").NightAuto({"true" if on else "false"}, {period:.2f}, "{NIGHT_TAG}")'
+def nightauto_cmd(period: float = 0.5, on: bool = True, tag: str = NIGHT_TAG) -> str:
+    """utpp_core 0.5.4: POS line every `period` s from onUpdate (echo '[night] auto on period=...'). `tag` = the tagged
+    Codeware entity reported in `v=` (NIGHT_TAG = the vehicle, ENEMY_TAG = the fist fight target)."""
+    return f'GetMod("utpp_core").NightAuto({"true" if on else "false"}, {period:.2f}, "{tag}")'
 
 
 def mark_cmds(tag: str) -> list[str]:

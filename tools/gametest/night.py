@@ -1,6 +1,6 @@
 """Unattended overnight runner: quit -> (install) -> launch -> arm MM -> record -> scenarios -> quit -> collect.
 
-  python Source\\tools\\gametest\\night.py --dry-run [--set loco,sprint_dash,weapon_draw_aim_holster,vehicle_mount_exit]   (also: --set aim_probe, not in 'all')
+  python Source\\tools\\gametest\\night.py --dry-run [--set loco,sprint_dash,weapon_draw_aim_holster,vehicle_mount_exit]   (also: --set aim_probe and --set melee_fists_target, not in 'all')
   python Source\\tools\\gametest\\night.py --go --cycles 3 --set all --db utpp_base
          [--install 0.5.8 "note" --cet-mods utpp_core,utpp_body] [--cet "Game.UTPPSetMMTurnCommit(true)"]
 
@@ -26,6 +26,9 @@ One cycle (Research\\logs\\night\\<cycle-ts>\\cycle.json records every step with
                   melee_fists (fists by script RequestEquipFists, RT tap, punches standing/walking, LT block, UnequipWeapon
                   then Y double tap if needed;
                   verified by the UTPP MMMASK/MMGATE melee lines and MM weight w >= 0.9 while masked),
+                  melee_fists_target (--set melee_fists_target only: the fists against a REAL opponent - a Codeware NPC
+                  spawned and teleported by console commands, Immortal; far / near / camera-orbit / block phases; evidence =
+                  MELEEAIM src=lock, V <-> target distance, target health before/after; see enemy_macro),
                   aim_probe (--set aim_probe only: perspective.aiming=tpp + utpp_probe AimProbe(true) by script, LT hold
                   4 s with 2 RT shots, AimProbe(false) + aiming=fpp restored in a finally; PASS = >= 4 aimprobe samples,
                   >= 1 shot, a summary line; the parsed result is stored as 'aimprobe' in cycle.json / summary.json),
@@ -1444,6 +1447,264 @@ class Night:
                      + (f' (warnings: {"; ".join(warns)})' if warns else ''))
         return res
 
+    def enemy_macro(self, pad, guard, plan: dict) -> dict:
+        """Fist fight against a REAL opponent (`--set melee_fists_target`, not in 'all'). Nobody had seen the third-person
+        melee on a target: no `src=lock` line in any log; reach, hit direction and the look of a hit are unknown.
+
+        Console (every command echo-verified, gt_night.enemy_*): Codeware entity of a Character record (first that works of
+        --enemy-record) 6 m ahead of V, tagged gn.ENEMY_TAG (NightAuto then reports it in `v=`), Immortal god mode (the
+        health drops but it cannot die), the attitude set to Neutral once when it is Friendly (GetTargetObject skips a
+        Friendly target). Phases (the target is TELEPORTED along the camera forward before each; it restores to 100 %):
+        far 2.0 m, near 1.2 m, orbit (camera turned 60 deg, target 1.2 m along the new forward), block 1.5 m - each with 3
+        punches (melee_punch) or the LT block (melee_block). Evidence per phase from the UTPP log: MELEEAIM src= (lock?
+        tgtPitch / tgtYaw), MMMASK / MMMELEEFULL, V <-> target distance from the NightAuto POS lines, and the health read
+        before the next placement (nothing in the mod logs a hit). gt_night.enemy_evaluate gives the verdict. Everything is
+        undone in a finally (target deleted, god mode removed, NightAuto tag restored, fists put away)."""
+        res = {'checks': [], 'phases': []}
+        fails, warns = [], []
+        st = {'defined': False, 'spawned': False, 'off': False, 'off_tries': 0, 'retag': False, 'fists': False,
+              'active': False}
+        phases: list = []
+        enemy: dict = {'tried': [], 'record': None, 'spawn': None, 'off': None, 'report': None}
+        args = self.args
+        records = [r.strip() for r in args.enemy_record.split(',') if r.strip()]
+
+        def say(msg: str) -> None:
+            self.log('[enemy] ' + msg)
+
+        def script_cmd(name: str, cmd: str, tag: str) -> bool | None:
+            text = self.console_verified(pad, guard, cmd, lambda t: f'[night] {tag} ok=' in t, name.lower())
+            ok, info = gn.night_echo(text, tag)
+            res['checks'].append({'phase': name, 'echo': info or None, 'ok': ok})
+            say(f'{name}: ' + (info or 'echo LOST'))
+            if ok is not True:
+                fails.append(f'{name}: ' + (f'the command failed ({info})' if ok is False else
+                                            f'no "[night] {tag} ok=" echo (console command lost)'))
+            return ok
+
+        def enemy_call(label: str, dist: float | None = None, heal: bool = False, god: bool = False,
+                       neutral: bool = False) -> dict | None:
+            """One UTPPENEMY state command. The first call carries the definition; when a later echo says the global is
+            gone (or is lost) the same command is sent once more WITH the definition (the one cheap alternative)."""
+            e = None
+            for define in ([True] if not st['defined'] else [False, True]):
+                cmd = gn.enemy_cmd(label, dist, heal=heal, god=god, neutral=neutral, define=define)
+                text = self.console_verified(pad, guard, cmd, lambda t: '[night] ENEMY ok=' in t, f'enemy/{label}')
+                e = gn.parse_enemy(text)
+                if e is not None and e['ok']:
+                    st['defined'] = True
+                    return e
+                say(f'{label}: ' + ('echo LOST' if e is None else f'failed ({e["raw"][:120]})')
+                    + ('' if define else ' -> sent again with the definition'))
+            return e
+
+        def window(off: int, done=None, window_s: float = 0.0):
+            """UTPP log text since `off` (polled every 0.5 s up to window_s until done(ms)); the melee mask state."""
+            carried = st['active']
+            t_end = time.monotonic() + window_s
+            guard.wait(0.5)  # log flush
+            while True:
+                text = read_since(self.utpp_log, off)
+                ms = gn.melee_state([l for l in text.splitlines() if '[night] POS' in l], text, carried)
+                if done is None or done(ms) or time.monotonic() >= t_end:
+                    break
+                guard.wait(0.5)
+            st['active'] = ms['active_now']
+            return text, ms
+
+        def spawn() -> dict | None:
+            for rec in records:
+                enemy['tried'].append(rec)
+                text = self.console_verified(pad, guard, gn.enemy_spawn_cmd(rec, args.enemy_spawn_dist),
+                                             lambda t: '[night] ENEMY_SPAWN ok=' in t, 'enemy_spawn')
+                ok, info = gn.night_echo(text, 'ENEMY_SPAWN')
+                res['checks'].append({'phase': 'enemy_spawn', 'record': rec, 'echo': info or None, 'ok': ok})
+                say(f'spawn {rec}: ' + (info or 'echo LOST'))
+                if ok is not True:
+                    continue                      # missing record / lost command: the next record (deletes this tag first)
+                st['spawned'] = True
+                end = time.monotonic() + args.enemy_spawn_wait
+                while True:                       # the earliest `found=1` ends the wait
+                    e = enemy_call('wait')
+                    if e is not None and e['ok'] and e['found']:
+                        enemy['record'] = rec
+                        return e
+                    if time.monotonic() >= end:
+                        break
+                    guard.wait(0.5)
+                warns.append(f'{rec}: spawn requested, no entity found within {args.enemy_spawn_wait:.0f} s -> next record')
+            return None
+
+        def do_off() -> None:
+            """Last state read, Immortal removed, entity deleted (idempotent: tagged entities only)."""
+            st['off_tries'] += 1
+            text = self.console_verified(pad, guard, gn.enemy_off_cmd(), lambda t: '[night] ENEMY_OFF ok=' in t,
+                                         'enemy_off')
+            ok, info = gn.night_echo(text, 'ENEMY_OFF')
+            res['checks'].append({'phase': 'enemy_off', 'echo': info or None, 'ok': ok})
+            if ok is True:
+                st['off'] = True
+                enemy['off'] = gn.parse_enemy(text)
+            say('off: ' + (info or 'echo LOST'))
+
+        def teardown() -> None:
+            if st['spawned'] and not st['off'] and st['off_tries'] < 2:
+                try:
+                    do_off()
+                except Exception as ex:  # noqa: BLE001 - every cleanup step is tried, the original error propagates
+                    say(f'cleanup: despawn error {ex!r}')
+            if st['spawned'] and not st['off']:
+                fails.append('enemy_off: the target may still be in the world (despawn echo lost)')
+            if st['retag']:
+                try:
+                    self.console_verified(pad, guard, gn.nightauto_cmd(args.night_auto_period),
+                                          lambda t: '[night] auto on' in t, 'nightauto_restore')
+                    st['retag'] = False
+                except Exception as ex:  # noqa: BLE001
+                    say(f'cleanup: NightAuto restore error {ex!r}')
+            if st['fists']:
+                try:
+                    off = file_size(self.utpp_log)
+                    script_cmd('fists_off_cmd', gn.FISTS_OFF_CMD, 'FISTS_OFF')
+                    _, ms = window(off, done=lambda x: not x['active_now'], window_s=gn.MELEE_OFF_WINDOW_S)
+                    if ms['active_now']:
+                        say('melee still active after FISTS_OFF -> Y double tap (melee_holster)')
+                        off = file_size(self.utpp_log)
+                        self.play(pad, guard, 'melee_holster', plan)
+                        _, ms = window(off, done=lambda x: not x['active_now'], window_s=gn.MELEE_OFF_WINDOW_S)
+                        if ms['active_now']:
+                            warns.append('melee mask still active after FISTS_OFF and the Y double tap')
+                    st['fists'] = False
+                except Exception as ex:  # noqa: BLE001
+                    say(f'cleanup: fists error {ex!r}')
+
+        spawn_info = None
+        try:
+            if args.night_auto and self.auto_pos:   # POS lines with the target in v= (finer period for the distance)
+                txt = self.console_verified(pad, guard, gn.nightauto_cmd(args.enemy_pos_period, True, gn.ENEMY_TAG),
+                                            lambda t: '[night] auto on' in t, 'nightauto_enemy')
+                st['retag'] = txt is not None
+                if txt is None:
+                    warns.append('NightAuto retag LOST: no V <-> target distance in the POS lines')
+            first = spawn()
+            if first is None:
+                warns.append('no record could be spawned and found (tried ' + ', '.join(enemy['tried']) + ')')
+            else:
+                neutral = first['att'] == 0
+                prep = enemy_call('prep', heal=True, god=True, neutral=neutral)
+                spawn_info = dict(first)
+                if prep is not None and prep['ok']:
+                    if prep['god'] is not True:
+                        warns.append('Immortal god mode not set: the target can die')
+                    if prep['heal'] is not True:
+                        warns.append('health restore (RequestSettingStatPoolValue) failed: the drops are cumulative')
+                if neutral:   # the one alternative: did the attitude change take?
+                    chk = enemy_call('recheck')
+                    if chk is not None and chk['ok']:
+                        spawn_info.update(att=chk['att'], att_name=chk['att_name'], act=chk['act'])
+                        if chk['att'] == 0:
+                            warns.append('attitude still Friendly after SetAttitudeTowards(Neutral): phases skipped')
+                enemy['spawn'] = spawn_info
+                say(f'target {spawn_info.get("rec") or enemy["record"]}: att={spawn_info.get("att_name")} '
+                    f'act={spawn_info.get("act")} hp={spawn_info.get("hp")}% hv={spawn_info.get("hv")} '
+                    f'd2={spawn_info.get("d2")} m')
+                base = {'hv': first['hv'], 'hp': first['hp']}   # a fresh spawn: full health
+            if spawn_info is not None and spawn_info.get('att') != 0:
+                off = file_size(self.utpp_log)
+                if args.cet_fists:
+                    script_cmd('fists_cmd', gn.FISTS_CMD, 'FISTS')
+                    st['fists'] = True
+                    guard.wait(1.0)
+                self.play(pad, guard, 'melee_draw', plan)
+                text, ms = window(off, done=lambda x: x['on'], window_s=args.weapon_window)
+                res['checks'].append({'phase': 'melee_draw', 'mask_on': ms['on'], 'active_end': ms['active_now']})
+                if not ms['on']:
+                    warns.append('melee_draw: no "MMMASK on reasons=0x1" / "MMGATE melee=0x.." after the RT tap')
+                for name, dist, required, orbit, part in gn.ENEMY_PHASES:
+                    ph = {'name': name, 'dist_set': dist, 'required': required, 'orbit_deg': orbit, 'part': part}
+                    if orbit:
+                        pos = self.poll_pos(guard, pad)
+                        if pos and pos.get('p') and pos.get('cf'):
+                            side = gn.rotate_stick(*pos['cf'], orbit)
+                            target = (pos['p'][0] + side[0] * 10.0, pos['p'][1] + side[1] * 10.0)
+                            new = self.camera_align(pad, guard, plan, pos, target, {'events': []},
+                                                    tol=gn.ENEMY_ORBIT_TOL, why='enemy-orbit')
+                            if new and new.get('cf'):
+                                ph['orbit_done_deg'] = round(abs(gn.turned_deg(pos['cf'], new['cf'])), 1)
+                            if ph.get('orbit_done_deg', 0.0) < 0.5 * orbit:
+                                warns.append(f'{name}: the camera turned only {ph.get("orbit_done_deg")} deg (wanted {orbit:.0f})')
+                        else:
+                            warns.append(f'{name}: no position - the camera orbit was skipped')
+                    place = enemy_call(name, dist, heal=True)
+                    ph['place'] = place
+                    ph['placed'] = place is not None and place['ok'] and place['found']
+                    ph['place_raw'] = place['raw'] if place else None
+                    if phases:
+                        phases[-1]['after'] = place
+                    off = file_size(self.utpp_log)
+                    self.play(pad, guard, part, plan)
+                    text, ms = window(off)
+                    aim = gn.meleeaim_stats(text)
+                    ph.update(aim=aim, lock=aim['lock'], dist=gn.target_distance_stats(text), mask_on=ms['on'],
+                              mask_seen=bool(ms['on'] or st['active']), full_on=text.count('MMMELEEFULL on'))
+                    phases.append(ph)
+                do_off()
+                if phases:
+                    phases[-1]['after'] = enemy['off']
+                for i, ph in enumerate(phases):
+                    pl = ph.get('place')
+                    before = base if (pl and pl.get('heal') is True) else pl
+                    ph['drop'] = gn.enemy_hp_drop(before, ph.get('after'))
+                    ph['after_d2'] = (ph.get('after') or {}).get('d2')
+                    d, a = ph.get('dist'), ph['aim']
+                    say(f'{ph["name"]}: want {ph["dist_set"]:.1f} m, V<->target first/min/last '
+                        f'{(d or {}).get("first")}/{(d or {}).get("min")}/{(d or {}).get("last")} m (n={(d or {}).get("n", 0)}), '
+                        f'after d2={ph["after_d2"]} m, lock={ph["lock"]} src={a["src"]} lockPitch={a["lock_pitch"]} '
+                        f'lockYaw={a["lock_yaw"]}, hp drop={ph["drop"]}, mask_on={ph["mask_on"]} full_on={ph["full_on"]}'
+                        + (f', orbit {ph["orbit_done_deg"]} deg' if 'orbit_done_deg' in ph else ''))
+        finally:
+            teardown()
+        ev = gn.enemy_evaluate(spawn_info if spawn_info is not None else ({'found': False} if st['spawned'] else None),
+                               phases)
+        fails += ev['fails']
+        warns += ev['warns']
+        if args.punch_report:
+            enemy['report'] = self.punch_report()
+        res['enemy'] = {'record': enemy['record'], 'tried': enemy['tried'], 'spawn': enemy['spawn'], 'locks': ev['locks'],
+                        'hits': ev['hits'], 'report': enemy['report'],
+                        'phases': [{k: v for k, v in p.items() if k not in ('place', 'after')} for p in phases]}
+        res['warnings'] = warns
+        res['verdict'] = 'FAIL' if fails else 'PASS'
+        res['fails'] = fails
+        if fails:
+            self.log('[enemy] FAIL: ' + '; '.join(fails))
+        else:
+            self.log(f'[enemy] PASS: target {enemy["record"]}, {ev["locks"]} src=lock line(s), hits {ev["hits"]}'
+                     + (f' (warnings: {"; ".join(warns)})' if warns else ''))
+        return res
+
+    def punch_report(self) -> dict:
+        """--punch-report: run the offline measuring tool (Source\\tools\\analysis\\punch_direction_report.py) on the UTPP log;
+        its command line comes from gt_night.punch_report_cmd. Skipped (logged) when the script is not there."""
+        script = os.path.normpath(os.path.join(HERE, gn.PUNCH_REPORT_REL))
+        if not os.path.isfile(script):
+            self.log(f'[enemy] --punch-report: {script} not found - skipped')
+            return {'ran': False, 'skipped': 'script missing'}
+        out = None
+        try:
+            p = self.runner(gn.punch_report_cmd(sys.executable, script, self.utpp_log), capture_output=True, text=True,
+                            timeout=300)
+            cdir = getattr(self, 'cycle_dir', None)
+            if cdir:
+                out = os.path.join(cdir, 'punch_report.txt')
+                with open(out, 'w', encoding='utf-8') as f:
+                    f.write((p.stdout or '') + (('\n' + p.stderr) if p.stderr else ''))
+            self.log(f'[enemy] --punch-report: rc={p.returncode}' + (f', output {out}' if out else ''))
+            return {'ran': True, 'rc': p.returncode, 'out': out}
+        except Exception as e:  # noqa: BLE001 - a measuring tool never fails the run
+            self.log(f'[enemy] --punch-report failed: {e!r}')
+            return {'ran': False, 'error': repr(e)}
+
     def aim_probe_macro(self, pad, guard, plan: dict) -> dict:
         """utpp_probe AimProbe macro: where do the shots leave the weapon while aiming in TPP (camera / fpp camera /
         muzzle)? Console (echo-verified): `perspective.aiming=tpp` (noSave) and `AimProbe(true)`; pad: LT held 4 s with
@@ -2372,6 +2633,8 @@ class Night:
                         limit = self.args.scenario_timeout
                         if name in self.scenarios:
                             limit = max(limit, self.scenarios[name].duration * 2 + 30)
+                        if name == 'melee_fists_target':     # ~2 min: spawn polls, 4 phases, console commands
+                            limit = max(limit, 300.0)
                         self.scenario_deadline = time.monotonic() + limit
                         self.log(f'[scenarios] {name} run {r}')
                         rec = {'name': name, 'run': r, 'start': t0}
@@ -2383,6 +2646,8 @@ class Night:
                                 rec.update(self.weapon_macro(pad, guard, plan))
                             elif name == 'melee_fists':
                                 rec.update(self.melee_macro(pad, guard, plan))
+                            elif name == 'melee_fists_target':
+                                rec.update(self.enemy_macro(pad, guard, plan))
                             elif name == 'shoulder_key':
                                 rec.update(self.shoulder_key_macro(pad, guard))
                             elif name == 'aim_probe':
@@ -2452,7 +2717,9 @@ class Night:
                    'scenario_verdicts': {f'{s["name"]}#{s["run"]}': {'verdict': s.get('verdict'),
                                                                       'fails': s.get('fails'),
                                                                       **({'aimprobe': s['aimprobe']}
-                                                                         if 'aimprobe' in s else {})}
+                                                                         if 'aimprobe' in s else {}),
+                                                                      **({'enemy': s['enemy']}
+                                                                         if 'enemy' in s else {})}
                                          for s in self.cycle.get('scenarios', []) if s.get('verdict')},
                    'recoveries': self.cycle.get('recoveries', [])}
         # recording: finalize even if ffmpeg died with the game (fragmented mp4)
@@ -2723,6 +2990,11 @@ def dry_run(args) -> int:
     print(f'     melee: fists by script ({"RequestEquipFists" if args.cet_fists else "off"}), RT tap, 3 punches, punch+walk, '
           'LT block 2 s, UnequipWeapon (then Y double tap if still active); verified by UTPP MMMASK/MMGATE melee lines '
           '(w >= 0.9 while masked, mask off <= 3 s after the holster)')
+    print(f'     melee_fists_target (--set melee_fists_target only): Codeware NPC {", ".join(args.enemy_record.split(","))} '
+          f'(first that works), {args.enemy_spawn_dist:.0f} m ahead, Immortal, teleported to 2.0 / 1.2 / 1.2 (camera orbit '
+          '60 deg) / 1.5 m before 3 punches / 3 punches / 3 punches / LT block; PASS = target found (not Friendly), >= 1 '
+          'MELEEAIM src=lock, health drop at 1.2 m; target deleted and god mode removed in a finally'
+          + (' ; --punch-report: tools\\analysis\\punch_direction_report.py on the log' if args.punch_report else ''))
     print('     aim_probe (--set aim_probe only): perspective.aiming=tpp + utpp_probe AimProbe(true) by script, LT held 4 s with '
           '2 RT shots, AimProbe(false) + aiming=fpp always restored (finally); PASS = >= 4 aimprobe samples, >= 1 shot, '
           'a summary line (weapon_draw first if NightPos shows w=0)')
@@ -2912,6 +3184,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--no-cet-fists', dest='cet_fists', action='store_false',
                    help='melee_fists: do not equip/unequip the fists by script (RequestEquipFists / UnequipWeapon); '
                         'RT tap and the Y double tap only')
+    p.add_argument('--enemy-record', default=','.join(gn.ENEMY_RECORDS),
+                   help='melee_fists_target: Character record(s), comma list, the first that spawns and is found is used '
+                        '(env UTPP_NIGHT_ENEMY sets the default); names of the installed game\'s TweakDB')
+    p.add_argument('--enemy-spawn-dist', type=float, default=gn.ENEMY_SPAWN_DIST,
+                   help='melee_fists_target: first spawn distance along the camera forward (m); beyond the 5 m lock range')
+    p.add_argument('--enemy-spawn-wait', type=float, default=6.0,
+                   help='melee_fists_target: seconds to wait for the spawned entity (state echo found=1) per record')
+    p.add_argument('--enemy-pos-period', type=float, default=gn.ENEMY_POS_PERIOD,
+                   help='melee_fists_target: NightAuto period (s) while the target exists (V <-> target distance)')
+    p.add_argument('--punch-report', action='store_true',
+                   help='melee_fists_target: afterwards run Source\\tools\\analysis\\punch_direction_report.py on the UTPP '
+                        'log (command line: gt_night.punch_report_cmd); skipped when the script is missing')
     p.add_argument('--cet-mount-wait', type=float, default=6.0,
                    help='seconds to wait for mount evidence (vehiclecam line / NightPos m=1) after a scripted mount')
     p.add_argument('--vhold-seconds', type=float, default=0.8, help='V held this long before the Down arrow')
