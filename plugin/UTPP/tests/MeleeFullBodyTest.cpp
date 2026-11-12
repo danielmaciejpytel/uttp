@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -684,13 +685,15 @@ static void TestGuard()
         melee::GuardInput in = GuardStanding();
         Expect("guard: fists drawn, standing in Idle 2 -> on", g.Update(in) == melee::kGuardOn);
         bool cont = true;
-        for (int32_t s : {2, 6, 6, 11, 11, 12, 2, 7, 13, 2, 8, 15, 2, 9, 10, 20, 5, 2})
+        // 2026-11-13: Safe 3 joined the guard states (old: why=state). The third-person melee_safepose is shipped, so a friendly NPC in
+        // reach lowers the guard instead of dropping the hands to the locomotion arms.
+        for (int32_t s : {2, 6, 6, 11, 11, 12, 2, 7, 13, 2, 8, 15, 2, 9, 10, 20, 5, 2, 3, 3, 2})
         {
             in.meleeState = s;
             cont = cont && g.Update(in) == melee::kGuardOn;
         }
         Expect("guard: Idle -> Hold -> ComboAttack -> FinalAttack -> Idle -> ChargedHold -> StrongAttack -> Block -> BlockAttack -> "
-               "Targeting -> Deflect -> DeflectAttack -> Parried -> Idle: on on every feed (no gap at the strike start)",
+               "Targeting -> Deflect -> DeflectAttack -> Parried -> Idle -> Safe -> Idle: on on every feed (no gap at the strike start)",
                cont);
         in.upperBody = 6;
         const bool aim = g.Update(in) == melee::kGuardOn;
@@ -714,7 +717,6 @@ static void TestGuard()
         {"base not the owner / not TPP / release reason -> why=owner", [](melee::GuardInput& i) { i.owner = false; }, melee::kGuardOwner},
         {"effective gate closed / exit release -> why=gate", [](melee::GuardInput& i) { i.gateOpen = false; }, melee::kGuardGate},
         {"Equipping 1 (first equip stays vanilla) -> why=state", [](melee::GuardInput& i) { i.meleeState = 1; }, melee::kGuardState},
-        {"Safe 3 -> why=state", [](melee::GuardInput& i) { i.meleeState = 3; }, melee::kGuardState},
         {"PublicSafe 4 -> why=state", [](melee::GuardInput& i) { i.meleeState = 4; }, melee::kGuardState},
         {"NotReady 0 -> why=state", [](melee::GuardInput& i) { i.meleeState = 0; }, melee::kGuardState},
         {"MeleeWeapon not reported -> why=state", [](melee::GuardInput& i) { i.meleeState = -1; }, melee::kGuardState},
@@ -757,6 +759,59 @@ static void TestGuard()
         Expect("guard: ungrounded 0.05 s -> on (debounced), 0.15 s -> why=air, grounded -> on, timer 0", on005 && off015 && back);
         g.Reset();
         Expect("guard: Reset -> why=flag, air timer 0", g.LastWhy() == melee::kGuardFlag && g.AirSeconds() == 0.0f);
+    }
+    {
+        // soft / hard end (2026-11-13): soft = the arms may ease out (0.35 s): the weapon state left the guard states, a crouch / sprint
+        // stance or detail. Hard = the quick fade as before: flag, mask, owner, closed gate, UpperBody swap, air, slide, dodge, climb...
+        struct SoftCase
+        {
+            const char* name;
+            void (*edit)(melee::GuardInput&);
+            bool soft;
+        };
+        const SoftCase soft[] = {
+            {"holstered / no state (NotReady 0)", [](melee::GuardInput& i) { i.meleeState = 0; }, true},
+            {"Equipping 1", [](melee::GuardInput& i) { i.meleeState = 1; }, true},
+            {"PublicSafe 4", [](melee::GuardInput& i) { i.meleeState = 4; }, true},
+            {"crouch stance", [](melee::GuardInput& i) { i.stance = 2; }, true},
+            {"sprint stance", [](melee::GuardInput& i) { i.stance = 3; }, true},
+            {"detail Crouch 3", [](melee::GuardInput& i) { i.psmDetail = 3; }, true},
+            {"detail Sprint 4", [](melee::GuardInput& i) { i.psmDetail = 4; }, true},
+            {"detail CrouchSprint 30", [](melee::GuardInput& i) { i.psmDetail = 30; }, true},
+            {"script flag off", [](melee::GuardInput& i) { i.flag = false; }, false},
+            {"setting off", [](melee::GuardInput& i) { i.setting = false; }, false},
+            {"mask off", [](melee::GuardInput& i) { i.maskOk = false; }, false},
+            {"not the owner", [](melee::GuardInput& i) { i.owner = false; }, false},
+            {"gate closed", [](melee::GuardInput& i) { i.gateOpen = false; }, false},
+            {"UpperBody SwitchItems 1 (holster / swap to a gun)", [](melee::GuardInput& i) { i.upperBody = 1; }, false},
+            {"UpperBody Reload 3", [](melee::GuardInput& i) { i.upperBody = 3; }, false},
+            {"detail Slide 5", [](melee::GuardInput& i) { i.psmDetail = 5; }, false},
+            {"detail Dodge 7", [](melee::GuardInput& i) { i.psmDetail = 7; }, false},
+            {"detail Climb 8", [](melee::GuardInput& i) { i.psmDetail = 8; }, false},
+            {"detail Fall 14", [](melee::GuardInput& i) { i.psmDetail = 14; }, false},
+            {"detail Jump 18", [](melee::GuardInput& i) { i.psmDetail = 18; }, false},
+            {"detail Knockdown 29", [](melee::GuardInput& i) { i.psmDetail = 29; }, false},
+            {"ungrounded (air)", [](melee::GuardInput& i) { i.haveAir = false; i.vz = 1.5f; }, false},
+        };
+        bool allOk = true;
+        std::string bad;
+        for (const SoftCase& c : soft)
+        {
+            melee::GuardGate g;
+            melee::GuardInput in = GuardStanding();
+            c.edit(in);
+            const bool off = g.Update(in) != melee::kGuardOn;
+            if (!off || g.LastSoft() != c.soft)
+            {
+                allOk = false;
+                bad += std::string(" [") + c.name + "]";
+            }
+        }
+        melee::GuardGate on;
+        const bool onNotSoft = on.Update(GuardStanding()) == melee::kGuardOn && !on.LastSoft();
+        on.Reset();
+        Expect("guard: soft end (state / crouch / sprint) vs hard end (flag, mask, owner, gate, UpperBody, air, slide, dodge, climb, jump ...); on and Reset -> not soft",
+               allOk && onNotSoft && !on.LastSoft(), bad);
     }
     Expect("guard: GuardWhyName covers every value",
            std::string_view(melee::GuardWhyName(melee::kGuardOn)) == "on" && std::string_view(melee::GuardWhyName(melee::kGuardAir)) == "air" &&
@@ -813,9 +868,48 @@ static void TestDriverTerms()
         // the pre-guard expressions of MotionHost.cpp (g_maskBlend wanted, maskTime, full-body meleeMask, g_meleeAimBlend wanted)
         same = same && t.maskWanted == (in.maskReasonsUpper || in.weaponMaskWanted) &&
                t.aimFadeLong == (in.aimFadeEligible && !in.weaponMaskWanted) && t.fullMelee == in.meleeMask && !t.fullGuard &&
-               t.tiltWanted == in.meleeMask;
+               t.tiltWanted == in.meleeMask && !t.guardOnly;
     }
     Expect("driver terms: guard not wanted -> mask, fade time, full-body input and tilt equal the pre-guard expressions (64 inputs)", same);
+    {
+        // the fade times with the guard off = the pre-guard pair (maskTime = aimFadeLong ? 0.25 : 0.15; out = 0.35 when the melee release
+        // is armed and the mask is not wanted and no aim fade), for every term combination and both latches
+        bool ident = true;
+        for (int m = 0; m < 256 && ident; ++m)
+        {
+            melee::DriverIn in;
+            in.maskReasonsUpper = (m & 1) != 0;
+            in.weaponMaskWanted = (m & 2) != 0;
+            in.aimFadeEligible = (m & 4) != 0;
+            in.meleeMask = (m & 8) != 0;
+            const bool longOut = (m & 16) != 0;
+            const melee::DriverTerms t = melee::CombineDriverTerms(in);
+            const melee::MaskTimes mt = melee::ComputeMaskTimes(t, longOut, false, kMaskFadeSeconds, 0.25f, kMeleeReleaseFadeOutSeconds); // no guard: no soft latch
+            const float maskTime = t.aimFadeLong ? 0.25f : kMaskFadeSeconds;
+            const float outOld = (!t.maskWanted && longOut && !t.aimFadeLong) ? kMeleeReleaseFadeOutSeconds : maskTime;
+            ident = ident && mt.in == maskTime && mt.out == outOld;
+        }
+        Expect("fade times: guard not wanted -> (in, out) equal the pre-guard maskTime / maskOutTime (256 inputs)", ident);
+        melee::DriverIn g;
+        g.guardWanted = true;
+        melee::DriverTerms t = melee::CombineDriverTerms(g);
+        melee::MaskTimes mt = melee::ComputeMaskTimes(t, false, false, kMaskFadeSeconds, 0.25f, kMeleeReleaseFadeOutSeconds);
+        Expect("fade times: guard alone holds the mask -> the raise takes kGuardFadeInSeconds 0.25, the quick fade out stays 0.15",
+               t.guardOnly && mt.in == melee::kGuardFadeInSeconds && melee::kGuardFadeInSeconds == 0.25f && mt.out == kMaskFadeSeconds);
+        g.maskReasonsUpper = true;
+        t = melee::CombineDriverTerms(g);
+        mt = melee::ComputeMaskTimes(t, false, false, kMaskFadeSeconds, 0.25f, kMeleeReleaseFadeOutSeconds);
+        Expect("fade times: guard with a melee reason (a strike): the raise stays 0.15", !t.guardOnly && mt.in == kMaskFadeSeconds);
+        g.maskReasonsUpper = false;
+        g.guardWanted = false;
+        t = melee::CombineDriverTerms(g);
+        mt = melee::ComputeMaskTimes(t, false, true, kMaskFadeSeconds, 0.25f, kMeleeReleaseFadeOutSeconds);
+        Expect("fade times: soft guard end, nothing else wanted -> eased out 0.35, in unchanged", mt.out == kMeleeReleaseFadeOutSeconds && mt.in == kMaskFadeSeconds);
+        g.weaponMaskWanted = true;
+        t = melee::CombineDriverTerms(g);
+        mt = melee::ComputeMaskTimes(t, false, true, kMaskFadeSeconds, 0.25f, kMeleeReleaseFadeOutSeconds);
+        Expect("fade times: a soft latch does not slow a mask that is wanted again (out unused, in 0.15)", t.maskWanted && mt.in == kMaskFadeSeconds);
+    }
     melee::DriverIn g;
     g.guardWanted = true;
     g.aimFadeEligible = true;
@@ -1177,6 +1271,384 @@ static void TestStandingGrounded()
     Expect("standing: Reset clears it", !g.StandingGrounded());
 }
 
+// ------------------------------------------------------------------------------------------------ guard sequences (2026-11-13)
+
+// The Feed wiring of the melee mask (MotionHost.cpp Feed: MeleeGate -> GuardGate -> CombineDriverTerms -> MaskTimeTracker ->
+// UpperMaskBlend, the tilt and the leg fades), driven with the real header classes over a PSM timeline: punch - pause - punch - walk
+// - sprint - stand. With UTPP_GUARD_TIMELINE_DIR set the per-frame weights are written as CSV for the offline figures
+// (Source\tools\melee\fists_guard_figures.py).
+namespace
+{
+struct Seg
+{
+    const char* name;
+    float seconds;
+    int state;      // PSM.MeleeWeapon
+    int detail = 1; // LocomotionDetailed
+    int stance = 1; // conditioned Locomotion state
+    int upper = 0;  // PSM.UpperBody
+    bool stick = false;
+    float speed = 0.0f;   // planar capsule speed m/s
+    bool hardGate = false; // vehicle / scene: the raw gate is closed by something the mask does not cover
+    bool airborne = false;
+};
+
+struct Frame
+{
+    float t;
+    int state;
+    int detail;
+    int stance;
+    bool stick;
+    float mask, tilt, legs;
+    bool guard, active;
+    int why;
+};
+
+struct SimCfg
+{
+    bool guardOn = false;
+    bool tiltOn = false;
+    bool legsOn = false; // melee.guardFullBody
+    float releaseHold = kMeleeReleaseHoldSeconds;
+    float releaseOut = kMeleeReleaseFadeOutSeconds;
+    float dt = 1.0f / 60.0f;
+};
+
+std::vector<Frame> RunTimeline(const std::vector<Seg>& aSegs, const SimCfg& aCfg)
+{
+    MeleeGateConfig cfg;
+    cfg.releaseHold = aCfg.releaseHold;
+    MeleeGate gate;
+    melee::GuardGate gg;
+    melee::Gate fg;
+    melee::MaskTimeTracker times;
+    UpperMaskBlend mask, tilt, legs;
+    std::vector<Frame> out;
+    float t = 0.0f;
+    const float dt = aCfg.dt;
+    for (const Seg& s : aSegs)
+    {
+        const int n = int(std::lround(s.seconds / dt));
+        for (int i = 0; i < n; ++i, t += dt)
+        {
+            uint32_t bits = 0;
+            if (s.state >= melee::kMwComboAttack && s.state <= melee::kMwEquipAttack)
+                bits = kPsmMeleeAttack;
+            else if (s.state >= melee::kMwParried && s.state <= melee::kMwDeflect)
+                bits = kPsmMeleePose;
+            const bool active = gate.Update(bits, dt, cfg, 0.06f, s.state >= kPsmMeleeWeaponIdle);
+            melee::GuardInput gi = GuardStanding();
+            gi.setting = aCfg.guardOn;
+            gi.meleeState = s.state;
+            gi.upperBody = s.upper;
+            gi.stance = s.stance;
+            gi.psmDetail = s.detail;
+            gi.onGround = !s.airborne;
+            gi.gateOpen = !s.hardGate;
+            gi.dt = dt;
+            const bool guard = gg.Update(gi) == melee::kGuardOn;
+            melee::DriverIn di;
+            di.maskReasonsUpper = active;
+            di.meleeMask = active;
+            di.guardWanted = guard;
+            di.guardFullSetting = aCfg.legsOn;
+            di.guardTiltSetting = aCfg.tiltOn;
+            const melee::DriverTerms terms = melee::CombineDriverTerms(di);
+            melee::MaskTimeIn mti;
+            mti.meleeReasonOnly = active;
+            mti.guardWanted = guard;
+            mti.guardSoft = gg.LastSoft();
+            mti.longRelease = gate.LongRelease();
+            mti.maskProgress = mask.Progress();
+            const melee::MaskTimes mt = times.Update(terms, mti, kMaskFadeSeconds, 0.25f, aCfg.releaseOut);
+            const bool rawGateOpen = !active && !s.hardGate;
+            mask.UpdateInOut(terms.maskWanted, rawGateOpen, true, dt, mt.in, mt.out);
+            tilt.UpdateInOut(terms.tiltWanted, true, true, dt, kMaskFadeSeconds, mt.out);
+            melee::Input fi = StandingMelee();
+            fi.meleeState = s.state;
+            fi.allowedStates = 3669472u; // fists line of utpp_melee.reds UTPPMeleeFullBodyStates
+            fi.meleeMask = terms.fullMelee;
+            fi.guard = terms.fullGuard;
+            fi.stance = s.stance;
+            fi.psmDetail = s.detail;
+            fi.stickHeld = s.stick;
+            fi.planarSpeed = s.speed;
+            fi.dt = dt;
+            const bool full = fg.Update(fi);
+            legs.UpdateInOut(full, !s.hardGate, true, dt, melee::kFadeSeconds, melee::LegFadeOutSeconds(fg.LastWhy(), gate.LongRelease()));
+            Frame f;
+            f.t = t;
+            f.state = s.state;
+            f.detail = s.detail;
+            f.stance = s.stance;
+            f.stick = s.stick;
+            f.mask = mask.Weight();
+            f.tilt = tilt.Weight();
+            f.legs = legs.Weight();
+            f.guard = guard;
+            f.active = active;
+            f.why = int(gg.LastWhy());
+            out.push_back(f);
+        }
+    }
+    return out;
+}
+
+// punch - pause - punch - pause - walk - sprint - stand, fists drawn (Idle 2 since the draw). A click enters Hold 6 for 0.1 s, the
+// strike is ComboAttack 11 for 0.85 s (state=11 -> Idle 2 in the logged run 2026-11-10 07:26:12-13).
+std::vector<Seg> PunchPausePunchWalk()
+{
+    std::vector<Seg> v;
+    v.push_back({"idle", 1.0f, melee::kMwIdle});
+    v.push_back({"hold", 0.1f, melee::kMwHold});
+    v.push_back({"punch 1", 0.85f, melee::kMwComboAttack});
+    v.push_back({"pause", 2.0f, melee::kMwIdle});
+    v.push_back({"hold", 0.1f, melee::kMwHold});
+    v.push_back({"punch 2", 0.85f, melee::kMwComboAttack});
+    v.push_back({"pause", 1.5f, melee::kMwIdle});
+    Seg walk{"walk", 2.5f, melee::kMwIdle};
+    walk.stick = true;
+    walk.speed = 1.6f;
+    v.push_back(walk);
+    Seg sprint{"sprint", 2.0f, melee::kMwIdle};
+    sprint.stick = true;
+    sprint.speed = 6.0f;
+    sprint.stance = 3;
+    sprint.detail = 4;
+    v.push_back(sprint);
+    v.push_back({"stand", 1.5f, melee::kMwIdle});
+    return v;
+}
+
+float TimeOf(const std::vector<Frame>& aF, float aT0, float aT1, float& aMin, float& aMaxStep)
+{
+    aMin = 1.0f;
+    aMaxStep = 0.0f;
+    float prev = -1.0f;
+    for (const Frame& f : aF)
+        if (f.t >= aT0 && f.t < aT1)
+        {
+            aMin = std::fmin(aMin, f.mask);
+            if (prev >= 0.0f)
+                aMaxStep = std::fmax(aMaxStep, std::fabs(f.mask - prev));
+            prev = f.mask;
+        }
+    return aMin;
+}
+
+void DumpTimeline(const char* aName, const std::vector<Frame>& aF)
+{
+#ifdef _WIN32
+    char* dir = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&dir, &len, "UTPP_GUARD_TIMELINE_DIR") != 0 || !dir || !*dir)
+    {
+        std::free(dir);
+        return;
+    }
+    const std::string path = std::string(dir) + "\\timeline_" + aName + ".csv";
+    std::free(dir);
+    FILE* f = nullptr;
+    if (fopen_s(&f, path.c_str(), "wb") == 0 && f)
+    {
+        std::fprintf(f, "t,state,detail,stance,stick,mask,tilt,legs,guard,active,why\n");
+        for (const Frame& r : aF)
+            std::fprintf(f, "%.5f,%d,%d,%d,%d,%.6f,%.6f,%.6f,%d,%d,%d\n", r.t, r.state, r.detail, r.stance, r.stick ? 1 : 0, r.mask, r.tilt, r.legs,
+                         r.guard ? 1 : 0, r.active ? 1 : 0, r.why);
+        std::fclose(f);
+    }
+#else
+    (void)aName;
+    (void)aF;
+#endif
+}
+} // namespace
+
+static void TestGuardSequences()
+{
+    const float dt = 1.0f / 60.0f;
+    const std::vector<Seg> seq = PunchPausePunchWalk();
+    // t of the segment starts: idle 0, hold 1.0, punch 1 1.1, pause 1.95, hold 3.95, punch 2 4.05, pause 4.9, walk 6.4, sprint 8.9, stand 10.9
+    const float tPunch1End = 1.95f, tPunch2Start = 3.95f, tPunch2End = 4.9f, tWalk = 6.4f, tSprint = 8.9f, tStand = 10.9f;
+
+    SimCfg before;           // the defaults of main (guard off): hold 0.55 s, eased fade out 0.35 s
+    SimCfg beforeOld = before; // the behaviour the review found (C1 / C2): hold 0.3 s, fade out 0.15 s
+    beforeOld.releaseHold = 0.3f;
+    beforeOld.releaseOut = kMaskFadeSeconds;
+    SimCfg after = before;
+    after.guardOn = true;
+    after.tiltOn = true;
+
+    const std::vector<Frame> fOld = RunTimeline(seq, beforeOld);
+    const std::vector<Frame> fBefore = RunTimeline(seq, before);
+    const std::vector<Frame> fAfter = RunTimeline(seq, after);
+    DumpTimeline("before_review", fOld);
+    DumpTimeline("before_main", fBefore);
+    DumpTimeline("after_guard", fAfter);
+
+    float mn = 0.0f, st = 0.0f;
+    // guard off: the mask is off before the first strike and drops in the pauses and the walk (the "dip" the guard removes)
+    TimeOf(fBefore, 0.0f, 1.0f, mn, st);
+    Expect("sequence, guard off: idle before the first strike -> mask 0 (arms on the locomotion)", mn == 0.0f);
+    TimeOf(fBefore, tPunch1End + 1.2f, tPunch2Start, mn, st);
+    Expect("sequence, guard off: the 2 s pause between the punches drops the hands off the guard (mask < 0.05 before the next click)", mn < 0.05f,
+           Fmt("min %.3f", mn));
+    TimeOf(fBefore, tWalk, tSprint, mn, st);
+    Expect("sequence, guard off: walking after the punches = mask 0", mn == 0.0f);
+
+    // guard on: the mask goes up once, stays at 1 through the strikes, the pause and the walk, and only leaves for the sprint
+    int firstOn = -1;
+    for (size_t i = 0; i < fAfter.size(); ++i)
+        if (fAfter[i].guard)
+        {
+            firstOn = int(i);
+            break;
+        }
+    Expect("sequence, guard on: the guard is on from the first feed in Idle 2 (flag, setting, standing)", firstOn == 0);
+    TimeOf(fAfter, 0.5f, tSprint, mn, st);
+    Expect("sequence, guard on: from 0.5 s (raise done) through punch, pause, punch, pause and walk the mask never leaves 1", mn == 1.0f, Fmt("min %.4f", mn));
+    TimeOf(fAfter, 0.0f, 0.5f, mn, st);
+    Expect("sequence, guard on: the raise out of the locomotion arms is eased over kGuardFadeInSeconds (step <= 1.5 dt / 0.25)",
+           st <= 1.5f * dt / melee::kGuardFadeInSeconds + 1e-4f && st > 0.0f, Fmt("max step %.4f", st));
+    bool guardEveryFeed = true;
+    for (const Frame& f : fAfter)
+        if (f.t >= 0.0f && f.t < tSprint - dt)
+            guardEveryFeed = guardEveryFeed && f.guard;
+    Expect("sequence, guard on: MMGUARD never off between the first feed and the sprint (no off between the strikes, none for the walk)", guardEveryFeed);
+    TimeOf(fAfter, tSprint, tSprint + 0.6f, mn, st);
+    Expect("sequence, guard on: sprint (soft end) -> the arms ease out over 0.35 s (max step <= 1.5 dt / 0.35), not the quick 0.15 s",
+           st <= 1.5f * dt / kMeleeReleaseFadeOutSeconds + 1e-4f && mn < 0.01f, Fmt("max step %.4f, min %.4f", st, mn));
+    float legsMax = 0.0f;
+    for (const Frame& f : fAfter)
+        legsMax = std::fmax(legsMax, f.legs);
+    Expect("sequence, guard on without melee.guardFullBody: the legs follow the existing rules (on only for the strikes)",
+           legsMax > 0.9f);
+    float legsPause = 1.0f;
+    for (const Frame& f : fAfter)
+        if (f.t >= tPunch1End + 0.8f && f.t < tPunch2Start)
+            legsPause = std::fmin(legsPause, f.legs);
+    Expect("sequence, guard on without guardFullBody: the legs are back on the locomotion in a 2 s pause (unchanged existing rule)", legsPause < 0.01f);
+    // tilt: with guardAimTilt on it stays up through the pause (no fade in and out at every strike)
+    float tiltMin = 1.0f;
+    for (const Frame& f : fAfter)
+        if (f.t >= 0.5f && f.t < tSprint)
+            tiltMin = std::fmin(tiltMin, f.tilt);
+    SimCfg noTilt = after;
+    noTilt.tiltOn = false;
+    const std::vector<Frame> fNoTilt = RunTimeline(seq, noTilt);
+    float tiltMinOff = 1.0f;
+    for (const Frame& f : fNoTilt)
+        if (f.t >= 0.5f && f.t < tSprint)
+            tiltMinOff = std::fmin(tiltMinOff, f.tilt);
+    Expect("sequence, guard on: tilt weight stays 1 with guardAimTilt, but fades out in the pauses without it", tiltMin == 1.0f && tiltMinOff < 0.05f,
+           Fmt("with %.3f, without %.3f", tiltMin, tiltMinOff));
+    (void)tPunch2End;
+    (void)tStand;
+
+    // ---- legs with the stage-2 setting: standing in the guard the legs are on the game pose, the walk (stick) ends them
+    {
+        SimCfg legs = after;
+        legs.legsOn = true;
+        const std::vector<Frame> fl = RunTimeline(seq, legs);
+        float lmin = 1.0f;
+        for (const Frame& f : fl)
+            if (f.t >= 1.0f && f.t < tWalk - 0.3f)
+                lmin = std::fmin(lmin, f.legs);
+        float lWalk = 1.0f;
+        for (const Frame& f : fl)
+            if (f.t >= tWalk + 0.5f && f.t < tSprint)
+                lWalk = std::fmin(lWalk, f.legs);
+        Expect("sequence, melee.guardFullBody on: legs stay on the game pose standing in the guard, the walk gives them back to the locomotion",
+               lmin > 0.9f && lWalk < 0.01f, Fmt("standing min %.3f, walk %.3f", lmin, lWalk));
+    }
+
+    // ---- hard ends keep the quick fade: a jump (detail 18, ungrounded) and the UpperBody swap (holster / swap to a gun)
+    {
+        std::vector<Seg> v;
+        v.push_back({"idle", 1.0f, melee::kMwIdle});
+        Seg jump{"jump", 1.0f, melee::kMwIdle};
+        jump.detail = 18;
+        jump.airborne = true;
+        v.push_back(jump);
+        SimCfg c = after;
+        const std::vector<Frame> f = RunTimeline(v, c);
+        DumpTimeline("hard_jump", f);
+        TimeOf(f, 1.0f, 2.0f, mn, st);
+        Expect("sequence, hard end (jump): the quick 0.15 s fade (reaches 0, step <= 1.5 dt / 0.15, above the eased limit)", mn < 0.01f &&
+               st > 1.5f * dt / kMeleeReleaseFadeOutSeconds && st <= 1.5f * dt / kMaskFadeSeconds + 1e-4f, Fmt("max step %.4f", st));
+        std::vector<Seg> w;
+        w.push_back({"idle", 1.0f, melee::kMwIdle});
+        Seg swap{"swap", 1.0f, melee::kMwIdle};
+        swap.upper = 1;
+        w.push_back(swap);
+        const std::vector<Frame> g = RunTimeline(w, c);
+        DumpTimeline("hard_swap", g);
+        TimeOf(g, 1.0f, 2.0f, mn, st);
+        Expect("sequence, hard end (UpperBody SwitchItems: holster / swap to a gun): the quick fade", mn < 0.01f && st > 1.5f * dt / kMeleeReleaseFadeOutSeconds,
+               Fmt("max step %.4f", st));
+        // vehicle / scene: the raw gate closes the whole body; the mask weight is held, no arm pop under the fading body
+        std::vector<Seg> x;
+        x.push_back({"idle", 1.0f, melee::kMwIdle});
+        Seg veh{"vehicle", 1.0f, melee::kMwIdle};
+        veh.hardGate = true;
+        x.push_back(veh);
+        const std::vector<Frame> h = RunTimeline(x, c);
+        TimeOf(h, 1.0f, 2.0f, mn, st);
+        Expect("sequence, vehicle / scene (raw gate closed): the guard ends at once, the mask weight is held at 1 (the whole body fades, no arm pop)",
+               mn == 1.0f && !h.back().guard && h.back().why == int(melee::kGuardGate));
+    }
+
+    // ---- soft end and a re-raise in the middle of the fade: continuous (the raise starts from where the arms are)
+    {
+        std::vector<Seg> v;
+        v.push_back({"idle", 1.0f, melee::kMwIdle});
+        Seg crouch{"crouch", 0.3f, melee::kMwIdle};
+        crouch.stance = 2;
+        crouch.detail = 3;
+        v.push_back(crouch);
+        v.push_back({"stand", 1.0f, melee::kMwIdle});
+        const std::vector<Frame> f = RunTimeline(v, after);
+        DumpTimeline("soft_crouch", f);
+        TimeOf(f, 1.0f, 2.3f, mn, st);
+        Expect("sequence, crouch for 0.3 s then stand: the arms ease down and back up with no frame step above the eased limit (no pop)",
+               st <= 1.5f * dt / melee::kGuardFadeInSeconds + 1e-4f && mn > 0.0f && mn < 1.0f, Fmt("max step %.4f, min %.3f", st, mn));
+    }
+
+    // ---- Safe (a friendly NPC in reach) keeps the guard: Idle -> Safe -> Idle never drops the mask
+    {
+        std::vector<Seg> v;
+        v.push_back({"idle", 1.0f, melee::kMwIdle});
+        v.push_back({"safe", 1.0f, melee::kMwSafe});
+        v.push_back({"idle", 1.0f, melee::kMwIdle});
+        const std::vector<Frame> f = RunTimeline(v, after);
+        TimeOf(f, 0.5f, 3.0f, mn, st);
+        Expect("sequence, Idle -> Safe (friendly NPC) -> Idle: the guard and the mask stay on", mn == 1.0f);
+        // the first-person melee_first_equip: Equipping 1 stays off the guard; the raise after the draw is the eased 0.25 s one
+        std::vector<Seg> d;
+        d.push_back({"equipping", 1.0f, melee::kMwEquipping});
+        d.push_back({"idle", 1.0f, melee::kMwIdle});
+        const std::vector<Frame> g = RunTimeline(d, after);
+        TimeOf(g, 0.0f, 0.99f, mn, st); // (feed times are sums of dt: the first Idle frame sits at ~1.0)
+        float mn2 = 0.0f, st2 = 0.0f;
+        TimeOf(g, 0.99f, 2.0f, mn2, st2);
+        Expect("sequence, draw: Equipping 1 keeps the locomotion arms (mask 0), the Idle 2 after it raises them eased (step <= 1.5 dt / 0.25)",
+               mn == 0.0f && st == 0.0f && st2 > 0.0f && st2 <= 1.5f * dt / melee::kGuardFadeInSeconds + 1e-4f, Fmt("max raise step %.4f", st2));
+    }
+
+    // ---- 30 fps feeds (the game thread can run slower): the same sequence keeps the mask at 1 and the steps below the eased limit
+    {
+        SimCfg c = after;
+        c.dt = 1.0f / 30.0f;
+        const std::vector<Frame> f = RunTimeline(seq, c);
+        TimeOf(f, 0.5f, tSprint, mn, st);
+        float mn2 = 0.0f, st2 = 0.0f;
+        TimeOf(f, tSprint, tSprint + 0.6f, mn2, st2);
+        Expect("sequence at 30 fps feeds: mask 1 through punch / pause / punch / walk, the sprint fade out stays eased", mn == 1.0f &&
+               st2 <= 1.5f * (1.0f / 30.0f) / kMeleeReleaseFadeOutSeconds + 1e-4f, Fmt("min %.3f, sprint step %.4f", mn, st2));
+    }
+}
+
 int main()
 {
     TestStandingGrounded();
@@ -1190,6 +1662,7 @@ int main()
     TestGuard();
     TestDriverTerms();
     TestRelease();
+    TestGuardSequences();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

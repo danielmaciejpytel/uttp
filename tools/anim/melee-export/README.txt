@@ -120,7 +120,7 @@ Registration (registration_evidence.py; details in the .xl comment)
   Mirrored: default sets 200 [] -> 199 [utpp_foot_tpp]; weapon sets 128 [w_melee_*|w_two_hand_blunt|w_melee_hammer] -> 127 [same, utpp_foot_tpp]; base and
   ep1 entity of each rig, component root. Not mirrored: [StrongArms] (fists), [additives] (one-handed blunt), [knife_thumb_override] (knife).
   Excluded clip names (stay vanilla): melee_first_equip (the ten weapon sets: the 127 [dildo] set holds it), vault (male default set:
-  pma_default_weapon 200 []). Held pose clips (< 6 frames) have no re-solved version (redo_batch.py skips them) and stay vanilla too.
+  pma_default_weapon 200 []). Held pose clips (< 6 frames) stay vanilla unless the built set supplies a re-solved version (the fists sets ship melee_idlepose = the guard, melee_safepose and melee_crouchpose).
   Classes in registration.txt: tie / always-same -> excluded; modifier-same -> listed risk; exclusive (another weapon variable); below / above.
 
 Re-run for new clips (e.g. a new animation round in a new folder):
