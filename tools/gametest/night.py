@@ -1456,8 +1456,9 @@ class Night:
         then reports it in `v=`), Immortal god mode (the health drops but it cannot die), the attitude set to Neutral once
         when it is Friendly (GetTargetObject skips a Friendly target). Phases (the target is TELEPORTED along the camera forward before each; it restores to 100 %):
         far 2.0 m, near 1.2 m, orbit (camera turned 60 deg, target 1.2 m along the new forward), block 1.5 m - each with 3
-        punches (melee_punch) or the LT block (melee_block). Evidence per phase from the UTPP log: MELEEAIM src= (lock?
-        tgtPitch / tgtYaw), MMMASK / MMMELEEFULL, V <-> target distance from the NightAuto POS lines, and the health read
+        punches (melee_punch) or the LT block (melee_block). The health must drop in near and orbit; far and block are
+        report only. Evidence per phase from the UTPP log: MELEEAIM src= (lock?
+        tgtYaw is clamped at 25 deg, so rawYaw = the body-to-target angle is reported too), MMMASK / MMMELEEFULL, V <-> target distance from the NightAuto POS lines, and the health read
         before the next placement (nothing in the mod logs a hit). gt_night.enemy_evaluate gives the verdict. Everything is
         undone in a finally (target deleted, god mode removed, NightAuto tag restored, fists put away)."""
         res = {'checks': [], 'phases': []}
@@ -1547,6 +1548,7 @@ class Night:
             say('off: ' + (info or 'echo LOST'))
 
         def teardown() -> None:
+            self.scenario_deadline = None    # after a ScenarioTimeout the cleanup must not raise it again
             if st['spawned'] and not st['off'] and st['off_tries'] < 2:
                 try:
                     do_off()
@@ -1649,6 +1651,8 @@ class Night:
                                      'the state read of the previous phase')
                     if phases:
                         phases[-1]['after'] = place
+                    elif place is not None and place['ok'] and place['hv'] is not None:
+                        base = {'hv': place['hv'], 'hp': place['hp']}   # full health, read after the spawn settled
                     off = file_size(self.utpp_log)
                     self.play(pad, guard, part, plan)
                     text, ms = window(off)
@@ -1668,7 +1672,8 @@ class Night:
                     say(f'{ph["name"]}: want {ph["dist_set"]:.1f} m, V<->target first/min/last '
                         f'{(d or {}).get("first")}/{(d or {}).get("min")}/{(d or {}).get("last")} m (n={(d or {}).get("n", 0)}), '
                         f'after d2={ph["after_d2"]} m, lock={ph["lock"]} src={a["src"]} lockPitch={a["lock_pitch"]} '
-                        f'lockYaw={a["lock_yaw"]}, hp drop={ph["drop"]}, mask_on={ph["mask_on"]} full_on={ph["full_on"]}'
+                        f'lockYaw={a["lock_yaw"]} (clamped) lockRawYaw={a["lock_raw_yaw"]} (body to target), '
+                        f'hp drop={ph["drop"]}, mask_on={ph["mask_on"]} full_on={ph["full_on"]}'
                         + (f', orbit {ph["orbit_done_deg"]} deg' if 'orbit_done_deg' in ph else ''))
         finally:
             teardown()

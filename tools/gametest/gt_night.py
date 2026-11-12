@@ -215,8 +215,9 @@ ENEMY_POS_PERIOD = 0.2       # NightAuto period during the macro (distance resol
 ENEMY_ORBIT_TOL = 8.0        # camera orbit tolerance (deg)
 ENEMY_MIN_DROP = 0.5         # health drop (absolute, else percent points) that counts as "the punch hit"
 # (phase, target distance along the camera forward in m, health drop required, camera orbit deg, pad part)
+# near and orbit are the close-range phases (1.2 m): their punches must connect; far (2.0 m) and block are report only
 ENEMY_PHASES = (('far', 2.0, False, 0.0, 'melee_punch'), ('near', 1.2, True, 0.0, 'melee_punch'),
-                ('orbit', 1.2, False, 60.0, 'melee_punch'), ('block', 1.5, False, 0.0, 'melee_block'))
+                ('orbit', 1.2, True, 60.0, 'melee_punch'), ('block', 1.5, False, 0.0, 'melee_block'))
 
 
 def enemy_spawn_cmd(record: str, dist: float = ENEMY_SPAWN_DIST) -> str:
@@ -355,10 +356,12 @@ _MELEEAIM_RE = re.compile(r'UTPP MELEEAIM src=(\w+) tiltW=(-?[\d.]+) tgtPitch=(-
 
 def meleeaim_stats(log_text: str) -> dict:
     """`UTPP MELEEAIM src=<lock|hit|cam> ...` lines of a log window (mm.trace on, 4 Hz). Pure.
-    -> {'lines', 'src': {name: count}, 'lock', 'lock_pitch': (min, max) | None, 'lock_yaw': (min, max) | None,
-        'applied_pitch_max', 'applied_yaw_max'} (tgt* = the angle towards the target, applied = what the tilt did)."""
+    -> {'lines', 'src': {name: count}, 'lock', 'lock_pitch' / 'lock_yaw': (min, max) | None, 'lock_raw_pitch' /
+        'lock_raw_yaw': (min, max) | None, 'applied_pitch_max', 'applied_yaw_max'}.
+    tgt* = the angle towards the target AFTER the clamp (yaw <= 25 deg) and the facing fade, raw* = BEFORE them = the real
+    angle between V's body and the target (the camera-orbit number), applied = what the tilt did."""
     src: dict = {}
-    lp, ly, ap, ay = [], [], [], []
+    lp, ly, lrp, lry, ap, ay = [], [], [], [], [], []
     n = 0
     for m in _MELEEAIM_RE.finditer(log_text or ''):
         n += 1
@@ -366,10 +369,13 @@ def meleeaim_stats(log_text: str) -> dict:
         if m.group(1) == 'lock':
             lp.append(float(m.group(3)))
             ly.append(float(m.group(4)))
+            lrp.append(float(m.group(5)))
+            lry.append(float(m.group(6)))
         ap.append(abs(float(m.group(7))))
         ay.append(abs(float(m.group(8))))
     return {'lines': n, 'src': src, 'lock': src.get('lock', 0),
             'lock_pitch': (min(lp), max(lp)) if lp else None, 'lock_yaw': (min(ly), max(ly)) if ly else None,
+            'lock_raw_pitch': (min(lrp), max(lrp)) if lrp else None, 'lock_raw_yaw': (min(lry), max(lry)) if lry else None,
             'applied_pitch_max': max(ap) if ap else None, 'applied_yaw_max': max(ay) if ay else None}
 
 
@@ -391,8 +397,8 @@ def target_distance_stats(log_text: str) -> dict | None:
 
 def enemy_evaluate(spawn: dict | None, phases: list[dict], min_drop: float = ENEMY_MIN_DROP) -> dict:
     """Verdict of the fist fight on a target. PASS = the target was spawned and found (not Friendly), at least one
-    `src=lock` line in the punch windows, the health dropped in the phases that require it (`near`; `orbit` and `far` are
-    report-only: warnings / metrics), no abort (raised elsewhere). Pure.
+    `src=lock` line in the punch windows, the health dropped in the phases that require it (`near` and `orbit`, both at
+    1.2 m; `far` and `block` are report only), no abort (raised elsewhere). Pure.
     A phase dict: {'name', 'required', 'lock', 'drop' (None = unreadable), 'placed' (False = the placement echo was lost),
     'aim': meleeaim_stats}. -> {'fails', 'warns', 'locks', 'hits': {phase: bool | None}}"""
     fails, warns = [], []
@@ -431,10 +437,9 @@ def enemy_evaluate(spawn: dict | None, phases: list[dict], min_drop: float = ENE
             if drop is None:
                 fails.append(f'{name}: health unreadable (no hp/hv in the state echo): "health dropped" cannot be shown')
             elif not hit:
-                fails.append(f'{name}: health did not drop (drop {drop}): the punches did not connect')
-        elif name == 'orbit' and hit is False:
-            warns.append(f'orbit: the punch after the camera orbit did not connect (drop {drop}): the hit follows the '
-                         'camera / target, not the body (report)')
+                fails.append(f'{name}: health did not drop (drop {drop}): the punches did not connect'
+                             + (' - after the camera orbit the hit does not follow the camera / target' if name == 'orbit'
+                                else ''))
     return {'fails': fails, 'warns': warns, 'locks': locks, 'hits': hits}
 
 

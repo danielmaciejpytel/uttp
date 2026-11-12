@@ -2727,7 +2727,7 @@ class EnemyPureTests(unittest.TestCase):
         self.assertTrue(all(part in sc for *_, part in gn.ENEMY_PHASES))
         self.assertEqual([p[0] for p in gn.ENEMY_PHASES], ['far', 'near', 'orbit', 'block'])
         self.assertEqual([p[1] for p in gn.ENEMY_PHASES], [2.0, 1.2, 1.2, 1.5])
-        self.assertEqual([p[0] for p in gn.ENEMY_PHASES if p[2]], ['near'])         # the health drop required at 1.2 m
+        self.assertEqual([p[0] for p in gn.ENEMY_PHASES if p[2]], ['near', 'orbit'])  # the health drop required at 1.2 m
 
     def test_commands_are_one_ascii_line_with_their_own_tag(self):
         cmds = [gn.enemy_spawn_cmd('Character.x'), gn.enemy_cmd('far', 2.0, heal=True, define=True),
@@ -2793,17 +2793,19 @@ class EnemyPureTests(unittest.TestCase):
         self.assertIsNone(gn.enemy_hp_drop({'hv': 1.0}, None))
 
     def test_meleeaim_stats_and_distances(self):
-        def aim(src, tp, ty, p=0.0, y=0.0):
+        def aim(src, tp, ty, p=0.0, y=0.0, rp=None, ry=None):
             return (f'[2026-11-13 10:00:00.000] [info    ] [ 1] [UTPP] UTPP MELEEAIM src={src} tiltW=1.00 tgtPitch={tp} tgtYaw={ty} '
-                    f'rawPitch={tp} rawYaw={ty} pitch={p} yaw={y} flags=0x0 maxUp=20 maxDown=35 hz=10 calls=1 applied=1 busy=0 '
-                    'reapplied=0 fails=0')
-        text = chr(10).join([aim('cam', -14.0, 1.0), aim('lock', -3.5, 12.0, -3.0, 11.0), aim('lock', 0.5, -9.0, 0.5, -8.0)])
+                    f'rawPitch={tp if rp is None else rp} rawYaw={ty if ry is None else ry} pitch={p} yaw={y} flags=0x0 '
+                    'maxUp=20 maxDown=35 hz=10 calls=1 applied=1 busy=0 reapplied=0 fails=0')
+        text = chr(10).join([aim('cam', -14.0, 1.0), aim('lock', -3.5, 12.0, -3.0, 11.0),
+                             aim('lock', 0.5, -9.0, 0.5, -8.0, rp=2.5, ry=-61.5)])     # tgtYaw is clamped, rawYaw is not
         st = gn.meleeaim_stats(text)
         self.assertEqual((st['lines'], st['src'], st['lock']), (3, {'cam': 1, 'lock': 2}, 2))
         self.assertEqual((st['lock_pitch'], st['lock_yaw']), ((-3.5, 0.5), (-9.0, 12.0)))
+        self.assertEqual((st['lock_raw_pitch'], st['lock_raw_yaw']), ((-3.5, 2.5), (-61.5, 12.0)))
         self.assertEqual((st['applied_pitch_max'], st['applied_yaw_max']), (3.0, 11.0))
         empty = gn.meleeaim_stats('nothing')
-        self.assertEqual((empty['lines'], empty['lock'], empty['lock_pitch']), (0, 0, None))
+        self.assertEqual((empty['lines'], empty['lock'], empty['lock_pitch'], empty['lock_raw_yaw']), (0, 0, None, None))
         pos = chr(10).join([
             '[2026-11-13 10:00:00.000] [info] [1] [UTPP] UTPP CET [night] POS p=0.00,0.00,0.00 cf=0.000,1.000 v=0.00,2.00,0.00,1.000,0.000 src=tag w=0 m=0 n=1',
             '[2026-11-13 10:00:00.200] [info] [1] [UTPP] UTPP CET [night] POS p=0.00,0.50,0.00 cf=0.000,1.000 v=0.00,2.00,0.00,1.000,0.000 src=tag w=0 m=0 n=2',
@@ -2818,7 +2820,7 @@ class EnemyPureTests(unittest.TestCase):
         def ph(name, lock, drop, required=False, placed=True, lines=3):
             return {'name': name, 'required': required, 'lock': lock, 'drop': drop, 'placed': placed,
                     'aim': {'lines': lines, 'src': {k: v for k, v in (('lock', lock), ('cam', lines - lock)) if v}}}
-        good = [ph('far', 0, 0.0), ph('near', 2, 30.0, True), ph('orbit', 1, 30.0), ph('block', 0, 0.0)]
+        good = [ph('far', 0, 0.0), ph('near', 2, 30.0, True), ph('orbit', 1, 30.0, True), ph('block', 0, 0.0)]
         r = gn.enemy_evaluate(spawn, good)
         self.assertEqual((r['fails'], r['warns'], r['locks']), ([], [], 3))
         self.assertEqual(r['hits'], {'far': False, 'near': True, 'orbit': True, 'block': False})
@@ -2831,9 +2833,12 @@ class EnemyPureTests(unittest.TestCase):
         self.assertTrue(r['fails'] and 'health did not drop' in r['fails'][0])
         r = gn.enemy_evaluate(spawn, [ph('near', 1, None, True)])
         self.assertIn('health unreadable', r['fails'][0])
-        r = gn.enemy_evaluate(spawn, [ph('near', 1, 30.0, True), ph('orbit', 0, 0.0)])
-        self.assertEqual(r['fails'], [])                                             # orbit is report-only
-        self.assertIn('orbit: the punch after the camera orbit did not connect', r['warns'][0])
+        r = gn.enemy_evaluate(spawn, [ph('near', 1, 30.0, True), ph('orbit', 0, 0.0, True)])
+        self.assertEqual(len(r['fails']), 1)                                         # orbit is a close-range phase too
+        self.assertIn('orbit: health did not drop', r['fails'][0])
+        self.assertIn('does not follow the camera', r['fails'][0])
+        r = gn.enemy_evaluate(spawn, [ph('near', 1, 30.0, True), ph('far', 0, 0.0), ph('block', 0, 0.0)])
+        self.assertEqual((r['fails'], r['warns']), ([], []))                         # far / block: report only
         r = gn.enemy_evaluate(spawn, [ph('near', 1, 0.0, True, placed=False)])
         self.assertIn('near: the placement command was lost', r['fails'][0])
         r = gn.enemy_evaluate(dict(spawn, att=0), [])
@@ -3135,17 +3140,38 @@ class EnemyMacroTests(unittest.TestCase):
         w = self.world(drops={'far': 0.0, 'near': 0.0, 'orbit': 0.0, 'block': 0.0})
         r = self.run_macro(w)
         self.assertTrue(any('near: health did not drop' in f for f in r['fails']), r['fails'])
-        self.assertTrue(any('orbit: the punch after the camera orbit did not connect' in x for x in r['warnings']))
+        self.assertTrue(any('orbit: health did not drop' in f for f in r['fails']), r['fails'])
         w = self.world(hp_unreadable=True)
         r = self.run_macro(w)
         self.assertTrue(any('health unreadable' in f for f in r['fails']), r['fails'])
 
-    def test_orbit_only_hits_are_a_warning(self):
+    def test_orbit_without_a_hit_fails_but_far_does_not(self):
         w = self.world(drops={'far': 0.0, 'near': 30.0, 'orbit': 0.0, 'block': 0.0})
         r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'FAIL')
+        self.assertEqual(len(r['fails']), 1)
+        self.assertIn('orbit: health did not drop', r['fails'][0])
+        self.assertEqual(r['enemy']['hits'], {'far': False, 'near': True, 'orbit': False, 'block': False})
+        w = self.world(drops={'far': 30.0, 'near': 30.0, 'orbit': 30.0, 'block': 0.0})
+        r = self.run_macro(w)
         self.assertEqual((r['verdict'], r['fails']), ('PASS', []))
-        self.assertEqual(r['enemy']['hits']['orbit'], False)
-        self.assertEqual(len(r['warnings']), 1)
+        self.assertEqual(r['enemy']['hits']['far'], True)                            # reported, not required
+
+    def test_cleanup_after_a_scenario_timeout_disarms_the_deadline(self):
+        self.n.scenario_deadline = 1e12
+        w = self.world(raise_in=('melee_punch', 2, night.ScenarioTimeout))
+        with self.assertRaises(night.ScenarioTimeout):
+            self.run_macro(w)
+        self.assertIsNone(self.n.scenario_deadline)                                  # the cleanup could not re-raise it
+        labels = [lab for lab, _ in w.cmds]
+        self.assertEqual(labels[-3:], ['enemy_off', 'nightauto_restore', 'fists_off_cmd'])
+        self.assertEqual(w.state['spawned'], None)
+
+    def test_health_baseline_is_the_first_placement_read(self):
+        w = self.world(spawn_hv=50.0)                    # the pool was not initialised yet at the first read
+        r = self.run_macro(w)
+        self.assertEqual((r['verdict'], r['fails']), ('PASS', []))
+        self.assertEqual({p['name']: p['drop'] for p in r['enemy']['phases']}['near'], 30.0)
 
     def test_god_and_heal_failures_are_warnings(self):
         w = self.world(god_ok=False, heal_ok=False)
@@ -3204,7 +3230,8 @@ class _EnemyWorld:
     target in v=) and applies the punch damage of the current phase."""
 
     def __init__(self, test, missing=(), wait_polls=1, att=2, att_after_neutral=1, heal_ok=True, god_ok=True, drops=None,
-                 lock=('far', 'near', 'orbit'), lose=(), drop_global_at=None, raise_in=None, hp_unreadable=False):
+                 lock=('far', 'near', 'orbit'), lose=(), drop_global_at=None, raise_in=None, hp_unreadable=False,
+                 spawn_hv=None):
         self.t, self.n, self.log = test, test.n, test.log
         open(self.log, 'w').close()                                                  # a fresh log per world
         self.missing, self.wait_polls, self.att, self.att_neutral = set(missing), wait_polls, att, att_after_neutral
@@ -3215,6 +3242,7 @@ class _EnemyWorld:
         self.cmds, self.played, self.counts = [], [], {}
         self.state = {'spawned': None, 'polls': 0, 'hv': 100.0, 'dist': 6.0, 'cur': None, 'neutral': False,
                       'defined': False, 'god': False}
+        self.spawn_hv = spawn_hv                                                     # health seen by the very first read
         test.n.play = self.play
         test.n.console_verified = self.console_verified
         test.n.poll_pos = lambda g, pad=None, timeout=None: {'p': (0.0, 0.0, 0.0), 'cf': (0.0, 1.0), 'v': None, 'vr': None}
@@ -3238,6 +3266,8 @@ class _EnemyWorld:
             return f'[night] ENEMY ok=true label={label} found=0'
         att = self.att_neutral if s['neutral'] else self.att
         hp = '-' if self.hp_unreadable else f'{s["hv"]:.1f}'
+        if self.spawn_hv is not None and label == 'wait':
+            hp = f'{self.spawn_hv:.1f}'
         body = (f'[night] ENEMY ok=true label={label} found=1 pre_d2={s["dist"]:.2f} pre_hv={hp} pre_hp={hp} '
                 f'att={att} act=true')
         dist, heal = call
@@ -3301,7 +3331,7 @@ class _EnemyWorld:
         self.played.append(name)
         s = self.state
         if self.raise_in and self.raise_in[0] == name and self.played.count(name) == self.raise_in[1]:
-            raise night.CycleError('boom')
+            raise (self.raise_in[2] if len(self.raise_in) > 2 else night.CycleError)('boom')
         night.time.sleep(2.0)
         if name == 'melee_draw':
             self.emit('MMMASK on reasons=0x1 (was 0x0) gate=0x0 covered=0x0 loco=1 upperBody=0 melee=1 exit=0.00 w=1.00 mask=0.00')
