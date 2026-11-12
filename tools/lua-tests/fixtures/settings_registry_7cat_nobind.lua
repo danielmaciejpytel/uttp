@@ -93,8 +93,8 @@ return {
     ["lootView.zoom"] = "0.90000000000000002",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
-    ["melee.guard"] = "false",
-    ["melee.guardAimTilt"] = "false",
+    ["melee.guard"] = "true",
+    ["melee.guardAimTilt"] = "true",
     ["melee.guardFullBody"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
@@ -185,9 +185,9 @@ return {
     "apply mm.weaponUpper(false,\"ok\")",
     "apply melee.fullBody(true,\"ok\")",
     "apply melee.aimTilt(true,\"ok\")",
-    "apply melee.guard(false,\"ok\")",
+    "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
-    "apply melee.guardAimTilt(false,\"ok\")",
+    "apply melee.guardAimTilt(true,\"ok\")",
     "mm setMotionGrip(true)",
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
@@ -380,9 +380,9 @@ return {
     "apply mm.weaponUpper(false,\"ok\")",
     "apply melee.fullBody(true,\"ok\")",
     "apply melee.aimTilt(true,\"ok\")",
-    "apply melee.guard(false,\"ok\")",
+    "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
-    "apply melee.guardAimTilt(false,\"ok\")",
+    "apply melee.guardAimTilt(true,\"ok\")",
     "mm setMotionGrip(true)",
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
@@ -1388,7 +1388,7 @@ return {
       ["type"] = "bool"
     },
     ["melee.guard"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -1396,7 +1396,7 @@ return {
       ["type"] = "bool"
     },
     ["melee.guardAimTilt"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2164,8 +2164,8 @@ return {
     ["lootView.zoom"] = "0.90000000000000002",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
-    ["melee.guard"] = "false",
-    ["melee.guardAimTilt"] = "false",
+    ["melee.guard"] = "true",
+    ["melee.guardAimTilt"] = "true",
     ["melee.guardFullBody"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
@@ -2643,9 +2643,9 @@ return {
     "apply mm.weaponUpper(false,\"ok\")",
     "apply melee.fullBody(true,\"ok\")",
     "apply melee.aimTilt(true,\"ok\")",
-    "apply melee.guard(false,\"ok\")",
+    "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
-    "apply melee.guardAimTilt(false,\"ok\")",
+    "apply melee.guardAimTilt(true,\"ok\")",
     "apply mm.grip(true,\"ok\")",
     "apply mm.shootTransfer(true,\"ok\")",
     "apply mm.shinobiBonusReload(false,\"ok\")",
@@ -2807,9 +2807,9 @@ mm.feedDump=false\r\
 mm.weaponUpper=false\r\
 melee.fullBody=true\r\
 melee.aimTilt=true\r\
-melee.guard=false\r\
+melee.guard=true\r\
 melee.guardFullBody=false\r\
-melee.guardAimTilt=false\r\
+melee.guardAimTilt=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
 mm.shinobiBonusReload=false\r\
@@ -3263,8 +3263,8 @@ vehicle.jumpOutSidePush=true\r\
     ["lootView.zoom"] = "1.3999999999999999",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
-    ["melee.guard"] = "false",
-    ["melee.guardAimTilt"] = "false",
+    ["melee.guard"] = "true",
+    ["melee.guardAimTilt"] = "true",
     ["melee.guardFullBody"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
@@ -3369,9 +3369,9 @@ mm.feedDump=false\r\
 mm.weaponUpper=false\r\
 melee.fullBody=true\r\
 melee.aimTilt=true\r\
-melee.guard=false\r\
+melee.guard=true\r\
 melee.guardFullBody=false\r\
-melee.guardAimTilt=false\r\
+melee.guardAimTilt=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
 mm.shinobiBonusReload=false\r\
