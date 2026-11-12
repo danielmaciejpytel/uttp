@@ -427,7 +427,8 @@ local LAYOUT = {
                             "perspective.meleeBlockTpp", "perspective.takedown" } },
   --   Release scope: melee guard (default off; the third-person guard pose is not installed - the fists
   -- melee_idlepose stays vanilla) is developer level, so the release menu has no option without content
-  { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt" } },
+  { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt",
+                              "bodyturn.meleeStrikeTurn" } },
   -- Interactions
   { "player", "world", { "perspective.scene", "lootView.impl", "interactRange.impl", "headLook.impl",
                         "headLook.faceCamera" } },

@@ -82,6 +82,16 @@ local E = {
                         -- overrides the game's FPP look for that tick (pitch -> ~0, yaw -> V), so V is turned only when
                         -- the camera is clearly away; the DLL AimOffset (30 deg) covers the arm in between
   aimAlignMaxSum = 540, -- deg turned in one aim without reaching the look -> stop (spin guard)
+  -- melee strike turn (setting bodyturn.meleeStrikeTurn, default off): while a fists strike runs and the game has a tracked target,
+  -- V turns toward the direction the game's hit will take (api.meleeStrikeYaw, utpp_melee.reds UTPPMeleeStrikeYaw)
+  strikeTurn = false,
+  strikeMax = 50,       -- deg: most V turns in one episode (a strike series); the rest stays with the melee aim tilt
+  strikeRate = 720,     -- deg/s cap
+  strikeGain = 16,      -- 1/s ease-out gain (time constant 0.06 s: a 40 deg turn is within 5 deg after 0.2 s)
+  strikeDeadband = 4,   -- deg: no turn within this of the target
+  strikeGap = 0.5,      -- s without a signal that ends an episode
+  strikeMaxSpeed = 1.0, -- m/s: no strike turn while V moves faster (the legs are motion matching then; the tilt covers it)
+  strikeSum = 0, strikeSeen = -1e9, strikeLogged = false,
   -- vehicle hand-over: the aim align (the body turn onto the camera) waits this long after utpp_camera ends a
   -- vehicle hold (api.vehicleHeld true -> false), so it does not land on the same frames as the release end and the aim pose;
   -- afterwards it starts through the normal hysteresis / rate. Never armed without a vehicle hold (api.vehicleHeld nil / false).
@@ -586,6 +596,72 @@ function M.ShooterModeAlignStep(api, dt)
   return E.why
 end
 
+-- Melee strike turn. While a fists strike runs (api.meleeStrikeYaw returns the world yaw of the game's hit direction, 1000 = none:
+-- no tracked target, other weapon, first person) V is turned toward it so the visible fist and the hit agree. One eased turn of at
+-- most E.strikeMax degrees per episode (an episode ends E.strikeGap s after the last signal), then V holds; no turn within
+-- E.strikeDeadband of the target. The same request path as the aim align (applyAim, FPP heading lock, game look step): the game
+-- look keeps its world heading. Returns a why string when it owns this frame (turning / aligned / hold), nil when not applicable.
+function M.StrikeTurnStep(api, dt)
+  if not E.strikeTurn then return nil end
+  local okR, reasons = try(api.locomotionReasons)
+  reasons = (okR and finite(reasons)) and reasons or 0
+  local function release()
+    if E.alignHeld then try(api.alignHold, false); E.alignHeld = false end
+  end
+  -- melee attack state (bit 2048) in third person (bit 65536 clear); anything else: no signal, the episode ends after the gap
+  local signal = nil
+  if math.floor(reasons / 2048) % 2 == 1 and math.floor(reasons / 65536) % 2 == 0 and type(api.meleeStrikeYaw) == "function" then
+    local okY, y = try(api.meleeStrikeYaw)
+    if okY and finite(y) and math.abs(y) <= 360 then signal = y end
+    local okS, speed = try(api.speed)
+    if signal ~= nil and okS and finite(speed) and speed > E.strikeMaxSpeed then signal = nil end
+  end
+  if signal == nil then
+    if E.clock - E.strikeSeen > E.strikeGap then E.strikeSum, E.strikeLogged = 0, false end
+    release()
+    return nil
+  end
+  E.strikeSeen = E.clock
+  local okB, cur = try(api.bodyYaw)
+  local okA, armed = try(api.arm, true)
+  if not (okB and finite(cur) and okA and armed == true) then release(); return nil end
+  local err = norm(signal - cur)
+  local budget = E.strikeMax - E.strikeSum
+  E.prevBody, E.prevCam, E.prevStep = nil, nil, 0
+  if math.abs(err) <= E.strikeDeadband then release(); E.why = "strike aligned"; return E.why end
+  if budget <= 0.01 then release(); E.why = "strike hold"; return E.why end
+  local goal = math.max(-budget, math.min(budget, err))
+  local turnDt = math.min(math.max(dt, 1 / 240), 0.1)
+  local lim = E.strikeRate * turnDt
+  local step = math.max(-lim, math.min(lim, goal * (1 - math.exp(-E.strikeGain * turnDt))))
+  if not E.alignHeld then try(api.alignHold, true); E.alignHeld = true end
+  local okP, res = try(api.applyAim or api.apply, norm(cur + step))
+  if okP and res == true then
+    E.strikeSum = E.strikeSum + math.abs(step)
+    xs.strikeTurns = (xs.strikeTurns or 0) + 1
+    xs.adjSeq, xs.lastAdjStep = (xs.adjSeq or 0) + 1, step
+    xs.lastAimStep = step
+    try(api.lookStep, step)
+    if not E.strikeLogged then
+      E.strikeLogged = true
+      M.log(string.format("[utpp_bodyturn] melee strike turn: hit direction %.0f deg from V's facing - turning V toward the tracked target (<= %d deg per series)",
+        err, E.strikeMax))
+    end
+    E.why = "strike turn"
+  else
+    xs.rejected = xs.rejected + 1
+    E.why = "strike turn rejected"
+  end
+  return E.why
+end
+
+function M.SetStrikeTurn(on)
+  E.strikeTurn = on == true
+  E.strikeSum, E.strikeSeen, E.strikeLogged = 0, -1e9, false
+  if not E.strikeTurn and E.alignHeld then try((M.api or {}).alignHold, false); E.alignHeld = false end
+  return E.strikeTurn
+end
+
 -- Changing the policy releases its camera lock and starts a fresh admission/align episode.
 function M.SetAimSmooth(on)
   E.aimSmooth = on == true
@@ -645,6 +721,12 @@ function M.RegisterSettings(core)
     desc = "Turns the body at up to 540 deg/s with ease-out. Starts beyond 35 deg, at least 0.3 s between episodes; "
       .. "requires a weapon in hand or UpperBody Aim stable for 0.1 s. Off = legacy 1080 deg/s alignment.",
     apply = function(v) M.SetAimSmooth(v); M.log("[utpp_bodyturn] aim smooth -> " .. tostring(E.aimSmooth)) end })
+  core.Register({ key = "bodyturn.meleeStrikeTurn", section = "bodyturn", type = "bool", default = false,
+    label = "Fists: turn toward the target when striking",
+    desc = "In third person the game's fist hit goes toward the target it tracks, while V's body keeps its own facing (the "
+      .. "upper-body tilt covers only 25 deg). With this on, V turns toward that target during a fists strike, eased, at most 50 deg "
+      .. "per series of strikes. Only with a tracked target; other weapons and first person are unchanged.",
+    apply = function(v) M.SetStrikeTurn(v == true) end })
   -- registered LAST (the apply of the stored value runs at once and sends UTPPSetMotionShooterMode(v), even false: the DLL state is
   -- unknown after a CET reload and the native is idempotent)
   core.Register({ key = "bodyturn.shooterMode", section = "bodyturn", type = "bool", default = false, label = "Shooter mode",
@@ -834,6 +916,10 @@ function M.ExecStep(api, dt)
     E.prevBody, E.prevCam, E.prevStep = nil, nil, 0
     releaseHold(api, dt)
     return why
+  end
+  if not want and not paused and E.strikeTurn and not SM.effective then
+    local strikeWhy = M.StrikeTurnStep(api, dt)
+    if strikeWhy then return strikeWhy end
   end
   if not want and not paused and E.aimAlign then
     -- aiming while standing after V had turned toward the movement left V facing away from
@@ -1177,6 +1263,8 @@ if type(registerForEvent) == "function" then
       end,
       active = function() return Game.UTPPMMBodyTurnActive() end,
       command = function(cur) return Game.UTPPMMBodyYawCommand(cur, cur) end,
+      -- melee strike turn: world yaw of the game's fist hit direction (1000 = none; utpp_melee.reds UTPPMeleeStrikeYaw)
+      meleeStrikeYaw = function() return Game.UTPPMeleeStrikeYaw() end,
       bodyYaw = function()
         local p = Game.GetPlayer()
         if p == nil then return nil end

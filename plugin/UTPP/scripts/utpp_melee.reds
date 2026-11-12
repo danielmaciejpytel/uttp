@@ -241,6 +241,47 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
   UTPPMeleeAimTargetTick(player, scriptInterface, now);
 }
 
+// Strike turn signal (CET utpp_bodyturn, setting bodyturn.meleeStrikeTurn): where the game's fist strike will go.
+// The hit effect (meleeTransitions.script CreateMeleeAttack / GetCameraTransformForMelee) starts at the FPP camera component and
+// points at the targeting system's tracked target component when there is one (else along the game's camera). Capsule yaw is not
+// part of it, so in third person (the capsule does not follow the camera while a strike runs) the fist can point elsewhere.
+// Returns the world yaw in degrees (the UTPPYawDegFromForward convention, as the body yaw) from the FPP camera component to the
+// tracked target while a UTPP third-person fists strike state runs (PSM.MeleeWeapon attack states 11..21 without ThrowAttack 19);
+// 1000.0 = no signal: other weapons and arm cyberware, no UTPP third-person fists pack, first person, mounted, no tracked target,
+// target farther than 5 m (vanilla melee target range) or closer than 0.3 m.
+public static func UTPPMeleeStrikeYawOf(player: ref<PlayerPuppet>) -> Float {
+  if !IsDefined(player) || !UTPPMeleeFullBodyWanted(player) {
+    return 1000.0;
+  }
+  let game: GameInstance = player.GetGame();
+  let bb: ref<IBlackboard> = GameInstance.GetBlackboardSystem(game).GetLocalInstanced(player.GetEntityID(), GetAllBlackboardDefs().PlayerStateMachine);
+  if !IsDefined(bb) {
+    return 1000.0;
+  }
+  let state: Int32 = bb.GetInt(GetAllBlackboardDefs().PlayerStateMachine.MeleeWeapon);
+  if state < 11 || state > 21 || state == 19 {
+    return 1000.0;
+  }
+  let tracked: wref<TargetingComponent> = GameInstance.GetTargetingSystem(game).GetTrackedTargetComponent(player);
+  let fpp: ref<FPPCameraComponent> = player.GetFPPCameraComponent();
+  if !IsDefined(tracked) || !IsDefined(fpp) {
+    return 1000.0;
+  }
+  let toTarget: Vector4 = Matrix.GetTranslation(tracked.GetLocalToWorld()) - Matrix.GetTranslation(fpp.GetLocalToWorld());
+  toTarget.Z = 0.0;
+  toTarget.W = 0.0;
+  let dist: Float = Vector4.Length2D(toTarget);
+  if dist < 0.3 || dist > 5.0 {
+    return 1000.0;
+  }
+  return UTPPYawDegFromForward(toTarget);
+}
+
+// CET: Game.UTPPMeleeStrikeYaw()
+public func UTPPMeleeStrikeYaw() -> Float {
+  return UTPPMeleeStrikeYawOf(GetPlayer(GetGameInstance()));
+}
+
 // Chained with the other wraps of the same method (redscript chains all wraps); every locomotion state reaches it (melee runs
 // in the upper-body / melee layers while Locomotion stays in Stand / AimWalk / Crouch ...).
 @wrapMethod(LocomotionEventsTransition)
