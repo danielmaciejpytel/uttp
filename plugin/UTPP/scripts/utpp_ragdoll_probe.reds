@@ -311,7 +311,7 @@ public func UTPPRdEngSpawnNpc(player: ref<PlayerPuppet>) -> Void {
   let fwd: Vector4 = player.GetWorldForward();
   let spec: ref<DynamicEntitySpec> = new DynamicEntitySpec();
   spec.recordID = UTPPRdEngNpcRecord();
-  spec.position = player.GetWorldPosition() + new Vector4(fwd.X * 2.5, fwd.Y * 2.5, 0.0, 0.0);
+  spec.position = player.GetWorldPosition() + Vector4(fwd.X * 2.5, fwd.Y * 2.5, 0.0, 0.0);
   spec.orientation = player.GetWorldOrientation();
   spec.persistState = false;
   spec.persistSpawn = false;
@@ -351,7 +351,7 @@ public func UTPPRdEngDeleteNpc(player: ref<PlayerPuppet>) -> Void {
   let des: ref<DynamicEntitySystem> = GameInstance.GetDynamicEntitySystem();
   let ok: Bool = IsDefined(des) && des.DeleteEntity(player.utppRdEngNpcId);
   UTPPLogLine("[utpp_ragdoll] eng npc deleted=" + (ok ? "1" : "0"));
-  player.utppRdEngNpcId = new EntityID();
+  player.utppRdEngNpcId = EntityID();
   player.utppRdEngNpc = null;
 }
 
@@ -592,7 +592,7 @@ public func UTPPRdEngPose(player: ref<PlayerPuppet>) -> String {
   if Vector4.Length(left) < 0.0001 || Vector4.Length(fwd) < 0.0001 {
     out += " pitch=n/a";
   } else {
-    out += " pitch=" + FloatToStringPrec(Vector4.GetAngleDegAroundAxis(Vector4.Normalize(fwd), new Vector4(0.0, 0.0, 1.0, 0.0), Vector4.Normalize(left)) + 90.0, 1);
+    out += " pitch=" + FloatToStringPrec(Vector4.GetAngleDegAroundAxis(Vector4.Normalize(fwd), Vector4(0.0, 0.0, 1.0, 0.0), Vector4.Normalize(left)) + 90.0, 1);
   }
   if SqrtF(toHead.X * toHead.X + toHead.Y * toHead.Y) < 0.05 {
     out += " yaw=n/a";
@@ -662,7 +662,7 @@ public func UTPPRdEngDoForce(player: ref<PlayerPuppet>, now: Float) -> Void {
       src = "hips";
     }
     let fwd: Vector4 = player.GetWorldForward();
-    let dir: Vector4 = new Vector4(fwd.X * impulse, fwd.Y * impulse, 0.3 * impulse, 0.0);
+    let dir: Vector4 = Vector4(fwd.X * impulse, fwd.Y * impulse, 0.3 * impulse, 0.0);
     GameInstance.GetDelaySystem(game).DelayEvent(player, CreateRagdollApplyImpulseEvent(pos, dir, 10000.0), 0.10, false);
     UTPPLogLine("[utpp_ragdoll] eng impulse queued +0.10s at=" + src + " pos=" + UTPPRdVec(pos) + " value=" + UTPPRdVec(dir));
   }

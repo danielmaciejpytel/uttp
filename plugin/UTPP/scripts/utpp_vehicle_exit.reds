@@ -80,7 +80,7 @@ public func UTPPQueuePlayerImpulse(x: Float, y: Float, z: Float) -> Bool {
   if !IsDefined(player) {
     return false;
   }
-  let v: Vector4 = new Vector4(x, y, z, 0.0);
+  let v: Vector4 = Vector4(x, y, z, 0.0);
   let len: Float = Vector4.Length(v);
   if len != len || len > 2.0 {
     return false;
@@ -124,8 +124,8 @@ public func UTPPExitGroundZ(sqs: ref<SpatialQueriesSystem>, xy: Vector4, probeZ:
   let filter: QueryFilter;
   QueryFilter.AddGroup(filter, n"Static");
   QueryFilter.AddGroup(filter, n"Terrain");
-  let from: Vector4 = new Vector4(xy.X, xy.Y, MaxF(probeZ, vehZ) + 1.2, 1.0);
-  let to: Vector4 = new Vector4(xy.X, xy.Y, MinF(probeZ, vehZ) - 2.5, 1.0);
+  let from: Vector4 = Vector4(xy.X, xy.Y, MaxF(probeZ, vehZ) + 1.2, 1.0);
+  let to: Vector4 = Vector4(xy.X, xy.Y, MinF(probeZ, vehZ) - 2.5, 1.0);
   let hit: TraceResult;
   if !sqs.SyncRaycastByQueryFilter(from, to, filter, hit) || !TraceResult.IsValid(hit) {
     return false;
@@ -146,8 +146,8 @@ public func UTPPExitSpotFree(sqs: ref<SpatialQueriesSystem>, feet: Vector4, orie
   QueryFilter.AddGroup(filter, n"Dynamic");
   QueryFilter.AddGroup(filter, n"Vehicle");
   QueryFilter.AddGroup(filter, n"AI");
-  let extents: Vector4 = new Vector4(0.25, 0.25, 0.8, 0.0);
-  let center: Vector4 = new Vector4(feet.X, feet.Y, feet.Z + 0.1 + 0.8, 1.0);
+  let extents: Vector4 = Vector4(0.25, 0.25, 0.8, 0.0);
+  let center: Vector4 = Vector4(feet.X, feet.Y, feet.Z + 0.1 + 0.8, 1.0);
   let res: TraceResult;
   return !sqs.OverlapByQueryFilter(extents, center, orientation, filter, res);
 }
@@ -159,8 +159,8 @@ public func UTPPExitPathClear(sqs: ref<SpatialQueriesSystem>, vehPos: Vector4, f
   QueryFilter.AddGroup(filter, n"Static");
   QueryFilter.AddGroup(filter, n"Terrain");
   QueryFilter.AddGroup(filter, n"Dynamic");
-  let from: Vector4 = new Vector4(vehPos.X, vehPos.Y, vehPos.Z + 0.9, 1.0);
-  let to: Vector4 = new Vector4(feet.X, feet.Y, feet.Z + 0.9, 1.0);
+  let from: Vector4 = Vector4(vehPos.X, vehPos.Y, vehPos.Z + 0.9, 1.0);
+  let to: Vector4 = Vector4(feet.X, feet.Y, feet.Z + 0.9, 1.0);
   let hit: TraceResult;
   if sqs.SyncRaycastByQueryFilter(from, to, filter, hit) && TraceResult.IsValid(hit) {
     return false;

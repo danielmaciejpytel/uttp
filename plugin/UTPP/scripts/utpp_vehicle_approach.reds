@@ -89,7 +89,7 @@ public func UTPPApproachPoseOf(vehicle: ref<VehicleObject>, player: ref<PlayerPu
   pose.px = Vector4.Dot(rel, right);
   pose.py = Vector4.Dot(rel, fwd);
   let pf: Vector4 = player.GetWorldForward();
-  pose.yawDeg = UTPPYawDegFromForward(new Vector4(Vector4.Dot(pf, right), Vector4.Dot(pf, fwd), 0.0, 0.0));
+  pose.yawDeg = UTPPYawDegFromForward(Vector4(Vector4.Dot(pf, right), Vector4.Dot(pf, fwd), 0.0, 0.0));
   pose.carYawDeg = UTPPYawDegFromForward(fwd);
   pose.ok = true;
   return pose;

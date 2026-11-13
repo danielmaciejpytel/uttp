@@ -12,7 +12,7 @@
 
 // Queues ActivateTPPRepresentationEvent (on = true) or DeactivateTPPRepresentationEvent (on = false) on the player.
 // false = no player. Deactivation follows vanilla: never while the mounted vehicle's TPP camera owns the representation.
-public static func UTPPQueueTppRepresentation(on: Bool) -> Bool {
+public func UTPPQueueTppRepresentation(on: Bool) -> Bool {
   let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
   if !IsDefined(player) {
     return false;
@@ -43,7 +43,7 @@ public static func UTPPQueueTppRepresentation(on: Bool) -> Bool {
 // melee clips are registered behind the same variable, so the legs may follow the game's melee pose only while it is set.
 @addField(PlayerPuppet) public let utppFootTppWanted: Bool;
 
-public static func UTPPSetFootTpp(on: Bool) -> Bool {
+public func UTPPSetFootTpp(on: Bool) -> Bool {
   let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
   if !IsDefined(player) {
     return false;
@@ -64,7 +64,7 @@ public static func UTPPSetFootTpp(on: Bool) -> Bool {
 // utpp_body sends 1 while UTPP's third-person body is wanted on foot (the value of utpp_foot_tpp) and the mod's animations are
 // the animation pack in force, 0 with the Game Animations pack, so the game plays its own melee animations then. A reloaded
 // player starts at 0; CET repeats the value. false = no player.
-public static func UTPPSetMeleeTpp(on: Bool) -> Bool {
+public func UTPPSetMeleeTpp(on: Bool) -> Bool {
   let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
   if !IsDefined(player) {
     return false;
@@ -82,7 +82,7 @@ public static func UTPPSetMeleeTpp(on: Bool) -> Bool {
 
 // A short message in the middle of the screen (the game's warning message: the blackboard variable UI_Notifications.WarningMessage,
 // the same one the game's own warning effector writes). Called from CET utpp_core for the diagnostic logs. false = no game session.
-public static func UTPPShowMessage(text: String, seconds: Float) -> Bool {
+public func UTPPShowMessage(text: String, seconds: Float) -> Bool {
   let game: GameInstance = GetGameInstance();
   let system: ref<BlackboardSystem> = GameInstance.GetBlackboardSystem(game);
   if !IsDefined(system) {
@@ -137,18 +137,18 @@ public let utppRepFinalDeact: Int32;
 @addField(PlayerPuppet)
 public let utppRepFinalAct: Int32;
 
-public static func UTPPRepNow(player: ref<PlayerPuppet>) -> Float {
+public func UTPPRepNow(player: ref<PlayerPuppet>) -> Float {
   return EngineTime.ToFloat(GameInstance.GetSimTime(player.GetGame()));
 }
 
-public static func UTPPApplyTppRepFeatureOn(player: ref<PlayerPuppet>, on: Bool) -> Void {
+public func UTPPApplyTppRepFeatureOn(player: ref<PlayerPuppet>, on: Bool) -> Void {
   let f: ref<gameAnimFeature_TPPRepresentation> = new gameAnimFeature_TPPRepresentation();
   f.IsActive = on;
   AnimationControllerComponent.ApplyFeature(player, n"TPPRepresentation", f);
 }
 
 // Anim feature TPPRepresentation.IsActive on the player. false = no player.
-public static func UTPPApplyTppRepFeature(on: Bool) -> Bool {
+public func UTPPApplyTppRepFeature(on: Bool) -> Bool {
   let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
   if !IsDefined(player) {
     return false;
@@ -159,7 +159,7 @@ public static func UTPPApplyTppRepFeature(on: Bool) -> Bool {
 
 // Latch for seconds s (on = false or seconds <= 0 clears it). The caller refreshes it while the window is open, so a
 // stopped caller cannot leave it set. false = no player.
-public static func UTPPSetTppRepKeep(on: Bool, seconds: Float) -> Bool {
+public func UTPPSetTppRepKeep(on: Bool, seconds: Float) -> Bool {
   let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
   if !IsDefined(player) {
     return false;
@@ -174,7 +174,7 @@ public static func UTPPSetTppRepKeep(on: Bool, seconds: Float) -> Bool {
 
 // "game=<deactivations not sent by UTPP> kept=<answered under the latch> own=<UTPP's own> finalDeact=<n> finalAct=<n>
 // last=<s since the last game deactivation, -1 = none> keep=<s left on the latch, 0 = off>" | "noplayer"
-public static func UTPPTppRepKeepDiag() -> String {
+public func UTPPTppRepKeepDiag() -> String {
   let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
   if !IsDefined(player) {
     return "noplayer";
@@ -230,7 +230,7 @@ protected cb func OnUTPPFinalizeActivationTppRepresentation(evt: ref<FinalizeAct
 
 // AttachmentSlots.TppHead: "tpp" | "fpp" | "empty" | "spawning" (FPP head or empty slot while a TPP head of either
 // gender is being spawned) | "other" | "noplayer".
-public static func UTPPTppHeadSlotState() -> String {
+public func UTPPTppHeadSlotState() -> String {
   let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
   if !IsDefined(player) {
     return "noplayer";

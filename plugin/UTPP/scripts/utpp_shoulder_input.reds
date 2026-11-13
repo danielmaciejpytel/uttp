@@ -17,7 +17,7 @@
 // timer are deduplicated per press). A release before 0.5 s never swaps (a 0.35 s hold stays a crouch tap). The action is
 // never consumed (OnAction returns false), so the game's tap = crouch toggle is untouched.
 
-enum UTPPShoulderPad {
+public enum UTPPShoulderPad {
   Off = 0,
   RightStickHold = 1,
   DpadDownTap = 2,
@@ -71,12 +71,12 @@ public class UTPPShoulderInput extends ScriptableSystem {
   private let m_r3Seq: Int32;         // press counter (a late timer of an older press is ignored)
   private let m_r3Swapped: Bool;      // this press already produced its swap
 
-  private func OnAttach() -> Void {
+  public func OnAttach() -> Void {
     this.m_settings = new UTPPShoulderInputSettings();
     this.Listen(true);
   }
 
-  private func OnDetach() -> Void {
+  public func OnDetach() -> Void {
     this.Listen(false);
     this.Unregister();
   }

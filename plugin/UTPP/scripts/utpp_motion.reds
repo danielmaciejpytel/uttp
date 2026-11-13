@@ -341,7 +341,7 @@ public class UTPPMotionGlue extends ScriptableSystem {
   private let m_dualShotsRight: Int32;
   private let m_dualShotsLeft: Int32;
 
-  private func OnAttach() -> Void {
+  public func OnAttach() -> Void {
     this.m_body = -1;
     this.m_healthPerc = 100.0;
     this.m_sentBody = -100;
@@ -355,7 +355,7 @@ public class UTPPMotionGlue extends ScriptableSystem {
     UTPPLogEnumContract();
   }
 
-  private func OnDetach() -> Void {
+  public func OnDetach() -> Void {
     this.ResetRecoilWeapon();
     this.ResetReloadGrip();
     this.UnregisterAll();
@@ -1485,11 +1485,11 @@ public class UTPPMotionGlue extends ScriptableSystem {
   }
 }
 
-public static func UTPPMotionGetGlue(game: GameInstance) -> ref<UTPPMotionGlue> {
+public func UTPPMotionGetGlue(game: GameInstance) -> ref<UTPPMotionGlue> {
   return GameInstance.GetScriptableSystemsContainer(game).Get(n"UTPPMotionGlue") as UTPPMotionGlue;
 }
 
-public static func UTPPMotionGlueStatus() -> String {
+public func UTPPMotionGlueStatus() -> String {
   let glue: ref<UTPPMotionGlue> = UTPPMotionGetGlue(GetGameInstance());
   if !IsDefined(glue) {
     return "glue missing | " + UTPPGetMotionStatus();
@@ -1497,7 +1497,7 @@ public static func UTPPMotionGlueStatus() -> String {
   return glue.Status();
 }
 
-public static func UTPPMotionGlueSetEnabled(on: Bool) -> Bool {
+public func UTPPMotionGlueSetEnabled(on: Bool) -> Bool {
   let glue: ref<UTPPMotionGlue> = UTPPMotionGetGlue(GetGameInstance());
   if !IsDefined(glue) {
     UTPPSetMotionEnabled(on);
@@ -1507,7 +1507,7 @@ public static func UTPPMotionGlueSetEnabled(on: Bool) -> Bool {
   return true;
 }
 
-public static func UTPPMotionGlueSetPistolOneHand(on: Bool) -> Bool {
+public func UTPPMotionGlueSetPistolOneHand(on: Bool) -> Bool {
   let glue: ref<UTPPMotionGlue> = UTPPMotionGetGlue(GetGameInstance());
   if !IsDefined(glue) {
     return false;
@@ -1597,14 +1597,14 @@ protected cb func OnStatusEffectRemoved(evt: ref<RemoveStatusEffect>) -> Bool {
 // climb sends hands only where the game itself IKs them (m_shouldIkHands, High / Mid, LT:2731-2743, set by
 // GetClimbParameter inside OnEnter LT:2803 before the wrap reads it). ClimbSpeedModifier read like LT:2746-2749 (<= 0 -> 1).
 // The wraps call wrappedMethod first (vanilla + other mods' wraps run unchanged, redscript chains them) and only read.
-public static func UTPPMotionTraversalHand(const h: HandIKDescriptionResult) -> Vector4 {
+public func UTPPMotionTraversalHand(const h: HandIKDescriptionResult) -> Vector4 {
   return h.grabPointEnd + (h.grabPointStart - h.grabPointEnd) * 0.50;
 }
 
 // the motion set-next: t = the state's live static parameters read by the wrap like the game
 // (GetStaticFloatParameterDefault, same names and defaults as LT:2727-2751 / LT:3063): [highThreshold, midThreshold,
 // verticalDurationHigh/Mid/Low, horizontalDurationHigh/Mid/Low, forwardStep]; -1 = not used by that action (DLL default).
-public static func UTPPMotionFeedTraversalFrom(action: Int32, scriptInterface: ref<StateGameScriptInterface>, ikHands: Bool,
+public func UTPPMotionFeedTraversalFrom(action: Int32, scriptInterface: ref<StateGameScriptInterface>, ikHands: Bool,
                                            airborne: Bool, climbSpeed: Float, const t: array<Float>) -> Void {
   if ArraySize(t) != 9 {
     return;

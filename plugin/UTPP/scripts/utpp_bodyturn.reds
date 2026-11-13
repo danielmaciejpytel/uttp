@@ -158,15 +158,15 @@ public class UTPPBodyTurnExec extends ScriptableSystem {
       return;
     }
     let yawRad: Float = Deg2Rad(this.m_yaw);
-    let fwd: Vector4 = new Vector4(-SinF(yawRad), CosF(yawRad), 0.0, 0.0);
+    let fwd: Vector4 = Vector4(-SinF(yawRad), CosF(yawRad), 0.0, 0.0);
     let seconds: Float = this.m_rotationSeconds;
     if seconds <= 0.0 {
       seconds = 0.000001;
     }
     let req: ref<AdjustTransformWithDurations> = new AdjustTransformWithDurations();
-    req.SetPosition(new Vector4(0.0, 0.0, 0.0, 0.0));
+    req.SetPosition(Vector4(0.0, 0.0, 0.0, 0.0));
     req.SetSlideDuration(-1.0);
-    req.SetRotation(Quaternion.BuildFromDirectionVector(fwd, new Vector4(0.0, 0.0, 1.0, 0.0)));
+    req.SetRotation(Quaternion.BuildFromDirectionVector(fwd, Vector4(0.0, 0.0, 1.0, 0.0)));
     req.SetRotationDuration(seconds);
     stateContext.SetTemporaryScriptableParameter(n"adjustTransform", req, true);
     this.m_applied += 1;

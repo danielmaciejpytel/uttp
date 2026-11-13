@@ -187,7 +187,7 @@ def render(reg):
             enums.append((ename, members, it["key"]))
     for ename, members, key in enums:
         w("// %s: %s" % (key, ", ".join("%d = %s" % (i, cid) for _, i, cid, _ in members)))
-        w("enum %s {" % ename)
+        w("public enum %s {" % ename)
         w(",\n".join("  %s = %d" % (m, i) for m, i, _, _ in members))
         w("}")
         w("")

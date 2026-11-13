@@ -43,12 +43,12 @@ public class UTPPModSettingsBridge extends ScriptableSystem {
   public let m_revision: Int32;
   public let m_listening: Bool;
 
-  private func OnAttach() -> Void {
+  public func OnAttach() -> Void {
     this.m_settings = new UTPPModSettings();
     this.Listen(true);
   }
 
-  private func OnDetach() -> Void {
+  public func OnDetach() -> Void {
     this.Listen(false);
   }
 
@@ -205,10 +205,15 @@ public func UTPPModSettingsBridgeInfo() -> String {
   if IsDefined(b) {
     session = "listener=" + UTPPMSBool(b.m_listening) + " revision=" + IntToString(b.m_revision);
   };
-  return "variant=modsettings mods=" + IntToString(ArraySize(ModSettings.GetMods())) + " utppListed="
-    + UTPPMSBool(UTPPModSettingsListed()) + " " + session + " categories="
-    + IntToString(ArraySize(ModSettings.GetCategories(UTPPModSettingsModName()))) + " configVars="
-    + IntToString(ArraySize(UTPPModSettingsVars()));
+  // temporaries are held in locals (redscript 1.0 does not accept a call result as an array argument); same evaluation order
+  let mods: array<CName> = ModSettings.GetMods();
+  let listed: String = UTPPMSBool(UTPPModSettingsListed());
+  let cats: array<CName> = ModSettings.GetCategories(UTPPModSettingsModName());
+  let vars: array<ref<ConfigVar>> = UTPPModSettingsVars();
+  return "variant=modsettings mods=" + IntToString(ArraySize(mods)) + " utppListed="
+    + listed + " " + session + " categories="
+    + IntToString(ArraySize(cats)) + " configVars="
+    + IntToString(ArraySize(vars));
 }
 
 @if(!ModuleExists("ModSettingsModule"))

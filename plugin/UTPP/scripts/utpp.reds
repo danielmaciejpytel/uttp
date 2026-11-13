@@ -285,7 +285,7 @@ public func UTPPOwnMoveTarget(cameraYawDeg: Float, playerYawDeg: Float, move: Ve
   if move.X * move.X + move.Y * move.Y <= 0.0225 {
     return false;
   }
-  targetYawDeg = playerYawDeg + UTPPYawDegFromForward(new Vector4(move.X, move.Y, 0.0, 0.0));
+  targetYawDeg = playerYawDeg + UTPPYawDegFromForward(Vector4(move.X, move.Y, 0.0, 0.0));
   return true;
 }
 
@@ -888,7 +888,7 @@ public func UTPPFeedFromLocomotion(stateName: CName, timeDelta: Float, scriptInt
     return;
   }
   let velocity: Vector4 = scriptInterface.GetOwnerStateVectorParameterVector(physicsStateValue.LinearVelocity);
-  let move: Vector2 = new Vector2(scriptInterface.GetActionValue(n"MoveX"), scriptInterface.GetActionValue(n"MoveY"));
+  let move: Vector2 = Vector2(scriptInterface.GetActionValue(n"MoveX"), scriptInterface.GetActionValue(n"MoveY"));
   let cameraYaw: Float = UTPPYawDegFromForward(Transform.GetForward(scriptInterface.GetCameraWorldTransform()));
   let playerYaw: Float = UTPPYawDegFromForward(player.GetWorldForward());
   let targetYaw: Float = 0.0;
@@ -936,8 +936,8 @@ public func UTPPAirGroundDistance(player: ref<PlayerPuppet>) -> Float {
     return -2.0;
   }
   let pos: Vector4 = player.GetWorldPosition();
-  let start: Vector4 = new Vector4(pos.X, pos.Y, pos.Z + 0.1, 1.0);
-  let end: Vector4 = new Vector4(pos.X, pos.Y, pos.Z - 20.0, 1.0);
+  let start: Vector4 = Vector4(pos.X, pos.Y, pos.Z + 0.1, 1.0);
+  let end: Vector4 = Vector4(pos.X, pos.Y, pos.Z - 20.0, 1.0);
   let filter: QueryFilter;
   QueryFilter.AddGroup(filter, n"Static");
   QueryFilter.AddGroup(filter, n"Terrain");

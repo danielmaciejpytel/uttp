@@ -90,11 +90,11 @@ class GeneratedTexts(unittest.TestCase):
 class ReadmeRequirements(unittest.TestCase):
     def test_tested_with_versions_and_input_loader(self):
         r = mr.gen_readme().decode()
-        for s in ("RED4ext 1.31.0", "redscript 0.5.32", "Cyber Engine Tweaks 1.38.1", "Codeware 1.21.2", "ArchiveXL 1.28.6",
-                  "Input Loader 0.2.6", "Mod Settings 0.2.29"):
+        for s in ("RED4ext 1.31.1", "redscript 0.5.32", "Cyber Engine Tweaks 1.38.1", "Codeware 1.21.4", "ArchiveXL 1.28.8",
+                  "Input Loader 0.2.6", "Mod Settings 0.2.30"):
             self.assertIn(s, r)
         tested = r.split("Tested with", 1)[1].split("(versions installed", 1)[0]
-        self.assertIn("Mod Settings 0.2.29", tested)
+        self.assertIn("Mod Settings 0.2.30", tested)
         self.assertIn("Requires RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL and Input Loader", r)
         for old in ("1.30.0", "0.5.31", "1.37.1", "1.20.6", "1.27.5"):
             self.assertNotIn(old, r)

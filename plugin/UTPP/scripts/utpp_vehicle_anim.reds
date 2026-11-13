@@ -636,12 +636,12 @@ public func UTPPVehVaultCar(info: ref<PlayerClimbInfo>) -> ref<VehicleObject> {
 }
 
 public func UTPPVehVaultFlat(v: Vector4) -> Vector4 {
-  let r: Vector4 = new Vector4(v.X, v.Y, 0.0, 0.0);
+  let r: Vector4 = Vector4(v.X, v.Y, 0.0, 0.0);
   let l: Float = SqrtF(r.X * r.X + r.Y * r.Y);
   if l < 0.0001 {
-    return new Vector4(0.0, 0.0, 0.0, 0.0);
+    return Vector4(0.0, 0.0, 0.0, 0.0);
   }
-  return new Vector4(r.X / l, r.Y / l, 0.0, 0.0);
+  return Vector4(r.X / l, r.Y / l, 0.0, 0.0);
 }
 
 // Diagnostic tail of a log line; built only when a line is actually written.

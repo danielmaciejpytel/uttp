@@ -306,7 +306,7 @@ public func UTPPRgHipsWorld(player: ref<PlayerPuppet>) -> Vector4 {
     return WorldPosition.ToVector4(WorldTransform.GetWorldPosition(hips));
   }
   let p: Vector4 = player.GetWorldPosition();
-  return new Vector4(p.X, p.Y, p.Z + 1.0, 0.0);
+  return Vector4(p.X, p.Y, p.Z + 1.0, 0.0);
 }
 
 // Reasons that END a running episode (empty = fine); checked every tick. Menu and photo mode are deliberately not among them: the
@@ -423,9 +423,9 @@ public func UTPPRgPushRecovery(player: ref<PlayerPuppet>, faceUp: Int32) -> Bool
     return false;
   }
   let fwd: Vector4 = player.GetWorldForward();
-  let dir: Vector4 = new Vector4(fwd.X, fwd.Y, 0.0, 0.0);
+  let dir: Vector4 = Vector4(fwd.X, fwd.Y, 0.0, 0.0);
   if faceUp == 1 {
-    dir = new Vector4(-fwd.X, -fwd.Y, 0.0, 0.0);
+    dir = Vector4(-fwd.X, -fwd.Y, 0.0, 0.0);
   }
   let feature: ref<AnimFeature_StatusEffect> = new AnimFeature_StatusEffect();
   StatusEffectHelper.PopulateStatusEffectAnimData(player, rec, EKnockdownStates.Recovery, dir, feature);
@@ -545,8 +545,8 @@ public func UTPPRgGuGroundZ(sqs: ref<SpatialQueriesSystem>, tgt: Vector4, out gr
   let filter: QueryFilter;
   QueryFilter.AddGroup(filter, n"Static");
   QueryFilter.AddGroup(filter, n"Terrain");
-  let from: Vector4 = new Vector4(tgt.X, tgt.Y, tgt.Z + 0.35, 1.0);
-  let to: Vector4 = new Vector4(tgt.X, tgt.Y, tgt.Z - 1.0, 1.0);
+  let from: Vector4 = Vector4(tgt.X, tgt.Y, tgt.Z + 0.35, 1.0);
+  let to: Vector4 = Vector4(tgt.X, tgt.Y, tgt.Z - 1.0, 1.0);
   let hit: TraceResult;
   if !sqs.SyncRaycastByQueryFilter(from, to, filter, hit) || !TraceResult.IsValid(hit) {
     return false;
@@ -587,7 +587,7 @@ public func UTPPRgGetUpStart(player: ref<PlayerPuppet>, cfg: ref<UTPPRagdollConf
   // not taken for the floor; without an accepted hit the native z (capsule / joints) is used
   let ground: Float = tgt.Z;
   let hasGround: Bool = UTPPRgGuGroundZ(sqs, tgt, ground);
-  let feet: Vector4 = new Vector4(tgt.X, tgt.Y, ground, 1.0);
+  let feet: Vector4 = Vector4(tgt.X, tgt.Y, ground, 1.0);
   let rot: EulerAngles = Vector4.ToRotation(fwd);
   if !UTPPExitSpotFree(sqs, feet, EulerAngles.ToQuat(rot)) {
     UTPPRagdollGetUpCancel();
@@ -904,28 +904,28 @@ public func UTPPRgCollectPose(player: ref<PlayerPuppet>) -> Void {
 public func UTPPRgPush(player: ref<PlayerPuppet>, relVel: Vector4, sep: Vector4, hitDir: Vector4, out dir: Vector4, out speed: Float, out src: String) -> Void {
   let len: Float = SqrtF(relVel.X * relVel.X + relVel.Y * relVel.Y);
   if len >= 1.0 {
-    dir = new Vector4(relVel.X / len, relVel.Y / len, 0.0, 0.0);
+    dir = Vector4(relVel.X / len, relVel.Y / len, 0.0, 0.0);
     speed = len;
     src = "relVel";
     return;
   }
   len = SqrtF(sep.X * sep.X + sep.Y * sep.Y);
   if len >= 0.1 {
-    dir = new Vector4(sep.X / len, sep.Y / len, 0.0, 0.0);
+    dir = Vector4(sep.X / len, sep.Y / len, 0.0, 0.0);
     speed = MaxF(len, 6.0);
     src = "separation";
     return;
   }
   len = SqrtF(hitDir.X * hitDir.X + hitDir.Y * hitDir.Y);
   if len >= 0.01 {
-    dir = new Vector4(hitDir.X / len, hitDir.Y / len, 0.0, 0.0);
+    dir = Vector4(hitDir.X / len, hitDir.Y / len, 0.0, 0.0);
     speed = 6.0;
     src = "hitDirection";
     return;
   }
   let fwd: Vector4 = player.GetWorldForward();
   let flen: Float = MaxF(SqrtF(fwd.X * fwd.X + fwd.Y * fwd.Y), 0.0001);
-  dir = new Vector4(-fwd.X / flen, -fwd.Y / flen, 0.0, 0.0);
+  dir = Vector4(-fwd.X / flen, -fwd.Y / flen, 0.0, 0.0);
   speed = 6.0;
   src = "-forward";
 }
@@ -950,7 +950,7 @@ public func UTPPRgStart(player: ref<PlayerPuppet>, relVel: Vector4, sep: Vector4
     scale = cfg.m_impulseScale;
   }
   let mag: Float = ClampF(3.0 * speed, 10.0, 60.0) * scale;
-  player.utppRgImpulse = new Vector4(dir.X * mag, dir.Y * mag, 0.25 * mag, 0.0);
+  player.utppRgImpulse = Vector4(dir.X * mag, dir.Y * mag, 0.25 * mag, 0.0);
   player.utppRgHips = UTPPRgHipsWorld(player);
   player.utppRgSeq += 1;
   player.utppRgPhase = 1;
@@ -998,7 +998,7 @@ public func UTPPRgOnCarHit(player: ref<PlayerPuppet>, evt: ref<OnCarHitPlayer>) 
     }
     return;
   }
-  let relVel: Vector4 = new Vector4(0.0, 0.0, 0.0, 0.0);
+  let relVel: Vector4 = Vector4(0.0, 0.0, 0.0, 0.0);
   let carSpeed: Float = 0.0;
   let vehicle: ref<VehicleObject> = GameInstance.FindEntityByID(player.GetGame(), evt.carId) as VehicleObject;
   if IsDefined(vehicle) {
@@ -1070,11 +1070,11 @@ public func UTPPRagdollDebugHit(dirDeg: Float, speed: Float) -> String {
   // unit vector from V towards the car, then the push direction = the opposite
   let toCarX: Float = fwd.X * CosF(a) - fwd.Y * SinF(a);
   let toCarY: Float = fwd.X * SinF(a) + fwd.Y * CosF(a);
-  let hit: Vector4 = new Vector4(-toCarX, -toCarY, 0.0, 0.0);
-  let relVel: Vector4 = new Vector4(hit.X * v, hit.Y * v, 0.0, 0.0);
+  let hit: Vector4 = Vector4(-toCarX, -toCarY, 0.0, 0.0);
+  let relVel: Vector4 = Vector4(hit.X * v, hit.Y * v, 0.0, 0.0);
   GameInstance.GetStatusEffectSystem(game).ApplyStatusEffect(player.GetEntityID(), t"BaseStatusEffect.VehicleKnockdown",
     GameObject.GetTDBID(player), player.GetEntityID(), 1u, hit);
-  if !UTPPRgStart(player, relVel, new Vector4(0.0, 0.0, 0.0, 0.0), hit, v, "debug") {
+  if !UTPPRgStart(player, relVel, Vector4(0.0, 0.0, 0.0, 0.0), hit, v, "debug") {
     return "refused: native layer (vanilla knockdown applied)";
   }
   return "started seq=" + IntToString(player.utppRgSeq) + " dir=" + UTPPRgVec(hit) + " speed=" + FloatToStringPrec(v, 1);

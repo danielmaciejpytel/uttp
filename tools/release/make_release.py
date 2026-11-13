@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""UTPP release packer (Nexus Mods, version 0.1.0).
+"""UTPP release packer (Nexus Mods; the version is VERSION below).
 
 Usage (always `python -I`):
   python -I Source\\tools\\release\\make_release.py --code-tree <repo or worktree with plugin\\UTPP>
@@ -50,7 +50,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 GAME_VERSION = "2.50"
 AUTHOR = "Daniel Maciej Pytel"
 # NVIDIA attribution in THIRD_PARTY_NOTICES (L3). MotionBricks clips are in the motion databases and
@@ -269,13 +269,18 @@ DAYOF_DATA = [
 #   utpp_vehicle_approach.reds f3c9cab968... -> 70773283... comments only
 #   utpp_vehicle_door.reds    f05fb69325... -> f4b0a821...  comments only
 #   utpp_vehicle_approach_table.reds, utpp_vehicle_door_timing.reds: unchanged
+# Re-pinned 2026-11-13 (redscript 1.0 compatibility, release 0.1.1; the tested game copies of 0.1.0 differ from these files):
+#   utpp_melee.reds           0be6a0b6... -> b18f9b9f...  `new Vector4(` -> `Vector4(` (1 site) and `public static func` -> `public func`
+#                                                           on 11 file-scope functions; redscript 0.5.32 compiles both to identical decompiled code;
+#                                                           the UTPP_STATES_TABLE lines are unchanged
+#   utpp_vehicle_approach.reds 70773283... -> 2dd3b901... `new Vector4(` -> `Vector4(` (1 site)
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "0be6a0b623a3bc356195e5d623946819503e2b4cd77731c5f5fa9d5eb87ddc6c"),
+     "b18f9b9ff53e07bcf9b0987312346735636165e376248b57e935d5409dd26b60"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
      "c30ed15246195549b5c6c2a57480583d37f10b2b664cabf1daa67f0dc9cf5386"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",
-     "7077328386c8a2fcb89155234a8462ff2e08268cd4937082761f5316893883cb"),
+     "2dd3b9017b668236a21e6e7cb2b604fbf2a3f199a57f413856fecbae8f0f905e"),
     ("car", P_REDS + "utpp_vehicle_approach_table.reds", "scripts/utpp_vehicle_approach_table.reds",
      "09ccead1654ed2cad752bee455606970eec645ef372463f4e976e63f154c9f38"),
     ("car", P_REDS + "utpp_vehicle_door.reds", "scripts/utpp_vehicle_door.reds",
@@ -388,11 +393,11 @@ Ultimate Third Person Project (UTPP) {version} - by {author}
 
 Requires Cyberpunk 2077 2.50 exactly (exe 3.0.88.46235). On any other game version the native plugin disables itself.
 Requires RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL and Input Loader (Input Loader provides the
-shoulder-switch key). Tested with RED4ext 1.31.0, redscript 0.5.32, Cyber Engine Tweaks 1.38.1, Codeware 1.21.2,
-ArchiveXL 1.28.6, Input Loader 0.2.6 and Mod Settings 0.2.29 (versions installed in the test game, 2.50).
+shoulder-switch key). Tested with RED4ext 1.31.1, redscript 0.5.32, Cyber Engine Tweaks 1.38.1, Codeware 1.21.4,
+ArchiveXL 1.28.8, Input Loader 0.2.6 and Mod Settings 0.2.30 (versions installed in the test game, 2.50).
 Older versions will not work with game version 2.5.
-redscript 1.0.0 is NOT supported yet: the scripts of UTPP 0.1.0 are written for redscript 0.5.x and do not compile
-with the rewritten 1.0 compiler. Use redscript 0.5.32.
+Use redscript 0.5.32. The scripts of UTPP compile with redscript 1.0.0 since version 0.1.1, but the frameworks UTPP
+needs were not ready for redscript 1.0.0 when this version was built (2026-11-13), so it is not supported yet.
 Mod Settings is recommended (the Ultimate Third Person page of the game's Mod Settings screen); without it
 Native Settings UI 1.96 provides the in-game settings tab. The Microsoft Visual C++ 2015-2022 x64 runtime is required.
 Requires the Phantom Liberty expansion (the weapon magazine fix archive uses its weapon resources). Tested with the
@@ -1241,7 +1246,7 @@ def check_skin_helpers(shipped, mode_bytes, table, table_err, dll_bytes, F):
 
 # ---------------------------------------------------------------------------------------------- manifest guard
 # Record of the local, never published 2.31 package of 0.1.0. It must survive: never overwritten, not even with the flag.
-PROTECTED_MANIFEST = ROOT / "Research" / "inventory" / ("utpp-release-%s.json" % VERSION)
+PROTECTED_MANIFEST = ROOT / "Research" / "inventory" / "utpp-release-0.1.0.json"   # fixed name: not tied to VERSION
 DEFAULT_MANIFEST = ROOT / "Research" / "inventory" / ("utpp-release-%s-game%s.json" % (VERSION.replace(".", ""), GAME_VERSION.replace(".", "")))
 
 
@@ -1274,7 +1279,7 @@ def main():
                     help="where the stage is built (default <out>\\stage); must be inside the project, e.g. Build\\stages\\utpp-0.1.0")
     ap.add_argument("--manifest", default=str(DEFAULT_MANIFEST),
                     help="final manifest (default %s); an existing file is refused "
-                         "without --overwrite-manifest, utpp-release-%s.json (2.31 record) always" % (DEFAULT_MANIFEST.name, VERSION))
+                         "without --overwrite-manifest, %s (2.31 record) always" % (DEFAULT_MANIFEST.name, PROTECTED_MANIFEST.name))
     ap.add_argument("--overwrite-manifest", action="store_true", help="allow replacing an existing --manifest file")
     ap.add_argument("--dry-run", action="store_true", help="hash + scan in place, no stage/zip; report to <out>\\dryrun")
     ap.add_argument("--day-of-build", default="", metavar="GROUP=ship|skip,...",

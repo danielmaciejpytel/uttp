@@ -6,44 +6,44 @@
 // class default is 0 (marked below), which Mod Settings' "Restore defaults" shows; the first sync pushes the CET value.
 
 // animation.pack: 0 = utpp, 1 = game
-enum UTPPMS_animation_pack {
+public enum UTPPMS_animation_pack {
   UltimateThirdPersonProject = 0,
   GameAnimations = 1
 }
 
 // core.diagnosticLogs: 0 = off, 1 = timed, 2 = until
-enum UTPPMS_core_diagnosticLogs {
+public enum UTPPMS_core_diagnosticLogs {
   Off = 0,
   OnFor5Minutes = 1,
   OnUntilSwitchedOff = 2
 }
 
 // perspective.aiming: 0 = fpp, 1 = tpp
-enum UTPPMS_perspective_aiming {
+public enum UTPPMS_perspective_aiming {
   FirstPerson = 0,
   ThirdPerson = 1
 }
 
 // perspective.aimingScoped: 0 = fpp, 1 = tpp
-enum UTPPMS_perspective_aimingScoped {
+public enum UTPPMS_perspective_aimingScoped {
   FirstPerson = 0,
   ThirdPerson = 1
 }
 
 // perspective.combat: 0 = tpp, 1 = fpp
-enum UTPPMS_perspective_combat {
+public enum UTPPMS_perspective_combat {
   ThirdPerson = 0,
   FirstPerson = 1
 }
 
 // perspective.weaponDrawn: 0 = tpp, 1 = fpp
-enum UTPPMS_perspective_weaponDrawn {
+public enum UTPPMS_perspective_weaponDrawn {
   ThirdPerson = 0,
   FirstPerson = 1
 }
 
 // crosshair.color: 0 = standard, 1 = white, 2 = red, 3 = green, 4 = black
-enum UTPPMS_crosshair_color {
+public enum UTPPMS_crosshair_color {
   Standard = 0,
   White = 1,
   Red = 2,

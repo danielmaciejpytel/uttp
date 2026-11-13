@@ -178,7 +178,7 @@ public class UTPPItemPlaneSystem extends ScriptableSystem {
     this.EnsureWatch();
   }
 
-  private func OnDetach() -> Void {
+  public func OnDetach() -> Void {
     this.ListenPhotoMode(false);
     this.ListenVehicle(false);
   }

@@ -45,7 +45,7 @@ public native func UTPPSetMeleeAimTarget(feet: Vector4, valid: Bool) -> Void
 // The list follows the installed clip export: only the variables packed for both rigs. the NPC-based pack npc1 has
 // the fists only. Knife, katana and blunt return here when their NPC-based clips are packed; until then they take the upper
 // body from the game and keep the legs on motion matching.
-public static func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
+public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
   return Equals(n, n"w_melee_fists");
 }
 
@@ -71,11 +71,11 @@ public static func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
 // (pwa_fists + pma_fists) covers the same states for Male V; the female-only pack (pwa_fists) leaves
 // Male V fists on the vanilla first-person clips.
 // Format: one line per variable between the UTPP_STATES_TABLE markers (read by the melee stage installer).
-public static func UTPPMeleeStatesDefault() -> Int32 {
+public func UTPPMeleeStatesDefault() -> Int32 {
   return 3667968;
 }
 
-public static func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
+public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
   // UTPP_STATES_TABLE begin
   if Equals(n, n"w_melee_fists") { return 3669472; }
   // UTPP_STATES_TABLE end
@@ -85,13 +85,13 @@ public static func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
 // Guard: the anim variables whose own third-person melee_idlepose (the graph's Ready / Idle pose) is installed. Fists only for
 // now (the pose is being built; the user setting melee.guard stays off until it is accepted). Separate from the full-body list:
 // every weapon set needs its own guard pose.
-public static func UTPPMeleeGuardCoveredName(n: CName) -> Bool {
+public func UTPPMeleeGuardCoveredName(n: CName) -> Bool {
   return Equals(n, n"w_melee_fists");
 }
 
 // The anim variable of a weapon: StringToName(friendlyName) of its item record; no record / empty friendlyName -> n"" (not
 // covered).
-public static func UTPPMeleeWeaponAnimVariable(weapon: ref<WeaponObject>) -> CName {
+public func UTPPMeleeWeaponAnimVariable(weapon: ref<WeaponObject>) -> CName {
   if !IsDefined(weapon) {
     return n"";
   }
@@ -109,7 +109,7 @@ public static func UTPPMeleeWeaponAnimVariable(weapon: ref<WeaponObject>) -> CNa
 // Arm cyberware weapons (Gorilla Arms, Mantis Blades, Monowire, Projectile Launch System): never the UTPP fists / blade clips.
 // Gorilla Arms inherit the fists friendlyName (StrongArms : Base_Fists) - so the item type and the weapon tag decide, robust to
 // the record variants (vanilla checks the type the same way: aiHitReactionTasks.script:393, meleeTransitions.script:1982).
-public static func UTPPMeleeIsArmCyberware(weapon: ref<WeaponObject>) -> Bool {
+public func UTPPMeleeIsArmCyberware(weapon: ref<WeaponObject>) -> Bool {
   if !IsDefined(weapon) {
     return false;
   }
@@ -126,7 +126,7 @@ public static func UTPPMeleeIsArmCyberware(weapon: ref<WeaponObject>) -> Bool {
 }
 
 // The weapon in WeaponRight while V is on foot in UTPP third person (null otherwise).
-public static func UTPPMeleeTppWeapon(player: ref<PlayerPuppet>) -> ref<WeaponObject> {
+public func UTPPMeleeTppWeapon(player: ref<PlayerPuppet>) -> ref<WeaponObject> {
   if !IsDefined(player) {
     return null;
   }
@@ -146,7 +146,7 @@ public static func UTPPMeleeTppWeapon(player: ref<PlayerPuppet>) -> ref<WeaponOb
 @addField(PlayerPuppet) public let utppMeleeAimAt: Float;      // sim time of the last melee target send
 @addField(PlayerPuppet) public let utppMeleeAimSent: Int32;    // 0 = nothing sent, 1 = invalid sent, 2 = a target sent
 
-public static func UTPPMeleeFullBodyWanted(player: ref<PlayerPuppet>) -> Bool {
+public func UTPPMeleeFullBodyWanted(player: ref<PlayerPuppet>) -> Bool {
   if !IsDefined(player) || !player.utppFootTppWanted {
     return false;
   }
@@ -161,7 +161,7 @@ public static func UTPPMeleeFullBodyWanted(player: ref<PlayerPuppet>) -> Bool {
   return UTPPMeleeFullBodyCoveredName(variable);
 }
 
-public static func UTPPMeleeGuardWanted(player: ref<PlayerPuppet>) -> Bool {
+public func UTPPMeleeGuardWanted(player: ref<PlayerPuppet>) -> Bool {
   if !IsDefined(player) || !player.utppFootTppWanted {
     return false;
   }
@@ -178,7 +178,7 @@ public static func UTPPMeleeGuardWanted(player: ref<PlayerPuppet>) -> Bool {
 
 // The game's melee target for the melee aim tilt: at most 20 Hz while a melee weapon is drawn in third person (the DLL drops it
 // after 0.3 s without a send); one 'invalid' when the target is lost or the weapon / view changes.
-public static func UTPPMeleeAimTargetTick(player: ref<PlayerPuppet>, scriptInterface: ref<StateGameScriptInterface>, now: Float) -> Void {
+public func UTPPMeleeAimTargetTick(player: ref<PlayerPuppet>, scriptInterface: ref<StateGameScriptInterface>, now: Float) -> Void {
   let weapon: ref<WeaponObject> = UTPPMeleeTppWeapon(player);
   let target: ref<GameObject>;
   if IsDefined(weapon) && weapon.IsMelee() && IsDefined(scriptInterface) {
@@ -197,12 +197,12 @@ public static func UTPPMeleeAimTargetTick(player: ref<PlayerPuppet>, scriptInter
   } else {
     if player.utppMeleeAimSent != 1 {
       player.utppMeleeAimSent = 1;
-      UTPPSetMeleeAimTarget(new Vector4(0.0, 0.0, 0.0, 1.0), false);
+      UTPPSetMeleeAimTarget(Vector4(0.0, 0.0, 0.0, 1.0), false);
     }
   }
 }
 
-public static func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: ref<StateGameScriptInterface>) -> Void {
+public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: ref<StateGameScriptInterface>) -> Void {
   if !IsDefined(player) {
     return;
   }

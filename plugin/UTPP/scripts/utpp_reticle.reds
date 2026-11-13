@@ -208,15 +208,15 @@ public func UTPPRetColourModeName(mode: Int32) -> String {
 public func UTPPRetFixedColour(mode: Int32) -> HDRColor {
   switch mode {
     case 1:
-      return new HDRColor(1.0, 1.0, 1.0, 1.0);
+      return HDRColor(1.0, 1.0, 1.0, 1.0);
     case 2:
-      return new HDRColor(1.0, 0.18, 0.15, 1.0);
+      return HDRColor(1.0, 0.18, 0.15, 1.0);
     case 3:
-      return new HDRColor(0.2, 1.0, 0.3, 1.0);
+      return HDRColor(0.2, 1.0, 0.3, 1.0);
     case 4:
-      return new HDRColor(0.0, 0.0, 0.0, 1.0);
+      return HDRColor(0.0, 0.0, 0.0, 1.0);
   }
-  return new HDRColor(1.0, 1.0, 1.0, 1.0);
+  return HDRColor(1.0, 1.0, 1.0, 1.0);
 }
 
 public func UTPPRetArcModeDefault() -> Int32 {
@@ -303,7 +303,7 @@ public func UTPPRetSpreadScale() -> Float {
 
 // The HUD cyan, used when the game's part carries no colour (white or transparent tint).
 public func UTPPRetFallbackColour() -> HDRColor {
-  return new HDRColor(0.3686, 0.9647, 1.0, 1.0);
+  return HDRColor(0.3686, 0.9647, 1.0, 1.0);
 }
 
 public func UTPPRetIsUncoloured(c: HDRColor) -> Bool {
@@ -320,7 +320,7 @@ public func UTPPRetNow() -> Float {
 
 // The game's hit indicator filter: a real, damaging, non-missed hit by the player.
 public func UTPPRetCountsAsHit(d: DamageInfo, player: wref<GameObject>) -> Bool {
-  if d.entityHit == null || d.instigator != player {
+  if !IsDefined(d.entityHit) || d.instigator != player {
     return false;
   }
   if d.damageValue == 0.0 || Equals(d.hitType, gameuiHitType.Miss) {
@@ -492,9 +492,9 @@ private final func UTPPRetRect(parent: ref<inkCompoundWidget>, w: Float, h: Floa
   let r: ref<inkRectangle> = new inkRectangle();
   r.SetSize(w, h);
   if white {
-    r.SetTintColor(new HDRColor(1.0, 1.0, 1.0, 1.0));
+    r.SetTintColor(HDRColor(1.0, 1.0, 1.0, 1.0));
   } else {
-    r.SetTintColor(new HDRColor(0.0, 0.0, 0.0, 1.0));
+    r.SetTintColor(HDRColor(0.0, 0.0, 0.0, 1.0));
   }
   r.SetOpacity(opacity);
   this.UTPPRetAttach(r, parent);
@@ -529,7 +529,7 @@ public final func UTPPRetSampleColour() -> Void {
   if IsDefined(src) {
     let c: HDRColor = src.GetTintColor();
     if !UTPPRetIsUncoloured(c) {
-      this.utppRetColour = new HDRColor(c.Red, c.Green, c.Blue, 1.0);
+      this.utppRetColour = HDRColor(c.Red, c.Green, c.Blue, 1.0);
       this.utppRetColourSrc = "part";
       return;
     }
@@ -586,10 +586,10 @@ public final func UTPPRetGuiState(state: CName) -> Void {
 @addMethod(gameuiCrosshairBaseGameController)
 public final func UTPPRetShadowLook(w: ref<inkWidget>, opacity: Float) -> Void {
   if UTPPRetColourModeOf(GetGameInstance()) == 4 {
-    w.SetTintColor(new HDRColor(1.0, 1.0, 1.0, 1.0));
+    w.SetTintColor(HDRColor(1.0, 1.0, 1.0, 1.0));
     w.SetOpacity(0.40);
   } else {
-    w.SetTintColor(new HDRColor(0.0, 0.0, 0.0, 1.0));
+    w.SetTintColor(HDRColor(0.0, 0.0, 0.0, 1.0));
     w.SetOpacity(opacity);
   }
 }
@@ -605,9 +605,9 @@ public final func UTPPRetRingShadow(w: ref<inkWidget>, opacity: Float) -> Void {
 @addMethod(gameuiCrosshairBaseGameController)
 public final func UTPPRetXLook(w: ref<inkWidget>) -> Void {
   if UTPPRetColourModeOf(GetGameInstance()) == 4 {
-    w.SetTintColor(new HDRColor(1.0, 1.0, 1.0, 1.0));
+    w.SetTintColor(HDRColor(1.0, 1.0, 1.0, 1.0));
   } else {
-    w.SetTintColor(new HDRColor(0.0, 0.0, 0.0, 1.0));
+    w.SetTintColor(HDRColor(0.0, 0.0, 0.0, 1.0));
   }
 }
 
@@ -953,7 +953,7 @@ private final func UTPPRetShapeChord(parent: ref<inkCompoundWidget>, theta: Floa
       let lo: Vector2 = UTPPRetMinOf(pts);
       let hi: Vector2 = UTPPRetMaxOf(pts);
       if hi.X - lo.X > 0.01 && hi.Y - lo.Y > 0.01 {
-        this.utppRetPresetSize = new Vector2(hi.X - lo.X, hi.Y - lo.Y);
+        this.utppRetPresetSize = Vector2(hi.X - lo.X, hi.Y - lo.Y);
         this.utppRetPresetRead = true;
       }
     }
@@ -965,7 +965,7 @@ private final func UTPPRetShapeChord(parent: ref<inkCompoundWidget>, theta: Floa
 }
 
 public func UTPPRetMinOf(pts: array<Vector2>) -> Vector2 {
-  let m: Vector2 = new Vector2(100000.0, 100000.0);
+  let m: Vector2 = Vector2(100000.0, 100000.0);
   let k: Int32 = 0;
   while k < ArraySize(pts) {
     m.X = MinF(m.X, pts[k].X);
@@ -976,7 +976,7 @@ public func UTPPRetMinOf(pts: array<Vector2>) -> Vector2 {
 }
 
 public func UTPPRetMaxOf(pts: array<Vector2>) -> Vector2 {
-  let m: Vector2 = new Vector2(-100000.0, -100000.0);
+  let m: Vector2 = Vector2(-100000.0, -100000.0);
   let k: Int32 = 0;
   while k < ArraySize(pts) {
     m.X = MaxF(m.X, pts[k].X);
@@ -1067,7 +1067,7 @@ public final func UTPPRetPresetSizeOrDefault() -> Vector2 {
   if this.utppRetPresetRead {
     return this.utppRetPresetSize;
   }
-  return new Vector2(100.0, 100.0);
+  return Vector2(100.0, 100.0);
 }
 
 // Resizes / moves the chords of either mode to radius r (the long side runs along the tangent, local Y of a spoke).
@@ -1095,7 +1095,7 @@ private final func UTPPRetLayoutChords(r: Float) -> Void {
       l += 3.0;
     }
     this.utppRetShapes[i].SetSize(size.X, size.Y);
-    this.utppRetShapes[i].SetScale(new Vector2(this.utppRetShapeThick[i] / size.X, l / size.Y));
+    this.utppRetShapes[i].SetScale(Vector2(this.utppRetShapeThick[i] / size.X, l / size.Y));
     this.utppRetShapes[i].SetTranslation(r, 0.0);
     i += 1;
   }
@@ -1138,12 +1138,12 @@ private final func UTPPRetAnimateRadius(rFrom: Float, rTo: Float, duration: Floa
   let size: Vector2 = this.UTPPRetPresetSizeOrDefault();
   let arcDef: ref<inkAnimDef> = new inkAnimDef();
   arcDef.AddInterpolator(this.UTPPRetMoveInterp(rFrom, rTo, duration));
-  arcDef.AddInterpolator(this.UTPPRetScaleInterp(new Vector2(t / size.X, lenFrom / size.Y),
-    new Vector2(t / size.X, lenTo / size.Y), duration));
+  arcDef.AddInterpolator(this.UTPPRetScaleInterp(Vector2(t / size.X, lenFrom / size.Y),
+    Vector2(t / size.X, lenTo / size.Y), duration));
   let shadowDef: ref<inkAnimDef> = new inkAnimDef();
   shadowDef.AddInterpolator(this.UTPPRetMoveInterp(rFrom, rTo, duration));
-  shadowDef.AddInterpolator(this.UTPPRetScaleInterp(new Vector2((t + 3.0) / size.X, (lenFrom + 3.0) / size.Y),
-    new Vector2((t + 3.0) / size.X, (lenTo + 3.0) / size.Y), duration));
+  shadowDef.AddInterpolator(this.UTPPRetScaleInterp(Vector2((t + 3.0) / size.X, (lenFrom + 3.0) / size.Y),
+    Vector2((t + 3.0) / size.X, (lenTo + 3.0) / size.Y), duration));
   i = 0;
   while i < ArraySize(this.utppRetShapes) {
     this.utppRetShapes[i].StopAllAnimations();
@@ -1159,8 +1159,8 @@ private final func UTPPRetAnimateRadius(rFrom: Float, rTo: Float, duration: Floa
 @addMethod(gameuiCrosshairBaseGameController)
 private final func UTPPRetMoveInterp(rFrom: Float, rTo: Float, duration: Float) -> ref<inkAnimTranslation> {
   let m: ref<inkAnimTranslation> = new inkAnimTranslation();
-  m.SetStartTranslation(new Vector2(rFrom, 0.0));
-  m.SetEndTranslation(new Vector2(rTo, 0.0));
+  m.SetStartTranslation(Vector2(rFrom, 0.0));
+  m.SetEndTranslation(Vector2(rTo, 0.0));
   m.SetDuration(duration);
   m.SetType(inkanimInterpolationType.Exponential);
   m.SetMode(inkanimInterpolationMode.EasyOut);
@@ -1294,9 +1294,9 @@ private final func UTPPRetDotPiece(parent: ref<inkCompoundWidget>, atlas: Bool, 
     img.SetTexturePart(n"dot");
     img.SetSize(size, size);
     if white {
-      img.SetTintColor(new HDRColor(1.0, 1.0, 1.0, 1.0));
+      img.SetTintColor(HDRColor(1.0, 1.0, 1.0, 1.0));
     } else {
-      img.SetTintColor(new HDRColor(0.0, 0.0, 0.0, 1.0));
+      img.SetTintColor(HDRColor(0.0, 0.0, 0.0, 1.0));
     }
     img.SetOpacity(opacity);
     this.UTPPRetAttach(img, parent);
@@ -1362,7 +1362,7 @@ private final func UTPPReticleBuild() -> Void {
     basic.UTPPRetBasicSyncOpacity();
   }
   this.utppRetR = -1.0;
-  this.UTPPReticleLayout(new Vector2(0.0, 0.0));
+  this.UTPPReticleLayout(Vector2(0.0, 0.0));
   top.SetVisible(false);
 }
 
@@ -1592,8 +1592,8 @@ private final func UTPPRetFlash(w: ref<inkWidget>, fade: Float, scaleFrom: Float
   alpha.SetMode(inkanimInterpolationMode.EasyOut);
   anim.AddInterpolator(alpha);
   let scale: ref<inkAnimScale> = new inkAnimScale();
-  scale.SetStartScale(new Vector2(scaleFrom, scaleFrom));
-  scale.SetEndScale(new Vector2(1.0, 1.0));
+  scale.SetStartScale(Vector2(scaleFrom, scaleFrom));
+  scale.SetEndScale(Vector2(1.0, 1.0));
   scale.SetDuration(scaleTime);
   scale.SetType(inkanimInterpolationType.Quadratic);
   scale.SetMode(inkanimInterpolationMode.EasyOut);
