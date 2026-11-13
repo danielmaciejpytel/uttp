@@ -53,9 +53,10 @@ from pathlib import Path
 VERSION = "0.1.1"
 GAME_VERSION = "2.50"
 AUTHOR = "Daniel Maciej Pytel"
-# NVIDIA attribution in THIRD_PARTY_NOTICES (L3). MotionBricks clips are in the motion databases and
-# in utpp_vehicle_car.archive (day-of-build group "car", see DAYOF below). Set NOTICE_MOTIONBRICKS = False only when none of
-# those shipped files contains a MotionBricks clip (e.g. the motion databases without them and --day-of-build car=skip).
+# NVIDIA attribution in THIRD_PARTY_NOTICES (L3). MotionBricks clips are in the motion databases, in
+# utpp_vehicle_car.archive (day-of-build group "car", see DAYOF below) and in utpp_melee.archive (group "melee"). Set
+# NOTICE_MOTIONBRICKS = False only when none of those shipped files contains a MotionBricks clip (e.g. the motion databases
+# without them and --day-of-build car=skip,melee=skip).
 # Kimodo: named together with MotionBricks in the licence texts (Source\LICENSE, THIRD_PARTY_NOTICES.txt, README.md).
 NOTICE_MOTIONBRICKS = True
 NOTICE_KIMODO = True
@@ -770,7 +771,7 @@ def nvidia_notice():
         return ""
     names = " and ".join(n for n, _ in tools)
     lic = " and ".join("%s (%s)" % (l, n) if len(tools) > 1 else l for n, l in tools)
-    return ("\n== NVIDIA ==\nSome transition and vehicle-exit animation clips were generated locally with %s (models licensed by "
+    return ("\n== NVIDIA ==\nSome transition, vehicle-exit and melee animation clips were generated locally with %s (models licensed by "
             "NVIDIA Corporation under the %s). No NVIDIA model is included. UTPP is not affiliated with or endorsed by "
             "NVIDIA.\n" % (names, lic))
 
