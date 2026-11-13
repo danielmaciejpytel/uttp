@@ -13,7 +13,8 @@ Protocol: 127.0.0.1 TCP only, one JSON object per line, one reply per line:
   {"op":"release"}               -> {"ok":true}
   {"op":"quit"}                  -> {"ok":true}; pad released and unplugged, daemon exits
 Safety: the daemon runs its own ForegroundGuard before every non-neutral report (game process must own the
-foreground window); a neutral report is always allowed. Watchdog: if a non-neutral report is not refreshed for
+foreground window); a neutral report is always allowed. A frame with "bg": true (background run) is checked for a
+running game process and the Pause abort key only: the game window may be behind other windows. Watchdog: if a non-neutral report is not refreshed for
 `--watchdog` seconds (client died / hung) or a client disconnects, the pad is released.
 Note: quitting unplugs the pad -> the game shows the dialog; dismiss it with run.py --dismiss-dialog.
 """
@@ -30,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from gt_input import NEUTRAL, PADD_HOST, PADD_PORT, import_vgamepad, msg_to_frame, set_report  # noqa: E402
-from gt_win32 import ForegroundGuard, GuardError  # noqa: E402
+from gt_win32 import VK_PAUSE, ForegroundGuard, GuardError  # noqa: E402
 
 
 def is_neutral(fr) -> bool:
@@ -47,6 +48,16 @@ class PadServer:
         self.active = False          # last report non-neutral
         self.last_frame = 0.0
         self.running = True
+
+    def background_check(self) -> None:
+        """Check for a report of a background run: the game is alive and Pause is not held (no foreground test)."""
+        g = self.guard
+        alive = [p for p in g.game_pids if g.api.process_alive(p)]
+        if not alive:
+            raise GuardError(f'{g.exe_name} is not running')
+        g.game_pids = alive
+        if g.api.key_down_now(VK_PAUSE):
+            raise GuardError(f'user abort key 0x{VK_PAUSE:02X} pressed')
 
     def release(self) -> None:
         set_report(self.pad, NEUTRAL)
@@ -78,7 +89,10 @@ class PadServer:
                     # on the previous session's nonempty PID cache.
                     if (not self.active or not self.guard.game_pids) and not self.guard.refresh_game():
                         raise GuardError('Cyberpunk2077.exe is not running')
-                    self.guard.check()
+                    if msg.get('bg'):
+                        self.background_check()
+                    else:
+                        self.guard.check()
                 except GuardError as e:
                     self.release()
                     if 'not running' in str(e):

@@ -19,10 +19,11 @@ import socket
 import sys
 import time
 import uuid
+from datetime import datetime
 
 import gt_log
 from gt_scenario import BUTTONS, Frame
-from gt_win32 import ForegroundGuard, GuardError
+from gt_win32 import VK_PAUSE, ForegroundGuard, GuardError
 
 PROJECT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
 PYLIBS = os.path.join(PROJECT, 'Tools', 'pylibs')
@@ -180,8 +181,16 @@ class RemotePadDriver(PadDriver):
         guard.on_violation = self.release
 
     def _push(self, fr: Frame) -> None:
-        r = self.client.call(frame_to_msg(fr))
+        msg = frame_to_msg(fr)
+        background = getattr(self.guard, 'background', False)
+        if background:
+            msg['bg'] = True          # background run: the daemon may skip its foreground test for this report
+        r = self.client.call(msg)
         if not r.get('ok'):
+            if background and 'not running' not in str(r.get('error')):
+                # reworded: the daemon's focus text would read as a user stop in night.py
+                raise GuardError('padd refused a background pad report (the daemon requires the game in the '
+                                 'foreground unless it honours "bg")')
             raise GuardError(f'padd refused input: {r.get("error")}')
 
     def release(self) -> None:
@@ -595,3 +604,235 @@ class CetOverlay:
         finally:
             self._close_quietly()
         return ok
+
+
+# ---------------------------------------------------------------------------------------------- background mode
+
+class NeedsKeyboard(RuntimeError):
+    """Keyboard / mouse input refused in background mode (not a GuardError: callers skip the action instead of aborting)."""
+
+
+KEYBOARD_METHODS = frozenset({'send_scan_chord', 'send_key_chord', 'send_unicode', '_send', '_scan', 'set_cursor',
+                              'send_left_click', 'focus'})
+
+
+class KeyboardRefusingApi:
+    """Win32 api wrapper for background runs: keyboard, mouse and focus calls raise NeedsKeyboard, every query
+    (process list, windows, key_down_now for the user-abort keys) passes through."""
+
+    def __init__(self, api):
+        self._api = api
+
+    def __getattr__(self, name):
+        if name in KEYBOARD_METHODS:
+            def refused(*_a, **_k):
+                raise NeedsKeyboard(f'needs keyboard: {name} is refused with --background')
+            return refused
+        return getattr(self._api, name)
+
+
+class BackgroundGuard(ForegroundGuard):
+    """Guard for runs with the game window in the background: the game process must be alive and the Pause key
+    still stops the run (ESC is not an abort key here: it is used in other applications while the run goes on), but
+    the foreground window is not checked and the game is never focused. Keyboard / mouse input
+    raises NeedsKeyboard (see KeyboardRefusingApi); pad reports pass."""
+
+    background = True
+
+    def __init__(self, api=None, **kw):
+        if api is None:
+            from gt_win32 import Win32Api
+            api = Win32Api()
+        kw.setdefault('abort_keys', (VK_PAUSE,))
+        super().__init__(api=KeyboardRefusingApi(api), **kw)
+
+    def check(self) -> None:
+        self.checks += 1
+        now = self.clock()
+        if now - self._last_proc_check >= self.process_check_interval:
+            self._last_proc_check = now
+            alive = [p for p in self.game_pids if self.api.process_alive(p)]
+            if not alive:
+                raise GuardError(f'{self.exe_name} is not running')
+            self.game_pids = alive
+        for vk in self.abort_keys:
+            if self.api.key_down_now(vk):
+                raise GuardError(f'user abort key 0x{vk:02X} pressed')
+
+    def ensure_focus(self, attempts: int = 3, wait: float = 0.4) -> None:
+        if not self.refresh_game():
+            raise GuardError(f'{self.exe_name} is not running')
+        self._last_proc_check = -1e9
+        self.check()
+
+
+# ---------------------------------------------------------------------------------------------- file command channel
+
+# The test-only CET module utpp_testcmd runs "<seq> <lua chunk>" lines of its cmd.txt and logs
+# "[testcmd] ACK seq=<n> ok=<true|false> <result>" into the UTPP log. The harness writes nothing else into the game folder.
+TESTCMD_DIR = os.path.join(CET_DIR, 'mods', 'utpp_testcmd')
+TESTCMD_FILE = os.path.join(TESTCMD_DIR, 'cmd.txt')
+TESTCMD_SUFFIX = os.path.join('mods', 'utpp_testcmd', 'cmd.txt')
+_TESTCMD_ACK_RE = re.compile(r'\[testcmd\] ACK seq=(\d+) ok=(true|false)(?: ([^\r\n]*))?')
+_TESTCMD_READY_RE = re.compile(r'\[testcmd\] READY seq=(\d+)(?: loader=(\S+))?')
+
+
+def testcmd_path_ok(path: str) -> bool:
+    """True only for a path that ends with mods\\utpp_testcmd\\cmd.txt after normalisation ('..' cannot escape)."""
+    if not path:
+        return False
+    p = os.path.normcase(os.path.normpath(os.path.abspath(path)))
+    return p.endswith(os.sep + os.path.normcase(TESTCMD_SUFFIX))
+
+
+def testcmd_acks(text: str) -> dict:
+    """{seq: (ok, result)} of every ACK line in the text."""
+    return {int(m.group(1)): (m.group(2) == 'true', (m.group(3) or '').strip()) for m in _TESTCMD_ACK_RE.finditer(text)}
+
+
+def testcmd_ready(text: str) -> tuple[int, str] | None:
+    """(last seq, loader) of the newest READY line, None = the module did not load in this session."""
+    last = None
+    for m in _TESTCMD_READY_RE.finditer(text):
+        last = (int(m.group(1)), m.group(2) or 'unknown')
+    return last
+
+
+def parse_testcmd_lines(text: str) -> list[tuple[int, str]]:
+    out = []
+    for line in text.splitlines():
+        m = re.match(r'^\s*(\d+)\s+(.*\S)\s*$', line)
+        if m:
+            out.append((int(m.group(1)), m.group(2)))
+    return out
+
+
+class FileCommandChannel:
+    """Sends Lua commands through cmd.txt of the utpp_testcmd CET module and waits for their ACK in the UTPP log.
+
+    Each command gets a new sequence number (ms clock, always above every number in the file and the module state); the
+    file keeps the last `keep_lines` commands (the module runs only numbers above its last one, so a short history is
+    safe) and is replaced atomically (temp file + os.replace, retried while the module has the file open). Without an
+    ACK within `ack_timeout` the command is rewritten once under a new number (the unanswered line is removed); an ACK
+    of either number counts. run_commands returns {cmd: True (ACK ok) | False (ACK ok=false or no ACK) | None (no log)}
+    like CetOverlay.run_commands.
+    """
+
+    name = 'file'
+
+    def __init__(self, cmd_path: str = TESTCMD_FILE, ack_timeout: float = 3.0, retries: int = 1, keep_lines: int = 8,
+                 sleep=time.sleep, clock=time.monotonic, now_ms=None, replace=os.replace, replace_tries: int = 40):
+        if not testcmd_path_ok(cmd_path):
+            raise ValueError(f'command file must end with {TESTCMD_SUFFIX}: {cmd_path}')
+        self.path = cmd_path
+        self.ack_timeout = ack_timeout
+        self.retries = retries
+        self.keep_lines = max(1, keep_lines)
+        self.sleep = sleep
+        self.clock = clock
+        self.now_ms = now_ms or (lambda: int(time.time() * 1000))
+        self.replace = replace
+        self.replace_tries = replace_tries
+        self.last_seq = 0
+        self.last_post_wall = None          # wall time right before the last os.replace (marker timing)
+        self.last_attempts: dict = {}
+
+    def installed(self) -> bool:
+        return os.path.isdir(os.path.dirname(self.path))
+
+    def read_entries(self) -> list[tuple[int, str]]:
+        try:
+            with open(self.path, encoding='utf-8', errors='replace') as f:
+                return parse_testcmd_lines(f.read())
+        except OSError:
+            return []
+
+    def state_seq(self) -> int:
+        try:
+            with open(os.path.join(os.path.dirname(self.path), 'state.txt'), encoding='utf-8') as f:
+                m = re.search(r'\d+', f.read())
+            return int(m.group(0)) if m else 0
+        except OSError:
+            return 0
+
+    def next_seq(self, entries: list[tuple[int, str]]) -> int:
+        top = max([self.last_seq, self.state_seq()] + [s for s, _ in entries])
+        return max(self.now_ms(), top + 1)
+
+    def _write(self, entries: list[tuple[int, str]]) -> None:
+        if not testcmd_path_ok(self.path):
+            raise ValueError(f'command file must end with {TESTCMD_SUFFIX}: {self.path}')
+        tmp = self.path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(''.join(f'{s} {c}\n' for s, c in entries))
+        self.last_post_wall = datetime.now()
+        for k in range(self.replace_tries):
+            try:
+                self.replace(tmp, self.path)
+                return
+            except PermissionError:          # the module is reading the file at this moment
+                if k == self.replace_tries - 1:
+                    raise
+                self.sleep(0.025)
+
+    def post(self, cmd: str, drop_seq: int | None = None) -> int:
+        """Append one command (new sequence number); `drop_seq` removes an unanswered earlier line. Returns the number."""
+        if not cmd or not cmd.strip():
+            raise ValueError('empty command')
+        if '\n' in cmd or '\r' in cmd:
+            raise ValueError('a command must be one line')
+        if not self.installed():
+            raise GuardError(f'utpp_testcmd is not installed ({os.path.dirname(self.path)} missing)')
+        entries = [e for e in self.read_entries() if e[0] != drop_seq]
+        seq = self.next_seq(entries)
+        kept = entries[len(entries) - (self.keep_lines - 1):] if self.keep_lines > 1 else []
+        self._write(kept + [(seq, cmd.strip())])
+        self.last_seq = seq
+        return seq
+
+    def send(self, cmd: str, log_path: str | None, timeout: float | None = None) -> dict:
+        """Post `cmd` and wait for its ACK. {'seq', 'seqs', 'ok': True/False/None, 'result', 'attempts', 'sent_at'}."""
+        timeout = self.ack_timeout if timeout is None else timeout
+        off = file_size(log_path)
+        seqs: list[int] = []
+        res = {'ok': None, 'result': '', 'attempts': 0, 'seqs': seqs, 'seq': None, 'sent_at': None}
+        for _ in range(self.retries + 1):
+            seq = self.post(cmd, drop_seq=seqs[-1] if seqs else None)
+            seqs.append(seq)
+            res.update(seq=seq, attempts=len(seqs), sent_at=self.last_post_wall)
+            if not log_path:
+                return res
+            found: dict = {}
+
+            def acked(text, found=found):
+                acks = testcmd_acks(text)
+                hit = next((s for s in seqs if s in acks), None)
+                if hit is not None:
+                    found['ack'] = (hit, acks[hit])
+                return hit is not None
+            if wait_for_log(log_path, off, acked, timeout, sleep=self.sleep, clock=self.clock):
+                hit, (ok, text) = found['ack']
+                res.update(ok=ok, result=text, seq=hit)
+                return res
+        res['ok'] = False
+        res['result'] = f'no ACK within {timeout:.1f} s ({len(seqs)} writes)'
+        return res
+
+    def run_commands(self, cmds: list[str], log_path: str | None = None, verify_timeout: float | None = None,
+                     retries: int | None = None) -> dict:
+        if retries is not None:
+            self.retries = retries
+        result: dict = {}
+        self.last_attempts = {}
+        for c in cmds:
+            r = self.send(c, log_path, verify_timeout)
+            self.last_attempts[c] = r['attempts']
+            result[c] = r['ok']
+        return result
+
+    def clear(self) -> bool:
+        """Empty the command file (end of a run); False when the module folder is missing."""
+        if not self.installed():
+            return False
+        self._write([])
+        return True

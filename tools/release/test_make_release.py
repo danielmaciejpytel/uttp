@@ -309,6 +309,7 @@ class ShipLists(unittest.TestCase):
     def test_excluded_and_included(self):
         for p in self.all_paths():
             self.assertNotIn("_probe", p)
+            self.assertNotIn("utpp_testcmd", p)
             self.assertNotIn("utpp_bisect", p)
             self.assertNotIn("ragdoll_poc", p)
             self.assertNotIn("ragdoll_graph", p)
@@ -465,6 +466,14 @@ class ReleaseTexts(unittest.TestCase):
         F = mr.Findings()
         mr.check_required(texts, F, set())
         self.assertTrue([i for i in F.items if i["check"] == "default-off"])
+
+    def test_test_command_module_is_never_shipped(self):
+        F = mr.Findings()
+        mr.check_forbidden_names([mr.P_CET + "utpp_testcmd/init.lua"], True, F)
+        self.assertEqual([i["check"] for i in F.items if i["level"] == "FAIL"], ["forbidden-file"])
+        F = mr.Findings()
+        mr.scan_text(mr.P_CET + "utpp_core/init.lua", 'local t = GetMod("utpp_testcmd")', F, True)
+        self.assertTrue([i for i in F.items if i["check"] == "probe-name" and i["level"] == "FAIL"])
 
     def test_stage_dir_must_be_inside_the_project_stages(self):
         import contextlib

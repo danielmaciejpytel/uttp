@@ -931,7 +931,7 @@ TEXT_FAIL = [
 # (..._tattoo_casius_r3758).
 LEGACY_VERSION_RX = RX(r"[A-Za-z0-9]_v[0-9]+(?![A-Za-z0-9])|[A-Za-z0-9]_r[0-9]{1,3}[a-z]?(?![A-Za-z0-9])")
 LEGACY_VERSION_EXEMPT = {README_REL, NOTICES_REL, LICENSE_REL}
-PROBE_RX = RX(r"(?:deform|mount|reload|helper)_probe|utpp_probe|local_test_profile|reload_phase")
+PROBE_RX = RX(r"(?:deform|mount|reload|helper)_probe|utpp_probe|utpp_testcmd|local_test_profile|reload_phase")
 GATE_RX = RX(r"reload_gate")
 TEXT_WARN = [
     ("research-ref", RX(r"Research[\\/]|Backups[\\/]|Tools[\\/]repos|Archives[\\/]|handoff")),
@@ -1112,7 +1112,8 @@ def check_forbidden_names(rels, nue, F):
             F.add("FAIL", "forbidden-file", rel, "file name is not allowed in the package")
         if not nue and ("reload_gate" in low or "nue_reload" in low):
             F.add("FAIL", "forbidden-file", rel, "Nue reload file with --no-nue")
-        if re.search(r"(deform|mount|reload|helper|ragdoll)_probe|utpp_probe|utpp_bisect|local_test_profile|reload_phase", low):
+        if re.search(r"(deform|mount|reload|helper|ragdoll)_probe|utpp_probe|utpp_testcmd|utpp_bisect|local_test_profile|reload_phase",
+                     low):
             F.add("FAIL", "forbidden-file", rel, "probe / bisect / test-profile file")
         if re.search(r"utpp_ragdoll_(poc|graph)|ragdoll.*\.archive", low):
             F.add("FAIL", "forbidden-file", rel, "ragdoll archive (not in 0.1.0, next version)")

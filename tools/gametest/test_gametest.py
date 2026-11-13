@@ -1751,6 +1751,160 @@ class VideoTests(unittest.TestCase):
         self.assertNotIn('motion ', ' '.join(stale))
 
 
+class FakeTestcmdModule:
+    """Stands in for the utpp_testcmd CET module: tick() runs the cmd.txt lines above its last sequence and appends an
+    ACK line per line to the log (`answer` decides: True / False = ok flag, None = no ACK)."""
+
+    def __init__(self, cmd_path, log_path, answer=lambda seq, chunk: True):
+        self.cmd_path, self.log_path, self.answer = cmd_path, log_path, answer
+        self.last = 0
+        self.ran = []
+
+    def tick(self):
+        if not os.path.isfile(self.cmd_path):
+            return
+        with open(self.cmd_path, encoding='utf-8') as f:
+            entries = gt_input.parse_testcmd_lines(f.read())
+        for seq, chunk in entries:
+            if seq > self.last:
+                self.last = seq
+                self.ran.append((seq, chunk))
+                ok = self.answer(seq, chunk)
+                if ok is not None:
+                    with open(self.log_path, 'a', encoding='utf-8') as f:
+                        f.write(f'[2026-11-14 10:00:00.000] [info] [1] [UTPP] UTPP CET [testcmd] ACK seq={seq} '
+                                f'ok={"true" if ok else "false"} r{seq}\n')
+
+
+class FileChannelTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.dir = os.path.join(self.root, 'mods', 'utpp_testcmd')
+        os.makedirs(self.dir)
+        self.cmd = os.path.join(self.dir, 'cmd.txt')
+        self.log = os.path.join(self.root, 'test.log')
+        open(self.log, 'w').close()
+        self.t = [0.0]
+
+    def read(self):
+        with open(self.cmd, encoding='utf-8') as f:
+            return f.read()
+
+    def channel(self, module=None, now=lambda: 5000, **kw):
+        def sleep(s):
+            self.t[0] += s
+            if module is not None:
+                module.tick()
+        return gt_input.FileCommandChannel(self.cmd, sleep=sleep, clock=lambda: self.t[0], now_ms=now, **kw)
+
+    def test_path_guard(self):
+        self.assertTrue(gt_input.testcmd_path_ok(self.cmd))
+        self.assertTrue(gt_input.testcmd_path_ok(os.path.join(self.root, 'mods', 'x', '..', 'utpp_testcmd', 'cmd.txt')))
+        for bad in (os.path.join(self.dir, 'other.txt'), os.path.join(self.dir, 'cmd.txt', '..', 'init.lua'),
+                    os.path.join(self.root, 'mods', 'utpp_core', 'cmd.txt'), ''):
+            self.assertFalse(gt_input.testcmd_path_ok(bad), bad)
+        with self.assertRaises(ValueError):
+            gt_input.FileCommandChannel(os.path.join(self.root, 'mods', 'utpp_core', 'init.lua'))
+        self.assertTrue(gt_input.testcmd_path_ok(gt_input.TESTCMD_FILE))
+
+    def test_sequence_numbers_rise_above_file_and_state(self):
+        with open(os.path.join(self.dir, 'state.txt'), 'w') as f:
+            f.write('7000\n')
+        with open(self.cmd, 'w') as f:
+            f.write('6500 print(1)\n')
+        ch = self.channel(keep_lines=3)
+        seqs = [ch.post(f'print({i})') for i in range(4)]
+        self.assertEqual(seqs, [7001, 7002, 7003, 7004])               # clock (5000) is below the state: state + 1
+        entries = gt_input.parse_testcmd_lines(self.read())
+        self.assertEqual([s for s, _ in entries], [7002, 7003, 7004])  # last keep_lines lines only
+        self.assertFalse(os.path.exists(self.cmd + '.tmp'))
+        self.assertGreater(self.channel(now=lambda: 9000).post('x()'), 9000 - 1)
+        for bad in ('a()\nb()', '  ', 'a()\r'):
+            with self.assertRaises(ValueError):
+                ch.post(bad)
+
+    def test_ack_match_is_exact(self):
+        mod = FakeTestcmdModule(self.cmd, self.log)
+        ch = self.channel(mod)
+        with open(self.log, 'a') as f:      # an older ACK whose number is a prefix of the new one must not count
+            f.write('[x] UTPP CET [testcmd] ACK seq=500 ok=true old\n')
+        r = ch.send('Game.UTPPLogLine("a")', self.log)
+        self.assertEqual((r['seq'], r['ok'], r['result'], r['attempts']), (5000, True, 'r5000', 1))
+        self.assertEqual(gt_input.testcmd_acks('[testcmd] ACK seq=12 ok=false boom'), {12: (False, 'boom')})
+        self.assertEqual(list(gt_input.testcmd_acks('[testcmd] ACK seq=50001 ok=true x')), [50001])
+        self.assertEqual(gt_input.testcmd_ready('a [testcmd] READY seq=3 loader=loadstring\n'
+                                                'b [testcmd] READY seq=9 loader=none'), (9, 'none'))
+        self.assertIsNone(gt_input.testcmd_ready('nothing'))
+
+    def test_timeout_retry_rewrites_under_a_new_number(self):
+        calls = {'n': 0}
+
+        def answer(seq, chunk):
+            calls['n'] += 1
+            return None if calls['n'] == 1 else True     # the first line runs without an ACK (lost)
+        mod = FakeTestcmdModule(self.cmd, self.log, answer)
+        ch = self.channel(mod, ack_timeout=1.0)
+        r = ch.send('spawn()', self.log)
+        self.assertEqual((r['ok'], r['attempts'], len(r['seqs'])), (True, 2, 2))
+        self.assertEqual([s for s, _ in gt_input.parse_testcmd_lines(self.read())], [r['seqs'][1]])
+
+    def test_no_ack_and_error_ack(self):
+        ch = self.channel(FakeTestcmdModule(self.cmd, self.log, lambda s, c: None), ack_timeout=0.5)
+        res = ch.run_commands(['a()', 'b()'], log_path=self.log)
+        self.assertEqual(res, {'a()': False, 'b()': False})
+        self.assertEqual(ch.last_attempts, {'a()': 2, 'b()': 2})
+        ch = self.channel(FakeTestcmdModule(self.cmd, self.log, lambda s, c: 'bad' not in c))
+        self.assertEqual(ch.run_commands(['bad()', 'good()'], log_path=self.log), {'bad()': False, 'good()': True})
+        self.assertEqual(self.channel().run_commands(['c()']), {'c()': None})        # no log: written, not verified
+
+    def test_replace_retried_while_the_module_reads(self):
+        fails = {'n': 2}
+
+        def replace(a, b):
+            if fails['n']:
+                fails['n'] -= 1
+                raise PermissionError('in use')
+            os.replace(a, b)
+        ch = self.channel(replace=replace)
+        ch.post('a()')
+        self.assertEqual(fails['n'], 0)
+        self.assertIn(' a()', self.read())
+        self.assertTrue(ch.clear())
+        self.assertEqual(self.read(), '')
+        os.remove(self.cmd)
+        os.rmdir(self.dir)
+        with self.assertRaises(GuardError):              # module not installed: nothing is created
+            ch.post('a()')
+        self.assertFalse(os.path.exists(self.dir))
+
+
+class BackgroundGuardTests(unittest.TestCase):
+    def test_no_foreground_check_keys_refused_abort_kept(self):
+        api = FakeApi()
+        api.fg = OTHER_HWND
+        g = gt_input.BackgroundGuard(api=api)
+        g.ensure_focus()                                   # does not focus the game
+        g.check()
+        g.wait(0.2)
+        self.assertNotIn('focus', [c[0] for c in api.calls])
+        for call in (lambda: g.api.send_unicode('a'), lambda: g.api.send_scan_chord([0x1C]),
+                     lambda: g.api.send_left_click(), lambda: g.api._send([])):
+            with self.assertRaises(gt_input.NeedsKeyboard):
+                call()
+        self.assertFalse(issubclass(gt_input.NeedsKeyboard, GuardError))
+        self.assertEqual(api.calls, [])
+        api.keys_down.add(0x1B)                            # ESC belongs to other applications in a background run
+        g.check()
+        api.keys_down.add(0x13)                            # Pause stops it
+        with self.assertRaisesRegex(GuardError, 'abort key'):
+            g.check()
+        api.keys_down.clear()
+        api.alive = False
+        g._last_proc_check = -1e9
+        with self.assertRaisesRegex(GuardError, 'not running'):
+            g.check()
+
+
 if __name__ == '__main__':
     unittest.main()
 

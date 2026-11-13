@@ -3352,5 +3352,80 @@ class _EnemyWorld:
         return {'steps': []}
 
 
+class CommandChannelNightTests(unittest.TestCase):
+    """--cmd-channel file / auto and --background in the night runner (no keys, no overlay)."""
+
+    def setUp(self):
+        self._pp, self._time = night.process_path, night.time
+        night.process_path = lambda pid: ''
+        night.time = FakeTime()
+
+    def tearDown(self):
+        night.process_path, night.time = self._pp, self._time
+
+    def make(self, *flags, ready=True):
+        from test_gametest import FakeTestcmdModule
+        api = FakeApi()
+        n = EnsureClosedTests.make(EnsureClosedTests(), api, None)
+        n.args = night.build_parser().parse_args(['--log-dir', n.args.log_dir, '--out-root', 'unused'] + list(flags))
+        n.utpp_log = night.gt_log.newest_log(n.args.log_dir)
+        if ready:
+            with open(n.utpp_log, 'a', encoding='utf-8') as f:
+                f.write('[2026-11-14 10:00:00.000] [info] [1] [UTPP] UTPP CET [testcmd] READY seq=0 loader=loadstring\n')
+        d = os.path.join(tempfile.mkdtemp(), 'mods', 'utpp_testcmd')
+        os.makedirs(d)
+        n.testcmd_path = os.path.join(d, 'cmd.txt')
+        mod = FakeTestcmdModule(n.testcmd_path, n.utpp_log)
+        api.on_sleep.append(mod.tick)
+        g = n.guard()
+        g.refresh_game()
+        return n, g, api, mod
+
+    def test_file_channel_sends_without_keys_or_overlay(self):
+        n, g, api, mod = self.make('--cmd-channel', 'file')
+        n.overlay_grab = lambda guard: self.fail('the overlay is never looked at with the file channel')
+        res = n.type_console(g, night.gn.arm_cmds('utpp_base'), verify_log=n.utpp_log)
+        self.assertEqual(list(res.values()), [True, True, True])
+        self.assertEqual([c for _, c in mod.ran], night.gn.arm_cmds('utpp_base'))
+        txt = n.console_verified(None, g, 'Game.UTPPLogLine("[night] X")', lambda t: 'ACK' in t, 'x')
+        self.assertIsNotNone(txt)
+        self.assertEqual(len(mod.ran), 4)                       # one send, no settle retries
+        self.assertEqual([c for c in api.calls if c[0] in ('keys', 'char', 'click', 'cursor', 'focus')], [])
+
+    def test_auto_resolves_from_ready_and_background_needs_it(self):
+        n, g, api, mod = self.make('--cmd-channel', 'auto')
+        self.assertTrue(n.use_file())
+        n, g, api, mod = self.make('--cmd-channel', 'auto', ready=False)
+        self.assertFalse(n.use_file())
+        n, g, api, mod = self.make('--cmd-channel', 'auto', '--background', ready=False)
+        with self.assertRaises(night.CycleError):
+            n.use_file()
+        self.assertFalse(night.build_parser().parse_args([]).background)
+        self.assertEqual(night.build_parser().parse_args([]).cmd_channel, 'console')
+        self.assertTrue(night.validate_args(night.build_parser().parse_args(['--background'])))
+        self.assertEqual(night.validate_args(night.build_parser().parse_args(['--background', '--cmd-channel', 'file'])), [])
+
+    def test_background_guard_and_keyboard_scenarios(self):
+        n, g, api, mod = self.make('--cmd-channel', 'file', '--background')
+        self.assertIsInstance(g, night.BackgroundGuard)
+        api.fg = OTHER_HWND                                       # the game is in the background
+        res = n.type_console(g, ['Game.UTPPSetMMEnabled(true)'], verify_log=n.utpp_log)
+        self.assertEqual(res, {'Game.UTPPSetMMEnabled(true)': True})
+        with self.assertRaises(night.NeedsKeyboard):
+            n.hold_key(g, 0x2E, 0.05)
+        self.assertTrue(n.scenario_needs_keyboard('shoulder_key'))
+        crouch = next(k for k, sc in n.scenarios.items() if gn.crouch_toggle_steps(sc))
+        self.assertTrue(n.scenario_needs_keyboard(crouch))
+        self.assertFalse(n.scenario_needs_keyboard('walk_forward_stop') if 'walk_forward_stop' in n.scenarios else False)
+        # vehicle exit without keys: straight to the scripted unmount
+        n.cycle = {'steps': []}
+        n.args.exit_pre, n.args.exit_done_wait = 0.1, 0.1
+        n.console_verified = lambda pad, g_, cmd, echo, label, timeout=3.0: '[night] UNMOUNT ok=true'
+        n.poll_pos = lambda g_, pad=None, timeout=None: {'mounted': False}
+        ex = n.exit_vehicle(None, g, None, 'test')
+        self.assertEqual([t['how'] for t in ex['tries']], ['cet_unmount'])
+        self.assertTrue(ex['scripted'])
+
+
 if __name__ == '__main__':
     unittest.main()

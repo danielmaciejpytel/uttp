@@ -48,6 +48,13 @@ Safety: every key/click/pad report goes through ForegroundGuard (game foreground
 ESC/Pause stops the whole night WITHOUT quitting the game (somebody is at the PC). Before each cycle the user idle
 time (GetLastInputInfo) must be >= --min-idle unless the last input was our own. Never run installers while the game
 runs. The system is kept awake (SetThreadExecutionState) only while --go runs; power settings are not changed.
+
+Commands: --cmd-channel console (default) types into the CET overlay; file writes cmd.txt of the test-only CET module
+utpp_testcmd and waits for its "[testcmd] ACK seq=<n>" line in the UTPP log (no overlay, no keys, no clicks; the only
+file the runner writes in the game folder besides the CET overlay state fix of the console mode); auto picks file when
+the session log has the module's READY line. --background (file / auto only): the game may stay behind other windows;
+no focusing, no focus-loss abort, keyboard / mouse input refused (scenarios that need keys are skipped as "needs
+keyboard"), pad reports still sent, ESC/Pause still stop the run.
 """
 from __future__ import annotations
 
@@ -72,8 +79,8 @@ import gt_night as gn  # noqa: E402
 import run as gt_run  # noqa: E402
 import failure_clips  # noqa: E402
 import video_sheets  # noqa: E402
-from gt_input import CET_DIR, SCAN_ENTER, file_size, padd_ping, read_cet_overlay_key, read_since, \
-    wait_for_log  # noqa: E402
+from gt_input import CET_DIR, SCAN_ENTER, TESTCMD_FILE, BackgroundGuard, FileCommandChannel, NeedsKeyboard, file_size, \
+    padd_ping, read_cet_overlay_key, read_since, testcmd_ready, wait_for_log  # noqa: E402
 from gt_scenario import BUTTONS, Scenario, load_scenarios, parse_scenario  # noqa: E402
 from gt_win32 import GAME_EXE, IS_WINDOWS, ForegroundGuard, GuardError, TimerResolution  # noqa: E402
 
@@ -361,6 +368,8 @@ class Night:
         self.auto_pos = False                  # utpp_core 0.5.4 NightAuto POS lines in the log
         self.overlay_grab = self.grab_game     # (guard) -> (gray, w, h) | None; tests replace it
         self.overlay_stats: dict = {}
+        self.channel_mode = None               # resolved --cmd-channel: 'console' | 'file' (auto: from the READY line)
+        self.testcmd_path = TESTCMD_FILE       # tests point it at a scratch folder
 
     # -- bookkeeping --
     def log(self, msg: str) -> None:
@@ -400,7 +409,38 @@ class Night:
 
     def guard(self) -> ForegroundGuard:
         # clock resolved at call time (tests replace night.time with a fake clock)
+        if getattr(self.args, 'background', False):
+            return BackgroundGuard(api=self.api, focus_grace=self.args.focus_grace, clock=lambda: time.monotonic())
         return ForegroundGuard(api=self.api, focus_grace=self.args.focus_grace, clock=lambda: time.monotonic())
+
+    # -- command channel (--cmd-channel console | file | auto) --
+    def use_file(self) -> bool:
+        """True when commands go through the utpp_testcmd file channel. auto: file once the current UTPP session log has
+        the module's READY line (with a Lua loader), else console. --background never falls back to the console."""
+        mode = getattr(self.args, 'cmd_channel', 'console')
+        if mode != 'auto':
+            return mode == 'file'
+        if self.channel_mode is None:
+            log = self.utpp_log or gt_log.newest_log(self.args.log_dir)
+            info = testcmd_ready(read_since(log, 0)) if log else None
+            self.channel_mode = 'file' if info and info[1] != 'none' else 'console'
+            self.log(f'[cmd] --cmd-channel auto -> {self.channel_mode} (READY {info})')
+        if self.channel_mode == 'console' and getattr(self.args, 'background', False):
+            raise CycleError('--background needs the file command channel: no "[testcmd] READY" line in the UTPP log '
+                             '(utpp_testcmd not installed?)')
+        return self.channel_mode == 'file'
+
+    def file_channel(self, guard) -> FileCommandChannel:
+        return FileCommandChannel(self.testcmd_path, sleep=guard.wait, clock=lambda: time.monotonic())
+
+    def file_commands(self, guard, cmds: list[str], log: str | None = None) -> dict:
+        log = log or self.utpp_log or gt_log.newest_log(self.args.log_dir)
+        ch = self.file_channel(guard)
+        res = ch.run_commands(cmds, log_path=log)
+        for c, ok in res.items():
+            if ok is False:
+                self.log(f'[cmd] file channel: no ACK ok for {c[:60]!r} after {ch.last_attempts.get(c)} writes')
+        return res
 
     def check_user_idle(self) -> None:
         idle = idle_seconds()
@@ -454,7 +494,7 @@ class Night:
         """Verify the CET overlay state from one captured frame; if it differs, press the overlay key and re-check
         (max --overlay-tries). A toggle whose effect goes the wrong way (classifier false positive) is undone.
         Returns the final classified state (None = cannot tell, nothing done)."""
-        if not self.args.overlay_check:
+        if not self.args.overlay_check or self.use_file():   # file channel: the overlay is never opened or toggled
             return None
         shot = self.overlay_grab(guard)
         if shot is None:
@@ -495,7 +535,10 @@ class Night:
         return ov
 
     def type_console(self, guard, cmds: list[str], verify_log: str | None = None, fast: bool = False) -> dict:
-        """Open the console, type, close - with the overlay state verified before, while open and after closing."""
+        """Open the console, type, close - with the overlay state verified before, while open and after closing.
+        File channel: the commands are written to cmd.txt and confirmed by their ACK (no overlay, no keys)."""
+        if self.use_file():
+            return self.file_commands(guard, cmds, verify_log)
         try:
             self.ensure_overlay(guard, 'closed', 'before console')
             if verify_log:
@@ -535,6 +578,10 @@ class Night:
             try:
                 pad = self._quit_console(label, res)
                 break
+            except CycleError as e:      # no command channel (--background without the file module): taskkill below
+                res['cet_error'] = str(e)
+                self.log(f'[quit] {e} -> taskkill')
+                break
             except GuardError as e:
                 # cycle 23: once ExitGame is echoed the game window disappears before the process ends -> the focus
                 # guard fires although the quit worked; treat the echo as success instead of refocusing/taskkill
@@ -564,11 +611,15 @@ class Night:
                 except Exception as e:  # noqa: BLE001
                     self.log(f'[quit] no pad for the exit ({e!r}); keyboard only')
             # ExitGame from the console did not close a mounted game (cycle 4): leave the vehicle first
-            if self.ensure_unmounted(pad, g, {'runs': []} if pad else None, f'before {label}'):
-                res['exited_vehicle'] = True
-                still = gn.mounted_state(None, self.log_tail())
-                if still:
-                    res['still_mounted'] = True
+            try:
+                if self.ensure_unmounted(pad, g, {'runs': []} if pad else None, f'before {label}'):
+                    res['exited_vehicle'] = True
+                    still = gn.mounted_state(None, self.log_tail())
+                    if still:
+                        res['still_mounted'] = True
+            except NeedsKeyboard as e:   # --background: the exit needs keys -> ExitGame anyway (taskkill follows if needed)
+                res['exit_skipped'] = str(e)
+                self.log(f'[quit] vehicle exit skipped: {e}')
             if not res.get('still_mounted'):
                 quit_echo = self.console_verified(pad, g, gn.QUIT_CMD, lambda t: '[night] QUIT exitgame' in t, 'quit',
                                                   timeout=2.0)
@@ -603,6 +654,11 @@ class Night:
             if act == 'done':
                 res['path'] = 'taskkill_force' if forced else ('taskkill' if killed else 'cet_exitgame')
                 self._close_crash_reporter(res)
+                if getattr(self.args, 'cmd_channel', 'console') != 'console':
+                    try:                 # no command line is left for the next session (the module skips them anyway)
+                        FileCommandChannel(self.testcmd_path).clear()
+                    except (OSError, ValueError) as e:
+                        self.log(f'[quit] cmd.txt not cleared: {e!r}')
                 break
             if act == 'taskkill':
                 self.runner(['taskkill', '/IM', GAME_EXE], capture_output=True, text=True)
@@ -669,7 +725,7 @@ class Night:
             self.log(f'[launch] CET overlay state check skipped ({e!r})')
 
     def launch(self) -> str:
-        if not self.pids():
+        if not self.pids() and getattr(self.args, 'cmd_channel', 'console') != 'file':
             self.fix_cet_overlay_state()
         for attempt in (1, 2):
             st = self.step(f'launch#{attempt}')
@@ -702,6 +758,9 @@ class Night:
                 time.sleep(self.args.gameplay_settle)
                 self.done(st, **info)
                 self.utpp_log = info['log']
+                self.channel_mode = None     # auto: resolved again from the new session log
+                if getattr(self.args, 'cmd_channel', 'console') == 'auto':
+                    self.use_file()
                 return info['log']
             self.done(st, 'failed', **info)
             self.log(f'[launch] attempt {attempt} timed out after {self.args.launch_timeout:.0f} s: {info}')
@@ -755,7 +814,11 @@ class Night:
             # a modal dialog ("controller disconnected") pauses the game: MMTRACE stops -> Enter + recheck
             if not self.trace_flowing(g):
                 self.log('[arm] no MMTRACE for 3 s: game paused by a dialog? -> Enter (run.dismiss)')
-                info['dialog_dismiss'] = gt_run.dismiss(g, log)
+                try:
+                    info['dialog_dismiss'] = gt_run.dismiss(g, log)
+                except NeedsKeyboard as e:   # --background: Enter is keyboard input
+                    info['dialog_dismiss'] = {'sent': 0, 'verified': None, 'error': str(e)}
+                    self.log(f'[arm] dialog dismiss skipped: {e}')
                 self.touched()
                 info['trace_after_dismiss'] = self.trace_flowing(g)
             if self.args.night_auto and not self.auto_pos:
@@ -827,6 +890,18 @@ class Night:
             g.ensure_focus()
             settles = [float(x) for x in self.args.console_settles.split(',') if x.strip()]
             sent, logged, tries = None, None, 0
+            if self.use_file():          # file channel: wall time right before the marker line is written to cmd.txt
+                settles = []
+                off = file_size(self.utpp_log)
+                ch = self.file_channel(g)
+                cmds = gn.mark_cmds(tag)
+                ch.send(cmds[0], self.utpp_log)
+                r = ch.send(cmds[1], self.utpp_log)
+                tries = r['attempts']
+                if wait_for_log(self.utpp_log, off, lambda t: f'UTPP_MARK {tag}' in t, 3.0, sleep=g.wait,
+                                clock=time.monotonic):
+                    logged = gn.find_line_ts(read_since(self.utpp_log, off), f'UTPP_MARK {tag}')
+                    sent = r['sent_at']
             for settle in settles:
                 tries += 1
                 g.wait(settle)
@@ -996,7 +1071,8 @@ class Night:
         self.console_fast=False (retry path of console_verified) types with the slow per-character timing."""
         if pad is not None:
             pad.release()
-        guard.wait(self.args.console_settle if settle is None else settle)
+        if not self.use_file():          # the settle is for typing into the overlay
+            guard.wait(self.args.console_settle if settle is None else settle)
         return self.type_console(guard, cmds, fast=getattr(self, 'console_fast', True))
 
     def console_verified(self, pad, guard, cmd: str, echo, label: str, timeout: float = 3.0) -> str | None:
@@ -1004,6 +1080,8 @@ class Night:
         settle (default 0.5 / 1.0 / 1.5 s; cycle 2-6: commands typed into the CET console were sometimes lost).
         Returns the log text since the successful attempt, None = LOST. Logs '[cet] <label> ok after N tries'."""
         settles = [float(x) for x in self.args.console_settles.split(',') if x.strip()]
+        if self.use_file():
+            settles = [0.0]              # one send: the file channel retries itself, a second send would run it twice
         log = self.utpp_log or gt_log.newest_log(self.args.log_dir)
         for n, settle in enumerate(settles, start=1):
             off = file_size(log)
@@ -2489,6 +2567,8 @@ class Night:
         if pad is not None and plan is not None:
             tries += [('pad_b_hold2', 'B', 2.0), ('pad_b_hold3', 'B', 3.0)]
         tries += [('key_f_tap', gn.SCAN_F, 0.1)] * self.args.exit_taps
+        if getattr(self.args, 'background', False):   # keys are refused: pad holds, then the scripted unmount
+            tries = [t for t in tries if not isinstance(t[1], int)]
         log = self.utpp_log or gt_log.newest_log(self.args.log_dir)
         off = file_size(log)
         for n, (name, key, hold) in enumerate(tries, start=1):
@@ -2618,6 +2698,14 @@ class Night:
              if e.get('mounted') and not e.get('error') and not e.get('exit_pull_end')]
         return {'episodes': out, 'verdict': 'FAIL' if fails else 'PASS', 'fails': fails}
 
+    def scenario_needs_keyboard(self, name: str) -> bool:
+        """Scenarios that always press keys (skipped with --background before they start; any other key press of a
+        scenario is refused at the api and skips it the same way)."""
+        if name == 'shoulder_key':
+            return True
+        sc = self.scenarios.get(name)
+        return sc is not None and self.args.crouch_button == 'key' and bool(gn.crouch_toggle_steps(sc))
+
     def run_scenarios(self, plan: dict) -> list[dict]:
         st = self.step('scenarios')
         records = []
@@ -2632,9 +2720,12 @@ class Night:
             self.touched()
             # the save may start in a vehicle: on-foot scenarios need V on foot first
             self.left_vehicle_this_cycle = False
-            if self.ensure_unmounted(pad, guard, plan, 'before the scenarios'):
-                self.left_vehicle_this_cycle = True
-                self.log('[scenarios] V was mounted at the start -> left the vehicle first')
+            try:
+                if self.ensure_unmounted(pad, guard, plan, 'before the scenarios'):
+                    self.left_vehicle_this_cycle = True
+                    self.log('[scenarios] V was mounted at the start -> left the vehicle first')
+            except NeedsKeyboard as e:
+                self.log(f'[scenarios] vehicle exit before the scenarios skipped: {e}')
             self.level_camera(pad, guard, plan)
             with TimerResolution():
                 for name in self.names:
@@ -2652,6 +2743,8 @@ class Night:
                         self.log(f'[scenarios] {name} run {r}')
                         rec = {'name': name, 'run': r, 'start': t0}
                         try:
+                            if getattr(self.args, 'background', False) and self.scenario_needs_keyboard(name):
+                                raise NeedsKeyboard(f'{name} uses keyboard input')
                             if name == 'vehicle_mount_exit':
                                 rec.update(self.vehicle_macro(pad, guard, plan))
                                 self.leave_car(pad, guard, plan)
@@ -2683,6 +2776,10 @@ class Night:
                                     rec['verdict'], rec['fails'] = 'FAIL', cfails
                                 if walks:
                                     rec['recovery'] = self.recover(pad, guard, plan, name, sc, res, log_off)
+                        except NeedsKeyboard as e:   # --background: keyboard / mouse input is refused
+                            rec['verdict'], rec['skip_reason'] = 'SKIP', 'needs keyboard'
+                            self.log(f'[scenarios] {name}: skipped, needs keyboard ({e})')
+                            pad.release()
                         except ScenarioTimeout as e:
                             rec['verdict'], rec['fails'] = 'TIMEOUT', [str(e)]
                             self.log(f'[scenarios] {name}: {e}')
@@ -2894,6 +2991,7 @@ class Night:
         self.cycle = {'name': name, 'index': n, 'start': start, 'args': vars(self.args), 'steps': [],
                       'scenarios': [], 'result': None}
         self.utpp_log = None
+        self.channel_mode = None
         rec = None
         plan = {'runs': [], 'created': start}
         quit_game = True
@@ -2935,7 +3033,7 @@ class Night:
             self.cycle['result'] = f'graceful stop: {e}'
             self.log(f'[night] graceful stop: {e} (on-stop={self.args.on_stop})')
             quit_game = self.args.on_stop == 'quit'
-        except CycleError as e:
+        except (CycleError, NeedsKeyboard) as e:
             self.cycle['result'] = f'failed: {e}'
             self.log(f'[night] cycle failed: {e}')
         if rec:
@@ -3095,6 +3193,11 @@ def dry_run(args) -> int:
     item('CET log', os.path.isfile(os.path.join(CET_DIR, 'cyber_engine_tweaks.log')))
     lg = gt_log.newest_log(args.log_dir)
     item('UTPP log dir', bool(lg), lg or args.log_dir)
+    if args.cmd_channel != 'console':
+        item('utpp_testcmd module installed (file channel)', os.path.isfile(os.path.join(os.path.dirname(TESTCMD_FILE),
+                                                                                         'init.lua')))
+        print(f'[--] newest UTPP log READY line: {testcmd_ready(read_since(lg, 0)) if lg else None}')
+    print(f'[--] command channel {args.cmd_channel}, background {args.background}')
     item('vgamepad package (Tools\\pylibs)', os.path.isdir(os.path.join(PROJECT, 'Tools', 'pylibs', 'vgamepad')))
     sc_q = subprocess.run(['sc', 'query', 'ViGEmBus'], capture_output=True, text=True, errors='replace')
     item('ViGEmBus service running', 'RUNNING' in sc_q.stdout)
@@ -3262,6 +3365,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--no-failure-clips', action='store_true',
                    help='do not cut 1x clips of failing steps into Media\\mp4\\<date>_niezaliczone_<run>')
     p.add_argument('--pause-between', type=float, default=30.0, help='seconds between cycles')
+    p.add_argument('--cmd-channel', default='console', choices=['console', 'file', 'auto'],
+                   help='how commands reach the game: console = typed into the CET overlay; file = cmd.txt of the test '
+                        'module utpp_testcmd, confirmed by its ACK in the UTPP log (no overlay, no keys, no clicks); '
+                        'auto = file when the module logged READY in the session, else console')
+    p.add_argument('--background', action='store_true',
+                   help='the game may stay in the background: no focusing, no abort on focus loss; keyboard / mouse '
+                        'input is refused (scenarios that need keys are skipped), pad reports are still sent and the '
+                        'user-abort keys stay active. Needs --cmd-channel file or auto')
     return p
 
 
@@ -3278,6 +3389,8 @@ def validate_args(args) -> list[str]:
     for m in [m.strip() for m in args.vehicle_spawn.split(',') if m.strip()]:
         if m not in ('codeware', 'vtap', 'vhold', 'summon', 'dpad'):
             errs.append(f'--vehicle-spawn: unknown mode {m!r}')
+    if getattr(args, 'background', False) and getattr(args, 'cmd_channel', 'console') == 'console':
+        errs.append('--background needs --cmd-channel file or auto (console typing needs the game in the foreground)')
     return errs
 
 
