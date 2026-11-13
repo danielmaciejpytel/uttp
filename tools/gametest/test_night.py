@@ -2712,5 +2712,645 @@ class LookAheadTests(unittest.TestCase):
         self.assertEqual(json.dumps(base, default=str), json.dumps(with_disc, default=str))
 
 
+class EnemyPureTests(unittest.TestCase):
+    """gt_night: the fist fight target (melee_fists_target) - sets, command texts, echo parsing, verdict."""
+
+    def test_set_and_macro_parts(self):
+        sc = load_scenarios(SCEN)
+        self.assertEqual(gn.resolve_sets('melee_fists_target'), ['melee_fists_target'])
+        self.assertEqual(gn.MACROS['melee_fists_target'], gn.ENEMY_PARTS)
+        self.assertNotIn('melee_fists_target', gn.SETS['all'])                      # needs a Codeware NPC: explicit only
+        self.assertEqual(gn.validate_sets(['melee_fists_target'], sc), [])
+        self.assertNotIn('melee_fists_target', sc)                                   # a night.py macro, no pad scenario
+        missing = {k: v for k, v in sc.items() if k != 'melee_block'}
+        self.assertIn('melee_block', gn.validate_sets(['melee_fists_target'], missing)[0])
+        self.assertTrue(all(part in sc for *_, part in gn.ENEMY_PHASES))
+        self.assertEqual([p[0] for p in gn.ENEMY_PHASES], ['far', 'near', 'orbit', 'block'])
+        self.assertEqual([p[1] for p in gn.ENEMY_PHASES], [2.0, 1.2, 1.2, 1.5])
+        self.assertEqual([p[0] for p in gn.ENEMY_PHASES if p[2]], ['near', 'orbit'])  # the health drop required at 1.2 m
+
+    def test_commands_are_one_ascii_line_with_their_own_tag(self):
+        cmds = [gn.enemy_spawn_cmd('Character.x'), gn.enemy_cmd('far', 2.0, heal=True, define=True),
+                gn.enemy_prep_cmd(True), gn.enemy_prep_cmd(False), gn.enemy_off_cmd(), gn.ENEMY_DEFINE]
+        for c in cmds:
+            self.assertNotIn(chr(10), c)
+            self.assertTrue(all(32 <= ord(ch) < 127 for ch in c))
+        self.assertNotEqual(gn.ENEMY_TAG, gn.NIGHT_TAG)                              # NightPos / mount read NIGHT_TAG as the car
+        self.assertNotIn(gn.NIGHT_TAG, ''.join(cmds))
+        sp = gn.enemy_spawn_cmd('Character.humanoid_tutorial_idle_ma', 6.0)
+        for part in ("TweakDBID.new('Character.humanoid_tutorial_idle_ma')", 's.spawnInView=true', 's.active=true',
+                     's.persistState=false', 's.persistSpawn=false', "s.tags={'" + gn.ENEMY_TAG + "'}", 'a.x+x*6.00',
+                     "TweakDB:GetRecord(id)", 'record missing', "[night] ENEMY_SPAWN ok="):
+            self.assertIn(part, sp)
+        self.assertIn('Immortal', gn.enemy_prep_cmd())
+        self.assertNotIn('Invulnerable', gn.enemy_prep_cmd() + gn.enemy_off_cmd())  # Invulnerable would block the damage
+        self.assertIn('AIA_Neutral', gn.enemy_prep_cmd(True))
+        self.assertNotIn('AIA_Neutral', gn.enemy_prep_cmd(False))
+        self.assertTrue(gn.enemy_prep_cmd().endswith("Game.UTPPLogLine('[night] ENEMY_PREP ok='..tostring(ok)..' '..tostring(e))"))
+        self.assertIn('RemoveGodMode', gn.enemy_off_cmd())
+        self.assertIn("DeleteTagged('" + gn.ENEMY_TAG + "')", gn.enemy_off_cmd())
+        self.assertTrue(gn.enemy_off_cmd().endswith("Game.UTPPLogLine('[night] ENEMY_OFF ok=true')"))
+        c = gn.enemy_cmd('near', 1.2, heal=True)
+        self.assertTrue(c.startswith('local ok,e=pcall(function() return UTPPENEMY(1.20,true) end)'))
+        self.assertIn('label=near', c)
+        self.assertTrue(gn.enemy_cmd('x', define=True).startswith('UTPPENEMY=function(D,H)'))
+        self.assertIn('UTPPENEMY(nil,false)', gn.enemy_cmd('wait'))
+        # typed at ~12 ms per character: later calls are short, the one-off commands stay small
+        self.assertLess(len(gn.enemy_cmd('far', 2.0, heal=True)), 200)
+        self.assertLess(len(gn.enemy_cmd('wait', define=True)), 1500)
+        self.assertLess(len(gn.enemy_spawn_cmd('Character.humanoid_tutorial_idle_ma')), 900)
+        self.assertLess(len(gn.enemy_prep_cmd(True)), 600)
+        self.assertLess(len(gn.enemy_off_cmd()), 600)
+        self.assertEqual(gn.nightauto_cmd(0.5), 'GetMod("utpp_core").NightAuto(true, 0.50, "UTPPNight")')   # unchanged
+        self.assertEqual(gn.nightauto_cmd(0.2, True, gn.ENEMY_TAG),
+                         'GetMod("utpp_core").NightAuto(true, 0.20, "' + gn.ENEMY_TAG + '")')
+
+    def test_parse_enemy(self):
+        txt = ('[2026-11-13 10:00:00.000] [info] [1] [UTPP] UTPP CET [night] ENEMY ok=true label=far found=1 pre_d2=2.31 '
+               'pre_hv=177.0 pre_hp=88.5 att=2 act=true heal=true moved=true')
+        e = gn.parse_enemy(txt)
+        self.assertEqual((e['ok'], e['label'], e['found'], e['d2'], e['hp'], e['hv']), (True, 'far', True, 2.31, 88.5, 177.0))
+        self.assertEqual((e['att'], e['att_name'], e['act']), (2, 'hostile', True))
+        self.assertEqual((e['heal'], e['moved']), (True, True))
+        prep = gn.parse_enemy('[night] ENEMY_PREP ok=true god=true attset=false\n[night] ENEMY ok=true label=x found=0',
+                              'ENEMY_PREP')
+        self.assertEqual((prep['ok'], prep['god'], prep['attset']), (True, True, False))
+        self.assertIsNone(gn.parse_enemy('[night] ENEMY_SPAWN ok=true Character.x'))     # another tag is not this echo
+        self.assertIsNone(gn.parse_enemy(''))
+        gone = gn.parse_enemy("[night] ENEMY ok=false label=far [string]:1: attempt to call global 'UTPPENEMY' (a nil value)")
+        self.assertFalse(gone['ok'])
+        self.assertFalse(gn.parse_enemy('[night] ENEMY ok=true label=w found=0')['found'])
+        e = gn.parse_enemy('[night] ENEMY ok=true label=w found=1 pre_d2=1.00 pre_hp=- pre_hv=- att=AIA_Friendly act=0')
+        self.assertEqual((e['hp'], e['hv'], e['att'], e['act']), (None, None, 0, False))   # unreadable / enum text
+        last = gn.parse_enemy('[night] ENEMY ok=true label=a found=1\n[night] ENEMY ok=true label=b found=0')
+        self.assertEqual(last['label'], 'b')
+
+    def test_hp_drop(self):
+        self.assertEqual(gn.enemy_hp_drop({'hv': 100.0, 'hp': 100.0}, {'hv': 70.0, 'hp': 70.0}), 30.0)
+        self.assertEqual(gn.enemy_hp_drop({'hv': None, 'hp': 100.0}, {'hv': None, 'hp': 91.0}), 9.0)   # percent fallback
+        self.assertIsNone(gn.enemy_hp_drop({'hv': None, 'hp': None}, {'hv': 1.0, 'hp': 1.0}))
+        self.assertIsNone(gn.enemy_hp_drop(None, {'hv': 1.0}))
+        self.assertIsNone(gn.enemy_hp_drop({'hv': 1.0}, None))
+
+    def test_meleeaim_stats_and_distances(self):
+        def aim(src, tp, ty, p=0.0, y=0.0, rp=None, ry=None):
+            return (f'[2026-11-13 10:00:00.000] [info    ] [ 1] [UTPP] UTPP MELEEAIM src={src} tiltW=1.00 tgtPitch={tp} tgtYaw={ty} '
+                    f'rawPitch={tp if rp is None else rp} rawYaw={ty if ry is None else ry} pitch={p} yaw={y} flags=0x0 '
+                    'maxUp=20 maxDown=35 hz=10 calls=1 applied=1 busy=0 reapplied=0 fails=0')
+        text = chr(10).join([aim('cam', -14.0, 1.0), aim('lock', -3.5, 12.0, -3.0, 11.0),
+                             aim('lock', 0.5, -9.0, 0.5, -8.0, rp=2.5, ry=-61.5)])     # tgtYaw is clamped, rawYaw is not
+        st = gn.meleeaim_stats(text)
+        self.assertEqual((st['lines'], st['src'], st['lock']), (3, {'cam': 1, 'lock': 2}, 2))
+        self.assertEqual((st['lock_pitch'], st['lock_yaw']), ((-3.5, 0.5), (-9.0, 12.0)))
+        self.assertEqual((st['lock_raw_pitch'], st['lock_raw_yaw']), ((-3.5, 2.5), (-61.5, 12.0)))
+        self.assertEqual((st['applied_pitch_max'], st['applied_yaw_max']), (3.0, 11.0))
+        empty = gn.meleeaim_stats('nothing')
+        self.assertEqual((empty['lines'], empty['lock'], empty['lock_pitch'], empty['lock_raw_yaw']), (0, 0, None, None))
+        pos = chr(10).join([
+            '[2026-11-13 10:00:00.000] [info] [1] [UTPP] UTPP CET [night] POS p=0.00,0.00,0.00 cf=0.000,1.000 v=0.00,2.00,0.00,1.000,0.000 src=tag w=0 m=0 n=1',
+            '[2026-11-13 10:00:00.200] [info] [1] [UTPP] UTPP CET [night] POS p=0.00,0.50,0.00 cf=0.000,1.000 v=0.00,2.00,0.00,1.000,0.000 src=tag w=0 m=0 n=2',
+            '[2026-11-13 10:00:00.400] [info] [1] [UTPP] UTPP CET [night] POS p=0.00,0.50,0.00 cf=0.000,1.000 v=nil src=none w=0 m=0 n=3'])
+        ds = gn.target_distance_stats(pos)
+        self.assertEqual(ds, {'n': 2, 'first': 2.0, 'min': 1.5, 'max': 2.0, 'last': 1.5})
+        self.assertIsNone(gn.target_distance_stats('[night] POS p=0.00,0.00,0.00 cf=0.000,1.000 v=nil src=none'))
+
+    def test_evaluate(self):
+        spawn = {'found': True, 'att': 2, 'act': True}
+
+        def ph(name, lock, drop, required=False, placed=True, lines=3):
+            return {'name': name, 'required': required, 'lock': lock, 'drop': drop, 'placed': placed,
+                    'aim': {'lines': lines, 'src': {k: v for k, v in (('lock', lock), ('cam', lines - lock)) if v}}}
+        good = [ph('far', 0, 0.0), ph('near', 2, 30.0, True), ph('orbit', 1, 30.0, True), ph('block', 0, 0.0)]
+        r = gn.enemy_evaluate(spawn, good)
+        self.assertEqual((r['fails'], r['warns'], r['locks']), ([], [], 3))
+        self.assertEqual(r['hits'], {'far': False, 'near': True, 'orbit': True, 'block': False})
+        r = gn.enemy_evaluate(spawn, [ph('far', 0, 0.0), ph('near', 0, 30.0, True)])
+        self.assertIn('no `src=lock`', r['fails'][0])
+        self.assertIn("{'cam': 6}", r['fails'][0])
+        r = gn.enemy_evaluate(spawn, [ph('near', 0, 30.0, True, lines=0)])
+        self.assertIn('no `MELEEAIM` line at all', r['fails'][0])
+        r = gn.enemy_evaluate(spawn, [ph('near', 1, 0.0, True)])
+        self.assertTrue(r['fails'] and 'health did not drop' in r['fails'][0])
+        r = gn.enemy_evaluate(spawn, [ph('near', 1, None, True)])
+        self.assertIn('health unreadable', r['fails'][0])
+        r = gn.enemy_evaluate(spawn, [ph('near', 1, 30.0, True), ph('orbit', 0, 0.0, True)])
+        self.assertEqual(len(r['fails']), 1)                                         # orbit is a close-range phase too
+        self.assertIn('orbit: health did not drop', r['fails'][0])
+        self.assertIn('does not follow the camera', r['fails'][0])
+        r = gn.enemy_evaluate(spawn, [ph('near', 1, 30.0, True), ph('far', 0, 0.0), ph('block', 0, 0.0)])
+        self.assertEqual((r['fails'], r['warns']), ([], []))                         # far / block: report only
+        r = gn.enemy_evaluate(spawn, [ph('near', 1, 0.0, True, placed=False)])
+        self.assertIn('near: the placement command was lost', r['fails'][0])
+        r = gn.enemy_evaluate(dict(spawn, att=0), [])
+        self.assertIn('Friendly', r['fails'][0])
+        self.assertEqual(len(r['fails']), 1)                                         # no phases: no lock noise
+        r = gn.enemy_evaluate(None, [])
+        self.assertIn('spawn failed', r['fails'][0])
+        r = gn.enemy_evaluate({'found': False}, [])
+        self.assertIn('never found', r['fails'][0])
+        r = gn.enemy_evaluate(dict(spawn, act=False, att=None), [ph('near', 1, 30.0, True)])
+        self.assertEqual(r['fails'], [])
+        self.assertEqual(len(r['warns']), 2)
+
+    def test_punch_report_cmd(self):
+        self.assertEqual(gn.punch_report_cmd('py', 'a.py', 'x.log'), ['py', '-I', 'a.py', 'x.log'])
+
+    def test_options(self):
+        a = night.build_parser().parse_args(['--set', 'melee_fists_target'])
+        self.assertEqual(a.enemy_record.split(',')[0], 'Character.humanoid_tutorial_idle_ma')
+        self.assertEqual((a.enemy_spawn_dist, a.enemy_spawn_wait, a.punch_report), (6.0, 6.0, False))
+        a = night.build_parser().parse_args(['--enemy-record', 'Character.a,Character.b', '--punch-report'])
+        self.assertEqual(a.enemy_record, 'Character.a,Character.b')
+        self.assertTrue(a.punch_report)
+
+
+def _lua_dll():
+    d = HERE
+    for _ in range(6):
+        cand = os.path.join(d, 'Tools', 'lua-5.1.5', 'lua51.dll')
+        if os.path.isfile(cand):
+            return cand
+        d = os.path.dirname(d)
+    return None
+
+
+# A tiny CET: just enough of the game API for the enemy commands (their real names and call shapes). The commands are
+# plain Lua 5.1, so the official interpreter runs them: syntax, control flow, string building and the echo are checked here;
+# only the engine side (what the real Game / TweakDB do) stays an assumption.
+_LUA_STUB = r"""
+LOG={} MISSING={} ATT=2 TAGGED={} HEALTH=80 HEALOK=true
+Game={} function Game.UTPPLogLine(s) LOG[#LOG+1]=s end
+local function V4(x,y,z,w) local v={x=x,y=y,z=z,w=w} v.ToRotation=function(self) return {yaw=math.deg(math.atan2(-self.x,self.y))} end return v end
+Vector4={new=V4}
+EulerAngles={new=function(p,r,y) return {yaw=y,ToQuat=function() return {} end} end}
+TweakDBID={new=function(n) return {name=n} end}
+TweakDB={GetRecord=function(self,id) if MISSING[id.name] then return nil end return {name=id.name} end}
+Enum={new=function(t,v) return t..'.'..v end}
+EnumInt=function(x) return ATT end
+CName={new=function(n) return n end}
+TDBID={ToStringDEBUG=function(id) return id end}
+DynamicEntitySpec={new=function() return {} end}
+PLAYER={pos=V4(0,0,0,1)}
+function PLAYER:GetWorldPosition() return self.pos end
+function PLAYER:GetAttitudeAgent() return 'pagent' end
+Game.GetPlayer=function() return PLAYER end
+Game.GetCameraSystem=function() return {GetActiveCameraForward=function() return V4(0,1,0,0) end} end
+local function npc(pos)
+  local n={pos=pos}
+  function n:GetWorldPosition() return self.pos end
+  function n:GetEntityID() return 'npc1' end
+  function n:GetAttitudeTowards(p) return ATT end
+  function n:IsActive() return true end
+  function n:GetRecordID() return 'Character.stub' end
+  function n:GetAttitudeAgent() return {SetAttitudeTowards=function(self,a,att) ATT=1 end} end
+  return n
+end
+DES={IsReady=function() return true end, DeleteTagged=function(self,t) TAGGED[t]=nil end,
+  CreateEntity=function(self,s) TAGGED[s.tags[1]]={npc(s.position)} return 'id' end,
+  GetTagged=function(self,t) return TAGGED[t] or {} end}
+Game.GetDynamicEntitySystem=function() return DES end
+POOL={GetStatPoolValue=function(self,i,t,perc) return HEALTH end,
+  RequestSettingStatPoolValue=function(self,i,t,v,p,perc) if not HEALOK then error('no') end HEALTH=v end}
+Game.GetStatPoolsSystem=function() return POOL end
+Game.GetGodModeSystem=function() return {AddGodMode=function(self,id,t,s) GODSET=t..'/'..s end,
+  RemoveGodMode=function(self,id,t,s) GODREM=t..'/'..s end} end
+Game.GetTeleportationFacility=function() return {Teleport=function(self,o,pos,ang) o.pos=pos end} end
+"""
+
+
+class EnemyLuaTests(unittest.TestCase):
+    """The enemy console commands executed by the official Lua 5.1 against the stub above (skipped without the DLL)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import ctypes
+        dll = _lua_dll()
+        if dll is None:
+            raise unittest.SkipTest('Tools\\lua-5.1.5\\lua51.dll not found')
+        cls.ct = ctypes
+        lua = ctypes.CDLL(dll)
+        lua.luaL_newstate.restype = ctypes.c_void_p
+        lua.luaL_openlibs.argtypes = [ctypes.c_void_p]
+        lua.luaL_loadstring.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        lua.lua_pcall.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+        lua.lua_tolstring.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+        lua.lua_tolstring.restype = ctypes.c_char_p
+        lua.lua_settop.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lua.lua_close.argtypes = [ctypes.c_void_p]
+        cls.lua = lua
+
+    def setUp(self):
+        self.L = self.lua.luaL_newstate()
+        self.lua.luaL_openlibs(self.L)
+        self.run_chunk(_LUA_STUB)
+
+    def tearDown(self):
+        self.lua.lua_close(self.L)
+
+    def run_chunk(self, code, want=False):
+        lua = self.lua
+        rc = lua.luaL_loadstring(self.L, code.encode('ascii'))
+        if rc == 0:
+            rc = lua.lua_pcall(self.L, 0, 1 if want else 0, 0)
+        out = lua.lua_tolstring(self.L, -1, None) if (rc or want) else b''
+        if rc:
+            self.fail(f'Lua error: {out.decode(errors="replace")}\n{code[:200]}')
+        lua.lua_settop(self.L, 0)
+        return out.decode()
+
+    def log(self):
+        return self.run_chunk("return table.concat(LOG, '\\n')", want=True)
+
+    def lua_str(self, expr):
+        return self.run_chunk(f'return tostring({expr})', want=True)
+
+    def test_spawn_state_place_off(self):
+        self.run_chunk(gn.enemy_spawn_cmd('Character.humanoid_tutorial_idle_ma', 6.0))
+        self.assertIn('[night] ENEMY_SPAWN ok=true', self.log())
+        # spawned 6 m ahead along the camera forward (0,1), facing V (yaw 180)
+        self.assertEqual(self.lua_str(f"TAGGED['{gn.ENEMY_TAG}'][1].pos.y"), '6')
+        self.run_chunk(gn.enemy_cmd('wait', define=True))
+        e = gn.parse_enemy(self.log(), 'ENEMY')
+        self.assertEqual((e['ok'], e['label'], e['found'], e['d2'], e['hp'], e['hv'], e['att'], e['act']),
+                         (True, 'wait', True, 6.0, 80.0, 80.0, 2, True))
+        self.run_chunk(gn.enemy_prep_cmd(True))
+        e = gn.parse_enemy(self.log(), 'ENEMY_PREP')
+        self.assertEqual((e['ok'], e['god'], e['attset']), (True, True, True))
+        self.assertEqual(self.lua_str('ATT'), '1')                                   # Neutral now
+        self.assertEqual(self.lua_str('GODSET'), 'gameGodModeType.Immortal/' + gn.ENEMY_TAG)
+        self.run_chunk(gn.enemy_cmd('near', 1.2, heal=True))                         # the global is already defined
+        e = gn.parse_enemy(self.log())
+        self.assertEqual((e['label'], e['moved'], e['heal'], e['hp'], e['att']), ('near', True, True, 80.0, 1))
+        self.assertEqual(self.lua_str('HEALTH'), '100')                              # restored after the read
+        self.assertEqual(self.lua_str(f"string.format('%.2f', TAGGED['{gn.ENEMY_TAG}'][1].pos.y)"), '1.20')
+        self.assertEqual(self.lua_str(f"TAGGED['{gn.ENEMY_TAG}'][1].pos.z"), '0.05')
+        self.run_chunk(gn.enemy_off_cmd())
+        log = self.log()
+        self.assertTrue(log.rstrip().endswith('[night] ENEMY_OFF ok=true'))
+        self.assertEqual(gn.parse_enemy(log)['label'], 'off')
+        self.assertEqual(self.lua_str(f"TAGGED['{gn.ENEMY_TAG}']"), 'nil')            # deleted
+        self.assertEqual(self.lua_str('GODREM'), 'gameGodModeType.Immortal/' + gn.ENEMY_TAG)
+
+    def test_missing_record_and_no_entity(self):
+        self.run_chunk("MISSING['Character.gone']=true")
+        self.run_chunk(gn.enemy_spawn_cmd('Character.gone'))
+        self.assertIn('[night] ENEMY_SPAWN ok=false', self.log())
+        self.assertIn('record missing', self.log())
+        self.assertEqual(self.lua_str(f"TAGGED['{gn.ENEMY_TAG}']"), 'nil')
+        self.run_chunk(gn.enemy_cmd('wait', define=True))
+        self.assertFalse(gn.parse_enemy(self.log())['found'])                        # nothing spawned: found=0
+        self.run_chunk(gn.enemy_off_cmd())                                           # off without a target: still echoes
+        self.assertTrue(self.log().rstrip().endswith('[night] ENEMY_OFF ok=true'))
+
+    def test_call_without_definition_fails_cleanly_and_unreadable_health(self):
+        self.run_chunk(gn.enemy_cmd('far', 2.0))                                     # no UTPPENEMY global yet
+        e = gn.parse_enemy(self.log())
+        self.assertFalse(e['ok'])
+        self.assertIn('UTPPENEMY', e['raw'])
+        self.run_chunk(gn.enemy_spawn_cmd('Character.x'))
+        self.run_chunk('POOL.GetStatPoolValue=function() error("no pool") end HEALOK=false')
+        self.run_chunk(gn.enemy_cmd('prep', 2.0, heal=True, define=True))
+        e = gn.parse_enemy(self.log())
+        self.assertEqual((e['ok'], e['found'], e['hp'], e['hv'], e['heal'], e['moved'], e['att']),
+                         (True, True, None, None, False, True, 2))
+
+
+class EnemyMacroTests(unittest.TestCase):
+    """enemy_macro with stubbed console / play / camera: the target is a small world (see _EnemyWorld)."""
+
+    def setUp(self):
+        self._time = night.time
+        night.time = FakeTime()
+        fd, self.log = tempfile.mkstemp(suffix='.log')
+        os.close(fd)
+        self.n = EnsureClosedTests.make(self, FakeApi(), None)
+        self.n.utpp_log = self.log
+        self.n.scen_log_off = 0
+        self.n.cycle = {'name': 't', 'steps': []}
+        self.n.auto_pos = True
+        self.n.recover = lambda *a, **k: {'suspect': False}
+        self._rel = gn.PUNCH_REPORT_REL
+
+    def tearDown(self):
+        night.time = self._time
+        gn.PUNCH_REPORT_REL = self._rel
+        os.remove(self.log)
+
+    def world(self, **kw):
+        return _EnemyWorld(self, **kw)
+
+    def run_macro(self, w, args=()):
+        self.n.args = night.build_parser().parse_args(['--quit-timeout', '3', '--out-root', 'unused',
+                                                       '--log-dir', self.n.args.log_dir, *args])
+        return self.n.enemy_macro(_Pad(), _G(), {'runs': []})
+
+    def test_pass(self):
+        w = self.world()
+        r = self.run_macro(w)
+        self.assertEqual((r['verdict'], r['fails']), ('PASS', []), r)
+        self.assertEqual(w.played, ['melee_draw', 'melee_punch', 'melee_punch', 'melee_punch', 'melee_block'])
+        labels = [lab for lab, _ in w.cmds]
+        self.assertEqual(labels, ['nightauto_enemy', 'enemy_spawn', 'enemy/wait', 'enemy_prep', 'fists_cmd',
+                                  'enemy/far', 'enemy/near', 'enemy/orbit', 'enemy/block', 'enemy_off',
+                                  'nightauto_restore', 'fists_off_cmd'])
+        cmds = dict((lab, c) for lab, c in w.cmds)
+        self.assertEqual(cmds['nightauto_enemy'], gn.nightauto_cmd(0.2, True, gn.ENEMY_TAG))
+        self.assertEqual(cmds['nightauto_restore'], gn.nightauto_cmd(self.n.args.night_auto_period))   # the vehicle tag again
+        self.assertEqual(cmds['enemy_spawn'], gn.enemy_spawn_cmd(gn.ENEMY_RECORDS[0], 6.0))
+        self.assertEqual(cmds['enemy_prep'], gn.enemy_prep_cmd(False))
+        self.assertEqual(cmds['enemy/near'], gn.enemy_cmd('near', 1.2, heal=True))
+        self.assertEqual(cmds['enemy_off'], gn.enemy_off_cmd())
+        self.assertEqual(sum('UTPPENEMY=function' in c for _, c in w.cmds), 1)       # defined once (the first state call)
+        ph = {p['name']: p for p in r['enemy']['phases']}
+        self.assertEqual({k: p['lock'] for k, p in ph.items()}, {'far': 2, 'near': 2, 'orbit': 2, 'block': 0})
+        self.assertEqual(r['enemy']['hits'], {'far': False, 'near': True, 'orbit': True, 'block': False})
+        self.assertEqual((ph['near']['drop'], ph['far']['drop']), (30.0, 0.0))
+        self.assertEqual(ph['orbit']['orbit_done_deg'], 60.0)
+        self.assertEqual(ph['near']['dist']['min'], 1.2)
+        self.assertEqual(r['enemy']['record'], gn.ENEMY_RECORDS[0])
+        self.assertEqual(r['enemy']['spawn']['att_name'], 'hostile')
+        self.assertTrue(r['enemy']['locks'] >= 1)
+        json.dumps(r, default=str)                                                   # cycle.json serialisable
+        self.assertEqual(w.state['spawned'], None)                                   # the target is gone at the end
+
+    def test_primary_record_missing_uses_the_fallback(self):
+        w = self.world(missing=(gn.ENEMY_RECORDS[0],))
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'PASS', r)
+        self.assertEqual(r['enemy']['tried'], list(gn.ENEMY_RECORDS[:2]))
+        self.assertEqual(r['enemy']['record'], gn.ENEMY_RECORDS[1])
+        spawns = [c for lab, c in w.cmds if lab == 'enemy_spawn']
+        self.assertEqual(spawns, [gn.enemy_spawn_cmd(gn.ENEMY_RECORDS[0], 6.0), gn.enemy_spawn_cmd(gn.ENEMY_RECORDS[1], 6.0)])
+        self.assertEqual([c['ok'] for c in r['checks'] if c['phase'] == 'enemy_spawn'], [False, True])
+        self.assertEqual([lab for lab, _ in w.cmds].count('enemy/wait'), 1)          # no wait for a record that is missing
+
+    def test_state_echo_lost_then_found_and_global_lost(self):
+        w = self.world(lose=['enemy/wait'], wait_polls=2, drop_global_at='enemy/near')
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'PASS', r)
+        labels = [lab for lab, _ in w.cmds]
+        self.assertEqual(labels.count('enemy/wait'), 3)                              # lost, not found yet, found
+        near = [c for lab, c in w.cmds if lab == 'enemy/near']
+        self.assertEqual(len(near), 2)                                               # the global was gone: sent again
+        self.assertNotIn('UTPPENEMY=function', near[0])
+        self.assertIn('UTPPENEMY=function', near[1])
+
+    def test_no_entity_within_the_wait_tries_the_next_record_and_fails(self):
+        w = self.world(wait_polls=10 ** 6)
+        r = self.run_macro(w, ['--enemy-spawn-wait', '1.0'])
+        self.assertEqual(r['verdict'], 'FAIL')
+        self.assertEqual(r['enemy']['tried'], list(gn.ENEMY_RECORDS))
+        self.assertTrue(any('never found' in f or 'spawn failed' in f for f in r['fails']), r['fails'])
+        self.assertEqual(w.played, [])                                               # no punch without a target
+        self.assertIn('enemy_off', [lab for lab, _ in w.cmds])                       # cleaned up all the same
+
+    def test_friendly_target_fails_after_the_neutral_alternative(self):
+        w = self.world(att=0, att_after_neutral=0)
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'FAIL')
+        self.assertTrue(any('Friendly' in f for f in r['fails']), r['fails'])
+        self.assertEqual(w.played, [])                                               # phases skipped
+        prep = [c for lab, c in w.cmds if lab == 'enemy_prep']
+        self.assertEqual(prep, [gn.enemy_prep_cmd(True)])
+        self.assertIn('enemy/recheck', [lab for lab, _ in w.cmds])
+        self.assertIn('enemy_off', [lab for lab, _ in w.cmds])
+
+    def test_friendly_target_made_neutral_runs_the_phases(self):
+        w = self.world(att=0, att_after_neutral=1)
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'PASS', r)
+        self.assertEqual(r['enemy']['spawn']['att'], 1)
+        self.assertEqual(len(w.played), 5)
+
+    def test_cleanup_when_a_phase_raises(self):
+        w = self.world(raise_in=('melee_punch', 2))
+        with self.assertRaises(night.CycleError):
+            self.run_macro(w)
+        labels = [lab for lab, _ in w.cmds]
+        self.assertEqual(labels[-3:], ['enemy_off', 'nightauto_restore', 'fists_off_cmd'])    # the finally ran everything
+        self.assertEqual(labels.count('enemy_off'), 1)
+        self.assertEqual(w.state['spawned'], None)
+
+    def test_failures_no_lock_no_drop_unreadable_health(self):
+        w = self.world(lock=())
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'FAIL')
+        self.assertIn('no `src=lock`', ' '.join(r['fails']))
+        self.assertEqual(r['enemy']['locks'], 0)
+        w = self.world(drops={'far': 0.0, 'near': 0.0, 'orbit': 0.0, 'block': 0.0})
+        r = self.run_macro(w)
+        self.assertTrue(any('near: health did not drop' in f for f in r['fails']), r['fails'])
+        self.assertTrue(any('orbit: health did not drop' in f for f in r['fails']), r['fails'])
+        w = self.world(hp_unreadable=True)
+        r = self.run_macro(w)
+        self.assertTrue(any('health unreadable' in f for f in r['fails']), r['fails'])
+
+    def test_orbit_without_a_hit_fails_but_far_does_not(self):
+        w = self.world(drops={'far': 0.0, 'near': 30.0, 'orbit': 0.0, 'block': 0.0})
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'FAIL')
+        self.assertEqual(len(r['fails']), 1)
+        self.assertIn('orbit: health did not drop', r['fails'][0])
+        self.assertEqual(r['enemy']['hits'], {'far': False, 'near': True, 'orbit': False, 'block': False})
+        w = self.world(drops={'far': 30.0, 'near': 30.0, 'orbit': 30.0, 'block': 0.0})
+        r = self.run_macro(w)
+        self.assertEqual((r['verdict'], r['fails']), ('PASS', []))
+        self.assertEqual(r['enemy']['hits']['far'], True)                            # reported, not required
+
+    def test_cleanup_after_a_scenario_timeout_disarms_the_deadline(self):
+        self.n.scenario_deadline = 1e12
+        w = self.world(raise_in=('melee_punch', 2, night.ScenarioTimeout))
+        with self.assertRaises(night.ScenarioTimeout):
+            self.run_macro(w)
+        self.assertIsNone(self.n.scenario_deadline)                                  # the cleanup could not re-raise it
+        labels = [lab for lab, _ in w.cmds]
+        self.assertEqual(labels[-3:], ['enemy_off', 'nightauto_restore', 'fists_off_cmd'])
+        self.assertEqual(w.state['spawned'], None)
+
+    def test_health_baseline_is_the_first_placement_read(self):
+        w = self.world(spawn_hv=50.0)                    # the pool was not initialised yet at the first read
+        r = self.run_macro(w)
+        self.assertEqual((r['verdict'], r['fails']), ('PASS', []))
+        self.assertEqual({p['name']: p['drop'] for p in r['enemy']['phases']}['near'], 30.0)
+
+    def test_god_and_heal_failures_are_warnings(self):
+        w = self.world(god_ok=False, heal_ok=False)
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'PASS')                                       # the drop is measured from the state read
+        self.assertTrue(any('health restore' in x for x in r['warnings']), r['warnings'])
+        w = self.world(god_ok=False)
+        r = self.run_macro(w)
+        self.assertEqual(r['verdict'], 'PASS')
+        self.assertTrue(any('Immortal' in x for x in r['warnings']), r['warnings'])
+
+    def test_no_cet_fists_skips_the_fists_commands(self):
+        w = self.world()
+        r = self.run_macro(w, ['--no-cet-fists'])
+        self.assertEqual(r['verdict'], 'PASS', r)
+        self.assertNotIn('fists_cmd', [lab for lab, _ in w.cmds])
+        self.assertNotIn('fists_off_cmd', [lab for lab, _ in w.cmds])
+
+    def test_without_night_auto_the_tag_is_not_switched(self):
+        self.n.auto_pos = False
+        w = self.world()
+        r = self.run_macro(w)
+        self.assertNotIn('nightauto_enemy', [lab for lab, _ in w.cmds])
+        self.assertNotIn('nightauto_restore', [lab for lab, _ in w.cmds])
+
+    def test_punch_report_hook(self):
+        w = self.world()
+        gn.PUNCH_REPORT_REL = os.path.join(tempfile.gettempdir(), 'no_such_punch_direction_report.py')
+        r = self.run_macro(w, ['--punch-report'])
+        self.assertEqual(r['enemy']['report'], {'ran': False, 'skipped': 'script missing'})
+        self.assertEqual(r['verdict'], 'PASS')
+        fd, script = tempfile.mkstemp(suffix='.py')
+        os.close(fd)
+        try:
+            gn.PUNCH_REPORT_REL = script
+            calls = []
+
+            class _P:
+                returncode, stdout, stderr = 0, 'ok', ''
+            self.n.runner = lambda cmd, **k: calls.append(cmd) or _P()
+            w = self.world()
+            r = self.run_macro(w, ['--punch-report'])
+            self.assertEqual(calls, [gn.punch_report_cmd(sys.executable, script, self.log)])
+            self.assertEqual((r['enemy']['report']['ran'], r['enemy']['report']['rc']), (True, 0))
+            w = self.world()
+            r = self.run_macro(w)                                                    # option off: nothing is run
+            self.assertEqual(len(calls), 1)
+            self.assertIsNone(r['enemy']['report'])
+        finally:
+            os.remove(script)
+
+
+class _EnemyWorld:
+    """Stub game for enemy_macro: console_verified answers the harness commands from a small world (target position,
+    health, attitude, spawn state), play() writes the log lines of a played pad part (mask lines, MELEEAIM, POS with the
+    target in v=) and applies the punch damage of the current phase."""
+
+    def __init__(self, test, missing=(), wait_polls=1, att=2, att_after_neutral=1, heal_ok=True, god_ok=True, drops=None,
+                 lock=('far', 'near', 'orbit'), lose=(), drop_global_at=None, raise_in=None, hp_unreadable=False,
+                 spawn_hv=None):
+        self.t, self.n, self.log = test, test.n, test.log
+        open(self.log, 'w').close()                                                  # a fresh log per world
+        self.missing, self.wait_polls, self.att, self.att_neutral = set(missing), wait_polls, att, att_after_neutral
+        self.heal_ok, self.god_ok, self.lock, self.lose = heal_ok, god_ok, set(lock), list(lose)
+        self.drops = drops if drops is not None else {'far': 0.0, 'near': 30.0, 'orbit': 30.0, 'block': 0.0}
+        self.drop_global_at, self.raise_in, self.hp_unreadable = drop_global_at, raise_in, hp_unreadable
+        self.k = 0.0
+        self.cmds, self.played, self.counts = [], [], {}
+        self.state = {'spawned': None, 'polls': 0, 'hv': 100.0, 'dist': 6.0, 'cur': None, 'neutral': False,
+                      'defined': False, 'god': False}
+        self.spawn_hv = spawn_hv                                                     # health seen by the very first read
+        test.n.play = self.play
+        test.n.console_verified = self.console_verified
+        test.n.poll_pos = lambda g, pad=None, timeout=None: {'p': (0.0, 0.0, 0.0), 'cf': (0.0, 1.0), 'v': None, 'vr': None}
+        test.n.camera_align = lambda pad, g, plan, known, target, ep, tol=None, why='': dict(
+            known, cf=gn.rotate_stick(*known['cf'], 60.0))
+
+    def emit(self, body, cet=False):
+        self.k += 0.02
+        ts = f'[2026-10-07 23:00:{self.k:06.3f}] [info    ] [ 1] [UTPP] UTPP '
+        with open(self.log, 'a', encoding='utf-8') as f:
+            f.write(ts + ('CET ' if cet else '') + body + chr(10))
+
+    def text(self):
+        with open(self.log, encoding='utf-8') as f:
+            return f.read()
+
+    def enemy_body(self, label, call):
+        s = self.state
+        found = s['spawned'] is not None and s['polls'] >= self.wait_polls
+        if not found:
+            return f'[night] ENEMY ok=true label={label} found=0'
+        att = self.att_neutral if s['neutral'] else self.att
+        hp = '-' if self.hp_unreadable else f'{s["hv"]:.1f}'
+        if self.spawn_hv is not None and label == 'wait':
+            hp = f'{self.spawn_hv:.1f}'
+        body = (f'[night] ENEMY ok=true label={label} found=1 pre_d2={s["dist"]:.2f} pre_hv={hp} pre_hp={hp} '
+                f'att={att} act=true')
+        dist, heal = call
+        if heal == 'true':
+            body += f' heal={"true" if self.heal_ok else "false"}'
+            if self.heal_ok:
+                s['hv'] = 100.0
+        if dist != 'nil':
+            body += ' moved=true'
+            s['dist'] = float(dist)
+        return body
+
+    def console_verified(self, pad, g, cmd, echo, label, timeout=3.0):
+        self.cmds.append((label, cmd))
+        s = self.state
+        night.time.sleep(1.0)                                                        # a typed command takes a moment
+        if label in self.lose:
+            self.lose.remove(label)
+            return None
+        if cmd == gn.FISTS_CMD:
+            self.emit('[night] FISTS ok=true quickslots', cet=True)
+        elif cmd == gn.FISTS_OFF_CMD:
+            self.emit('[night] FISTS_OFF ok=true eqsystem', cet=True)
+            self.emit('MMMASK off reasons=0x0 (was 0x1) gate=0x0 covered=0x0 loco=1 upperBody=0 melee=0 exit=0.00 w=1.00 mask=0.00')
+        elif cmd.startswith('GetMod("utpp_core").NightAuto('):
+            self.emit('[night] auto on period=0.20 tag=x', cet=True)
+        elif '[night] ENEMY_SPAWN ok=' in cmd:
+            rec = cmd.split("TweakDBID.new('", 1)[1].split("'", 1)[0]
+            if rec in self.missing:
+                self.emit('[night] ENEMY_SPAWN ok=false [string]:1: record missing', cet=True)
+            else:
+                s['spawned'], s['polls'] = rec, 0
+                self.emit(f'[night] ENEMY_SPAWN ok=true {rec}', cet=True)
+        elif '[night] ENEMY_PREP ok=' in cmd:
+            neutral = 'AIA_Neutral' in cmd
+            self.emit(f'[night] ENEMY_PREP ok=true god={"true" if self.god_ok else "false"}'
+                      + (' attset=true' if neutral else ''), cet=True)
+            s['neutral'] = s['neutral'] or neutral
+        elif '[night] ENEMY_OFF ok=' in cmd:
+            self.emit(self.enemy_body('off', ('nil', 'false')), cet=True)
+            s['spawned'] = None
+            self.emit('[night] ENEMY_OFF ok=true', cet=True)
+        elif 'UTPPENEMY(' in cmd:
+            call = tuple(cmd.split('return UTPPENEMY(', 1)[1].split(')', 1)[0].split(','))
+            lab = cmd.split('label=', 1)[1].split(' ', 1)[0]
+            if 'UTPPENEMY=function' in cmd:
+                s['defined'] = True
+            if self.drop_global_at == label and s['defined']:
+                self.drop_global_at = None
+                s['defined'] = False
+            if not s['defined']:
+                self.emit(f"[night] ENEMY ok=false label={lab} [string]:1: attempt to call global 'UTPPENEMY' (a nil value)", cet=True)
+            else:
+                if lab == 'wait':
+                    s['polls'] += 1
+                s['cur'] = lab if lab in self.drops else s['cur']
+                self.emit(self.enemy_body(lab, call), cet=True)
+        return self.text()
+
+    def play(self, pad, g, name, plan, sc=None):
+        self.played.append(name)
+        s = self.state
+        if self.raise_in and self.raise_in[0] == name and self.played.count(name) == self.raise_in[1]:
+            raise (self.raise_in[2] if len(self.raise_in) > 2 else night.CycleError)('boom')
+        night.time.sleep(2.0)
+        if name == 'melee_draw':
+            self.emit('MMMASK on reasons=0x1 (was 0x0) gate=0x0 covered=0x0 loco=1 upperBody=0 melee=1 exit=0.00 w=1.00 mask=0.00')
+        elif name == 'melee_holster':
+            self.emit('MMMASK off reasons=0x0 (was 0x1) gate=0x0 covered=0x0 loco=1 upperBody=0 melee=0 exit=0.00 w=1.00 mask=0.00')
+        elif name in ('melee_punch', 'melee_block'):
+            cur = s['cur']
+            for i in range(4):
+                src = 'lock' if (cur in self.lock and i >= 2) else 'cam'
+                self.emit(f'MELEEAIM src={src} tiltW=1.00 tgtPitch=-3.0 tgtYaw={5.0 * i:.1f} rawPitch=-3.0 rawYaw=0.0 pitch=-3.0 yaw=0.0 '
+                          'flags=0x0 maxUp=20 maxDown=35 hz=10 calls=1 applied=1 busy=0 reapplied=0 fails=0')
+                self.emit(f'[night] POS p=0.00,0.00,0.00 cf=0.000,1.000 v=0.00,{s["dist"]:.2f},0.00,1.000,0.000 src=tag w=0 m=0 n={i}',
+                          cet=True)
+            self.emit('MMMELEEFULL on why=on full=0.00 speed=0.00 loco=1 rawLoco=1 detail=-1 vz=0.00 reasons=0x1 gate=0x400 stick=0 '
+                      'ground=1 fastT=0.00 fastOff=0 airT=0.00 state=6 states=0x37FDE0 guard=0')
+            if name == 'melee_punch':
+                s['hv'] -= self.drops.get(cur, 0.0)
+        return {'steps': []}
+
+
 if __name__ == '__main__':
     unittest.main()
