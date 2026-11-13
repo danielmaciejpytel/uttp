@@ -93,7 +93,7 @@ return {
     ["lootView.zoom"] = "0.90000000000000002",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
-    ["melee.guard"] = "false",
+    ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
     ["mm.aimAtCrosshair"] = "true",
@@ -185,7 +185,7 @@ return {
     "apply mm.weaponUpper(false,\"ok\")",
     "apply melee.fullBody(true,\"ok\")",
     "apply melee.aimTilt(true,\"ok\")",
-    "apply melee.guard(false,\"ok\")",
+    "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "mm setMotionGrip(true)",
@@ -380,7 +380,7 @@ return {
     "apply mm.weaponUpper(false,\"ok\")",
     "apply melee.fullBody(true,\"ok\")",
     "apply melee.aimTilt(true,\"ok\")",
-    "apply melee.guard(false,\"ok\")",
+    "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "mm setMotionGrip(true)",
@@ -1388,7 +1388,7 @@ return {
       ["type"] = "bool"
     },
     ["melee.guard"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2164,7 +2164,7 @@ return {
     ["lootView.zoom"] = "0.90000000000000002",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
-    ["melee.guard"] = "false",
+    ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
     ["mm.aimAtCrosshair"] = "true",
@@ -2643,7 +2643,7 @@ return {
     "apply mm.weaponUpper(false,\"ok\")",
     "apply melee.fullBody(true,\"ok\")",
     "apply melee.aimTilt(true,\"ok\")",
-    "apply melee.guard(false,\"ok\")",
+    "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "apply mm.grip(true,\"ok\")",
@@ -2807,7 +2807,7 @@ mm.feedDump=false\r\
 mm.weaponUpper=false\r\
 melee.fullBody=true\r\
 melee.aimTilt=true\r\
-melee.guard=false\r\
+melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
 mm.grip=true\r\
@@ -3263,7 +3263,7 @@ vehicle.jumpOutSidePush=true\r\
     ["lootView.zoom"] = "1.3999999999999999",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
-    ["melee.guard"] = "false",
+    ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
     ["mm.aimAtCrosshair"] = "true",
@@ -3369,7 +3369,7 @@ mm.feedDump=false\r\
 mm.weaponUpper=false\r\
 melee.fullBody=true\r\
 melee.aimTilt=true\r\
-melee.guard=false\r\
+melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
 mm.grip=true\r\

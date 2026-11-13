@@ -58,7 +58,9 @@ HEADER_BOTTOM = """# Not mirrored (the clips of these paths stay vanilla): paths
 # Clip names that stay vanilla (another entry that can be active at the same time has the same priority as the new entry or as the vanilla
 #   one, so the order would be unknown): melee_first_equip in the weapon sets (p?a_one_handed_blunt_dildo.anims at 127 [dildo]) and,
 #   male default set only, vault (pma_default_weapon.anims at 200, no variable). Held pose clips of fewer than 6 frames (melee_idlepose,
-#   melee_safepose, melee_crouchpose, block, melee_air_sprint, ...) have no re-solved version and also stay vanilla.
+#   melee_safepose, melee_crouchpose, block, melee_air_sprint, ...) stay vanilla unless the built set supplies a re-solved version (the
+#   fists sets do for melee_idlepose = the guard every fist clip starts and ends in, melee_safepose and melee_crouchpose; block and
+#   melee_air_sprint stay vanilla).
 # Root motion: unchanged (the vanilla motionExtraction, copied verbatim); the new clips are built in the anim buffer frame (Root = the vanilla
 #   buffer Root, identity), so the engine moves the entity, and the new body with it, exactly as in vanilla.
 # Known risks (not verified in game): (1) entries gated by a MODIFIER variable at the vanilla priority 128 that hold the same clip names

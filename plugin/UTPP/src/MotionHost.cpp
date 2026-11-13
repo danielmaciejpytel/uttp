@@ -668,7 +668,7 @@ uint32_t g_maskStates = kMaskStatesAll; // UTPPSetMMUpperMaskStates (melee | aim
 UpperMask g_upperMask;                  // from the database bone names (BuildUpperMaskLocked)
 bool g_maskLogged = false;              // the mask is logged once per build
 UpperMaskBlend g_maskBlend;             // 1 = upper-body bones on the game pose
-bool g_maskLongOut = false;             // the mask was last wanted by a melee WEAPON release hold only: eased 0.35 s fade out
+mm::melee::MaskTimeTracker g_maskTimes; // mask fade times: the eased fade out after a melee weapon release / a soft guard end
 bool g_aimUpperFadeOn = true, g_maskFadeFromAim = false;
 bool g_weaponUpperOn = true, g_weaponKnown = false, g_weaponHeld = false, g_weaponUpperActive = false;
 uint32_t g_maskReasons = 0;             // last feed: kMaskState* bits holding the mask (0 = none)
@@ -2319,7 +2319,7 @@ void ResetRuntimeLocked()
     g_havePrevYaw = false;
     g_weight.Reset();
     g_maskBlend.Reset(); // 0.6.2
-    g_maskLongOut = false;
+    g_maskTimes.Reset();
     g_maskFadeFromAim = false;
     g_weaponKnown = g_weaponHeld = g_weaponUpperActive = false;
     g_maskReasons = g_maskCovered = 0;
@@ -5006,28 +5006,33 @@ void Feed(const FeedInput& aRawIn)
     di.guardFullSetting = g_meleeGuardFullSetting;
     di.guardTiltSetting = g_meleeGuardTiltSetting;
     const mm::melee::DriverTerms terms = mm::melee::CombineDriverTerms(di);
-    const float maskTime = terms.aimFadeLong ? 0.25f : kMaskFadeSeconds;
-    // melee release (2026-11-12): while the melee reason (melee weapon, no weapon / guard / vehicle-exit reason) holds the mask the
-    // fade out is armed for the eased kMeleeReleaseFadeOutSeconds; any other holder disarms it. Fade IN stays kMaskFadeSeconds.
-    if (terms.maskWanted)
-        g_maskLongOut = (g_maskReasons & kMaskStateMelee) != 0 && (g_maskReasons & ~(kMaskStateMelee | kMaskStateAim)) == 0 &&
-                        !weaponMaskWanted && !guardWanted && g_meleeGate.LongRelease();
-    else if (g_maskBlend.Progress() <= 0.0f)
-        g_maskLongOut = false;
-    const float maskOutTime = (!terms.maskWanted && g_maskLongOut && !terms.aimFadeLong) ? kMeleeReleaseFadeOutSeconds : maskTime;
+    // Fade times of the mask (mm/MeleeFullBody.hpp MaskTimeTracker). Melee release (2026-11-12): while the melee reason (melee
+    // weapon, no weapon / guard / vehicle-exit reason) holds the mask the fade out is armed for the eased
+    // kMeleeReleaseFadeOutSeconds; any other holder disarms it. Melee guard (2026-11-13): the guard ending for a soft reason
+    // (state left the guard states, crouch / sprint) eases out the same way, a hard end (closed gate, UpperBody swap, air, slide,
+    // dodge ...) keeps the quick fade; a guard-only raise takes kGuardFadeInSeconds. Fade IN after a strike stays kMaskFadeSeconds.
+    mm::melee::MaskTimeIn mti;
+    mti.meleeReasonOnly = (g_maskReasons & kMaskStateMelee) != 0 && (g_maskReasons & ~(kMaskStateMelee | kMaskStateAim)) == 0;
+    mti.weaponMaskWanted = weaponMaskWanted;
+    mti.guardWanted = guardWanted;
+    mti.guardSoft = g_meleeGuardGate.LastSoft();
+    mti.longRelease = g_meleeGate.LongRelease();
+    mti.maskProgress = g_maskBlend.Progress();
+    const mm::melee::MaskTimes maskTimes = g_maskTimes.Update(terms, mti, kMaskFadeSeconds, 0.25f, kMeleeReleaseFadeOutSeconds);
+    const float maskOutTime = maskTimes.out;
     // CAR-1 / MOTO-6: an exit-window-only mask in TPP covers the gate (legs on MM) but leaves the upper body on MM as well
-    g_maskBlend.UpdateInOut(terms.maskWanted, g_gate == 0, shown, dt, maskTime, maskOutTime, airMaskRelease);
+    g_maskBlend.UpdateInOut(terms.maskWanted, g_gate == 0, shown, dt, maskTimes.in, maskOutTime, airMaskRelease);
     if (guardWanted && !g_meleeGuardWant)
         ++g_meleeGuardSwitches;
     if (g_trace && g_log && guardWanted != g_meleeGuardWant)
     {
         char line[320];
-        std::snprintf(line, sizeof line, "UTPP MMGUARD %s why=%s state=%d upper=%d loco=%d rawLoco=%d detail=%d airT=%.2f mask=%.2f full=%.2f tilt=%.2f reasons=0x%X gate=0x%X effGate=0x%X hold=%d fullSet=%d tiltSet=%d",
+        std::snprintf(line, sizeof line, "UTPP MMGUARD %s why=%s state=%d upper=%d loco=%d rawLoco=%d detail=%d airT=%.2f mask=%.2f full=%.2f tilt=%.2f reasons=0x%X gate=0x%X effGate=0x%X hold=%d fullSet=%d tiltSet=%d soft=%d",
                       guardWanted ? "on" : "off", mm::melee::GuardWhyName(g_meleeGuardGate.LastWhy()), g_meleeState, g_upperBody,
                       conditioned.locoState, aIn.locoState, psmDetail, static_cast<double>(g_meleeGuardGate.AirSeconds()),
                       static_cast<double>(g_maskBlend.Weight()), static_cast<double>(g_meleeFullBlend.Weight()),
                       static_cast<double>(g_meleeAimBlend.Weight()), g_maskReasons, g_gate, g_effGate, g_holdActive ? 1 : 0,
-                      g_meleeGuardFullSetting ? 1 : 0, g_meleeGuardTiltSetting ? 1 : 0);
+                      g_meleeGuardFullSetting ? 1 : 0, g_meleeGuardTiltSetting ? 1 : 0, g_meleeGuardGate.LastSoft() ? 1 : 0);
         g_log(line);
     }
     g_meleeGuardWant = guardWanted;
@@ -5082,7 +5087,7 @@ void Feed(const FeedInput& aRawIn)
         g_meleeFullBlend.UpdateInOut(fullWant, g_effGate == 0, shown, dt, mm::melee::kFadeSeconds,
                                      mm::melee::LegFadeOutSeconds(g_meleeFullGate.LastWhy(), g_meleeGate.LongRelease()));
         // tilt: follows the mask (the same eased fade out, else 25 deg of tilt would unwind in 0.15 s under slow arms)
-        g_meleeAimBlend.UpdateInOut(terms.tiltWanted, true, shown, dt, kMaskFadeSeconds, maskOutTime); // melee reason (+ guard with guardAimTilt)
+        g_meleeAimBlend.UpdateInOut(terms.tiltWanted, true, shown, dt, kMaskFadeSeconds, maskTimes.tiltOut); // melee reason (+ guard with guardAimTilt)
         if (g_trace && g_log && g_meleeAimLogSource)
         {
             const int64_t nowTicks = Qpc();

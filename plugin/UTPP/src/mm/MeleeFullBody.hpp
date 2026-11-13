@@ -251,10 +251,14 @@ inline float LegFadeOutSeconds(Why aWhy, bool aLongRelease)
 
 // ------------------------------------------------------------------------------------------------ guard
 
-// PSM.MeleeWeapon states that keep the guard: Idle 2 and Parried..EquipAttack 5..21 (attacks keep it, so the MeleeGate
-// debounce at the strike start leaves no gap). Not: NotReady 0, Equipping 1 (melee_first_equip stays vanilla first person),
-// Safe 3 / PublicSafe 4 (melee_safepose stays vanilla), not reported -1.
-inline constexpr bool GuardMeleeState(int32_t aState) { return aState == kMwIdle || (aState >= kMwParried && aState <= kMwEquipAttack); }
+// PSM.MeleeWeapon states that keep the guard: Idle 2, Safe 3 (a friendly NPC in reach: the graph plays the lowered third-person
+// melee_safepose, 17-18 cm under the guard, so the hands do not fall to the locomotion arms and come back whenever a civilian walks
+// by) and Parried..EquipAttack 5..21 (attacks keep it, so the MeleeGate debounce at the strike start leaves no gap). Not: NotReady 0,
+// Equipping 1 (the first draw plays the first-person melee_first_equip), PublicSafe 4 (blocked for fists by the game), not reported -1.
+inline constexpr bool GuardMeleeState(int32_t aState)
+{
+    return aState == kMwIdle || aState == kMwSafe || (aState >= kMwParried && aState <= kMwEquipAttack);
+}
 // PSM.UpperBody (orphans.script:6663-6671): not reported -1, Default 0, Aim 6 keep it; SwitchItems 1 (draw / holster / swap),
 // SwitchCyberware 2, Reload 3, TemporaryUnequip 4, ForceEmptyHands 5 end it.
 inline constexpr bool GuardUpperBody(int32_t aUpper) { return aUpper == -1 || aUpper == 0 || aUpper == 6; }
@@ -272,6 +276,15 @@ enum GuardWhy : uint8_t
     kGuardDetail, // LocomotionDetailed not standing (sprint, crouch, slide, dodge, jump, fall, land...)
     kGuardAir,    // ungrounded (same rule as the full body)
 };
+
+// LocomotionDetailed values that end the guard for a SOFT reason: the player is still on the ground and the arms just belong to
+// another stance (Crouch 3, Sprint 4, CrouchSprint 30). Slide, dodge, climb, vault, ladder, air, land, knockdown ... are hard ends.
+inline constexpr bool SoftGuardDetail(int32_t aDetail) { return aDetail == 3 || aDetail == 4 || aDetail == 30; }
+
+// Guard fade timing (2026-11-13, fists guard). A raise out of the locomotion arms (the draw ends in Idle, a sprint / crouch ends) is
+// slower than the strike-time fade: the hands rise ~40 cm. The end of the guard for a SOFT reason (see GuardGate::LastSoft) uses
+// the eased melee release fade (0.35 s) instead of 0.15 s, the same "no drop in 3-4 frames" rule as the release after a strike.
+inline constexpr float kGuardFadeInSeconds = 0.25f;
 
 inline const char* GuardWhyName(GuardWhy aWhy)
 {
@@ -316,6 +329,7 @@ public:
     {
         m_airT = 0.0f;
         m_why = kGuardFlag;
+        m_soft = false;
     }
     // Once per feed (the air timer is tracked on every call).
     GuardWhy Update(const GuardInput& aIn)
@@ -331,14 +345,20 @@ public:
                 : !StandingDetail(aIn.psmDetail)    ? kGuardDetail
                 : air                               ? kGuardAir
                                                     : kGuardOn;
+        m_soft = m_why == kGuardState || m_why == kGuardStance || (m_why == kGuardDetail && SoftGuardDetail(aIn.psmDetail));
         return m_why;
     }
     GuardWhy LastWhy() const { return m_why; }
+    // The guard is off for a soft reason (the weapon state left the guard states: holstered / drawn anew, or a crouch / sprint
+    // stance): the mask may ease out slowly. False for on and for every hard reason (flag, mask, owner, closed gate, UpperBody
+    // swap, air, slide, dodge, climb ...): there the arms go back to the locomotion at the quick fade, as before.
+    bool LastSoft() const { return m_soft; }
     float AirSeconds() const { return m_airT; }
 
 private:
     float m_airT = 0.0f;
     GuardWhy m_why = kGuardFlag;
+    bool m_soft = false;
 };
 
 // ------------------------------------------------------------------------------------------------ driver terms
@@ -363,6 +383,7 @@ struct DriverTerms
     bool fullMelee = false;   // Input::meleeMask of the full-body gate
     bool fullGuard = false;   // Input::guard of the full-body gate (stage 2)
     bool tiltWanted = false;  // g_meleeAimBlend wanted
+    bool guardOnly = false;   // the guard alone holds the mask (no melee reason, no weapon mask): the raise uses kGuardFadeInSeconds
 };
 
 inline DriverTerms CombineDriverTerms(const DriverIn& aIn)
@@ -373,7 +394,87 @@ inline DriverTerms CombineDriverTerms(const DriverIn& aIn)
     t.fullMelee = aIn.meleeMask;
     t.fullGuard = aIn.guardWanted && aIn.guardFullSetting;
     t.tiltWanted = aIn.meleeMask || (aIn.guardWanted && aIn.guardTiltSetting);
+    t.guardOnly = aIn.guardWanted && !aIn.maskReasonsUpper && !aIn.weaponMaskWanted;
     return t;
 }
+
+// The two durations of the upper-mask fade (integ::UpperMaskBlend::UpdateInOut): in while the mask is wanted, out while it is not.
+// aFade = integ::kMaskFadeSeconds, aAimFade = the aim fade (0.25 s), aReleaseOut = integ::kMeleeReleaseFadeOutSeconds.
+// aLongOut = the melee release is armed (MotionHost g_maskLongOut: only the melee reason holds the mask, a melee weapon state ended);
+// aGuardSoftOut = the guard ended for a soft reason (GuardGate::LastSoft, latched by the caller until the mask is back at 0).
+// With no guard (guardOnly false, aGuardSoftOut false) this is the pre-guard pair bit for bit: in = out = aimFadeLong ? aAimFade :
+// aFade, out = aReleaseOut when the melee release is armed.
+struct MaskTimes
+{
+    float in = 0.0f;
+    float out = 0.0f;
+    float tiltOut = 0.0f; // the aim tilt's fade out (see aTiltLong)
+};
+
+// aTiltLong = the tilt was last wanted by the melee reason of a melee weapon (MaskTimeTracker latch). While the guard alone holds the
+// mask the tilt (melee.guardAimTilt off) would otherwise unwind with the quick 0.15 s of the held mask: up to 25 deg of lean in
+// 0.15 s, the fast unwind the eased release (2026-11-12) removed. It eases out over aReleaseOut instead. Without the guard tiltOut == out.
+inline MaskTimes ComputeMaskTimes(const DriverTerms& aT, bool aLongOut, bool aGuardSoftOut, float aFade, float aAimFade, float aReleaseOut,
+                                  bool aTiltLong = false)
+{
+    MaskTimes m;
+    const float base = aT.aimFadeLong ? aAimFade : aFade;
+    m.in = aT.guardOnly ? kGuardFadeInSeconds : base;
+    m.out = (!aT.maskWanted && (aLongOut || aGuardSoftOut) && !aT.aimFadeLong) ? aReleaseOut : base;
+    m.tiltOut = (!aT.tiltWanted && aT.guardOnly && aTiltLong) ? aReleaseOut : m.out;
+    return m;
+}
+
+// The per-feed state of the mask fade times (MotionHost Feed owns one; tests/MeleeFullBodyTest.cpp drives the same class):
+//   longOut  = the mask was last wanted by a melee WEAPON release hold only (melee reason alone, no weapon mask, no guard) -> the
+//              fade out after it is the eased aReleaseOut (2026-11-12); any other holder disarms it;
+//   softOut  = the guard ended for a soft reason (GuardGate::LastSoft) -> the fade out after it is eased as well (2026-11-13).
+// Both latches clear once the mask is back at 0 (progress <= 0) and not wanted; softOut also when the guard is wanted again.
+struct MaskTimeIn
+{
+    bool meleeReasonOnly = false; // g_maskReasons has the melee reason and no reason besides melee / aim
+    bool weaponMaskWanted = false;
+    bool guardWanted = false;
+    bool guardSoft = false;       // GuardGate::LastSoft() of this feed (read when the guard has just ended)
+    bool longRelease = false;     // MeleeGate::LongRelease()
+    float maskProgress = 0.0f;    // UpperMaskBlend::Progress() before this feed's update
+};
+
+class MaskTimeTracker
+{
+public:
+    void Reset()
+    {
+        m_longOut = false;
+        m_softOut = false;
+        m_guardWas = false;
+        m_tiltLong = false;
+    }
+    MaskTimes Update(const DriverTerms& aT, const MaskTimeIn& aIn, float aFade, float aAimFade, float aReleaseOut)
+    {
+        if (aT.maskWanted)
+            m_longOut = aIn.meleeReasonOnly && !aIn.weaponMaskWanted && !aIn.guardWanted && aIn.longRelease;
+        else if (aIn.maskProgress <= 0.0f)
+            m_longOut = false;
+        if (aIn.guardWanted)
+            m_softOut = false;
+        else if (m_guardWas)
+            m_softOut = aIn.guardSoft;
+        else if (!aT.maskWanted && aIn.maskProgress <= 0.0f)
+            m_softOut = false;
+        m_guardWas = aIn.guardWanted;
+        if (aT.tiltWanted)
+            m_tiltLong = aIn.meleeReasonOnly && !aIn.weaponMaskWanted && aIn.longRelease;
+        return ComputeMaskTimes(aT, m_longOut, m_softOut, aFade, aAimFade, aReleaseOut, m_tiltLong);
+    }
+    bool LongOut() const { return m_longOut; }
+    bool SoftOut() const { return m_softOut; }
+
+private:
+    bool m_longOut = false;
+    bool m_softOut = false;
+    bool m_guardWas = false;
+    bool m_tiltLong = false;
+};
 
 } // namespace utpp::mm::melee

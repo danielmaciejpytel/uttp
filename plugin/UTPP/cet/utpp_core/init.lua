@@ -425,8 +425,8 @@ local LAYOUT = {
                             "camera.aim.zoomFov", "camera.aim.fov", "camera.aim.autoSwap", "camera.aimReturn",
                             "camera.aimReturnBlend", "perspective.combatCut", "perspective.combatExit",
                             "perspective.meleeBlockTpp", "perspective.takedown" } },
-  --   Release scope: melee guard (default off; the third-person guard pose is not installed - the fists
-  -- melee_idlepose stays vanilla) is developer level, so the release menu has no option without content
+  --   Melee guard (fists only; the shipped third-person melee_idlepose is the guard pose every fist clip starts and ends in):
+  -- developer level switches (default on for the guard, off for its aim tilt and the legs), no release menu option yet
   { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt" } },
   -- Interactions
   { "player", "world", { "perspective.scene", "lootView.impl", "interactRange.impl", "headLook.impl",
@@ -2387,8 +2387,11 @@ local function applyMeleeAimTilt(v)
 end
 
 -- melee guard (DLL mm/MeleeFullBody.hpp GuardGate): with fists drawn (never Gorilla Arms) the upper body keeps
--- the game's guard pose between strikes; guardFullBody = the legs too while standing in the guard; guardAimTilt = the melee aim
--- tilt also through the guard. All default off (the third-person guard pose is not installed yet).
+-- the game's guard pose (the shipped third-person melee_idlepose = the start / end pose of every fist clip) between strikes;
+-- guardFullBody = the legs too while standing in the guard (default off: the guard stance is 67 cm between the ankles, the feet
+-- would slide on entering and leaving it); guardAimTilt = the melee aim tilt also through the guard, so it does not fade in and
+-- out at every strike. Default: guard on, aim tilt and legs off (the game's melee target also picks neutral bystanders within 5 m, so
+-- a standing lean toward them is unverified).
 local function applyMeleeGuardBool(key, field, fn, label)
   return function(v)
     local on = v == true
@@ -2628,11 +2631,10 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
       .. "degrees up, 35 down, within natural limits), like the body and rifle while aiming a gun. Off: the melee animations "
       .. "play unchanged.",
     apply = applyMeleeAimTilt })
-  M.Register({ key = "melee.guard", section = "animation", type = "bool", default = false,
-    label = "Melee guard (experimental)",
-    desc = "With fists drawn V keeps the game's guard pose between strikes instead of lowering the arms after every hit "
-      .. "(not with Gorilla Arms). Needs the third-person guard animation; until it is installed this shows the first-person "
-      .. "pose, so leave it off.",
+  M.Register({ key = "melee.guard", section = "animation", type = "bool", default = true,
+    label = "Melee guard",
+    desc = "With fists drawn V keeps the fighting guard between strikes (and while walking) instead of lowering the arms "
+      .. "after every hit (not with Gorilla Arms). Off: the arms return to the walking pose about 1 second after the last strike.",
     apply = applyMeleeGuard })
   M.Register({ key = "melee.guardFullBody", section = "animation", type = "bool", default = false,
     label = "Melee guard: legs (experimental)",
