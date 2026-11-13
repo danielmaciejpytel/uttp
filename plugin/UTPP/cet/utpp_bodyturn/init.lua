@@ -91,7 +91,8 @@ local E = {
   strikeStartDeg = 8,   -- deg: a turn starts beyond this error ...
   strikeDeadband = 4,   -- deg: ... and ends within this one (hysteresis)
   strikeGap = 0.5,      -- s without a signal that ends an episode
-  strikeMaxSpeed = 1.0, -- m/s: no strike turn while V moves faster (the legs are motion matching then; the tilt covers it)
+  strikeMaxSpeed = 1.0, -- m/s: no strike turn in a series that starts while V moves faster (the legs are motion matching then;
+                        -- the tilt covers it); the speed is V's speed before the strike, not the game's lunge during it
   strikeSum = 0, strikeStart = nil, strikeSeen = -1e9, strikeLogged = false, strikeTurning = false, strikeHeld = false,
   -- vehicle hand-over: the aim align (the body turn onto the camera) waits this long after utpp_camera ends a
   -- vehicle hold (api.vehicleHeld true -> false), so it does not land on the same frames as the release end and the aim pose;
@@ -600,10 +601,33 @@ end
 -- Melee strike turn. While a fists strike runs (api.meleeStrikeYaw returns the world yaw of the game's hit direction, 1000 = none:
 -- no tracked target, other weapon, first person) V is turned toward it so the visible fist and the hit agree. The goal is that
 -- yaw limited to E.strikeMax degrees around V's facing at the start of the episode (an episode ends E.strikeGap s after the last
--- signal); a turn starts beyond E.strikeStartDeg and ends within E.strikeDeadband (hysteresis); no turn while V moves. The same
--- request path as the aim align (applyAim, FPP heading lock, game look step); the goal is computed from V's measured yaw every
--- frame, so late or dropped requests only slow the turn. The heading lock taken here (E.strikeHeld) is released only here and
--- never while the aim align holds it (E.alignHeld). Returns a why string when it owns this frame, nil when not applicable.
+-- signal); a turn starts beyond E.strikeStartDeg and ends within E.strikeDeadband (hysteresis); no turn in a series that starts
+-- while V moves. The same request path as the aim align (applyAim, FPP heading lock, game look step); the goal is computed from
+-- V's measured yaw every frame, so late or dropped requests only slow the turn. The heading lock has one owner at a time: the
+-- strike turn takes over a lock the aim align holds (E.alignHeld -> E.strikeHeld) and releases its own lock when it stops
+-- turning, when the signal ends and on every frame another path owns (strikeIdle). Returns a why string when it owns this frame,
+-- nil when not applicable.
+-- The speed gate uses V's speed on the last frame without a strike signal (the game's melee lunge moves V fast while the strike
+-- runs; that must not cancel the turn); with no such sample, the speed at the episode start.
+-- Frames on which the strike step does not run (Locomotion active, camera guard pause, Shooter mode): V's speed is sampled for
+-- the gate and the strike turn's heading lock is released. reset = also forget the episode (executor selection / disarm).
+local function strikeIdle(api, reset)
+  if reset then
+    E.strikeStart, E.strikeSum, E.strikeSeen, E.strikeLogged, E.strikeTurning = nil, 0, -1e9, false, false
+    E.strikeIdleSpeed = nil
+  else
+    local okR, reasons = try(api.locomotionReasons)
+    if not (okR and finite(reasons) and math.floor(reasons / 2048) % 2 == 1) then
+      local okS, sp = try(api.speed)
+      E.strikeIdleSpeed = (okS and finite(sp)) and sp or nil
+    end
+  end
+  if E.strikeHeld then
+    if not E.alignHeld then try(api.alignHold, false) end
+    E.strikeHeld = false
+  end
+end
+
 function M.StrikeTurnStep(api, dt)
   if not E.strikeTurn then return nil end
   local okR, reasons = try(api.locomotionReasons)
@@ -619,12 +643,24 @@ function M.StrikeTurnStep(api, dt)
   if math.floor(reasons / 2048) % 2 == 1 and math.floor(reasons / 65536) % 2 == 0 and type(api.meleeStrikeYaw) == "function" then
     local okY, y = try(api.meleeStrikeYaw)
     if okY and finite(y) and math.abs(y) <= 360 then signal = y end
-    local okS, speed = try(api.speed)
-    if signal ~= nil and okS and finite(speed) and speed > E.strikeMaxSpeed then signal = nil end
+  end
+  if signal ~= nil and (E.strikeStart == nil or E.clock - E.strikeSeen > E.strikeGap) then
+    -- a new episode (also after a long stretch on which this step did not run): fresh start facing; no episode while V moves
+    E.strikeStart, E.strikeSum, E.strikeLogged, E.strikeTurning = nil, 0, false, false
+    local speed = E.strikeIdleSpeed
+    if speed == nil then
+      local okS, sp = try(api.speed)
+      speed = (okS and finite(sp)) and sp or nil
+    end
+    if speed ~= nil and speed > E.strikeMaxSpeed then signal = nil end
   end
   if signal == nil then
     if E.clock - E.strikeSeen > E.strikeGap then
       E.strikeStart, E.strikeSum, E.strikeLogged, E.strikeTurning = nil, 0, false, false
+    end
+    if math.floor(reasons / 2048) % 2 == 0 then
+      local okS, sp = try(api.speed)
+      E.strikeIdleSpeed = (okS and finite(sp)) and sp or nil
     end
     release()
     return nil
@@ -654,7 +690,8 @@ function M.StrikeTurnStep(api, dt)
   local lim = E.strikeRate * turnDt
   local step = math.max(-lim, math.min(lim, err * (1 - math.exp(-E.strikeGain * turnDt))))
   if not E.strikeHeld then
-    if not E.alignHeld then try(api.alignHold, true) end
+    -- one owner of the heading lock at a time: a lock the aim align holds is taken over (and released by the strike turn)
+    if E.alignHeld then E.alignHeld = false else try(api.alignHold, true) end
     E.strikeHeld = true
   end
   local okP, res = try(api.applyAim or api.apply, norm(cur + step))
@@ -678,11 +715,7 @@ end
 
 function M.SetStrikeTurn(on)
   E.strikeTurn = on == true
-  E.strikeStart, E.strikeSum, E.strikeSeen, E.strikeLogged, E.strikeTurning = nil, 0, -1e9, false, false
-  if E.strikeHeld then
-    if not E.alignHeld then try((M.api or {}).alignHold, false) end
-    E.strikeHeld = false
-  end
+  strikeIdle(M.api or {}, true)
   return E.strikeTurn
 end
 
@@ -781,6 +814,7 @@ function M.SelectExecutor(api)
   E.trips, E.pausedUntil, E.score = 0, nil, 0
   E.prevBody, E.prevCam, E.prevStep = nil, nil, 0
   E.viewSrc = false
+  strikeIdle(api, true)
   if E.alignHeld then try(api.alignHold, false); E.alignHeld = false end
   E.hipFireRemaining, E.hipFireAdsShot, E.hipFireAdsAge = 0, false, 0
   hipFireForget()
@@ -817,6 +851,7 @@ end
 function M.DisarmExecutor(api, why)
   api = api or M.api or {}
   SM.align, SM.prevAim, SM.prevCur, SM.stall = false, false, nil, 0
+  strikeIdle(api, true)
   if E.alignHeld then try(api.alignHold, false); E.alignHeld = false end
   E.hipFireRemaining, E.hipFireAdsShot, E.hipFireAdsAge = 0, false, 0
   hipFireForget()
@@ -944,6 +979,8 @@ function M.ExecStep(api, dt)
   if not want and not paused and E.strikeTurn and not SM.effective then
     local strikeWhy = M.StrikeTurnStep(api, dt)
     if strikeWhy then return strikeWhy end
+  elseif E.strikeTurn then
+    strikeIdle(api) -- another owner this frame: the strike turn keeps no heading lock
   end
   if not want and not paused and E.aimAlign then
     -- aiming while standing after V had turned toward the movement left V facing away from
@@ -1425,6 +1462,7 @@ if type(registerForEvent) == "function" then
         hipFireForget()
         E.hipLeaseSent = nil -- new session: the lease flag is re-synced (false) by the first ExecStep with a player
         E.prevBody, E.prevCam, E.prevStep = nil, nil, 0
+        E.strikeStart, E.strikeIdleSpeed = nil, nil -- no strike episode across a load (a held lock is released by the next ExecStep)
         W.dirty, W.sent = true, nil -- new session: the mask is sent again once the player exists
         return
       end

@@ -18,9 +18,11 @@ import sys
 import zlib
 from pathlib import Path
 
-GAME = Path(r'E:\Steam Library\steamapps\common\Cyberpunk 2077')
-DEFAULT_DB = GAME / 'r6' / 'cache' / 'tweakdb.bin'
-EP1_DB = GAME / 'r6' / 'cache' / 'tweakdb_ep1.bin'
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from utpp_paths import game_dir as _utpp_game_dir  # noqa: E402
+
+_GAME = _utpp_game_dir(required=False)
+DEFAULT_DB = (Path(_GAME) / 'r6' / 'cache' / 'tweakdb.bin') if _GAME else None
 
 # scalar type name -> (struct format, element size)
 SCALARS = {
@@ -44,7 +46,7 @@ def tweakdb_id(name: str) -> int:
 
 
 class FlatDb:
-    def __init__(self, path: Path = DEFAULT_DB):
+    def __init__(self, path: Path):
         self.data = Path(path).read_bytes()
         self.types = {}
         count = struct.unpack_from('<I', self.data, 0x20)[0]
@@ -93,13 +95,15 @@ class FlatDb:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--db', default=str(DEFAULT_DB))
+    ap.add_argument('--db', default=str(DEFAULT_DB) if DEFAULT_DB else None)
     ap.add_argument('names', nargs='+')
     args = ap.parse_args(argv)
+    if not args.db:
+        ap.error('--db is required when the game folder is not configured (UTPP_GAME_DIR)')
     db = FlatDb(Path(args.db))
     for n in args.names:
         r = db.get(n)
-        print('%s = %s' % (n, '<absent>' if r is None else '%s %r' % (r[1], r[0]) if False else '%s (%s)' % (r[1], r[0])))
+        print('%s = %s' % (n, '<absent>' if r is None else '%s (%s)' % (r[1], r[0])))
     return 0
 
 

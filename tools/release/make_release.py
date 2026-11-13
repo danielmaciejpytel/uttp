@@ -258,7 +258,9 @@ DAYOF_GROUPS = {
 DAYOF_DATA = [
     # combined fists pack (pwa/pma fists, StrongArms, default sets): Build\work\melee-fists-combined-20261109\runs\combined\packed,
     # stage melee-fists-combined-20261109; game copy of 2026-11-10 is identical (re-pinned 2026-11-10, was 827a8841... of npc1-fists)
-    ("melee", P_ARC + "utpp_melee.archive", 4530176, "d683748f5339f7b6955f7f79c9a39a5f1a7602016967881dc0df64d4258656cf"),
+    # Re-pinned 2026-11-14 (was d683748f..., 4530176 bytes): new final_attack_03 (+ _hit, _deflect) of both fists sets; the other fists
+    # clips and the default / StrongArms sets are unchanged.
+    ("melee", P_ARC + "utpp_melee.archive", 4534272, "844d00f643fcb36da421cf0ee2e4d1747ddac3622fca0dd8ed13495d689e82fe"),
     # stage Build\stages\vehexit6-20261109 (game copy of 2026-11-09 15:30 is identical)
     ("car", P_ARC + "utpp_vehicle_car.archive", 7102464, "3843163c100787fc0669c6f5091e58597e83a312cc1f21da1542fc09771119d5"),
 ]
@@ -277,7 +279,7 @@ DAYOF_DATA = [
 #   utpp_vehicle_approach.reds 70773283... -> 2dd3b901... `new Vector4(` -> `Vector4(` (1 site)
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "b18f9b9ff53e07bcf9b0987312346735636165e376248b57e935d5409dd26b60"),
+     "411d1dbe06da50579fee1eb725881e18e7485a4be27397709ca805f0d6a794bd"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
      "c30ed15246195549b5c6c2a57480583d37f10b2b664cabf1daa67f0dc9cf5386"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",
@@ -310,6 +312,8 @@ PARRIED_CLIPS = {
     # combined fists pack, pinned in DAYOF_DATA (game copy of 2026-11-10 = Build\work\melee-fists-combined-20261109\runs\combined\packed; xl f871e232...):
     # its reports\build-*.json and coverage.json hold only the plain parried_left / parried_right (checked 2026-11-10)
     "d683748f5339f7b6955f7f79c9a39a5f1a7602016967881dc0df64d4258656cf": {"w_melee_fists": "generic"},
+    # the same pack with the new final_attack_03 clips (parried clips unchanged: generic)
+    "844d00f643fcb36da421cf0ee2e4d1747ddac3622fca0dd8ed13495d689e82fe": {"w_melee_fists": "generic"},
 }
 STATES_RX = re.compile(r'^if\s+Equals\(n,\s*n"([A-Za-z0-9_]+)"\)\s*\{\s*return\s+(\d+);\s*\}$')
 

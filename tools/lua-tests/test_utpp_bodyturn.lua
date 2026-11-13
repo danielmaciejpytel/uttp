@@ -2324,6 +2324,76 @@ do
       "    try(api.alignHold, false); E.alignHeld = false\n  end\n  -- melee attack state"))
     xcheck("strike turn: mutation [releases the aim align's lock] is caught", not okMut)
   end
+  -- 6c) the game's melee lunge (V fast while the strike runs) does not cancel the turn; a series started while V moves does not turn
+  do
+    local m = freshModule(true)
+    local w = strikeWorld(m, { strike = 40 })
+    local spd = 0
+    w.api.speed = function() return spd end
+    w.reasons, w.strike = 0, nil
+    runStrike(m, w, 5) -- standing before the strike
+    w.reasons, w.strike = 2048, 40
+    runStrike(m, w, 2)
+    spd = 5 -- lunge
+    runStrike(m, w, 20)
+    xcheck("strike turn: a fast lunge during the strike keeps the turn going (speed gate uses the speed before the strike)",
+      w.body > 40 - m.exec.strikeDeadband - 1e-6 and w.body <= 40 + 1e-9, w.body)
+    local m2 = freshModule(true)
+    local w2 = strikeWorld(m2, { strike = 40 })
+    local spd2 = 3
+    w2.api.speed = function() return spd2 end
+    w2.reasons, w2.strike = 0, nil
+    runStrike(m2, w2, 5) -- running before the strike
+    w2.reasons, w2.strike = 2048, 40
+    spd2 = 0
+    runStrike(m2, w2, 20)
+    xcheck("strike turn: a series that starts while V runs gets no turn", #w2.calls.apply == 0 and #w2.holds == 0, #w2.calls.apply)
+  end
+  -- 6d) another owner takes the frame (Locomotion active again) while the strike turn holds the lock: the lock is released at once
+  do
+    local m = freshModule(true)
+    local w = strikeWorld(m, { strike = 40 })
+    runStrike(m, w, 3)
+    local heldBefore = m.exec.strikeHeld == true
+    w.reasons, w.strike = 0, nil
+    w.api.locomotionActive = function() return true end
+    runStrike(m, w, 1)
+    xcheck("strike turn: Locomotion active again -> the strike turn's heading lock is released the same frame", heldBefore
+      and m.exec.strikeHeld ~= true and w.holds[#w.holds] == false, #w.holds)
+  end
+  -- 6e) a strike long after the last one (the step did not run in between) starts a new episode from V's current facing
+  do
+    local m = freshModule(true)
+    local w = strikeWorld(m, { strike = 120 })
+    runStrike(m, w, 60) -- V ends at the 50 deg cap
+    w.reasons, w.strike = 0, nil
+    w.api.locomotionActive = function() return true end
+    runStrike(m, w, 120) -- 2 s of Locomotion (strike step not run)
+    w.api.locomotionActive = function() return false end
+    w.body = 200 -- V turned while walking
+    w.reasons, w.strike = 2048, 230
+    runStrike(m, w, 40)
+    xcheck("strike turn: a new series after a long pause turns from V's current facing (no stale episode start)",
+      math.abs(norm(w.body - 230)) <= m.exec.strikeDeadband + 1e-6, w.body)
+  end
+  -- 6f) the aim align holds the lock when a strike begins: the strike turn takes it over (no second engage) and releases it once
+  do
+    local m = freshModule()
+    local w = strikeWorld(m, { strike = nil })
+    w.reasons = 4096
+    w.body, w.cam, w.free = -16, 166, true
+    runStrike(m, w, 3) -- aim align engaged its lock
+    local alignHeld = m.exec.alignHeld == true
+    w.reasons, w.strike = 2048 + 4096, w.body + 40
+    runStrike(m, w, 30)
+    w.reasons, w.strike = 0, nil
+    runStrike(m, w, 2)
+    local seq = {}
+    for i, v in ipairs(w.holds) do seq[i] = tostring(v) end
+    xcheck("strike turn: takes over the aim align's lock without a second engage and releases it once at the end", alignHeld
+      and #w.holds == 2 and w.holds[1] == true and w.holds[2] == false and m.exec.alignHeld ~= true and m.exec.strikeHeld ~= true,
+      table.concat(seq, ","))
+  end
   -- 7) the setting is registered (default off) after aimSmooth and before shooterMode
   do
     local m = freshModule(true)

@@ -242,14 +242,14 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
 }
 
 // Strike turn signal (CET utpp_bodyturn, setting bodyturn.meleeStrikeTurn): where the game's fist strike will go.
-// The hit effect (meleeTransitions.script CreateMeleeAttack / GetCameraTransformForMelee) starts at the FPP camera component and
-// points at the targeting system's tracked target component when there is one (else along the game's camera). Capsule yaw is not
-// part of it, so in third person (the capsule does not follow the camera while a strike runs) the fist can point elsewhere.
+// The game's melee hit starts at the FPP camera component and points at the targeting system's tracked target component when
+// there is one (else along the game's camera). Capsule yaw is not part of it, so in third person (the capsule does not follow the
+// camera while a strike runs) the fist can point elsewhere.
 // Returns the world yaw in degrees (the UTPPYawDegFromForward convention, as the body yaw) from the FPP camera component to the
 // tracked target while a UTPP third-person fists strike state runs (PSM.MeleeWeapon attack states 11..21 without ThrowAttack 19);
 // 1000.0 = no signal: other weapons and arm cyberware, no UTPP third-person fists pack, first person, mounted, no tracked target,
 // target farther than 5 m (vanilla melee target range) or closer than 0.3 m.
-public static func UTPPMeleeStrikeYawOf(player: ref<PlayerPuppet>) -> Float {
+public func UTPPMeleeStrikeYawOf(player: ref<PlayerPuppet>) -> Float {
   if !IsDefined(player) || !UTPPMeleeFullBodyWanted(player) {
     return 1000.0;
   }
