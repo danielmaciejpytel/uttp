@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Offline graph patcher for utpp_nue_reload (C# port of Source\tools\analysis\patch_nue_reload_graph_twohand.ps1
+       + verify_cr2w_graph_schema_roundtrip.ps1). Uses the local WolvenKit.CLI 9.0.1 assemblies; nothing is copied. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <WolvenKitDir>$(UtppRoot)\Tools\WolvenKit.CLI\</WolvenKitDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="WolvenKit.RED4"><HintPath>$(WolvenKitDir)WolvenKit.RED4.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="WolvenKit.Common"><HintPath>$(WolvenKitDir)WolvenKit.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="WolvenKit.Core"><HintPath>$(WolvenKitDir)WolvenKit.Core.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

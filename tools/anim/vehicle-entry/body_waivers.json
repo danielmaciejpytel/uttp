@@ -1,0 +1,61 @@
+{
+ "sport1:w:driver": {
+  "thigh_r": 4.8,
+  "shoulder_r": 5.8,
+  "uarm_r": 6.9,
+  "farm_r": 5.7,
+  "hand_r": 5.3,
+  "head": 2.8
+ },
+ "sport1:m:driver": {
+  "shoulder_r": 4.0,
+  "uarm_r": 3.5,
+  "head": 3.1
+ },
+ "sport1:w:passenger_r": {
+  "hips_l": 4.6,
+  "spine": 2.2,
+  "chest": 3.3,
+  "neck": 8.4,
+  "thigh_l": 8.4,
+  "shin_l": 3.8,
+  "shoulder_l": 7.3,
+  "uarm_l": 6.7,
+  "farm_l": 5.9,
+  "hand_l": 6.0,
+  "head": 11.7
+ },
+ "sport1:m:passenger_r": {
+  "hips_l": 3.0,
+  "chest": 3.9,
+  "neck": 8.6,
+  "thigh_l": 6.3,
+  "shoulder_l": 7.1,
+  "uarm_l": 6.9,
+  "farm_l": 6.0,
+  "hand_l": 5.9,
+  "head": 11.4
+ },
+ "sport2:m:passenger_r": {
+  "head": 3.3
+ },
+ "standard3:m:driver": {
+  "head": 2.9
+ },
+ "standard3:m:passenger_r": {
+  "head": 6.0
+ },
+ "utility:m:passenger_r": {
+  "pelvis": 2.8,
+  "hips_l": 7.3,
+  "spine": 3.3,
+  "chest": 4.6,
+  "neck": 4.2,
+  "thigh_l": 5.0,
+  "shoulder_l": 5.7,
+  "uarm_l": 5.1,
+  "farm_l": 3.7,
+  "hand_l": 2.8,
+  "head": 8.2
+ }
+}

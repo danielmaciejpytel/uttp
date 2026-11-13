@@ -1,0 +1,129 @@
+# UTPP third-person motorcycle entry (female and male V, sportbike1 Kusanagi / sportbike2 / sportbike3). Own clip sets, one clip
+# each ('enter_l' / 'enter_r'), built offline from the game's NPC wa_/ma_sportbike entry clips (retargeted to the player rig, 1.4 s
+# like the vanilla clips) whose last 0.4 s blend into the TPP seated pose (tpp_p?a_sportbike 'drive_slow_bike' frame 0). The vanilla
+# FPP enter_l / enter_r end in the lower, hunched FPP seat pose and the game swaps to the TPP riding pose ~0.3 s later (recording
+# 2026-10-28, sportbike1: Hips z -0.007 -> +0.082; logged seat step 9.1 cm / 28 deg).
+# Route 'root' (A/B for the precedence direction): these entries are merged into the root component's own list; at priority 94 they
+# never played (every TPP ride of 2026-10-28 still showed the FPP enter). Priority 130 tests 'higher number wins' (above the vanilla
+# FPP 119 / TPP 100 entries of MotorcycleAnimsets). The other route, the `resource: patch:` section at the end of this file, puts
+# the same sets on an own extension component next to MotorcycleAnimsets (priority 94, lower number wins as in the vanilla data).
+# Activation: wrapper variable utpp_vehicle_tpp = 1 AND the route variable utpp_bike_route_root = 1 (utpp_vehicle_anim.reds, bike
+# mount in UTPP third person, route bit 2 of Game.UTPPSetVehicleBikeRoute) AND the vanilla seat variable, so first-person riding
+# keeps the vanilla clips. The route in use is listed in the log line "[utpp_vehicle_anim] ride N: workspot animVariables [...]".
+animations:
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sportbike_enter_l.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike1_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sportbike_enter_r.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike1_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sportbike2_enter_l.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike2_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sportbike2_enter_r.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike2_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sportbike3_enter_l.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike3_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sportbike3_enter_r.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike3_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pma_sportbike_enter_l.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike1_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pma_sportbike_enter_r.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike1_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pma_sportbike2_enter_l.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike2_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pma_sportbike2_enter_r.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike2_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pma_sportbike3_enter_l.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike3_vehicle_seat_front_left]
+    priority: 130
+
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pma_sportbike3_enter_r.anims
+    vars: [utpp_vehicle_tpp, utpp_bike_route_root, sportbike3_vehicle_seat_front_left]
+    priority: 130
+
+# Route 'ext' / 'ride' (seat pop fix 2026-10-28): ArchiveXL resource patch adding the extension component
+# UTPPMotorcycleAnimsets (own name and id: appended next to the game's MotorcycleAnimsets, never replacing it) to the
+# player FPP entities: UTPP enter sets at priority 94 [utpp_vehicle_tpp, utpp_bike_route_ext, seat] and the
+# game's TPP riding sets (incl. their exit clips) at 95 [utpp_vehicle_tpp, utpp_bike_route_ride, seat].
+# Lower number wins inside the extension pool (vanilla: TPP 100 [player_tpp_head, seat] over FPP 119 [seat]). The patch
+# resources are packed into utpp_vehicle_bike.archive (make_bike_ext_patch.py); only `components` are merged (props).
+resource:
+  patch:
+    utpp\vehicle\utpp_bike_animsets_wa.ent:
+      props:
+        - components
+      targets:
+        - base\characters\entities\player\player_wa_fpp.ent
+        - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    utpp\vehicle\utpp_bike_animsets_ma.ent:
+      props:
+        - components
+      targets:
+        - base\characters\entities\player\player_ma_fpp.ent
+        - ep1\characters\entities\player\player_ma_fpp_ep1.ent

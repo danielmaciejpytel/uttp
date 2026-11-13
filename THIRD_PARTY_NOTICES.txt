@@ -1,0 +1,107 @@
+Ultimate Third Person Project (UTPP) - third-party notices
+
+Ultimate Third Person Project is (c) Daniel Maciej Pytel. All rights reserved except where a
+third-party license says otherwise.
+
+== Animation data ==
+The motion-matching databases, overlays, traversal and lean tables shipped with UTPP are original
+work. They are based on licensed GASPALS 1.2 content by Polygon Hive, then heavily modified,
+extended, tuned and blended with the game's own animations for Cyberpunk 2077. The GASPALS content
+was used under a purchased license.
+
+== Generated clips (NVIDIA) ==
+Some transition and vehicle-exit animation clips were generated locally with NVIDIA Kimodo and
+NVIDIA MotionBricks (models licensed by NVIDIA Corporation under the NVIDIA Open Model License and
+the NVIDIA Open Model Agreement, respectively). No NVIDIA model is included.
+
+== Content derived from Cyberpunk 2077 ==
+Weapon recoil profiles and animation clips, graphs and resource patches built from or for the
+animations and resources of Cyberpunk 2077 and its Phantom Liberty expansion (c) CD PROJEKT RED are
+derived from game content. They do not contain the game and work only together with a legitimate
+copy of it.
+
+== Open-source code used in UTPP.dll ==
+The three libraries below are licensed under the MIT License. Each full license text follows unchanged.
+
+------------------------------------------------------------------------------
+RED4ext.SDK - Copyright (c) 2020 - present Octavian Dima
+Used for the plugin API headers.
+------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2020 - present Octavian Dima
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+cyberpunk-vr-port - Copyright (c) 2026 dariulone
+Logic and memory offsets for arming the player animation were adapted from this project.
+------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 dariulone
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+Motion-Matching - Copyright (c) 2021 Daniel Holden
+The inertialization and motion matching algorithms were re-implemented from this project.
+------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2021 Daniel Holden
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Not affiliated with or endorsed by CD PROJEKT RED, Epic Games, Polygon Hive or NVIDIA.

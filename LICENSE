@@ -1,0 +1,33 @@
+Ultimate Third Person Project (UTPP)
+
+Ultimate Third Person Project is (c) Daniel Maciej Pytel. All rights reserved except where a
+third-party license says otherwise.
+
+No permission is granted to copy, modify, distribute or reuse this repository or any part of it,
+except as allowed by a third-party license listed below or with the written permission of the
+author.
+
+Animation data
+The motion-matching databases, overlays, traversal and lean tables shipped with UTPP are original
+work. They are based on licensed GASPALS 1.2 content by Polygon Hive, then heavily modified,
+extended, tuned and blended with the game's own animations for Cyberpunk 2077. The GASPALS content
+was used under a purchased license.
+
+Generated clips
+Some transition and vehicle-exit animation clips were generated locally with NVIDIA Kimodo and
+NVIDIA MotionBricks (models licensed by NVIDIA Corporation under the NVIDIA Open Model License and
+the NVIDIA Open Model Agreement, respectively). No NVIDIA model is included.
+
+Content derived from Cyberpunk 2077
+Weapon recoil profiles and animation clips, graphs and resource patches built from or for the
+animations and resources of Cyberpunk 2077 and its Phantom Liberty expansion (c) CD PROJEKT RED are
+derived from game content. They do not contain the game and work only together with a legitimate
+copy of it.
+
+Open-source code
+Open-source code (MIT) used in UTPP.dll: RED4ext.SDK (c) 2020 - present Octavian Dima (plugin API
+headers); cyberpunk-vr-port (c) 2026 dariulone (logic and memory offsets for arming the player
+animation were adapted from it); Motion-Matching (c) 2021 Daniel Holden (inertialization and motion
+matching algorithms re-implemented from it). The full license texts are in THIRD_PARTY_NOTICES.txt.
+
+Not affiliated with or endorsed by CD PROJEKT RED, Epic Games, Polygon Hive or NVIDIA.

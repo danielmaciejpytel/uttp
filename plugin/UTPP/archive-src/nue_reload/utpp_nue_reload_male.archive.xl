@@ -1,0 +1,30 @@
+# UTPP authored Nue reload (third person), female V + male V: own clip sets with custom names only.
+# ArchiveXL appends these sets to the gameplay animations of the matching entity + component.
+# Registration is not activation: the CET module utpp_reload_gate switches the graph branches per reload
+# (exact Nue preset, third person); everything else keeps the game's own reload.
+# Female: utpp_nue_tpp_reload.anims (player_woman_skeleton). Male: utpp_nue_tpp_reload_man.anims (player_man_skeleton),
+# same clip names and same timeline (81 / 101 frames, same events) so the shared magazine set fits both.
+# The male gate (reds/CET/DLL) must be opened only together with this archive.
+animations:
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\reload\utpp_nue_tpp_reload.anims
+    priority: 128
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\reload\utpp_nue_tpp_reload_man.anims
+    priority: 128
+  # weapon_root is shared: unique clip names and the Nue/TPP gate are
+  # essential. Do not replace native clip names or register on every component.
+  - entity: base\weapons\weapon_root.ent
+    component: Magazine
+    set: utpp\reload\utpp_nue_tpp_magazine.anims
+    priority: 128
+  - entity: base\weapons\weapon_root.ent
+    component: MagazineReload
+    set: utpp\reload\utpp_nue_tpp_magazine.anims
+    priority: 128

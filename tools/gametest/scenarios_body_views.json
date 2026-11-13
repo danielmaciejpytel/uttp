@@ -1,0 +1,14 @@
+{
+  "_note": "2026-11-12 one-off: V stands with the weapon drawn while the camera orbits slowly, for front and side frames of the body (before / after the helper recompute). Start standing, third person, nothing drawn.",
+  "scenarios": {
+    "body_views": {
+      "description": "draw the weapon, slow camera orbit around standing V, holster",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 3.0, "buttons": [{"t": 0.3, "button": "Y", "hold": 0.1}], "metrics": false},
+        {"name": "orbit", "duration": 14.0, "interp": "step", "ls": [[0, 0, 0]], "rs": [[0, 0, 0], [0.5, 0.45, 0], [13.0, 0, 0]], "metrics": false},
+        {"name": "holster", "duration": 2.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "buttons": [{"t": 0.3, "button": "Y", "hold": 0.08}, {"t": 0.45, "button": "Y", "hold": 0.08}], "metrics": false}
+      ]
+    }
+  }
+}

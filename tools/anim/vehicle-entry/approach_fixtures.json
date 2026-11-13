@@ -1,0 +1,1299 @@
+{
+ "_note": "frozen from the car-door2 game test 2026-11-02 (build_approach_fixtures.py); vehicle frame x right, y forward, z up, m; female V (pwa) clips",
+ "slide_T_by_class_s": {
+  "standard2": 0.3,
+  "standard25": 0.305,
+  "standard3": 0.297,
+  "sport1": 0.82,
+  "sport2": 0.295,
+  "utility": 0.305
+ },
+ "slide_T_samples": {
+  "standard2": [
+   0.31,
+   0.3,
+   0.3,
+   0.27
+  ],
+  "standard25": [
+   0.305,
+   0.275,
+   0.315
+  ],
+  "standard3": [
+   0.305,
+   0.3,
+   0.295,
+   0.285
+  ],
+  "sport1": [
+   0.815,
+   0.82,
+   0.825
+  ],
+  "sport2": [
+   0.305,
+   0.295,
+   0.295,
+   0.305,
+   0.285
+  ],
+  "utility": [
+   0.305
+  ]
+ },
+ "rides": [
+  {
+   "ride": 2,
+   "vehicle": "hella",
+   "cls": "standard2",
+   "seat": "driver",
+   "case": "parallel",
+   "review": "",
+   "clip": "utpp_car_pwa_standard2_driver",
+   "mount_spot": [
+    -2.18,
+    0.01,
+    -0.31
+   ],
+   "mount_heading_deg": 89.6,
+   "clip_start_logged": [
+    -1.708,
+    -0.606,
+    -0.372
+   ],
+   "seat_pos_logged": [
+    -0.475,
+    0.145,
+    0.128
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.043,
+   "rootPeakDist_log": 0.67,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -2.132,
+    -0.059,
+    -0.31
+   ],
+   "door": "fl",
+   "door_E_s": 0.046,
+   "slide_m": 0.776,
+   "slide_fit": {
+    "T": 0.31,
+    "t0": 0.005,
+    "rms": 0.014,
+    "dist_m": 0.776,
+    "n_samples": 11
+   }
+  },
+  {
+   "ride": 3,
+   "vehicle": "hella",
+   "cls": "standard2",
+   "seat": "driver",
+   "case": "parallel-ride2",
+   "review": "",
+   "clip": "utpp_car_pwa_standard2_driver",
+   "mount_spot": [
+    -1.74,
+    -0.55,
+    -0.33
+   ],
+   "mount_heading_deg": 90.0,
+   "clip_start_logged": [
+    -1.708,
+    -0.606,
+    -0.372
+   ],
+   "seat_pos_logged": [
+    -0.475,
+    0.145,
+    0.128
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.047,
+   "rootPeakDist_log": 0.05,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.735,
+    -0.559,
+    -0.33
+   ],
+   "door": "fl",
+   "door_E_s": 0.046,
+   "slide_m": 0.065,
+   "slide_fit": null
+  },
+  {
+   "ride": 4,
+   "vehicle": "hella",
+   "cls": "standard2",
+   "seat": "driver",
+   "case": "door",
+   "review": "hip through opening door",
+   "clip": "utpp_car_pwa_standard2_driver",
+   "mount_spot": [
+    -1.86,
+    0.56,
+    -0.3
+   ],
+   "mount_heading_deg": 5.3,
+   "clip_start_logged": [
+    -1.708,
+    -0.606,
+    -0.372
+   ],
+   "seat_pos_logged": [
+    -0.475,
+    0.145,
+    0.128
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.042,
+   "rootPeakDist_log": 1.05,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.845,
+    0.442,
+    -0.3
+   ],
+   "door": "fl",
+   "door_E_s": 0.047,
+   "slide_m": 1.176,
+   "slide_fit": {
+    "T": 0.3,
+    "t0": 0.005,
+    "rms": 0.011,
+    "dist_m": 1.176,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 5,
+   "vehicle": "hella",
+   "cls": "standard2",
+   "seat": "driver",
+   "case": "behind",
+   "review": "",
+   "clip": "utpp_car_pwa_standard2_driver",
+   "mount_spot": [
+    -2.02,
+    -0.18,
+    -0.58
+   ],
+   "mount_heading_deg": 95.1,
+   "clip_start_logged": [
+    -1.708,
+    -0.606,
+    -0.372
+   ],
+   "seat_pos_logged": [
+    -0.475,
+    0.145,
+    0.128
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.059,
+   "rootPeakDist_log": 0.43,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -1.954,
+    -0.265,
+    -0.58
+   ],
+   "door": "fl",
+   "door_E_s": 0.046,
+   "slide_m": 0.528,
+   "slide_fit": {
+    "T": 0.3,
+    "t0": 0.005,
+    "rms": 0.021,
+    "dist_m": 0.528,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 6,
+   "vehicle": "hella",
+   "cls": "standard2",
+   "seat": "passenger_r",
+   "case": "passenger",
+   "review": "",
+   "clip": "utpp_car_pwa_standard2_passenger_r",
+   "mount_spot": [
+    2.22,
+    -0.1,
+    -0.47
+   ],
+   "mount_heading_deg": 95.1,
+   "clip_start_logged": [
+    1.705,
+    -0.534,
+    -0.372
+   ],
+   "seat_pos_logged": [
+    0.475,
+    0.174,
+    0.128
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.058,
+   "rootPeakDist_log": 0.56,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    2.123,
+    -0.197,
+    -0.47
+   ],
+   "door": "fr",
+   "door_E_s": 0.046,
+   "slide_m": 0.674,
+   "slide_fit": {
+    "T": 0.27,
+    "t0": 0.01,
+    "rms": 0.013,
+    "dist_m": 0.673,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 7,
+   "vehicle": "columbus",
+   "cls": "standard25",
+   "seat": "driver",
+   "case": "parallel",
+   "review": "",
+   "clip": "utpp_car_pwa_standard25_driver",
+   "mount_spot": [
+    -2.29,
+    0.07,
+    -0.33
+   ],
+   "mount_heading_deg": 165.0,
+   "clip_start_logged": [
+    -1.672,
+    -0.328,
+    -0.399
+   ],
+   "seat_pos_logged": [
+    -0.439,
+    0.224,
+    0.301
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.042,
+   "rootPeakDist_log": 0.63,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -2.228,
+    0.027,
+    -0.33
+   ],
+   "door": "fl",
+   "door_E_s": 0.096,
+   "slide_m": 0.735,
+   "slide_fit": {
+    "T": 0.305,
+    "t0": 0.005,
+    "rms": 0.013,
+    "dist_m": 0.735,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 8,
+   "vehicle": "columbus",
+   "cls": "standard25",
+   "seat": "driver",
+   "case": "parallel-ride2",
+   "review": "",
+   "clip": "utpp_car_pwa_standard25_driver",
+   "mount_spot": [
+    -1.67,
+    -0.5,
+    -0.35
+   ],
+   "mount_heading_deg": 90.0,
+   "clip_start_logged": [
+    -1.672,
+    -0.328,
+    -0.399
+   ],
+   "seat_pos_logged": [
+    -0.439,
+    0.224,
+    0.301
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.043,
+   "rootPeakDist_log": 0.16,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.67,
+    -0.482,
+    -0.35
+   ],
+   "door": "fl",
+   "door_E_s": 0.097,
+   "slide_m": 0.172,
+   "slide_fit": null
+  },
+  {
+   "ride": 9,
+   "vehicle": "columbus",
+   "cls": "standard25",
+   "seat": "driver",
+   "case": "door",
+   "review": "",
+   "clip": "utpp_car_pwa_standard25_driver",
+   "mount_spot": [
+    -1.85,
+    0.55,
+    -0.35
+   ],
+   "mount_heading_deg": 5.1,
+   "clip_start_logged": [
+    -1.672,
+    -0.328,
+    -0.399
+   ],
+   "seat_pos_logged": [
+    -0.439,
+    0.224,
+    0.301
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.046,
+   "rootPeakDist_log": 0.78,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.826,
+    0.428,
+    -0.35
+   ],
+   "door": "fl",
+   "door_E_s": 0.095,
+   "slide_m": 0.895,
+   "slide_fit": {
+    "T": 0.275,
+    "t0": 0.01,
+    "rms": 0.017,
+    "dist_m": 0.896,
+    "n_samples": 9
+   }
+  },
+  {
+   "ride": 10,
+   "vehicle": "columbus",
+   "cls": "standard25",
+   "seat": "driver",
+   "case": "behind",
+   "review": "",
+   "clip": "utpp_car_pwa_standard25_driver",
+   "mount_spot": [
+    -2.01,
+    -0.11,
+    -0.52
+   ],
+   "mount_heading_deg": 95.1,
+   "clip_start_logged": [
+    -1.672,
+    -0.328,
+    -0.399
+   ],
+   "seat_pos_logged": [
+    -0.439,
+    0.224,
+    0.301
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.093,
+   "rootPeakDist_log": 0.25,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.893,
+    -0.195,
+    -0.472
+   ],
+   "door": "fl",
+   "door_E_s": 0.08,
+   "slide_m": 0.402,
+   "slide_fit": {
+    "T": 0.3,
+    "t0": 0.005,
+    "rms": 0.012,
+    "dist_m": 0.402,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 11,
+   "vehicle": "columbus",
+   "cls": "standard25",
+   "seat": "passenger_r",
+   "case": "passenger",
+   "review": "",
+   "clip": "utpp_car_pwa_standard25_passenger_r",
+   "mount_spot": [
+    2.32,
+    0.03,
+    -0.32
+   ],
+   "mount_heading_deg": 170.2,
+   "clip_start_logged": [
+    1.614,
+    -0.446,
+    -0.399
+   ],
+   "seat_pos_logged": [
+    0.436,
+    0.253,
+    0.301
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.042,
+   "rootPeakDist_log": 0.76,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    2.245,
+    -0.022,
+    -0.32
+   ],
+   "door": "fr",
+   "door_E_s": 0.097,
+   "slide_m": 0.851,
+   "slide_fit": {
+    "T": 0.315,
+    "t0": 0.005,
+    "rms": 0.011,
+    "dist_m": 0.851,
+    "n_samples": 11
+   }
+  },
+  {
+   "ride": 12,
+   "vehicle": "emperor",
+   "cls": "standard3",
+   "seat": "driver",
+   "case": "parallel",
+   "review": "",
+   "clip": "utpp_car_pwa_standard3_driver",
+   "mount_spot": [
+    -2.19,
+    0.01,
+    -0.44
+   ],
+   "mount_heading_deg": 89.9,
+   "clip_start_logged": [
+    -1.494,
+    -0.848,
+    -0.415
+   ],
+   "seat_pos_logged": [
+    -0.484,
+    -0.081,
+    0.535
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.043,
+   "rootPeakDist_log": 0.95,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -2.122,
+    -0.071,
+    -0.44
+   ],
+   "door": "fl",
+   "door_E_s": 0.029,
+   "slide_m": 1.105,
+   "slide_fit": {
+    "T": 0.305,
+    "t0": 0.005,
+    "rms": 0.013,
+    "dist_m": 1.105,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 13,
+   "vehicle": "emperor",
+   "cls": "standard3",
+   "seat": "driver",
+   "case": "parallel-ride2",
+   "review": "",
+   "clip": "utpp_car_pwa_standard3_driver",
+   "mount_spot": [
+    -1.68,
+    -0.72,
+    -0.46
+   ],
+   "mount_heading_deg": 93.7,
+   "clip_start_logged": [
+    -1.494,
+    -0.848,
+    -0.415
+   ],
+   "seat_pos_logged": [
+    -0.484,
+    -0.081,
+    0.535
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.042,
+   "rootPeakDist_log": 0.19,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -1.66,
+    -0.735,
+    -0.46
+   ],
+   "door": "fl",
+   "door_E_s": 0.03,
+   "slide_m": 0.226,
+   "slide_fit": null
+  },
+  {
+   "ride": 14,
+   "vehicle": "emperor",
+   "cls": "standard3",
+   "seat": "driver",
+   "case": "door",
+   "review": "",
+   "clip": "utpp_car_pwa_standard3_driver",
+   "mount_spot": [
+    -1.87,
+    0.49,
+    -0.46
+   ],
+   "mount_heading_deg": 0.1,
+   "clip_start_logged": [
+    -1.494,
+    -0.848,
+    -0.415
+   ],
+   "seat_pos_logged": [
+    -0.484,
+    -0.081,
+    0.535
+   ],
+   "vt_mode": "none",
+   "rootEngageAt": -1.0,
+   "rootPeakDist_log": 0.0,
+   "rootOnlyWrites": 1,
+   "anchor_logged": null,
+   "door": "fl",
+   "door_E_s": 0.031,
+   "slide_m": 1.39,
+   "slide_fit": {
+    "T": 0.3,
+    "t0": 0.005,
+    "rms": 0.012,
+    "dist_m": 1.39,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 15,
+   "vehicle": "emperor",
+   "cls": "standard3",
+   "seat": "driver",
+   "case": "behind",
+   "review": "",
+   "clip": "utpp_car_pwa_standard3_driver",
+   "mount_spot": [
+    -1.6,
+    -0.32,
+    -0.43
+   ],
+   "mount_heading_deg": 86.2,
+   "clip_start_logged": [
+    -1.494,
+    -0.848,
+    -0.415
+   ],
+   "seat_pos_logged": [
+    -0.484,
+    -0.081,
+    0.535
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.059,
+   "rootPeakDist_log": 0.44,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.58,
+    -0.428,
+    -0.428
+   ],
+   "door": "fl",
+   "door_E_s": 0.03,
+   "slide_m": 0.539,
+   "slide_fit": {
+    "T": 0.295,
+    "t0": 0.005,
+    "rms": 0.012,
+    "dist_m": 0.539,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 16,
+   "vehicle": "emperor",
+   "cls": "standard3",
+   "seat": "passenger_r",
+   "case": "passenger",
+   "review": "",
+   "clip": "utpp_car_pwa_standard3_passenger_r",
+   "mount_spot": [
+    2.24,
+    -0.05,
+    -0.54
+   ],
+   "mount_heading_deg": null,
+   "clip_start_logged": [
+    1.445,
+    -1.048,
+    -0.415
+   ],
+   "seat_pos_logged": [
+    0.462,
+    -0.062,
+    0.535
+   ],
+   "vt_mode": "none",
+   "rootEngageAt": -1.0,
+   "rootPeakDist_log": 0.0,
+   "rootOnlyWrites": 2,
+   "anchor_logged": null,
+   "door": "fr",
+   "door_E_s": 0.045,
+   "slide_m": 1.276,
+   "slide_fit": {
+    "T": 0.285,
+    "t0": 0.005,
+    "rms": 0.015,
+    "dist_m": 1.276,
+    "n_samples": 9
+   }
+  },
+  {
+   "ride": 17,
+   "vehicle": "turbo",
+   "cls": "sport1",
+   "seat": "driver",
+   "case": "parallel",
+   "review": "",
+   "clip": "utpp_car_pwa_sport1_driver",
+   "mount_spot": [
+    -2.14,
+    -0.55,
+    -0.32
+   ],
+   "mount_heading_deg": -168.3,
+   "clip_start_logged": [
+    -1.612,
+    -0.943,
+    -0.357
+   ],
+   "seat_pos_logged": [
+    -0.365,
+    -0.409,
+    -0.008
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.126,
+   "rootPeakDist_log": 0.36,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -2.035,
+    -0.627,
+    -0.32
+   ],
+   "door": "fl",
+   "door_E_s": 0.08,
+   "slide_m": 0.658,
+   "slide_fit": {
+    "T": 0.815,
+    "t0": 0.005,
+    "rms": 0.006,
+    "dist_m": 0.658,
+    "n_samples": 19
+   }
+  },
+  {
+   "ride": 18,
+   "vehicle": "turbo",
+   "cls": "sport1",
+   "seat": "driver",
+   "case": "parallel-ride2",
+   "review": "",
+   "clip": "utpp_car_pwa_sport1_driver",
+   "mount_spot": [
+    -1.85,
+    -0.8,
+    -0.4
+   ],
+   "mount_heading_deg": 84.2,
+   "clip_start_logged": [
+    -1.612,
+    -0.943,
+    -0.357
+   ],
+   "seat_pos_logged": [
+    -0.365,
+    -0.409,
+    -0.008
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.108,
+   "rootPeakDist_log": 0.2,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.812,
+    -0.829,
+    -0.391
+   ],
+   "door": "fl",
+   "door_E_s": 0.081,
+   "slide_m": 0.278,
+   "slide_fit": null
+  },
+  {
+   "ride": 19,
+   "vehicle": "turbo",
+   "cls": "sport1",
+   "seat": "driver",
+   "case": "door",
+   "review": "",
+   "clip": "utpp_car_pwa_sport1_driver",
+   "mount_spot": [
+    -1.87,
+    -0.05,
+    -0.27
+   ],
+   "mount_heading_deg": 0.4,
+   "clip_start_logged": [
+    -1.612,
+    -0.943,
+    -0.357
+   ],
+   "seat_pos_logged": [
+    -0.365,
+    -0.409,
+    -0.008
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.092,
+   "rootPeakDist_log": 0.56,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.839,
+    -0.171,
+    -0.27
+   ],
+   "door": "fl",
+   "door_E_s": 0.08,
+   "slide_m": 0.93,
+   "slide_fit": {
+    "T": 0.82,
+    "t0": 0.005,
+    "rms": 0.004,
+    "dist_m": 0.93,
+    "n_samples": 19
+   }
+  },
+  {
+   "ride": 20,
+   "vehicle": "turbo",
+   "cls": "sport1",
+   "seat": "driver",
+   "case": "behind",
+   "review": "",
+   "clip": "utpp_car_pwa_sport1_driver",
+   "mount_spot": [
+    -1.67,
+    -0.72,
+    -0.6
+   ],
+   "mount_heading_deg": 90.0,
+   "clip_start_logged": [
+    -1.612,
+    -0.943,
+    -0.357
+   ],
+   "seat_pos_logged": [
+    -0.365,
+    -0.409,
+    -0.008
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.326,
+   "rootPeakDist_log": 0.04,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -1.656,
+    -0.872,
+    -0.326
+   ],
+   "door": "fl",
+   "door_E_s": 0.08,
+   "slide_m": 0.23,
+   "slide_fit": null
+  },
+  {
+   "ride": 21,
+   "vehicle": "turbo",
+   "cls": "sport1",
+   "seat": "passenger_r",
+   "case": "passenger",
+   "review": "",
+   "clip": "utpp_car_pwa_sport1_passenger_r",
+   "mount_spot": [
+    2.17,
+    -0.6,
+    -0.32
+   ],
+   "mount_heading_deg": null,
+   "clip_start_logged": [
+    1.551,
+    -0.145,
+    -0.358
+   ],
+   "seat_pos_logged": [
+    0.364,
+    -0.409,
+    -0.008
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.115,
+   "rootPeakDist_log": 0.43,
+   "rootOnlyWrites": 43,
+   "anchor_logged": [
+    2.022,
+    -0.503,
+    -0.333
+   ],
+   "door": "fr",
+   "door_E_s": 0.025,
+   "slide_m": 0.769,
+   "slide_fit": {
+    "T": 0.825,
+    "t0": -0.02,
+    "rms": 0.012,
+    "dist_m": 0.768,
+    "n_samples": 16
+   }
+  },
+  {
+   "ride": 23,
+   "vehicle": "outlaw",
+   "cls": "sport2",
+   "seat": "driver",
+   "case": "parallel",
+   "review": "",
+   "clip": "utpp_car_pwa_sport2_driver",
+   "mount_spot": [
+    -1.57,
+    0.0,
+    -0.3
+   ],
+   "mount_heading_deg": 158.7,
+   "clip_start_logged": [
+    -1.563,
+    -1.672,
+    -0.35
+   ],
+   "seat_pos_logged": [
+    -0.33,
+    -0.32,
+    0.125
+   ],
+   "vt_mode": "none",
+   "rootEngageAt": -1.0,
+   "rootPeakDist_log": 0.0,
+   "rootOnlyWrites": 2,
+   "anchor_logged": null,
+   "door": "fl",
+   "door_E_s": 0.031,
+   "slide_m": 1.672,
+   "slide_fit": {
+    "T": 0.305,
+    "t0": 0.005,
+    "rms": 0.009,
+    "dist_m": 1.672,
+    "n_samples": 11
+   }
+  },
+  {
+   "ride": 24,
+   "vehicle": "outlaw",
+   "cls": "sport2",
+   "seat": "driver",
+   "case": "parallel-ride2",
+   "review": "",
+   "clip": "utpp_car_pwa_sport2_driver",
+   "mount_spot": [
+    -1.85,
+    -0.76,
+    -0.36
+   ],
+   "mount_heading_deg": 90.0,
+   "clip_start_logged": [
+    -1.563,
+    -1.672,
+    -0.35
+   ],
+   "seat_pos_logged": [
+    -0.33,
+    -0.32,
+    0.125
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.044,
+   "rootPeakDist_log": 0.86,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -1.817,
+    -0.867,
+    -0.36
+   ],
+   "door": "fl",
+   "door_E_s": 0.03,
+   "slide_m": 0.956,
+   "slide_fit": {
+    "T": 0.295,
+    "t0": 0.01,
+    "rms": 0.01,
+    "dist_m": 0.956,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 25,
+   "vehicle": "outlaw",
+   "cls": "sport2",
+   "seat": "driver",
+   "case": "door",
+   "review": "minor",
+   "clip": "utpp_car_pwa_sport2_driver",
+   "mount_spot": [
+    -1.42,
+    0.59,
+    -0.26
+   ],
+   "mount_heading_deg": 5.7,
+   "clip_start_logged": [
+    -1.563,
+    -1.672,
+    -0.35
+   ],
+   "seat_pos_logged": [
+    -0.33,
+    -0.32,
+    0.125
+   ],
+   "vt_mode": "jump(est)",
+   "rootEngageAt": -1.0,
+   "rootPeakDist_log": 0.0,
+   "rootOnlyWrites": 9,
+   "anchor_logged": [
+    -1.42,
+    0.59,
+    -0.26
+   ],
+   "door": "fl",
+   "door_E_s": 0.031,
+   "slide_m": 2.267,
+   "slide_fit": {
+    "T": 0.295,
+    "t0": 0.01,
+    "rms": 0.008,
+    "dist_m": 2.267,
+    "n_samples": 11
+   }
+  },
+  {
+   "ride": 26,
+   "vehicle": "outlaw",
+   "cls": "sport2",
+   "seat": "driver",
+   "case": "behind",
+   "review": "",
+   "clip": "utpp_car_pwa_sport2_driver",
+   "mount_spot": [
+    -2.03,
+    -0.16,
+    -0.62
+   ],
+   "mount_heading_deg": 95.2,
+   "clip_start_logged": [
+    -1.563,
+    -1.672,
+    -0.35
+   ],
+   "seat_pos_logged": [
+    -0.33,
+    -0.32,
+    0.125
+   ],
+   "vt_mode": "none",
+   "rootEngageAt": -1.0,
+   "rootPeakDist_log": 0.0,
+   "rootOnlyWrites": 2,
+   "anchor_logged": null,
+   "door": "fl",
+   "door_E_s": 0.047,
+   "slide_m": 1.583,
+   "slide_fit": {
+    "T": 0.305,
+    "t0": 0.005,
+    "rms": 0.012,
+    "dist_m": 1.582,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 27,
+   "vehicle": "outlaw",
+   "cls": "sport2",
+   "seat": "passenger_r",
+   "case": "passenger",
+   "review": "",
+   "clip": "utpp_car_pwa_sport2_passenger_r",
+   "mount_spot": [
+    2.18,
+    -0.04,
+    -0.33
+   ],
+   "mount_heading_deg": 89.9,
+   "clip_start_logged": [
+    1.6,
+    -1.131,
+    -0.375
+   ],
+   "seat_pos_logged": [
+    0.338,
+    -0.231,
+    0.125
+   ],
+   "vt_mode": "none",
+   "rootEngageAt": -1.0,
+   "rootPeakDist_log": 0.0,
+   "rootOnlyWrites": 1,
+   "anchor_logged": null,
+   "door": "fr",
+   "door_E_s": 0.029,
+   "slide_m": 1.235,
+   "slide_fit": {
+    "T": 0.285,
+    "t0": 0.005,
+    "rms": 0.022,
+    "dist_m": 1.236,
+    "n_samples": 10
+   }
+  },
+  {
+   "ride": 28,
+   "vehicle": "bratsk",
+   "cls": "utility",
+   "seat": "driver",
+   "case": "parallel",
+   "review": "",
+   "clip": "utpp_car_pwa_utility_driver",
+   "mount_spot": [
+    -2.16,
+    3.46,
+    -0.52
+   ],
+   "mount_heading_deg": 165.0,
+   "clip_start_logged": [
+    -2.285,
+    3.279,
+    -0.959
+   ],
+   "seat_pos_logged": [
+    -0.913,
+    3.625,
+    0.885
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.144,
+   "rootPeakDist_log": 0.1,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -2.275,
+    3.381,
+    -0.536
+   ],
+   "door": "fl",
+   "door_E_s": 0.129,
+   "slide_m": 0.22,
+   "slide_fit": null
+  },
+  {
+   "ride": 29,
+   "vehicle": "bratsk",
+   "cls": "utility",
+   "seat": "driver",
+   "case": "parallel-ride2",
+   "review": "",
+   "clip": "utpp_car_pwa_utility_driver",
+   "mount_spot": [
+    -2.16,
+    3.37,
+    -0.51
+   ],
+   "mount_heading_deg": 92.7,
+   "clip_start_logged": [
+    -2.285,
+    3.279,
+    -0.959
+   ],
+   "seat_pos_logged": [
+    -0.913,
+    3.625,
+    0.885
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.059,
+   "rootPeakDist_log": 0.16,
+   "rootOnlyWrites": 45,
+   "anchor_logged": [
+    -2.199,
+    3.361,
+    -0.513
+   ],
+   "door": "fl",
+   "door_E_s": 0.126,
+   "slide_m": 0.155,
+   "slide_fit": null
+  },
+  {
+   "ride": 30,
+   "vehicle": "bratsk",
+   "cls": "utility",
+   "seat": "driver",
+   "case": "door",
+   "review": "head through door",
+   "clip": "utpp_car_pwa_utility_driver",
+   "mount_spot": [
+    -2.37,
+    4.11,
+    -0.74
+   ],
+   "mount_heading_deg": -0.3,
+   "clip_start_logged": [
+    -2.285,
+    3.279,
+    -0.959
+   ],
+   "seat_pos_logged": [
+    -0.913,
+    3.625,
+    0.885
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.043,
+   "rootPeakDist_log": 0.71,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -2.36,
+    4.018,
+    -0.74
+   ],
+   "door": "fl",
+   "door_E_s": 0.129,
+   "slide_m": 0.836,
+   "slide_fit": {
+    "T": 0.305,
+    "t0": 0.005,
+    "rms": 0.017,
+    "dist_m": 0.835,
+    "n_samples": 11
+   }
+  },
+  {
+   "ride": 31,
+   "vehicle": "bratsk",
+   "cls": "utility",
+   "seat": "driver",
+   "case": "behind",
+   "review": "head/hair minor",
+   "clip": "utpp_car_pwa_utility_driver",
+   "mount_spot": [
+    -2.14,
+    3.47,
+    -0.8
+   ],
+   "mount_heading_deg": 89.8,
+   "clip_start_logged": [
+    -2.285,
+    3.279,
+    -0.959
+   ],
+   "seat_pos_logged": [
+    -0.913,
+    3.625,
+    0.885
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.128,
+   "rootPeakDist_log": 0.13,
+   "rootOnlyWrites": 44,
+   "anchor_logged": [
+    -2.222,
+    3.355,
+    -0.905
+   ],
+   "door": "fl",
+   "door_E_s": 0.13,
+   "slide_m": 0.24,
+   "slide_fit": null
+  },
+  {
+   "ride": 32,
+   "vehicle": "bratsk",
+   "cls": "utility",
+   "seat": "passenger_r",
+   "case": "passenger",
+   "review": "",
+   "clip": "utpp_car_pwa_utility_passenger_r",
+   "mount_spot": [
+    2.16,
+    3.49,
+    -0.83
+   ],
+   "mount_heading_deg": 89.8,
+   "clip_start_logged": [
+    2.276,
+    3.096,
+    -0.915
+   ],
+   "seat_pos_logged": [
+    0.904,
+    3.625,
+    0.885
+   ],
+   "vt_mode": "hold",
+   "rootEngageAt": 0.075,
+   "rootPeakDist_log": 0.3,
+   "rootOnlyWrites": 43,
+   "anchor_logged": [
+    2.2,
+    3.385,
+    -0.83
+   ],
+   "door": "fr",
+   "door_E_s": 0.13,
+   "slide_m": 0.411,
+   "slide_fit": {
+    "T": 0.275,
+    "t0": 0.01,
+    "rms": 0.014,
+    "dist_m": 0.411,
+    "n_samples": 10
+   }
+  }
+ ]
+}

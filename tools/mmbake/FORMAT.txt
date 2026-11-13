@@ -1,0 +1,464 @@
+UTPP Motion Matching database - .utppmm format, version 1
+==========================================================
+(Part 1 = version 1, unchanged. Part 2 "VERSION 2" at the end of this file = format v2 written by mmbake_motion.py.)
+
+Producer : Source/tools/mmbake/mmbake_base.py (config: Source/tools/mmbake/config/default.json)
+Reader   : Source/plugin/UTPP/src/BaseDatabase.hpp (header-only C++20, fails closed)
+Tests    : Source/tools/mmbake/test_mmbake_base.py, Source/plugin/UTPP/tests/MMDatabaseSelfTest.cpp
+Credits  : feature layout, normalization and AABB search after Daniel Holden's Motion-Matching
+           (orangeduck, MIT, (c) 2021 Daniel Holden), Tools/repos/Motion-Matching/database.h.
+
+General
+-------
+- Little-endian. float = IEEE-754 binary32. No implicit padding: every record size is listed.
+- File = 128-byte header, section table at offset 128 (num_sections x 32 bytes), then sections.
+  Every section starts at an offset that is a multiple of 16; gaps and the file tail are zero
+  padding up to a multiple of 16.
+- Deterministic: identical inputs + config give byte-identical files (no timestamps inside).
+- Frames are global: clips are concatenated in ascending clip-name order; frame f of clip c has
+  global index clip.first_frame + f. Sampling rate = header.fps (30).
+
+Coordinate conventions
+----------------------
+- Game rig player_woman_skeleton, bones 0..72 (game indices), parents from rig.json
+  boneParentIndexes. Metres. Up = +Z, character forward = +Y. Quaternions xyzw.
+- Root (0) is identity in every frame (the baker enforces it). Trajectory (1, child of Root)
+  carries root motion: planar x, y and yaw about +Z (CCW positive). Hips (2, child of Root) and
+  its subtree are the body pose WITHOUT root motion, i.e. already in the character frame.
+- "Character frame" of frame i = Trajectory transform of frame i. Body-bone positions in the
+  character frame = model-space FK from Root (Trajectory excluded from the chain).
+
+Header (128 bytes)
+------------------
+ off size type    field
+   0    8 char[8] magic = "UTPPMMDB"
+   8    4 u32     version = 1
+  12    4 u32     header_size = 128
+  16    8 u64     file_size (must equal the actual size)
+  24    8 u64     rig_hash (see below)
+  32    4 u32     flags: bit0 HAS_SCALE (SCAL section present); other bits must be 0
+  36    4 u32     num_frames
+  40    4 u32     num_bones (73)
+  44    4 u32     num_features (27)
+  48    4 u32     num_clips
+  52    4 u32     num_ranges (search ranges)
+  56    4 u32     num_groups (feature groups)
+  60    4 u32     num_tags (<= 64)
+  64    4 u32     bound_sm_size (frames per small AABB, 16)
+  68    4 u32     bound_lr_size (frames per large AABB, 64; multiple of bound_sm_size)
+  72    4 u32     num_bound_sm = ceil(num_frames / bound_sm_size)
+  76    4 u32     num_bound_lr = ceil(num_frames / bound_lr_size)
+  80    4 f32     fps
+  84    4 u32     num_sections (<= 64)
+  88    4 u32     section_table_offset = 128
+  92    4 u32     payload_crc32 = CRC-32 over bytes [128, file_size)  (includes section table)
+  96    4 u32     header_crc32 = CRC-32 over header bytes [0,128) with this field set to 0
+ 100   28 u8[28]  reserved, 0
+CRC-32 = IEEE 802.3 reflected polynomial 0xEDB88320, init/xorout 0xFFFFFFFF (== zlib.crc32).
+
+Rig hash
+--------
+FNV-1a 64 (offset basis 0xCBF29CE484222325, prime 0x100000001B3) over, for each bone 0..72 in
+order: UTF-8 name bytes, one 0x00 byte, parent index as int32 LE (-1 for Root).
+player_woman_skeleton bones 0..72 -> 0x72CB314EB01F562D. The runtime computes the hash from the
+live rig and passes it to the loader; the loader also recomputes it from the BONE section.
+
+Section table entry (32 bytes)
+------------------------------
+ u32 id (FourCC, first char in lowest byte), u32 count, u32 elem_size, u32 reserved=0,
+ u64 offset, u64 size_bytes (= count * elem_size). Ids are unique; sections do not overlap.
+
+Sections
+--------
+STRS count=bytes elem=1   UTF-8 strings, each NUL-terminated; referenced by byte offset.
+BONE count=num_bones elem=16   {u32 name_off, i32 parent, u32 name_len, u32 0}; parent < index.
+TAGS count=num_tags elem=4     {u32 name_off}: source UE PoseSearchDatabase names (e.g.
+                               PSD_Dense_Stand_Walk_Loops), sorted. Bit k of clip.tag_mask = tag k.
+CLIP count=num_clips elem=32   {u32 name_off, u32 first_frame, u32 num_frames, u32 flags,
+                               u32 loop_period, u32 num_searchable, u64 tag_mask}
+                               flags: bit0 LOOP, bit1 ENDS_POSE_MATCH, bit2 NAME_LOOP.
+                               loop_period = num_frames-1 for loops (last frame == first frame), else 0.
+GRUP count=num_groups elem=48  {u32 name_off, u32 kind, u32 first_feature, u32 num_features,
+                               i32 bone (-1 for trajectory), f32 weight, f32 std (raw, before
+                               weighting), u32 num_horizons, i32 horizon_frames[4]}
+                               kind: 1 bone position, 2 bone velocity, 3 trajectory position,
+                               4 trajectory direction. Groups cover [0, num_features) contiguously.
+FOFF count=F elem=4            feature offset (mean) per dimension.
+FSCL count=F elem=4            feature scale per dimension = group_std / group_weight (> 0).
+FEAT count=num_frames elem=4F  normalized+weighted features, row-major: (raw - FOFF) / FSCL.
+FFLG count=num_frames elem=4   u32 frame flags:
+                               bit0 SEARCHABLE, bit1 EXCLUDED_NOTIFY, bit2 HORIZON_PAST_END,
+                               bit3 LOOP_DUPLICATE, bit4 BLOCK_TRANSITION, bit5 BRANCH_IN,
+                               bit6 CLIP_START, bit7 CLIP_END.
+RNGS count=num_ranges elem=8   {u32 start, u32 stop}: maximal runs of SEARCHABLE frames, half-open,
+                               ascending, never crossing a clip boundary. The union equals the
+                               set of SEARCHABLE frames.
+BSMN/BSMX count=num_bound_sm elem=4F   per-dimension min/max of FEAT over the SEARCHABLE frames in
+                               [b*sm, (b+1)*sm). Boxes with no searchable frame hold 0 and are
+                               never visited by the search.
+BLRN/BLRX count=num_bound_lr elem=4F   same for large boxes.
+POSE count=num_frames elem=num_bones*28   per bone {px,py,pz,qx,qy,qz,qw} game-local transform
+                               (relative to the game parent), unit quaternions (sign continuity
+                               from the clip). Bone 1 (Trajectory) holds the clip's accumulated
+                               root motion and is informative only; use ROOT for root motion.
+SCAL count=num_frames elem=num_bones*12   per bone {sx,sy,sz}; present only if HAS_SCALE. It is
+                               omitted when every scale is within scale_tolerance (1e-5) of 1;
+                               the runtime then uses scale 1.
+ROOT count=num_frames elem=16  {f32 dx, f32 dy, f32 dyaw, f32 0}: step from this frame to the next
+                               played frame, (dx,dy) in metres in the Trajectory frame of THIS
+                               frame, dyaw radians CCW about +Z. Loop last frame: step into frame 1
+                               (frame N-1 == frame 0). Non-loop last frame: copy of the previous step
+                               (extrapolation, only used if playback overruns the clip).
+CONT count=num_frames elem=8   {contact_l, contact_r} from the Neutral curves (0..1).
+
+Feature vector (F = 27, order = file order)
+-------------------------------------------
+ 0- 2  left_foot_position   LeftFoot (11) position in character frame (x,y,z)      weight 0.75
+ 3- 5  right_foot_position  RightFoot (12) position in character frame             weight 0.75
+ 6- 8  left_foot_velocity   LeftFoot world velocity expressed in character frame   weight 1.0
+ 9-11  right_foot_velocity  RightFoot world velocity in character frame            weight 1.0
+12-14  hip_velocity         Hips (2) world velocity in character frame             weight 1.0
+15-20  trajectory_position  future Trajectory position (x,y) in character frame at
+                            +10, +20, +30 frames (0.33/0.66/1.0 s): x10,y10,x20,y20,x30,y30
+                                                                                   weight 1.0
+21-26  trajectory_direction future facing (+Y rotated by future yaw) in character frame,
+                            same horizons and order                                weight 1.5
+Weights are per group, configurable (config "weights" + "group_weight_overrides").
+Velocities: world-space central differences at fps (0.5*(p[i+1]-p[i])*fps + 0.5*(p[i]-p[i-1])*fps),
+end frames of non-loops extrapolated as in orangeduck generate_database.py
+(v[0] = v[1] - (v[3]-v[2]), v[-1] = v[-2] + (v[-2]-v[-3])); loops wrap across the seam using
+period N-1 and the loop root offset D = T[N-1] * T[0]^-1 (frame j+P = D * frame j).
+Trajectory beyond the clip end: loops wrap the same way; non-loops clamp to the last frame
+(orangeduck database_trajectory_index_clamp) and such frames are flagged HORIZON_PAST_END.
+Normalization per group (orangeduck normalize_feature): mean per dimension, std = mean over the
+group's dimensions of the per-dimension population std, computed over SEARCHABLE frames only
+(config "normalization_frames"); scale = std / weight.
+Runtime query: build the raw 27-vector with the same definitions, then q = (raw - FOFF) / FSCL.
+
+Searchability
+-------------
+SEARCHABLE unless any of: EXCLUDED_NOTIFY (time i/fps inside [trigger, trigger+duration] +- 1e-4 s
+of a PoseSearchExcludeFromDatabase notify), HORIZON_PAST_END (non-loop, i + 30 > N-1),
+LOOP_DUPLICATE (last frame of a loop, identical to frame 0). BLOCK_TRANSITION
+(PoseSearchBlockTransition) and BRANCH_IN (PoseSearchBranchIn) are flags only by default
+(config block_transition_unsearchable = false). Unsearchable frames stay in POSE/ROOT/CONT for
+playback.
+
+Loop detection
+--------------
+LOOP = name matches regex "_Loop(_|$)" AND max |model-space position delta| of bones 2..72 between
+the first and last frame <= 0.01 m. Turn-in-place clips also start and end in the same pose but
+rotate the Trajectory, so pose matching alone is not used (they get ENDS_POSE_MATCH only).
+A name-loop whose ends do not match is treated as non-loop with a warning.
+
+Search (reader)
+---------------
+Squared Euclidean distance in normalized space over SEARCHABLE frames, iterating RNGS in order,
+pruning with large then small boxes (orangeduck motion_matching_search). Optional current frame:
+the best cost starts at the current frame's cost, frames within ignore_surrounding of it are
+skipped; optional transition cost added to every candidate. The AABB search returns exactly the
+same index and bitwise-identical cost as the reference linear scan (verified by the self-test).
+
+Validation performed by the reader (any failure -> empty database)
+-------------------------------------------------------------------
+magic, version, header size, header CRC, file size, payload CRC, expected rig hash, counts and
+limits, section bounds/alignment/size/uniqueness/overlap, required sections, string termination,
+skeleton vs rig hash, clip coverage, group coverage and kinds, finite values, positive scales,
+unit quaternions, ranges vs flags, AABBs containing their searchable frames.
+
+
+==========================================================================================================
+VERSION 2
+==========================================================================================================
+
+Producer : Source/tools/mmbake/mmbake_base.py --format v2 (code: mmbake_motion.py; data file with every Neutral name /
+           threshold / modifier parameter: mmbake-sourcepack.json, outside this repository)
+Reader   : C++ src/mm/MotionDatabase.hpp (branch port, test utpp_motion_db_test). Independent Python reader: test_mmbake_motion.py (written from
+           this text, does not import mmbake_motion).
+Tests    : Source/tools/mmbake/test_mmbake_motion.py
+Model    : UE 5.8 PoseSearch (databases, schemas, channels, normalization, pose metadata) reproduced offline;
+           sources quoted in the mmbake_motion.py docstring. Several databases (<= 64) share one set of clips.
+Content  : Neutral / source pack derived files.
+
+General (as v1 unless stated)
+-----------------------------
+- Little-endian, float = IEEE-754 binary32, no implicit padding, 128-byte header, section table at 128
+  (num_sections x 32 bytes, same entry layout as v1), every section offset a multiple of 16, zero padding in
+  gaps and at the tail up to a multiple of 16. CRC-32 as v1 (zlib.crc32).
+- Deterministic: identical inputs, data file, config and arguments give byte-identical files.
+- Frames are global: baked clips (clips with at least one database entry) in ascending clip-name order,
+  concatenated; frame f of clip c = global clip.first_frame + f; fps = header.fps (30). Clip files without any
+  entry are not stored.
+- Strings: STRS blob, each string UTF-8 + NUL, referenced by byte offset; offset 0 is the empty string; the
+  blob is padded with NULs to a multiple of 4 bytes. 0xFFFFFFFF = no string.
+- Coordinates as v1: game rig bones 0..num_bones-1, metres, up +Z, character forward +Y, quaternions xyzw,
+  Root (0) identity, Trajectory (1) = planar root motion (x, y, yaw), Hips (2) subtree = pose without root
+  motion. For clips with a root_z track (RTZ, below) Hips holds only its height above the root.
+
+Header (128 bytes)
+------------------
+ off size type    field
+   0    8 char[8] magic = "UTPPMMDB"
+   8    4 u32     version = 2
+  12    4 u32     header_size = 128
+  16    8 u64     file_size (must equal the actual size)
+  24    8 u64     rig_hash = RIG IDENTITY hash (see "Rig identity"; NOT the v1 topology hash)
+  32    4 u32     flags: bit0 HAS_SCALE (SCAL present); other bits 0
+  36    4 u32     num_frames
+  40    4 u32     num_bones
+  44    4 u32     num_clips
+  48    4 u32     num_schemas
+  52    4 u32     num_channels      (all schemas)
+  56    4 u32     num_norms
+  60    4 u32     num_databases     (<= 64)
+  64    4 u32     num_entries
+  68    4 u32     num_rows          (all databases)
+  72    4 u32     num_curves        (<= 32)
+  76    4 u32     num_events
+  80    4 f32     fps (30)
+  84    4 u32     num_sections (<= 64)
+  88    4 u32     section_table_offset = 128
+  92    4 u32     payload_crc32 = CRC-32 over [128, file_size) (section table included)
+  96    4 u32     header_crc32 = CRC-32 over [0, 128) with this field 0
+ 100    4 u32     bound_sm_size (16, rows per small box)
+ 104    4 u32     bound_lr_size (64, rows per large box; multiple of bound_sm_size)
+ 108    4 u32     max_dims (largest schema cardinality)
+ 112    8 u64     dfea_floats (= DFEA count)
+ 120    8 u64     dbox_floats (= DBOX count)
+
+Rig identity (decision 2026-10-13)
+----------------------------------
+The v1 rig hash (names + parents) is the same for player_woman_skeleton and player_man_skeleton
+(0x72CB314EB01F562D), so it cannot keep a man database off the
+woman rig. Version 2 therefore stores:
+- header rig_hash = identity hash: FNV-1a 64 (offset basis 0xCBF29CE484222325, prime 0x100000001B3) over, for
+  each bone 0..num_bones-1 in order: UTF-8 name bytes, 0x00, int32 LE parent (-1 for Root), then three int32 LE
+  qx, qy, qz with q = floor(double(t) * 1000.0 + 0.5), t = the bone's float32 rest LOCAL translation (metres,
+  RIGR px/py/pz). Quantum 1 mm: rest translations differ between the two rigs by up to 6.3 cm (> 1 cm on 15 of
+  73 bones), and at 0.1 mm values printed with 9 digits (e.g. -0.0209500007) sit within 1e-9 m of a rounding
+  boundary. The baker logs the smallest distance of any x = double(t) * 1000 from a rounding boundary
+  (player_woman_skeleton 0.0147 quanta = 14.7 um, player_man_skeleton 0.0094 quanta = 9.4 um) and warns below
+  0.001 quanta. Rest rotations are not hashed (stored in RIGR for comparison).
+    player_woman_skeleton bones 0..72: identity 0xF62810A88A8BFDA9   (topology 0x72CB314EB01F562D)
+    player_man_skeleton   bones 0..72: identity 0xAFE2CFEDCF97CDF7   (topology 0x72CB314EB01F562D)
+- RIGR section: the rest local transforms the hash was computed from, so a loader can (a) recompute the
+  identity hash from BONE + RIGR and compare with the header, (b) compare RIGR with the live rig's rest
+  (reference) pose numerically (e.g. |dt| <= 1 mm per bone) when it can read it, (c) still recompute the v1
+  topology hash from BONE (names + parents) for the existing name/parent check.
+The runtime must refuse the database unless the live rig's identity (hash computed the same way from the live
+rig's names, parents and rest local translations, or the per-body constant above chosen from the player's
+body) equals header rig_hash. Clip files carry their rig name ("rig"); the baker refuses clips retargeted
+for another rig than --rig.
+
+Sections (written in this order; SCAL only with HAS_SCALE)
+-----------------------------------------------------------
+id    count            elem        record
+STRS  bytes            1           strings (see General)
+BONE  num_bones        16          {u32 name_off, i32 parent, u32 name_len, u32 0}; parent < index, Root -1
+RIGR  num_bones        28          {f32 px, py, pz, qx, qy, qz, qw}: rest LOCAL transform of the bone as stored
+                                   in the rig (boneTransforms Translation X/Y/Z, Rotation i/j/k/r), not normalized
+CLIP  num_clips        32          {u32 name_off, u32 first_frame, u32 num_frames, u32 flags, u32 loop_period,
+                                    u32 num_selectable, u64 db_mask}
+                                   flags: bit0 LOOP (UE bLoop for Neutral clips, v1 name+pose rule otherwise),
+                                   bit1 ENDS_POSE_MATCH, bit2 NAME_LOOP, bit3 RTZ_UNKNOWN, bit4 ADDED,
+                                   bit5 RTZ_PRESENT, bit6 RTZ_NONE (exactly one of bits 3/5/6 is set).
+                                   loop_period = num_frames-1 for loops, else 0. num_selectable = frames of the
+                                   clip with FFLG SELECTABLE. db_mask bit d = the clip has an entry in database d.
+CLP2  num_clips        32          {u32 first_event, u32 num_events, u32 rtz_source, u32 curve_mask, f32 hip_ratio,
+                                    f32 length_s, u32 added, u32 recomputed_curve_mask}
+                                   events of the clip = EVNT[first_event, first_event + num_events).
+                                   rtz_source: 0 NONE (no vertical root, RTZ rows 0 are valid), 1 UNKNOWN (a
+                                   vertical root is expected - UE root track start/end |z| > data-file tolerance or
+                                   the clip is in a database whose schema reads the 3D trajectory - but there is
+                                   no root_z track: RTZ rows 0 are NOT valid), 2 ROOT_Z (RTZ rows from root_z).
+                                   curve_mask bit k = curve k present for the clip (same for all its frames).
+                                   length_s = UE play length for Neutral clips, (num_frames-1)/fps otherwise.
+                                   added 0/1. recomputed_curve_mask bit k = curve k computed by the baker
+                                   (recreated AnimModifier) instead of the UE curve.
+FFLG  num_frames       4           u32 frame flags: bit0 SELECTABLE (a non-block row in at least one database),
+                                   bit1 EXCLUDED_NOTIFY (inside an ExcludeFromDatabase notify state), bit2 unused
+                                   (0; v1 HORIZON_PAST_END no longer exists), bit3 LOOP_DUPLICATE (last frame of a
+                                   loop), bit4 BLOCK_TRANSITION (a block row in at least one database), bit5
+                                   BRANCH_IN, bit6 CLIP_START, bit7 CLIP_END, bit8 EXCLUDED_TAIL (after the
+                                   ExcludeFromDatabaseParameters window of a non-loop), bit9 INDEXED (a row in at
+                                   least one database). Flags are informative; the search uses DROW.
+SCHM  num_schemas      32          {u32 name_off, u32 dims, u32 first_channel, u32 num_channels, f32 sample_rate,
+                                    u32 preprocessor, f32 weight_sum, u32 0}
+                                   channels of the schema = SCHC[first_channel, first_channel + num_channels);
+                                   preprocessor 0 None, 1 Normalize, 2 NormalizeWithCommonSchema (only 2 is baked);
+                                   weight_sum = sum over channels of weight * cardinality.
+SCHC  num_channels     76          off type field
+                                     0 u32 kind: 1 Position, 2 Velocity, 3 VelocityDirection, 4 Heading
+                                     4 u32 components: 7 xyz, 3 xy (STRIP_Z), 4 z (STRIP_XY)
+                                     8 i32 bone (game bone index; -1 = root = Trajectory + RTZ)
+                                    12 i32 origin bone (game index; -1 = root)
+                                    16 f32 t_sample (s, multiple of 1/60)
+                                    20 f32 t_origin (s, multiple of 1/60)
+                                    24 u32 velocity space: 0 none, 1 character, 2 world
+                                    28 u32 input query: 0 continuing pose, 1 character (query built from the game)
+                                    32 f32 weight (effective: sample weight x channel weight x parent weights)
+                                    36 f32 weight / schema weight_sum
+                                    40 u32 data offset (first dimension in the schema vector)
+                                    44 u32 cardinality (1..3)
+                                    48 u32 normalization group name_off (0xFFFFFFFF = none)
+                                    52 u32 label name_off (UE-style label, used for normalization grouping)
+                                    56 f32 axis x, 60 f32 axis y, 64 f32 axis z: heading axis in the game bone
+                                           frame (from the UE / CP rest poses); trajectory heading (0, 1, 0)
+                                    68 u32 flags: bit0 TRAJECTORY, bit1 NORMALIZE_OUTPUT (headings), bit2
+                                           CLAMP_UNIT_UE (velocity direction), bit3 Z_FROM_RTZ (the value depends
+                                           on the root vertical: database from RTZ, query from the capsule
+                                           vertical history / ballistic prediction), bit4 UNITLESS
+                                    72 u32 0
+NORM  num_norms        32          {u32 schema, u32 dims, u32 nrmv_offset, u32 num_members, u64 member_mask,
+                                    u32 rows, u32 0}: one per (main schema, main database + normalization set)
+                                   pair; member_mask bit d = database d contributed rows; rows = indexed poses used.
+NRMV  floats           4           per norm at nrmv_offset (floats): mean[dims], scale[dims], deviation[dims]
+DBAS  num_databases    96          off type field
+                                     0 u32 name_off      4 u32 schema      8 u32 norm      12 u32 family code
+                                    16 u32 tag bits     20 u32 flags (bit0 RTZ_PENDING: 3D-trajectory schema and
+                                           an entry clip with RTZ_UNKNOWN; bit1 IN_NORMALIZATION_SET)
+                                    24 f32 base_cost_bias   28 f32 continuing_pose_cost_bias
+                                    32 f32 looping_cost_bias 36 f32 exclude_min 40 f32 exclude_max
+                                           (ExcludeFromDatabaseParameters, s; max <= 0 counts from the end)
+                                    44 u32 first_entry  48 u32 num_entries  52 u32 first_row  56 u32 num_rows
+                                    60 u32 dims
+                                    64 u64 feat_offset (floats into DFEA)   72 u64 box_offset (floats into DBOX)
+                                    80 u32 num_small_boxes 84 u32 num_large_boxes
+                                    88 f32 min_addend (minimum cost addend of the non-block rows; FLT_MAX if none)
+                                    92 u32 num_selectable (non-block rows)
+                                   Family codes and tag bits come from the data file (databases.family_codes,
+                                   databases.tag_bits).
+DENT  num_entries      32          {u32 database, u32 clip, u32 flags, f32 range_min, f32 range_max,
+                                    u32 first_row, u32 num_rows, u32 0}
+                                   flags: bit0 ENABLED, bit1 DISABLE_RESELECTION, bit2 LOOPING, bit3 ADDED,
+                                   bit4 NOTIFY_MOTION58. range = UE SamplingRange (0, 0 = whole clip). Entries are
+                                   ordered by database, then Neutral before non-Neutral, then clip index; first_row is a
+                                   global DROW index; the rows of an entry are contiguous.
+DROW  num_rows         20          {u32 frame (global), f32 cost_addend, f32 continuing_addend, u32 entry,
+                                    u32 flags}: flags bit0 BLOCK (BlockTransition), bit1 BRANCH_IN, bit2 LOOPING,
+                                   bit3 RANGE_START, bit4 RANGE_END. The rows of database d are
+                                   DROW[first_row, first_row + num_rows); local row r = global row - first_row.
+DFEA  floats           4           per database at feat_offset: num_rows x dims float32, row-major, normalized
+                                   features of the local rows: f = (raw - mean) * scale (NRMV of the database's norm)
+DBOX  floats           4           per database at box_offset: num_small_boxes records then num_large_boxes
+                                   records, each (2 * dims + 1) floats: min[dims], max[dims], min_addend. Box b of
+                                   size S covers local rows [b*S, min((b+1)*S, num_rows)) and is built from its
+                                   non-block rows only; a box without such a row holds min = max = 0 and
+                                   min_addend = FLT_MAX (never visited).
+CRVN  num_curves       8           {u32 name_off, u32 unit}: unit 0 alpha, 1 m/s, 2 m, 3 phase (values of the
+                                   recreated / UE phase curve, data file modifiers)
+CURV  num_frames       4*(C+1)     per frame: u32 presence mask (bit k = curve k), then f32 value[C]; absent = 0.
+                                   m/s and m curves are in CP rig units (Neutral: UE value x hip_ratio / 100).
+EVNT  num_events       24          {u32 clip, f32 time_s, f32 duration_s, u32 tag name_off, u32 class name_off,
+                                    u32 flags}: flags bit0 SIDE_LEFT, bit1 SIDE_RIGHT, bit2 DERIVED (from contacts),
+                                   bit3 STATE (duration > 0). Sorted by clip, then time, tag, side.
+RTZ_  num_frames       8           {f32 root_z, f32 vz}: root vertical (Source/tools/retarget/RTZ.txt): root_z in
+                                   metres (CP +Z up, absolute, 0 = floor of the source animation origin,
+                                   = hip_ratio x source root Z), vz = (root_z[f+1] - root_z[f-1]) * fps / 2 m/s,
+                                   one-sided (root_z[1]-root_z[0]) * fps / (root_z[N-1]-root_z[N-2]) * fps at the
+                                   first / last frame of the clip. Rows of clips without RTZ_PRESENT are 0.
+                                   The runtime never moves the entity or Hips by root_z (RTZ.txt "How the runtime
+                                   applies it"); it is used for matching (Z_FROM_RTZ channels).
+POSE  num_frames       num_bones*28   as v1
+ROOT  num_frames       16          as v1 ({dx, dy, dyaw, 0}, step to the next played frame; loops continue from
+                                   the last frame into frame 1; non-loop last frame copies the previous step)
+CONT  num_frames       8           {contact_l, contact_r} from the clip curves (0..1), 0 if absent
+SCAL  num_frames       num_bones*12   as v1, only with HAS_SCALE
+
+Feature values (raw, before normalization; what the runtime query must reproduce)
+-----------------------------------------------------------------------------------
+Time grid: every t_sample / t_origin is a multiple of 1/60 s, so features are evaluated on half frames
+h = 2 * frame + 60 * t. Pose at an odd half frame: local translations lerped, local rotations nlerped (sign
+fixed) between the two frames, then FK; the model-space (Root-space) bone transforms gp/gq come from that FK.
+Root (Trajectory) at an odd half frame: (x, y, unwrapped yaw) averaged.
+Outside the clip (UE PoseSearchAssetSampler): loops wrap - pose at h mod H (H = 2 (N-1)), root =
+D^q o T(r) with (q, r) = divmod(h, H), D = T[N-1] o T[0]^-1, root_z(r) + q (root_z[N-1] - root_z[0]); non-loops
+clamp the pose to the first / last frame and extrapolate the root with the first / last 1/30 s of root motion:
+after the end, e = h - H half frames: T[N-1] o d^(e div 2) o (e odd ? d/2 : identity), d = T[N-2]^-1 o T[N-1],
+d/2 = (x/2, y/2, yaw/2); before the start, e = -h: T[0] o d0^(e div 2) o (e odd ? d0/2 : identity),
+d0 = T[1]^-1 o T[0]; root_z linear with the same end steps. (a o b = apply b first: (x, y, yaw) o (x', y', yaw')
+= (x + R(yaw)(x', y'), yaw + yaw').) This replaces the v1 HORIZON_PAST_END cut.
+Positions: P(bone, h) = (R(yaw_h) gp_xy + T_xy, gp_z + root_z_h), root (-1): (T_x, T_y, root_z_h).
+  rel(bone, origin, hs, ho) = (R(-yaw_ho) (P_xy(bone, hs) - P_xy(origin, ho)), P_z(bone, hs) - P_z(origin, ho)).
+  Position = rel(bone, origin, hs, ho).
+Velocity = (rel(hs, ho) - rel(hs - 1, ho')) * 60, ho' = ho - 1 (character space) or ho (world space).
+VelocityDirection = velocity * 100 (UE cm/s), clamped to length <= 1 (UE GetClampedToMaxSize(1)), unitless.
+Heading = axis rotated by gq(bone, hs) (root: the axis itself), then its xy rotated by yaw_hs - yaw_ho; z kept.
+Component stripping after the above (velocity direction: after the clamp); headings are then normalized when
+|v|^2 > 1e-8. hs = h of t_sample, ho = h of t_origin, for the row's frame.
+
+Rows (UE FindValidRanges / FSearchIndexAsset)
+---------------------------------------------
+Per entry: range = SamplingRange (0, 0 -> [0, L]; else [min, min(L, max)], min clamped to max); non-loops:
+intersect with [exclude_min, L + exclude_max) (half-open TRange); subtract every ExcludeFromDatabase notify state
+[time, time + duration] (closed); each remaining range gives sample indices ceil(lo * 30) .. floor(hi * 30)
+(float32, inclusivity ignored as in UE). Pose metadata at st = min(i / 30, L), notify states active when they
+overlap [st - 1/240, st + 1/240] (time <= hi and time + duration > lo): BLOCK (BlockTransition), BRANCH_IN;
+cost_addend = base_cost_bias, replaced by the active ModifyCost notify value, + looping_cost_bias for looping
+entries; continuing_addend = continuing_pose_cost_bias or the active OverrideContinuingPoseCostBias value.
+
+Normalization (UE PoseSearchDerivedData.cpp 231-405, 654-712, NormalizeWithCommonSchema)
+------------------------------------------------------------------------------------------
+Rows = every indexed row (block rows included) of the main database and of every database of its
+normalization set, all evaluated with the main database's schema. Channel groups: in channel order a channel
+joins the first group whose first channel CanBeNormalizedWith it (same cardinality and UE class - Position;
+Velocity incl. VelocityDirection; Heading - and the same non-empty normalization group or the same label).
+Group deviation = mean over all rows and all channels of the group of |v - m| (m = mean of the stacked
+cardinality-sized vectors of the group); deviation <= 0.1 UE units -> 1 UE unit, i.e. metres / m/s:
+<= 0.001 -> 0.01, unitless: <= 0.1 -> 1. Per dimension: mean = column mean over the rows,
+w = channel weight, scale = sqrt(w / sum(w)) / deviation. Stored: NRMV mean, scale, deviation; DFEA =
+float32((raw - mean) * scale). Queries use the same mean and scale (the mean cancels in distances).
+
+Search (reference for the runtime; test_mmbake_motion.py checks it)
+---------------------------------------------------------------
+Per selected database: q = (raw_query - mean) * scale (database's norm). Candidate rows = non-BLOCK rows (minus
+rows the runtime excludes: reselection window, DISABLE_RESELECTION of the current entry). cost(r) = sum over
+dimensions, in ascending order, of (q - f)^2 in float32, + cost_addend. Best = smallest cost, ties -> lowest
+local row. AABB: visit large boxes in order, skip a box when lower bound + min_addend >= best (lower bound =
+sum over dimensions of max(0, min - q, q - max)^2, same summation order), then its small boxes the same way,
+then rows; replace best only when cost < best. This returns the same row and bitwise-identical cost as the
+linear scan. The continuing pose may be inside a BLOCK range (cost = its feature cost + continuing_addend);
+a search never starts at a BLOCK row.
+
+Chooser data file (next to the database, <name>.chooser.json)
+-------------------------------------------------------------
+JSON "utpp-chooser-table" version 1 (motion_chooser_ref.py tables, AllResults semantics described in its
+"semantics" member); database results reference DBAS indices of this file (-1 = not baked).
+
+Validation a v2 loader must perform (any failure -> no database)
+----------------------------------------------------------------
+v1 checks (magic, version 2, header size, header / payload CRC, file size, section table bounds / alignment /
+uniqueness / overlap, elem sizes as above, string termination) plus: rig identity (header rig_hash == live rig
+identity; header rig_hash == hash recomputed from BONE + RIGR), counts vs header, DBAS row / entry / feature /
+box ranges inside their sections and consistent with dims, DENT rows inside their database, DROW frames <
+num_frames, NORM / NRMV ranges, SCHC offsets + cardinality <= dims, finite floats, positive scales, unit POSE
+quaternions, exactly one RTZ flag per clip, refuse RTZ_UNKNOWN clips (or the database) when a Z_FROM_RTZ channel
+is used.
+
+CHOOSER DATA FILE, SLIDE SECTION (additive, utpp-chooser-table version stays 1; source pack slide, mmbake_base.py --slide-spec)
+A bundle baked with --slide-spec adds to <bundle>.chooser.json (a file without these fields behaves exactly as before):
+  inputs      + MovementDirection (enum: Forward 0, Other 1), + MovementMode_LastFrame (enum, values of MovementMode);
+              MovementMode gains the enum value Sliding = 2 (0 OnGround, 1 InAir).
+  tables      + table "Slide" (rows: MovementDirection MatchEqual Forward -> PSD_Slide_FeetOut, MatchNotEqual Forward ->
+              PSD_Slide_KneesOut); the root movement tables (CHT_PoseSearchDatabases_Dense / _Sparse) get a last row
+              MovementMode == Sliding -> table "Slide"; the tables Stand Idles / Crouch Idle / Crouch Moving / Stand Walks /
+              Stand Runs / Stand Sprint of both families get a last row MovementMode_LastFrame == Sliding (all other columns
+              match-any) -> PSD_Slide_ExitTo{StandIdle, CrouchIdle, CrouchWalk, Walk, Run, Sprint}.
+  slide       {version 1, movement_mode_input, sliding_value 2, direction_input, direction_values, last_mode_input,
+               slide_table (index), families, databases {name: DBAS id}, exit_rows [{table,row,db}], root_rows, semantics}.
+Loader: Chooser.hpp Table::GetSlide() (SlideInfo; version != 1 -> load error). .utppmm needs no format change: the 8 databases
+PSD_Slide_FeetOut, PSD_Slide_KneesOut, PSD_Slide_ExitTo* are appended after the base databases (base ids unchanged, base DFEA
+bit-identical); summary.json gets slide_spec {file, sha256, databases}. Authored windows: Into_* EXCLUDE from 2.1 s, Out_* BLOCK
+from max(pelvis recovered 0.9, root speed settled) (make_slide_spec.py). Runtime: MapConfig.slide, ChooserState.movementMode 2,
+movementDirection, movementModeLast.
+
+SLIDE RUNTIME FEED (MapConfig.slide = true, MotionAdapter.hpp; defaults are [P], design 2026-10-19 from the replay of 13 recorded slides)
+The runtime session feeds per frame: MotionFeed.psmDetailed (5 = Slide), velWorld, playerYawDeg, dt (as for every v2 frame); MapToChooser then
+sets ChooserState.movementMode = 2 (stance Crouch), movementDirection (Forward within slideForwardHalfAngleDeg 60 of the actor yaw),
+movementModeLast. Query side: (1) speed map game -> Neutral cm/s while Sliding: 0 -> 0, slideLowMs 2.0 m/s -> slideLoopCmS 450, up to
+slideHighMs 8.25 m/s -> slideEntryCmS 450 (the Neutral Loop clip speed; 11 m/s boosted game slides query as 450); (2) the predicted
+trajectory is a linear brake (slideDecelMs2 2.75 m/s^2, no input acceleration) through the same map (SlideBrakePrediction); (3) the
+first slideExitMapS 0.6 s after the slide the query speed decays from slideExitStartCmS 550 to the normal map (exit clips start at
+5-7 m/s). Matcher: on the frame with MovementMode OnGround and movementModeLast Sliding only the PSD_Slide_ExitTo* databases are
+searched (when any is in the chooser result); later frames keep the exit clip via the continuing pose. Bake: FeetOut/KneesOut
+ContinuingPoseCostBias -2.0 (1.2: -0.02) [P], needed to stop the Into_Lfoot <-> Into_Rfoot flicker; exit blocks from pelvis recovery.

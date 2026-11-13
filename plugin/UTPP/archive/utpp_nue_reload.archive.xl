@@ -1,0 +1,21 @@
+# UTPP authored Nue reload (female V, third person): own clip sets with custom names only.
+# ArchiveXL appends these sets to the gameplay animations of the matching entity + component.
+# Registration is not activation: the CET module utpp_reload_gate switches the graph branches per reload
+# (female V, Items.Preset_Nue_Default, third person); everything else keeps the game's own reload.
+animations:
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\reload\utpp_nue_tpp_reload.anims
+    priority: 128
+  # weapon_root is shared: unique clip names and the Female/Nue/TPP gate are
+  # essential. Do not replace native clip names or register on every component.
+  - entity: base\weapons\weapon_root.ent
+    component: Magazine
+    set: utpp\reload\utpp_nue_tpp_magazine.anims
+    priority: 128
+  - entity: base\weapons\weapon_root.ent
+    component: MagazineReload
+    set: utpp\reload\utpp_nue_tpp_magazine.anims
+    priority: 128

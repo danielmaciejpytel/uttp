@@ -1,0 +1,1 @@
+local ok,e=pcall(function() return GetMod('utpp_core').Set('core.diagnosticLogs','timed') end) Game.UTPPLogLine('[night] DIAG_ON ok='..tostring(ok)..' '..tostring(e))

@@ -1,0 +1,323 @@
+# h2 sidecar v1 (tools/replay/h2_sidecar_from_log.py; feed seconds = log wall time - 'MM feed dump on' wall time)
+session 20261015_0009
+feed utpp-feed-2026-10-15-00-09-19.txt
+log utpp-2026-10-15-00-09-01-user-video.log
+dumpon 2026-10-15 00:09:19.571
+frames 33492 595.097
+align samples(body turning)=824 camTrace=5667 median|dyaw| at lag 0: 0.09 deg; best lag 0.00 s -> 0.09 deg
+leasesource derived
+# stats: frames 33492 feed t 6.667..595.097
+# stats: native-off frames 5025 (off windows 58, 113.50 s)
+# stats: native-off, ground, sp>=0.5, not ADS: 833; outside strafe/act8 windows (-0.02/+0.15 s): 779
+# stats:   sp>=1.5   all   828 | outside windows   774 | outside windows, no melee   183
+# stats:   in>=45    all   397 | outside windows   362 | outside windows, no melee     3
+# stats:   in>=105   all   211 | outside windows   211 | outside windows, no melee     2
+# stats:   vel>=105  all   204 | outside windows   204 | outside windows, no melee     2
+# stats:   vel>=90   all   257 | outside windows   255 | outside windows, no melee     2
+# stats:   vel>=130  all   199 | outside windows   199 | outside windows, no melee     2
+mask 5.234 0x5FBF 1
+freeMoveEnable 5.234 1
+off 5.234 6.676
+off 189.574 194.174
+off 206.208 207.191
+off 223.107 223.624
+off 224.007 224.874
+off 225.308 229.641
+off 243.225 244.891
+off 281.191 288.462
+off 288.995 292.633
+off 306.216 319.411
+off 319.828 320.661
+off 322.894 324.195
+off 330.311 331.161
+off 331.828 332.428
+off 332.961 334.195
+off 335.511 339.778
+off 340.611 341.228
+off 342.978 343.845
+off 344.528 344.961
+off 345.529 345.911
+off 346.794 347.679
+off 348.548 349.664
+off 357.530 358.530
+off 362.951 364.464
+off 413.764 414.782
+off 416.466 417.168
+off 419.518 420.085
+off 421.285 421.885
+off 427.593 428.610
+off 442.676 458.027
+off 476.569 479.503
+off 480.236 480.936
+off 481.769 482.369
+off 483.136 492.702
+off 495.619 497.337
+off 502.221 504.540
+off 504.557 507.740
+off 507.756 510.558
+off 510.573 511.990
+off 512.006 514.674
+off 515.124 518.591
+off 518.641 519.624
+off 534.024 535.142
+off 535.459 538.293
+off 544.560 544.960
+off 546.393 546.760
+off 550.910 551.147
+off 552.527 552.910
+off 556.410 556.611
+off 558.526 558.676
+off 560.910 561.060
+off 562.843 562.994
+off 564.676 565.110
+off 582.347 582.497
+off 584.312 584.463
+off 590.212 590.362
+off 592.113 592.980
+off 595.362 inf
+freeMove 6.693 189.590
+freeMove 194.190 206.291
+freeMove 207.191 223.190
+freeMove 223.690 224.091
+freeMove 224.891 225.390
+freeMove 229.691 243.292
+freeMove 244.891 281.191
+freeMove 288.495 288.995
+freeMove 292.683 305.983
+freeMove 319.511 319.895
+freeMove 320.711 322.911
+freeMove 324.194 330.311
+freeMove 331.211 331.895
+freeMove 332.511 333.011
+freeMove 334.211 335.511
+freeMove 339.812 340.611
+freeMove 341.311 343.011
+freeMove 343.895 344.595
+freeMove 345.011 345.595
+freeMove 345.911 346.794
+freeMove 347.695 348.597
+freeMove 349.697 357.597
+freeMove 358.597 362.998
+freeMove 364.498 413.798
+freeMove 414.799 416.499
+freeMove 417.201 419.603
+freeMove 420.101 421.302
+freeMove 421.901 427.610
+freeMove 428.610 442.510
+freeMove 458.094 476.602
+freeMove 479.502 480.302
+freeMove 480.986 481.802
+freeMove 482.402 483.186
+freeMove 492.786 495.689
+freeMove 497.387 502.288
+freeMove 511.990 512.090
+freeMove 514.691 515.191
+freeMove 518.591 518.691
+freeMove 519.691 534.091
+freeMove 535.191 535.492
+freeMove 538.292 544.593
+freeMove 544.993 546.393
+freeMove 546.793 550.994
+freeMove 551.193 552.593
+freeMove 552.993 556.494
+freeMove 556.693 564.694
+freeMove 565.193 592.196
+freeMove 592.996 595.196
+why off_aim_align 226.591 227.891
+why off_aim_align 228.294 228.790
+why off_aim_align 228.990 229.290
+why off_aim_align 289.396 289.696
+why off_aim_align 292.584 292.684
+why off_aim_align 345.611 346.011
+why off_aim_align 346.811 347.411
+why off_aim_align 348.598 349.197
+why off_aim_align 363.497 364.497
+why off_aim_align 413.999 414.799
+why off_aim_align 416.499 416.901
+why off_aim_align 419.602 420.102
+why off_aim_align 421.302 421.901
+why off_aim_align 427.610 428.010
+why off_aim_align 476.602 476.902
+why off_aim_align 480.803 481.004
+why off_aim_align 481.802 482.403
+why off_aim_align 483.186 483.503
+why off_aim_align 483.786 485.003
+why off_aim_align 485.602 486.702
+why off_aim_align 487.586 488.402
+why off_aim_align 488.603 490.402
+why off_aim_align 491.086 492.786
+why off_aim_align 495.702 496.203
+why off_aim_align 502.287 503.288
+why off_aim_align 534.091 534.191
+why off_aim_align_waiting 189.590 189.791
+why off_aim_align_waiting 223.191 223.291
+why off_aim_align_waiting 319.912 320.012
+why off_aim_aligned 189.791 194.191
+why off_aim_aligned 206.291 207.291
+why off_aim_aligned 223.290 223.691
+why off_aim_aligned 224.091 224.890
+why off_aim_aligned 225.390 226.590
+why off_aim_aligned 226.991 227.091
+why off_aim_aligned 227.891 228.291
+why off_aim_aligned 228.791 228.991
+why off_aim_aligned 229.290 229.691
+why off_aim_aligned 243.291 244.991
+why off_aim_aligned 289.095 289.395
+why off_aim_aligned 289.696 292.583
+why off_aim_aligned 320.011 320.711
+why off_aim_aligned 322.911 324.294
+why off_aim_aligned 330.411 331.211
+why off_aim_aligned 331.911 332.495
+why off_aim_aligned 333.011 334.211
+why off_aim_aligned 335.611 339.811
+why off_aim_aligned 340.711 341.295
+why off_aim_aligned 343.011 343.912
+why off_aim_aligned 344.611 345.011
+why off_aim_aligned 347.411 347.711
+why off_aim_aligned 349.197 349.697
+why off_aim_aligned 357.597 358.598
+why off_aim_aligned 362.997 363.497
+why off_aim_aligned 413.798 413.999
+why off_aim_aligned 416.901 417.201
+why off_aim_aligned 428.010 428.710
+why off_aim_aligned 476.902 479.602
+why off_aim_aligned 480.302 480.803
+why off_aim_aligned 483.502 483.802
+why off_aim_aligned 485.003 485.603
+why off_aim_aligned 486.703 487.591
+why off_aim_aligned 488.402 488.602
+why off_aim_aligned 489.286 489.386
+why off_aim_aligned 489.803 489.903
+why off_aim_aligned 490.402 491.102
+why off_aim_aligned 496.186 497.403
+why off_aim_aligned 503.287 504.790
+why off_aim_aligned 507.790 507.990
+why off_aim_aligned 510.590 510.690
+why off_aim_aligned 512.089 512.290
+why off_aim_aligned 512.990 513.891
+why off_aim_aligned 515.191 516.491
+why off_aim_aligned 517.291 518.791
+why off_aim_aligned 519.091 519.691
+why off_aim_aligned 535.493 535.693
+why off_locomotion_inactive 6.379 6.695
+why off_locomotion_inactive 281.291 288.495
+why off_locomotion_inactive 319.394 319.494
+why off_locomotion_inactive 451.186 458.110
+why off_locomotion_inactive 504.790 507.790
+why off_locomotion_inactive 507.989 512.090
+why off_locomotion_inactive 512.290 512.990
+why off_locomotion_inactive 513.891 514.690
+why off_locomotion_inactive 516.491 517.291
+why off_locomotion_inactive 518.391 518.491
+why off_locomotion_inactive 518.791 519.091
+why off_locomotion_inactive 534.191 535.191
+why off_locomotion_inactive 535.693 538.392
+why off_locomotion_inactive 544.594 544.993
+why off_locomotion_inactive 546.493 546.793
+why off_locomotion_inactive 550.993 551.194
+why off_locomotion_inactive 552.593 552.993
+why off_locomotion_inactive 556.493 556.693
+why off_locomotion_inactive 558.593 558.693
+why off_locomotion_inactive 560.993 561.093
+why off_locomotion_inactive 562.893 563.093
+why off_locomotion_inactive 564.694 565.193
+why off_locomotion_inactive 582.397 582.596
+why off_locomotion_inactive 584.396 584.496
+why off_locomotion_inactive 590.296 590.396
+why off_locomotion_inactive 592.196 592.996
+why on_applied 501.787 501.987
+why on_applied 502.188 502.288
+why on_applied 527.691 534.091
+why on_applied 538.593 542.593
+why on_applied 542.993 544.593
+why on_applied 545.093 546.193
+why on_applied 546.393 546.493
+why on_applied 546.893 548.393
+why on_deadband 530.891 530.991
+why on_deadband 533.891 533.991
+why on_native_inactive 6.693 189.590
+why on_native_inactive 194.190 206.291
+why on_native_inactive 207.290 223.190
+why on_native_inactive 223.690 224.091
+why on_native_inactive 224.891 225.390
+why on_native_inactive 229.691 243.292
+why on_native_inactive 244.991 281.291
+why on_native_inactive 288.495 289.095
+why on_native_inactive 292.683 305.983
+why on_native_inactive 319.511 319.895
+why on_native_inactive 320.711 322.911
+why on_native_inactive 324.294 330.411
+why on_native_inactive 331.211 331.895
+why on_native_inactive 332.511 333.011
+why on_native_inactive 334.211 335.611
+why on_native_inactive 339.812 340.711
+why on_native_inactive 341.311 343.011
+why on_native_inactive 343.895 344.595
+why on_native_inactive 345.011 345.595
+why on_native_inactive 346.011 346.794
+why on_native_inactive 347.695 348.597
+why on_native_inactive 349.697 357.597
+why on_native_inactive 358.597 362.998
+why on_native_inactive 364.498 413.798
+why on_native_inactive 414.799 416.499
+why on_native_inactive 417.201 419.603
+why on_native_inactive 420.101 421.302
+why on_native_inactive 421.901 427.610
+why on_native_inactive 428.710 442.510
+why on_native_inactive 458.094 476.602
+why on_native_inactive 479.603 480.302
+why on_native_inactive 480.986 481.802
+why on_native_inactive 482.402 483.186
+why on_native_inactive 492.786 495.689
+why on_native_inactive 497.387 501.787
+why on_native_inactive 501.987 502.188
+why on_native_inactive 514.691 515.191
+why on_native_inactive 519.691 527.692
+why on_native_inactive 535.191 535.492
+why on_native_inactive 538.393 538.593
+why on_native_inactive 542.593 542.994
+why on_native_inactive 544.993 545.093
+why on_native_inactive 546.193 546.393
+why on_native_inactive 546.793 546.893
+why on_native_inactive 548.393 550.994
+why on_native_inactive 551.193 552.593
+why on_native_inactive 552.993 556.494
+why on_native_inactive 556.693 562.893
+why on_native_inactive 563.093 564.694
+why on_native_inactive 565.193 582.396
+why on_native_inactive 582.596 592.196
+why on_native_inactive 592.996 595.196
+strafe 189.558 194.161
+strafe 206.194 207.177
+strafe 223.092 223.612
+strafe 223.993 224.860
+strafe 225.293 229.627
+strafe 243.211 244.878
+strafe 288.980 292.619
+strafe 319.812 320.647
+strafe 322.881 324.181
+strafe 330.297 331.150
+strafe 331.814 332.413
+strafe 332.947 334.180
+strafe 335.497 339.764
+strafe 340.597 341.213
+strafe 342.964 343.831
+strafe 344.514 344.947
+strafe 345.517 345.901
+strafe 346.780 347.667
+strafe 348.535 349.651
+strafe 357.516 358.516
+strafe 362.941 364.450
+strafe 413.751 414.769
+strafe 416.453 417.154
+strafe 419.505 420.070
+strafe 421.272 421.871
+strafe 427.579 428.596
+strafe 476.555 479.488
+strafe 480.223 480.922
+strafe 481.755 482.356
+strafe 483.122 492.689
+strafe 495.606 497.325
+strafe 515.109 518.581
+melee 502.272 519.908
+melee 534.076 549.128

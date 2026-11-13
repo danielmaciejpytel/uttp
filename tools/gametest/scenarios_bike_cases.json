@@ -1,0 +1,452 @@
+{
+ "_format": "run.py scenario file, see gt_scenario.py; ls/rs = [t, x, y], lt/rt = [t, v]; every step defines all channels (an undefined channel keeps the previous step's final value). Driven by bike_cases.ps1 (same pad bindings as scenarios_car_cases.json).",
+ "_bindings": "Pad: X tap = mount (the 'Get on' prompt of the seat sphere, r 1.0..1.3 m around V), RT = accelerate, LT = brake, B hold 1.0 s = dismount (the side is chosen by the engine: native vehicle.CanUnmount, vehicleTransition.script:919). ls in bike_dismount_stick_* = left stick held toward the wanted side during the B hold (an UNVERIFIED lever). The approach walk is not here: bike_cases.ps1 walks V from the position feedback (bike_cases_nav.py) to the seat sphere.",
+ "defaults": {
+  "rate_hz": 60,
+  "interp": "smooth"
+ },
+ "scenarios": {
+  "bike_idle": {
+   "description": "1 s neutral (carrier for CET-only runs)",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  },
+  "bike_exit_only": {
+   "description": "hold B 0.9 s: leave the vehicle the save loads mounted on",
+   "steps": [
+    {
+     "name": "exit",
+     "duration": 4.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "B",
+       "hold": 0.9
+      }
+     ]
+    }
+   ]
+  },
+  "bike_walk_away": {
+   "description": "walk forward 3.2 s away from the vehicle",
+   "steps": [
+    {
+     "name": "fwd",
+     "duration": 4.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.8
+      ],
+      [
+       3.2,
+       0.0,
+       0.8
+      ],
+      [
+       3.21,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    }
+   ]
+  },
+  "bike_mount": {
+   "description": "X tap after 0.5 s neutral, 6.5 s seated (video of the mount)",
+   "steps": [
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.5,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    }
+   ]
+  },
+  "bike_ride": {
+   "description": "short ride: RT 0.5 for 2 s, then brake (LT) to a stop (video of the ride / stop)",
+   "steps": [
+    {
+     "name": "drive",
+     "duration": 2.6,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.5
+      ],
+      [
+       2.0,
+       0.5
+      ],
+      [
+       2.4,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "brake",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       2.2,
+       1.0
+      ],
+      [
+       2.6,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "settle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  },
+  "bike_dismount": {
+   "description": "dismount: B held 1.0 s in a 7 s step (video of the dismount, no stick)",
+   "steps": [
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.5,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "bike_dismount_stick_l": {
+   "description": "dismount with the left stick held to the left (x -0.8) during the B hold (hypothesis lever)",
+   "steps": [
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       -0.8,
+       0.0
+      ],
+      [
+       1.7,
+       -0.8,
+       0.0
+      ],
+      [
+       1.71,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.5,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "bike_dismount_stick_r": {
+   "description": "dismount with the left stick held to the right (x +0.8) during the B hold (hypothesis lever)",
+   "steps": [
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.8,
+       0.0
+      ],
+      [
+       1.7,
+       0.8,
+       0.0
+      ],
+      [
+       1.71,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.5,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

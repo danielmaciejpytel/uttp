@@ -1,0 +1,8 @@
+<Project>
+  <!-- Keep build output out of Source\: everything goes to Build\stages\nue-reload-250\toolbuild. -->
+  <PropertyGroup>
+    <UtppRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\..\..\..\..'))</UtppRoot>
+    <BaseIntermediateOutputPath>$(UtppRoot)\Build\stages\nue-reload-250\toolbuild\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(UtppRoot)\Build\stages\nue-reload-250\toolbuild\bin\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,61 @@
+UTPP overlay layer data (.utppov) version 1  (writer: overlaybake.py, check: test_overlaybake.py)
+=============================================================================================
+source pack derived. Files: Data/overlay/utpp_overlays_<rig>.utppov
+(+ .summary.json). One file per CP rig: woman = style Feminine, man = style Masculine.
+
+Conventions: little-endian, float32, game rig bones 0..72 (BONE section order = rig order), metres, up +Z,
+quaternions xyzw, same retargeted data (utppclip v1, out_sourcepack_<rig>) and posture config as the active .utppmm v2.
+"Mesh space" = root-relative FK over bones 0..72 (bone 0 Root). All names zero-padded UTF-8.
+
+Header (64 bytes)
+  0  8  magic "UTPPOV\0\0"
+  8  4  u32 version = 1
+ 12  4  u32 header_size = 64
+ 16  8  u64 rig_hash = rig IDENTITY hash exactly as .utppmm v2 (FORMAT.txt "Rig identity": FNV-1a 64 over name,0,
+        int32 parent, int32 rest local translation x/y/z on the 1 mm grid floor(t*1000+0.5)); woman 0xf62810a88a8bfda9
+ 24  4  u32 num_bones (73)
+ 28  4  u32 num_sections
+ 32  4  u32 file_size
+ 36  4  u32 payload_crc32 = CRC-32 of bytes [64, file_size)
+ 40  4  u32 header_crc32 = CRC-32 of [0,64) with this field 0
+ 44 20  zero
+Section table at 64: num_sections x 16 bytes: tag[4], u32 offset (absolute), u32 size, u32 count. Sections are
+16-byte aligned. Order: BONE CURV POSE FRAM DELT DFRM OVLY MASK. Readers locate by tag and fail closed.
+
+BONE  count = num_bones, 36 B: name[32], i32 parent.
+CURV  count = C, 48 B: curve name[48] (lower case as in utppclip: layering_*, enable_*, ...; sorted).
+POSE  count = num_poses, 104 B: name[64]; u32 group (0 base/neutral, 1 style, 2 overlay pose, 3 AO sweep,
+      4 transition); u32 first_frame (FRAM index); u32 num_frames; u32 additive_type (0 none = full pose,
+      1 AAT_ROTATION_OFFSET_MESH_SPACE, 2 AAT_LOCAL_SPACE_BASE); i32 base_pose (POSE index, -1 none);
+      u32 base_frame; u32 base_kind (0 none, 1 ANIM_FRAME = frame of another sequence, 2 LOCAL_ANIM_FRAME = frame
+      of itself); u32 reserved 0; u64 curve_mask (bit i = CURV i present on this asset; absent curves are not
+      written by the LayeredBoneBlend Override merge, so the runtime must keep the previous value).
+      Additive refs are copied from export meta additive.base (seq + frame); the frames still hold the FULL pose.
+FRAM  count = total frames, per frame num_bones x 17 f32 = local t(3) q(4) s(3), mesh q(4) t(3); then C f32
+      curve values at that frame (0 where the mask bit is clear).
+DELT  count = D, 80 B: name[48]; u32 kind (0 additive asset vs its asset base, 1 style dP); i32 target_pose;
+      u32 target_first_frame; u32 num_frames; i32 base_pose; u32 base_frame; u32 space (1 mesh, 2 local);
+      u32 first (DFRM index).
+DFRM  count = total delta frames, per frame num_bones x 14 f32:
+      dq_ms = G_X * inv(G_A) (mesh-space rotations), dq_ls = Q_X * inv(Q_A) (local), dt = t_X - t_A (local
+      translations), ds = s_X / s_A - 1. (UE ConvertPoseToAdditive / ConvertPoseToMeshRotation; report 3.11 D_MS/D_LS.)
+      Baked: every additive asset (AO_*_Sweep vs own frame 15; Pose_Transition, Stand_Transition vs Pose_Base_Stand
+      frame 0) and dP = D_MS(BP -> OB) for (Stand_Idle, Stand_Move) vs Pose_Base_Stand and Crouch vs
+      Pose_Base_Crouch. dLms = D_MS(B -> L) and dLls = D_LS(B -> L) depend on live locomotion L and are computed
+      at runtime from the B pose (Pose_Neutral_*) stored in FRAM (mesh rotations are precomputed there).
+      Apply (report 3.11): A_MS: G <- nlerp(1, dq_ms, a) * G, t += a*dt, s *= 1 + a*ds; A_LS: Q <- nlerp(1, dq_ls, a) * Q.
+OVLY  count = O, 48 B: name[32]; u32 kind (0 pose overlay OP, 1 style OB, 2 base poses B/BP, 3 transitions);
+      u32 flags (bit0 bCanAim); u32 first_pose; u32 num_poses (contiguous POSE range). Order: BasePoses, <style>,
+      Default (0 poses: ABP_OverlayPose_Default has no pose, result = locomotion), Pistol1H, Pistol2H, Rifle,
+      Injured, Transitions.
+MASK  count = 7, 16 + num_bones*4 B: name[16] + f32 weight per bone. pelvis, spine, head, arm_l, arm_r, hand_l,
+      hand_r = the ALS LayeredBoneBlend BranchFilters of ABP_LayerBlending (UE filter bone
+      -> CP bone through the retarget bonemap cp <- src) with UE BlendDepth semantics (0 = subtree 1, k > 0 = depth
+      d below the filter bone gets min(1, (d+1)/k), -1 = subtree excluded, filters combine by max).
+      pelvis = Hips subtree minus LeftUpLeg/RightUpLeg subtrees; spine = Spine subtree, the UE ramp spine_01 +
+      BlendDepth 5 (spine_01..05 = 0.2..1.0) re-spread over the CP bones mapped from it: Spine/Spine1/Spine2/Spine3
+      = 0.25/0.5/0.75/1.0 (top spine bone full, like spine_05), descendants 1; head = Neck subtree; arm_x =
+      LeftShoulder/RightShoulder subtree (incl. WeaponLeft/Right); hand_x = subtrees of the thumb and finger 1
+      bones (no metacarpals: LeftInHandIndex.. = 0, LeftHand = 0) + WeaponLeft/WeaponRight (stand-in for the UE
+      ik_hand_l/r filter, unmapped in the bonemap). Per-pose curve weights (Layering_*) multiply at runtime.
+      Region formulas and the P1..P8 order (MS vs LS per stage) are those of report 3.11.

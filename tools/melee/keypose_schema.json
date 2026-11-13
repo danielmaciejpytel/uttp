@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "utpp-keypose-correction/1",
+  "title": "Key-pose correction file of ONE vanilla melee clip",
+  "description": "Written by the analysis step to corrections\\<set>\\<clip>.json, applied by apply_keyposes.py (game axes, z up, character faces +Y). Frame numbers are 0-based frames of the 30 fps source dump. Conventions: 'local' space = the bone's own game-axes local frame of the rig (post-multiplied: R' = R * Rot(euler)); 'character' space = the hips heading frame (x = character right, y = forward, z = up, origin = hips ground point), the rotation is applied about the bone's own joint to the bone's WORLD orientation and the whole subtree follows rigidly. Euler = degrees, extrinsic x then y then z about the axes of the chosen space (scipy 'xyz'). Positive angle = right-handed turn about the axis.",
+  "type": "object",
+  "required": ["schema", "set", "clip", "keys"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "utpp-keypose-correction/1"},
+    "set": {"type": "string", "description": "animset name, e.g. pwa_katana"},
+    "clip": {"type": "string", "description": "clip name, e.g. combo_attack_01"},
+    "note": {"type": "string"},
+    "window": {"type": "integer", "minimum": 0, "maximum": 6, "default": 3,
+      "description": "default half-width (frames) around every key in which the key's correction is applied unchanged, so the MotionBricks context (4 frames ending at the key) and target (4 frames starting at the key) keep the source velocity"},
+    "fade_in_frames": {"type": "integer", "minimum": 0, "default": 0, "description": "frames before the first key over which the correction fades from 0 (0 = hold the first key's correction back to frame 0)"},
+    "fade_out_frames": {"type": "integer", "minimum": 0, "default": 0, "description": "same after the last key"},
+    "segments": {
+      "type": "array",
+      "description": "optional per-segment generation mode (default 'auto': mb when the output gap is 17..57 frames, else offset)",
+      "items": {"type": "object", "required": ["from", "to", "mode"], "additionalProperties": false,
+        "properties": {"from": {"type": "string"}, "to": {"type": "string"}, "mode": {"enum": ["auto", "mb", "offset"]}}}
+    },
+    "keys": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["id", "src_frame"], "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "src_frame": {"type": "integer", "minimum": 0, "description": "source frame the key is taken from"},
+          "time_frame": {"type": "integer", "minimum": 0, "description": "frame of the OUTPUT clip at which the key pose lands (default = src_frame). Strictly increasing over the keys. Spacing between consecutive keys of 17, 21, 25 ... 57 frames (4N-7, N=6..16) lets MotionBricks generate the segment; other spacings are retimed (mb: nearest N, then resampled) or handled in 'offset' mode."},
+          "window": {"type": "integer", "minimum": 0, "maximum": 6},
+          "note": {"type": "string"},
+          "rot": {
+            "type": "array",
+            "description": "bone rotation offsets, applied in list order",
+            "items": {"type": "object", "required": ["bone", "euler_deg"], "additionalProperties": false,
+              "properties": {
+                "bone": {"type": "string", "description": "rig bone name (152 joints, e.g. LeftArm, RightForeArm, Spine3, LeftHand)"},
+                "space": {"enum": ["local", "character"], "default": "character"},
+                "euler_deg": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+              }}
+          },
+          "hips_offset_cm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3,
+            "description": "hips translation in the character frame [right, forward, up] (cm)"},
+          "keep": {"type": "array", "items": {"enum": ["LeftHand", "RightHand", "LeftFoot", "RightFoot"]},
+            "description": "effectors held at their SOURCE world position after rot / hips changes (two-bone IK), e.g. feet when the hips are lowered"},
+          "ik": {
+            "type": "array",
+            "items": {"type": "object", "required": ["effector", "target_cm"], "additionalProperties": false,
+              "properties": {
+                "effector": {"enum": ["LeftHand", "RightHand", "LeftFoot", "RightFoot"]},
+                "target_cm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "frame": {"enum": ["character_offset", "character_abs", "world"], "default": "character_offset",
+                  "description": "character_offset: move the effector by target_cm from where it is after the rot offsets, in [right, forward, up]; character_abs: position in the hips heading frame with the hips ground point as origin; world: game world cm"},
+                "weight": {"type": "number", "minimum": 0, "maximum": 1, "default": 1}
+              }}
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {"schema": "utpp-keypose-correction/1", "set": "pwa_katana", "clip": "combo_attack_01", "window": 3,
+     "keys": [
+       {"id": "k0", "src_frame": 3, "time_frame": 3},
+       {"id": "k1", "src_frame": 12, "time_frame": 20,
+        "rot": [{"bone": "RightArm", "space": "character", "euler_deg": [0, 0, -12]}],
+        "hips_offset_cm": [0, 0, -4], "keep": ["LeftFoot", "RightFoot"]},
+       {"id": "k2", "src_frame": 26, "time_frame": 37}
+     ]}
+  ]
+}

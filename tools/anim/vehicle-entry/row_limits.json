@@ -1,0 +1,346 @@
+{
+ "pma_sport1_driver": {
+  "slide": 0.804,
+  "back": 0.005,
+  "rear": {
+   "root": 0.271
+  },
+  "sha": "BF9008A6E7F93408",
+  "reason": "Turbo-R lifting door: the start is 0.8 m FORWARD of the game's start (pk-door7: -0.4 .. -0.7 fail the door skin, -0.8 passes), so the clip moves rearward to the seat by design (root / hips excursion = that forward start); unchanged this round",
+  "measured": {
+   "dy": 0.8,
+   "slide": 0.8,
+   "rear": {
+    "root": 0.266,
+    "Hips": 0.098,
+    "Spine": 0.157,
+    "sink_slide_Hips": 0.093
+   },
+   "game_rear": {
+    "root": 0.001,
+    "Hips": 0.146,
+    "Spine": 0.143,
+    "sink_slide_Hips": 0.129
+   }
+  }
+ },
+ "pma_sport1_passenger_r": {
+  "slide": 0.804,
+  "back": 0.005,
+  "rear": {
+   "root": 0.47,
+   "Hips": 0.469,
+   "Spine": 0.525,
+   "sink": 0.372
+  },
+  "sha": "00B0C8F623372547",
+  "reason": "Turbo-R lifting door: the start is 0.8 m FORWARD of the game's start (pk-door7: -0.4 .. -0.7 fail the door skin, -0.8 passes), so the clip moves rearward to the seat by design (root / hips excursion = that forward start); unchanged this round",
+  "measured": {
+   "dy": 0.8,
+   "slide": 0.8,
+   "rear": {
+    "root": 0.465,
+    "Hips": 0.464,
+    "Spine": 0.52,
+    "sink_slide_Hips": 0.367
+   },
+   "game_rear": {
+    "root": 0.017,
+    "Hips": 0.029,
+    "Spine": 0.032,
+    "sink_slide_Hips": 0.034
+   }
+  }
+ },
+ "pma_sport2_passenger_r": {
+  "slide": 0.604,
+  "back": 0.605,
+  "sha": "A5F513A7EFF09024",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.6,
+   "slide": 0.6,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.0,
+    "Spine": 0.002,
+    "sink_slide_Hips": 0.0
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.055,
+    "Spine": 0.057,
+    "sink_slide_Hips": 0.028
+   }
+  }
+ },
+ "pma_standard25_passenger_r": {
+  "slide": 0.304,
+  "back": 0.305,
+  "sha": "8158C82945013585",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.3,
+   "slide": 0.3,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.069,
+    "Spine": 0.109,
+    "sink_slide_Hips": 0.024
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.074,
+    "Spine": 0.077,
+    "sink_slide_Hips": 0.029
+   }
+  }
+ },
+ "pma_standard2_passenger_r": {
+  "slide": 0.404,
+  "back": 0.405,
+  "sha": "814FCA09A9FE6E38",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.4,
+   "slide": 0.4,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.036,
+    "Spine": 0.063,
+    "sink_slide_Hips": 0.0
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.074,
+    "Spine": 0.077,
+    "sink_slide_Hips": 0.036
+   }
+  }
+ },
+ "pma_standard3_driver": {
+  "slide": 1.144,
+  "back": 0.905,
+  "sha": "585EA3CF4BDF3841",
+  "reason": "standard3 driver at the PREVIOUS shipped start (start-back 0.9 m with ramp): every forward start (dy >= -0.15) adds ride14 'entity' contacts the approach baseline (which starts 0.9 m back) does not have, so the start gate and the RELATIVE approach gate are mutually exclusive for the male clip; r10: the hips-path lever (--hips-path, build_entry_clip.py) closes the rearward gate of this clip, only the start position stays documented",
+  "measured": {
+   "dy": -0.9,
+   "slide": 1.14,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.023,
+    "Spine": 0.072,
+    "sink_slide_Hips": 0.043
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.023,
+    "Spine": 0.068,
+    "sink_slide_Hips": 0.022
+   }
+  }
+ },
+ "pma_standard3_passenger_r": {
+  "slide": 0.785,
+  "back": 0.605,
+  "rear": {
+   "sink": 0.127
+  },
+  "sha": "74C9CE3731F28BC1",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.6,
+   "slide": 0.781,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.073,
+    "Spine": 0.121,
+    "sink_slide_Hips": 0.122
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.086,
+    "Spine": 0.084,
+    "sink_slide_Hips": 0.0
+   }
+  }
+ },
+ "pma_utility_passenger_r": {
+  "slide": 0.804,
+  "back": 0.682,
+  "rear": {
+   "Hips": 0.198,
+   "Spine": 0.23,
+   "sink": 0.198
+  },
+  "sha": "682887C5920D7881",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.8,
+   "slide": 0.8,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.193,
+    "Spine": 0.225,
+    "sink_slide_Hips": 0.193
+   },
+   "game_rear": {
+    "root": 0.235,
+    "Hips": 0.083,
+    "Spine": 0.109,
+    "sink_slide_Hips": 0.01
+   }
+  }
+ },
+ "pwa_sport1_driver": {
+  "slide": 0.804,
+  "back": 0.005,
+  "rear": {
+   "root": 0.271
+  },
+  "sha": "630D10AF6DE6F17D",
+  "reason": "Turbo-R lifting door: the start is 0.8 m FORWARD of the game's start (pk-door7: -0.4 .. -0.7 fail the door skin, -0.8 passes), so the clip moves rearward to the seat by design (root / hips excursion = that forward start); unchanged this round",
+  "measured": {
+   "dy": 0.8,
+   "slide": 0.8,
+   "rear": {
+    "root": 0.266,
+    "Hips": 0.081,
+    "Spine": 0.136,
+    "sink_slide_Hips": 0.091
+   },
+   "game_rear": {
+    "root": 0.001,
+    "Hips": 0.148,
+    "Spine": 0.145,
+    "sink_slide_Hips": 0.126
+   }
+  }
+ },
+ "pwa_sport1_passenger_r": {
+  "slide": 0.804,
+  "back": 0.005,
+  "rear": {
+   "root": 0.47,
+   "Hips": 0.481,
+   "Spine": 0.534,
+   "sink": 0.346
+  },
+  "sha": "97C84216175FBB13",
+  "reason": "Turbo-R lifting door: the start is 0.8 m FORWARD of the game's start (pk-door7: -0.4 .. -0.7 fail the door skin, -0.8 passes), so the clip moves rearward to the seat by design (root / hips excursion = that forward start); unchanged this round",
+  "measured": {
+   "dy": 0.8,
+   "slide": 0.8,
+   "rear": {
+    "root": 0.465,
+    "Hips": 0.476,
+    "Spine": 0.529,
+    "sink_slide_Hips": 0.341
+   },
+   "game_rear": {
+    "root": 0.017,
+    "Hips": 0.031,
+    "Spine": 0.034,
+    "sink_slide_Hips": 0.034
+   }
+  }
+ },
+ "pwa_sport2_passenger_r": {
+  "slide": 0.604,
+  "back": 0.605,
+  "sha": "61D35114F060B5A6",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.6,
+   "slide": 0.6,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.003,
+    "Spine": 0.008,
+    "sink_slide_Hips": 0.0
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.056,
+    "Spine": 0.06,
+    "sink_slide_Hips": 0.026
+   }
+  }
+ },
+ "pwa_standard25_passenger_r": {
+  "slide": 0.304,
+  "back": 0.305,
+  "rear": {
+   "Hips": 0.229,
+   "Spine": 0.278,
+   "sink": 0.128
+  },
+  "sha": "37B7F182BB95B42D",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.3,
+   "slide": 0.3,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.224,
+    "Spine": 0.273,
+    "sink_slide_Hips": 0.123
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.075,
+    "Spine": 0.082,
+    "sink_slide_Hips": 0.027
+   }
+  }
+ },
+ "pwa_standard2_passenger_r": {
+  "slide": 0.404,
+  "back": 0.405,
+  "sha": "C3F01E9FD65DE4B6",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.4,
+   "slide": 0.4,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.064,
+    "Spine": 0.104,
+    "sink_slide_Hips": 0.008
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.075,
+    "Spine": 0.082,
+    "sink_slide_Hips": 0.035
+   }
+  }
+ },
+ "pwa_standard3_passenger_r": {
+  "slide": 0.747,
+  "back": 0.705,
+  "rear": {
+   "Hips": 0.211,
+   "Spine": 0.261,
+   "sink": 0.24
+  },
+  "sha": "E42CD016DAB08E73",
+  "reason": "PASSENGER row, previous clip kept (not part of the driver-side change): its joint rule passes; the start shift is the lever of its opening-door gate (the natural start + 0.3 s hold fails the opening phase by 3-15 cm, startfwd/grid7); the NPC-derived sit-down moves the hips rearward more than the game's clip; unchanged this round",
+  "measured": {
+   "dy": -0.7,
+   "slide": 0.743,
+   "rear": {
+    "root": 0.0,
+    "Hips": 0.206,
+    "Spine": 0.256,
+    "sink_slide_Hips": 0.235
+   },
+   "game_rear": {
+    "root": 0.0,
+    "Hips": 0.086,
+    "Spine": 0.084,
+    "sink_slide_Hips": 0.001
+   }
+  }
+ }
+}

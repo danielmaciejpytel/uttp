@@ -1,0 +1,263 @@
+{
+ "format": "utpp_posture_offsets",
+ "version": 1,
+ "rule": "local[B] = local[B] * C_B for every frame; C_B ~ inverse(local_DB[B]) * local_REF[B] (game-local x,y,z,w), re-expressed as a model-space correction and mirror-symmetrized (left/right averaged) when symmetrize=true",
+ "symmetrize": true,
+ "db_clip": "M_Neutral_Stand_Idle_Loop",
+ "ref_anim": "fpp_idle_stand",
+ "ref_glb": "Extracted/game/glb/reference/tpp_fem_v_locomotion.anims.glb",
+ "mode": "avg",
+ "db_frames": "0..299",
+ "ref_frames": "0..159",
+ "note": "Offsets are measured vs the game reference female idle. unsymmetrized_* = plain inverse(local_DB)*local_REF.",
+ "offsets": {
+  "LeftShoulder": {
+   "q": [
+    -0.023154776213808303,
+    -0.005381660968264865,
+    0.15085979803080365,
+    0.9882693030757438
+   ],
+   "angle_deg": 17.569321790377316,
+   "axis_local": [
+    -0.1516146183417627,
+    -0.03523845215405949,
+    0.9878113478771479
+   ],
+   "unsymmetrized_q": [
+    -0.035251057828973004,
+    -0.022005743047364523,
+    0.09538923162049155,
+    0.9945722722284812
+   ],
+   "unsymmetrized_angle_deg": 11.94464608758823,
+   "t_scale_raw": 0.8606940204017467,
+   "t_len_db_m": 0.16818034800088857,
+   "t_len_ref_m": 0.14475181987344965,
+   "t_scale": 0.8608718743385905
+  },
+  "RightShoulder": {
+   "q": [
+    -0.04833915446301951,
+    0.009663207171339783,
+    0.14454664704221912,
+    0.9882693030757439
+   ],
+   "angle_deg": 17.569321790377234,
+   "axis_local": [
+    -0.31651882044550406,
+    0.06327348853263225,
+    0.9464736139759512
+   ],
+   "unsymmetrized_q": [
+    -0.0386879348742861,
+    0.01212802661875684,
+    0.20237495701879488,
+    0.9784684621576408
+   ],
+   "unsymmetrized_angle_deg": 23.822508874882335,
+   "t_scale_raw": 0.8610497282754342,
+   "t_len_db_m": 0.1681906973140013,
+   "t_len_ref_m": 0.14482055422067663,
+   "t_scale": 0.8608718743385905
+  },
+  "Neck": {
+   "q": [
+    -0.003580614595562139,
+    0.007467017700264256,
+    -0.05140194170810861,
+    0.9986437118584477
+   ],
+   "angle_deg": 5.968878052704809,
+   "axis_local": [
+    -0.06877235630656144,
+    0.14341794910472724,
+    -0.9872697984252518
+   ],
+   "unsymmetrized_q": [
+    -0.07002779765193558,
+    -0.009937045769672524,
+    -0.049176843397061444,
+    0.9962825908099027
+   ],
+   "unsymmetrized_angle_deg": 9.883765647121562,
+   "t_scale_raw": 0.831994205057631,
+   "t_len_db_m": 0.17446169999999997,
+   "t_len_ref_m": 0.14515112340450287,
+   "t_scale": 0.831994205057631
+  },
+  "LeftArm": {
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "angle_deg": 0.0,
+   "axis_local": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "unsymmetrized_q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "unsymmetrized_angle_deg": 0.0,
+   "t_scale_raw": 0.7827838262332736,
+   "t_len_db_m": 0.1742253,
+   "t_len_ref_m": 0.13638074696063995,
+   "t_scale": 0.782179511834648
+  },
+  "RightArm": {
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "angle_deg": 0.0,
+   "axis_local": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "unsymmetrized_q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "unsymmetrized_angle_deg": 0.0,
+   "t_scale_raw": 0.7815751974360222,
+   "t_len_db_m": 0.17419770000000004,
+   "t_len_ref_m": 0.136148601770401,
+   "t_scale": 0.782179511834648
+  },
+  "Neck1": {
+   "q": [
+    -0.0024896915124776615,
+    0.008518736415407341,
+    -0.051457428429423725,
+    0.9986357522267507
+   ],
+   "angle_deg": 5.9863711444169345,
+   "axis_local": [
+    -0.04767954320730436,
+    0.16314047702473972,
+    -0.9854500727665929
+   ],
+   "unsymmetrized_q": [
+    0.006813076627769846,
+    -0.0023318909425836527,
+    -0.05369829636348431,
+    0.9985312399915967
+   ],
+   "unsymmetrized_angle_deg": 6.21149608623725,
+   "t_scale_raw": 0.8499996261220044,
+   "t_len_db_m": 0.0633226,
+   "t_len_ref_m": 0.05382418632507324,
+   "t_scale": 0.8499996261220044
+  },
+  "Head": {
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "angle_deg": 0.0,
+   "axis_local": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "unsymmetrized_q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "unsymmetrized_angle_deg": 0.0,
+   "t_scale_raw": 0.8499999556177622,
+   "t_len_db_m": 0.07300719999999998,
+   "t_len_ref_m": 0.06205611675977707,
+   "t_scale": 0.8499999556177622
+  }
+ },
+ "mirror_check": {
+  "LeftShoulder": {
+   "model_delta_left_deg": 17.569321790377316,
+   "model_delta_right_deg": 17.569321790377316,
+   "angle_between_left_and_mirrored_right_deg": 0.0
+  },
+  "LeftArm": {
+   "model_delta_left_deg": 17.569321790377316,
+   "model_delta_right_deg": 17.569321790377316,
+   "angle_between_left_and_mirrored_right_deg": 0.0
+  }
+ },
+ "classes": {
+  "crouch": {
+   "doc": "Moving-crouch posture class (applied by crouch_posture.py to GASP clips AFTER the shoulder/neck offsets above; not part of 'offsets'). Per frame weight w = smoothstep((hips_z - z_lo)/(z_hi - z_lo)) from the ORIGINAL hips height, so idle-depth frames (<= z_lo, ~0.47-0.50 m) stay bit-exact and the deep loop frames (>= z_hi) get the full correction. Hips z -= min(w*hips_drop_m, max(hips_z - hips_floor_m, 0)) (Root frame, Root is identity; the floor = crouch-idle depth keeps the knee flexion within what the GASP idle/turn clips already use); spine chain pitched back about the model X axis by w*spine_bend_deg, distributed over spine_chain (cumulative fraction of the bend per bone, model-space pitch added to the ORIGINAL global orientation; spine_bend_deg is tuned so the Hips->Neck lean falls from ~49 to ~28 deg in the loops, because the pitch of a bone only moves the segments below it); neck_chain (Neck 2/3, Neck1 1/3, Head 0) hands the pitch back so the HEAD keeps its original model-space orientation; arm_chain gives the upper-arm pitch as a fraction of the spine bend (0.5 = half follow, 0 = restore original orientation; 0.5 keeps the hands >= 3.9 cm from the thigh axis, 0 gives 1.7-3.1 cm). Legs: analytic two-bone IK per frame keeps both ankles at their original model-space positions (knee plane kept), foot orientation restored; so foot position/velocity features of the DB are unchanged.",
+   "include_regex": "^M_Neutral_Crouch_(Loop|Start|Stop|Pivot|Turn|Reface_Start|Box|Diamond|Hourglass)_",
+   "exclude_regex": "Crouch_Idle|Transition_",
+   "hips_drop_m": 0.185,
+   "z_lo_m": 0.5,
+   "z_hi_m": 0.64,
+   "spine_bend_deg": 32.0,
+   "spine_chain": {
+    "Spine": 0.4,
+    "Spine1": 0.7,
+    "Spine2": 1.0,
+    "Spine3": 1.0
+   },
+   "neck_chain": {
+    "Neck": 0.6667,
+    "Neck1": 0.3333,
+    "Head": 0.0
+   },
+   "stand_hips_z_m": 0.974,
+   "arm_chain": {
+    "LeftArm": 0.5,
+    "RightArm": 0.5
+   },
+   "hips_floor_m": 0.47
+  },
+  "headlock": {
+   "doc": "Head-lock posture class (applied by head_yaw_audit.py apply to retargeted clips; not part of 'offsets'). For Neck, Neck1 and Head: R = conj(G_Spine3)*G_bone (bone in the Spine3 frame); D = R*conj(R0), R0 = mean relative pose over M_Neutral_Stand_Idle_Loop; yaw = heading of D*f0 about the chest axis a (Spine3->Neck direction in the Spine3 frame; f0 = model +Y of the reference pose projected perpendicular to a). Correction R' = Rot(a, -w*yaw)*R: the yaw relative to Spine3 is zeroed for all three bones, pitch/roll are kept; descendants (eyes) keep their local rotation. Weight w: loops (loop_regex) w = 1 on every frame (the correction is a pure function of the frame pose, so closing loops keep closing and there is no seam whip); other clips w = max(smoothstep(min(frame, last-frame)/(blend_s*fps)), 1 - edge_residual_deg/|yaw|), i.e. a 0.1 s ramp at both edges that never leaves more than edge_residual_deg of yaw (a clip that starts/ends with a constant 60 deg yaw would otherwise whip by that angle in 0.1 s). Selection: max |Head yaw| of the clip > yaw_threshold_deg AND the name does not match threshold_exclude_regex (the default skips the native GASP clips, whose head leads turns/strafes by up to 60-80 deg by authoring: 377 of 718 GASP clips would be hit; head_yaw_audit.py apply --all-sources removes that exclusion). Clips outside the selection are copied byte for byte.",
+   "yaw_threshold_deg": 25.0,
+   "blend_s": 0.1,
+   "parent_bone": "Spine3",
+   "chain": [
+    "Neck",
+    "Neck1",
+    "Head"
+   ],
+   "reference_clip": "M_Neutral_Stand_Idle_Loop",
+   "threshold_exclude_regex": "^M_Neutral_",
+   "loop_regex": "_Loop(_|$)",
+   "edge_residual_deg": 10.0
+  },
+  "launch": {
+   "doc": "Run/sprint start launch-lean cap (applied by launch_posture.py to the GASP standing start clips AFTER the offsets above; not part of 'offsets'). Per frame lean = angle(Neck - Hips, +Z) of the ORIGINAL pose; frames with lean <= knee_deg stay bit-exact; above it the lean is mapped to knee + (cap - knee) * tanh((lean - knee) / (cap - knee)) (C1, asymptote cap_deg). The excess is removed by a backward pitch about the horizontal axis perpendicular to the frame's lean direction: pelvis_share on Hips (pivot = Hips joint), the rest over spine_chain (cumulative fraction per bone, model-space pitch on the ORIGINAL global orientation), iterated so the result lands on the capped lean; neck/head/arms keep their pose relative to the chest. Hips raised by raise_m_per_deg * removed lean (at most to frame-0 height - min_drop_m, and never so far that a leg straightens past reach_max of its length; that cut is smoothed over lift_smooth_frames). Legs: two-bone IK keeps both ankles at their original model-space positions with the original knee hinge carried (crouch_posture knee-fix construction), foot orientation restored. Source: 2026-11-09 gametest (V folds ~57 deg at run start; GASP source FBX Run_Start_F 59-61 deg, run cycle 20-31 deg, GASPALS 1.2 Relaxed run start 41.6 deg).",
+   "include_regex": "^M_Neutral_(Run|Sprint)_(Start|Reface_Start)_|^M_Neutral_Transition_Walk_to_Run_",
+   "exclude_regex": "Crouch|Relaxed",
+   "knee_deg": 30.0,
+   "cap_deg": 40.0,
+   "pelvis_share": 0.5,
+   "spine_chain": {
+    "Spine": 0.35,
+    "Spine1": 0.65,
+    "Spine2": 0.9,
+    "Spine3": 1.0
+   },
+   "raise_m_per_deg": 0.0035,
+   "min_drop_m": 0.01,
+   "reach_max": 0.995,
+   "lift_smooth_frames": 4
+  }
+ }
+}

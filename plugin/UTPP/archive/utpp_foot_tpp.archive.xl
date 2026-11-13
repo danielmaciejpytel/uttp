@@ -1,0 +1,38 @@
+# UTPP on-foot third-person idle set. No new animation data: the game's own locomotion sets
+# (base\animations\player\{female,male}\body\player_locomotion.anims) are registered a second time on the player's root animated
+# component, gated by the UTPP wrapper variable utpp_foot_tpp, at priority 198.
+# Why: the 2.5 player entities (player_wa_fpp.ent / player_ma_fpp.ent and the ep1 *_ep1.ent) register
+# base\animations\player\{female,male}\body\tpp_p{w,m}a_security_cam.anims at priority 199 with vars [player_tpp_head], ahead of
+# player_locomotion.anims (priority 200, no vars). That set holds exactly three clips: idle_hacking, fpp_idle_stand and
+# fpp_crouch_idle, all the same 12.233 s hacking crouch (right hand at the temple; sampled offline: hips 0.34 m, head 0.82-0.84 m
+# against 0.99 / 1.64 m for the standing idle). player_locomotion.anims has fpp_idle_stand (7.133 s female / 7.033 s male, standing)
+# and fpp_crouch_idle (6.767 s, normal crouch: hips 0.46 / 0.35 m, head 1.05 / 0.95 m, right hand to head 0.58 / 0.61 m against
+# 0.13-0.14 m in the hacking crouch; female / male) but no idle_hacking, so the graph state that plays idle_hacking
+# still resolves it from the 199 set. UTPP keeps the game's third-person representation (player_tpp_head) on while on foot, so
+# whenever the game graph's Ground Idle / crouch Idle is visible (Motion Matching off or released) V showed the hacking crouch.
+# scripts\utpp_body.reds / cet\utpp_body set the wrapper utpp_foot_tpp to 1 while the UTPP third-person body is wanted (on foot;
+# kept through vehicle rides) and to 0 when it is not, and during a vanilla take-over of control (security camera): with the
+# variable at 0 this file has no effect and the vanilla security-camera set applies as before.
+# Priority 198 outranks the 199 security-camera set only for the clip names both sets hold (fpp_idle_stand, fpp_crouch_idle).
+# Evidence for "lower number wins" (static, from the 2.5 entity files): specific entries carry lower numbers than generic ones
+# (dual-wield weapon sets 64 < dual-wield base 100 < per-weapon sets 128 < base-weapon sets 150 < default weapon sets 200; male
+# variant locomotion sets player_locomotion_sick / _box / _johnny_guitar / _sandstorm at 128 with one variable each over
+# player_locomotion at 200; the TPP bike sets [player_tpp_head, seat] at 100 over the first-person ones at 119), and the
+# observed hacking crouch in game was the 199 set winning over the 200 locomotion set. The variant locomotion sets (128)
+# stay ahead of this entry.
+# Female ep1 also lists player_locomotion.anims at 210 with [q306_Blackwall_Targetting]; that entry is left alone.
+animations:
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: base\animations\player\female\body\player_locomotion.anims
+    vars: [utpp_foot_tpp]
+    priority: 198
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: base\animations\player\male\body\player_locomotion.anims
+    vars: [utpp_foot_tpp]
+    priority: 198

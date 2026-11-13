@@ -1,0 +1,19 @@
+{
+  "_note": "2026-11-10 shoulder swap while CROUCHED (pad R3 hold 0.5 s). Run: python Source\\tools\\gametest\\run.py --scenario-file Source\\tools\\gametest\\scenarios_shoulder_crouch.json --scenarios shoulder_crouch --keep-pad. Start STANDING, Female V, UTPP camera on, third person, nothing drawn. Game in the foreground. Every step waits >= 4 s after a stance change (R3 presses inside the ~2 s stand<->crouch transition are swallowed by the game). Expected UTPP log lines per step are in the step names: swap = '[utpp_camera] shoulder -> left|right (pad)'; the reds side writes '[utpp_shoulder] R3 press seq=N stance=S' and '[utpp_shoulder] R3 release seq=N held=T holdComplete=0|1 timer=0|1 swapped=0|1 stance=S' (stance = PSM LocomotionDetailed, Stand 1 / Crouch 3). In 2.5 a 0.35 s R3 hold counts as a TAP for the game (toggles crouch), a 0.65 s hold does not toggle crouch.",
+  "scenarios": {
+    "shoulder_crouch": {
+      "description": "stand: settle | tap -> crouch | crouched hold 0.65 -> swap #1 | crouched hold 0.65 -> swap #2 | crouched hold 0.35 -> NO swap, V stands up | tap -> crouch | crouched hold 0.65 -> swap #3 | tap -> stand | standing hold 0.65 -> swap #4 (control)",
+      "steps": [
+        {"name": "s00_settle_standing", "duration": 3.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "s01_tap_crouch_expect_crouched", "duration": 4.5, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "s02_crouched_hold_065_expect_swap1_stay_crouched", "duration": 4.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.65}], "metrics": false},
+        {"name": "s03_crouched_hold_065_expect_swap2_stay_crouched", "duration": 4.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.65}], "metrics": false},
+        {"name": "s04_crouched_hold_035_expect_no_swap_then_standing", "duration": 4.5, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.35}], "metrics": false},
+        {"name": "s05_tap_crouch_expect_crouched", "duration": 4.5, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "s06_crouched_hold_065_expect_swap3_stay_crouched", "duration": 4.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.65}], "metrics": false},
+        {"name": "s07_tap_stand_expect_standing", "duration": 4.5, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "s08_standing_hold_065_control_expect_swap4_stay_standing", "duration": 4.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.65}], "metrics": false}
+      ]
+    }
+  }
+}

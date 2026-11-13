@@ -1,0 +1,345 @@
+# h2 sidecar v1 (tools/replay/h2_sidecar_from_log.py; feed seconds = log wall time - 'MM feed dump on' wall time)
+session 20261021_0116
+feed utpp-feed-2026-10-21-01-16-02.txt
+log utpp-2026-10-21-01-15-46.log
+dumpon 2026-10-21 01:16:02.860
+frames 16975 336.138
+align samples(body turning)=947 camTrace=2766 median|dyaw| at lag 0: 0.25 deg; best lag 0.00 s -> 0.25 deg
+leasesource derived
+# stats: frames 16975 feed t 6.916..336.138
+# stats: native-off frames 7075 (off windows 30, 165.07 s)
+# stats: native-off, ground, sp>=0.5, not ADS: 626; outside strafe/act8 windows (-0.02/+0.15 s): 386
+# stats:   sp>=1.5   all   602 | outside windows   377 | outside windows, no melee     3
+# stats:   in>=45    all   337 | outside windows   188 | outside windows, no melee     1
+# stats:   in>=105   all   176 | outside windows    63 | outside windows, no melee     0
+# stats:   vel>=105  all   175 | outside windows    63 | outside windows, no melee     0
+# stats:   vel>=90   all   232 | outside windows    97 | outside windows, no melee     0
+# stats:   vel>=130  all   128 | outside windows    45 | outside windows, no melee     0
+mask 5.131 0x5FBF 1
+freeMoveEnable 5.131 1
+off 5.131 6.926
+off 26.643 32.826
+off 36.576 37.393
+off 38.092 60.092
+off 100.605 103.005
+off 105.322 105.622
+off 105.673 144.326
+off 150.593 151.292
+off 165.092 191.457
+off 216.527 221.494
+off 224.661 228.581
+off 231.468 232.934
+off 236.051 238.220
+off 239.070 242.304
+off 242.472 243.037
+off 246.304 247.500
+off 249.984 250.467
+off 263.417 264.633
+off 265.467 272.584
+off 272.650 273.750
+off 273.783 275.116
+off 275.150 278.000
+off 278.184 287.517
+off 288.667 292.038
+off 294.323 296.523
+off 298.890 309.375
+off 313.208 319.358
+off 322.892 323.608
+off 325.692 326.475
+off 328.808 330.008
+freeMove 6.990 26.693
+freeMove 32.894 36.592
+freeMove 37.476 37.876
+freeMove 60.092 105.688
+freeMove 144.326 150.626
+freeMove 151.326 165.132
+freeMove 191.457 217.360
+freeMove 221.560 224.660
+freeMove 228.664 231.467
+freeMove 232.950 236.067
+freeMove 237.453 239.153
+freeMove 239.753 240.554
+freeMove 241.054 242.554
+freeMove 242.954 246.354
+freeMove 247.166 250.066
+freeMove 250.367 263.466
+freeMove 264.666 265.466
+freeMove 273.766 273.866
+freeMove 278.066 278.266
+freeMove 287.567 288.666
+freeMove 289.154 289.553
+freeMove 292.054 294.356
+freeMove 296.057 298.956
+freeMove 309.458 313.258
+freeMove 319.358 336.158
+why off_aim_align 26.793 27.093
+why off_aim_align 28.893 29.693
+why off_aim_align 216.560 216.660
+why off_aim_align 217.160 217.260
+why off_aim_align 217.760 217.860
+why off_aim_align 218.560 219.460
+why off_aim_align 219.960 220.860
+why off_aim_align 221.061 221.360
+why off_aim_align 224.760 224.961
+why off_aim_align 225.664 225.864
+why off_aim_align 226.064 226.564
+why off_aim_align 227.365 227.569
+why off_aim_align 228.164 228.264
+why off_aim_align 236.353 236.553
+why off_aim_align 246.355 246.763
+why off_aim_align 250.066 250.266
+why off_aim_align 263.466 263.766
+why off_aim_align 289.067 289.853
+why off_aim_align 290.153 290.653
+why off_aim_align 290.853 290.953
+why off_aim_align 291.154 291.254
+why off_aim_align 294.356 294.456
+why off_aim_align 294.857 294.957
+why off_aim_align 295.556 295.656
+why off_aim_align 314.558 314.858
+why off_aim_align 315.658 315.858
+why off_aim_align 316.358 316.758
+why off_aim_align 322.958 323.158
+why off_aim_align 325.758 325.858
+why off_aim_align_waiting 26.698 26.798
+why off_aim_align_waiting 150.626 151.326
+why off_aim_aligned 27.093 28.893
+why off_aim_aligned 29.693 32.893
+why off_aim_aligned 216.660 218.560
+why off_aim_aligned 219.461 219.960
+why off_aim_aligned 220.861 221.061
+why off_aim_aligned 221.360 221.560
+why off_aim_aligned 224.960 225.664
+why off_aim_aligned 225.864 226.064
+why off_aim_aligned 226.364 227.365
+why off_aim_aligned 227.564 228.664
+why off_aim_aligned 231.567 232.967
+why off_aim_aligned 236.067 236.353
+why off_aim_aligned 236.553 238.253
+why off_aim_aligned 239.153 242.354
+why off_aim_aligned 242.554 243.054
+why off_aim_aligned 246.563 247.566
+why off_aim_aligned 250.266 250.566
+why off_aim_aligned 263.767 264.666
+why off_aim_aligned 265.566 265.666
+why off_aim_aligned 268.166 269.466
+why off_aim_aligned 272.666 272.766
+why off_aim_aligned 273.866 274.766
+why off_aim_aligned 275.166 275.366
+why off_aim_aligned 278.266 278.366
+why off_aim_aligned 280.166 286.066
+why off_aim_aligned 288.767 289.067
+why off_aim_aligned 289.553 289.653
+why off_aim_aligned 289.853 290.153
+why off_aim_aligned 290.653 292.054
+why off_aim_aligned 294.456 296.556
+why off_aim_aligned 313.258 314.558
+why off_aim_aligned 314.858 315.658
+why off_aim_aligned 315.858 316.358
+why off_aim_aligned 316.758 319.458
+why off_aim_aligned 323.158 323.658
+why off_aim_aligned 325.858 326.558
+why off_aim_aligned 328.858 330.058
+why off_locomotion_inactive 6.676 7.007
+why off_locomotion_inactive 37.376 37.476
+why off_locomotion_inactive 52.973 60.192
+why off_locomotion_inactive 105.688 133.189
+why off_locomotion_inactive 142.922 144.426
+why off_locomotion_inactive 165.126 168.126
+why off_locomotion_inactive 184.850 191.557
+why off_locomotion_inactive 265.666 268.166
+why off_locomotion_inactive 269.467 273.766
+why off_locomotion_inactive 274.766 275.166
+why off_locomotion_inactive 275.366 278.066
+why off_locomotion_inactive 278.366 280.166
+why off_locomotion_inactive 280.767 280.867
+why off_locomotion_inactive 286.066 287.566
+why off_locomotion_inactive 309.358 309.458
+why off_paused 100.688 103.088
+why off_paused 105.388 105.688
+why on_applied 11.785 23.393
+why on_applied 25.493 26.693
+why on_applied 32.993 33.093
+why on_applied 73.784 74.484
+why on_applied 74.784 76.884
+why on_applied 80.783 81.483
+why on_applied 82.084 82.483
+why on_applied 84.084 84.884
+why on_applied 86.183 87.084
+why on_applied 87.383 89.684
+why on_applied 90.383 90.483
+why on_applied 90.983 94.083
+why on_applied 95.183 96.383
+why on_applied 96.984 97.184
+why on_applied 98.386 98.586
+why on_applied 99.888 100.688
+why on_applied 103.988 105.288
+why on_applied 145.726 145.926
+why on_applied 146.426 148.526
+why on_applied 154.026 154.926
+why on_applied 160.926 161.526
+why on_applied 162.826 164.026
+why on_applied 164.726 165.132
+why on_applied 201.560 202.560
+why on_applied 202.860 202.960
+why on_applied 203.260 207.460
+why on_applied 212.065 212.660
+why on_applied 212.860 212.960
+why on_applied 221.560 221.760
+why on_applied 224.560 224.760
+why on_applied 228.664 231.067
+why on_applied 235.667 236.067
+why on_applied 253.166 254.666
+why on_applied 257.866 258.066
+why on_applied 259.566 260.066
+why on_applied 260.866 260.966
+why on_applied 261.966 262.366
+why on_applied 287.867 288.666
+why on_applied 292.154 293.456
+why on_applied 296.556 296.956
+why on_applied 311.758 313.258
+why on_deadband 11.585 11.785
+why on_deadband 19.093 19.193
+why on_deadband 19.393 19.493
+why on_deadband 74.484 74.783
+why on_deadband 76.884 76.984
+why on_deadband 81.483 82.084
+why on_deadband 82.483 84.084
+why on_deadband 84.884 86.183
+why on_deadband 86.583 86.683
+why on_deadband 87.084 87.384
+why on_deadband 89.184 89.284
+why on_deadband 94.083 94.183
+why on_deadband 95.483 95.583
+why on_deadband 98.286 98.386
+why on_deadband 145.926 146.426
+why on_deadband 202.560 203.260
+why on_deadband 212.660 212.860
+why on_deadband 235.867 235.967
+why on_deadband 253.666 253.766
+why on_deadband 253.966 254.066
+why on_deadband 292.654 292.754
+why on_native_inactive 6.990 11.585
+why on_native_inactive 23.393 25.493
+why on_native_inactive 32.894 36.592
+why on_native_inactive 37.476 37.876
+why on_native_inactive 60.176 73.784
+why on_native_inactive 76.984 80.784
+why on_native_inactive 89.684 90.983
+why on_native_inactive 94.184 95.184
+why on_native_inactive 96.384 96.984
+why on_native_inactive 97.184 98.286
+why on_native_inactive 98.587 99.887
+why on_native_inactive 103.088 103.988
+why on_native_inactive 105.288 105.388
+why on_native_inactive 144.426 145.726
+why on_native_inactive 148.526 150.626
+why on_native_inactive 151.326 154.026
+why on_native_inactive 154.926 160.926
+why on_native_inactive 161.526 162.826
+why on_native_inactive 164.026 164.726
+why on_native_inactive 191.557 201.560
+why on_native_inactive 207.460 212.061
+why on_native_inactive 212.960 216.560
+why on_native_inactive 221.760 224.560
+why on_native_inactive 231.067 231.567
+why on_native_inactive 232.950 235.667
+why on_native_inactive 238.253 239.153
+why on_native_inactive 242.355 242.554
+why on_native_inactive 243.054 246.354
+why on_native_inactive 247.566 250.066
+why on_native_inactive 250.567 253.167
+why on_native_inactive 254.666 257.867
+why on_native_inactive 258.066 259.566
+why on_native_inactive 260.066 261.966
+why on_native_inactive 262.366 263.466
+why on_native_inactive 264.666 265.566
+why on_native_inactive 273.766 273.866
+why on_native_inactive 278.066 278.266
+why on_native_inactive 287.567 287.867
+why on_native_inactive 288.166 288.266
+why on_native_inactive 288.666 288.766
+why on_native_inactive 292.054 292.154
+why on_native_inactive 293.456 294.356
+why on_native_inactive 296.956 298.956
+why on_native_inactive 309.458 311.758
+why on_native_inactive 319.458 322.958
+why on_native_inactive 323.658 325.758
+why on_native_inactive 326.558 328.858
+why on_native_inactive 330.058 336.158
+strafe 26.628 32.813
+strafe 216.528 221.480
+strafe 224.647 228.568
+strafe 231.455 232.920
+strafe 236.038 238.238
+strafe 239.056 242.323
+strafe 242.457 243.039
+strafe 246.291 247.503
+strafe 249.970 250.468
+strafe 263.402 272.588
+strafe 288.653 292.024
+strafe 294.324 296.525
+strafe 313.194 319.345
+strafe 322.893 323.609
+strafe 325.694 326.476
+strafe 328.810 330.010
+act 2 221.462 224.178
+act 2 228.549 231.252
+act 2 232.901 234.818
+act 2 243.039 245.756
+act 2 247.503 249.418
+act 2 250.468 252.386
+act 2 292.006 294.324
+act 2 319.326 321.559
+act 2 323.609 325.042
+act 2 326.476 327.910
+act 2 330.010 331.443
+act 8 216.528 217.279
+act 8 217.795 219.545
+act 8 220.495 221.146
+act 8 225.001 228.232
+act 8 231.727 232.384
+act 8 236.288 237.489
+act 8 239.338 240.171
+act 8 240.572 241.572
+act 8 242.589 242.722
+act 8 246.618 247.170
+act 8 250.070 250.303
+act 8 288.872 290.140
+act 8 290.204 291.706
+act 8 294.324 295.775
+act 8 314.793 315.210
+act 8 316.677 317.110
+act 8 317.343 317.760
+act 8 318.144 318.578
+act 8 318.860 319.009
+act 8 322.893 323.327
+act 8 325.694 326.143
+act 8 328.810 329.243
+act 8 329.426 329.843
+act 8 329.876 330.010
+melee 263.468 287.802
+lease 216.528 218.029
+lease 217.795 220.295
+lease 220.495 221.896
+lease 225.001 228.982
+lease 231.727 233.134
+lease 236.288 238.239
+lease 239.338 240.921
+lease 240.572 242.322
+lease 242.589 243.472
+lease 246.618 247.920
+lease 250.070 251.053
+lease 288.872 290.890
+lease 290.204 292.456
+lease 294.324 296.525
+lease 314.793 315.960
+lease 316.677 317.860
+lease 317.343 318.510
+lease 318.144 319.328
+lease 318.860 319.759
+lease 322.893 324.077
+lease 325.694 326.893
+lease 328.810 329.993
+lease 329.426 330.593
+lease 329.876 330.760

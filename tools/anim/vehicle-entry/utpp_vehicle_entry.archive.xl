@@ -1,0 +1,24 @@
+# UTPP third-person car entry (female V, sport2 cars: Porsche 911 / Quadra Type-66 / Mizutani Shion / Alvarado ...).
+# Own clip sets (one clip each, name 'enter') built offline from the game's NPC side-view passenger entry
+# (wa_sport2_passenger_r 'enter': mirrored for the driver door, as is for the passenger door), retargeted to the player
+# rig, root-motion end matched to the vanilla player clip, end pose blended into the vanilla seated pose.
+# Registration is not activation: both entries need the wrapper variable utpp_vehicle_tpp = 1 (set by
+# utpp_vehicle_anim.reds while mounting in UTPP third person) AND the vanilla seat variable.
+# Priority 95 follows the MOTO-2 entry (utpp_vehicle_tpp.archive.xl): lower number assumed to win over the vanilla
+# CarAnimsets entries (priority 128). NOT verified in game for cars. Every other car clip (idle, exit, switch_seat ...)
+# still comes from the vanilla sets because these sets contain only 'enter'.
+animations:
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sport2_driver.anims
+    vars: [utpp_vehicle_tpp, sport2_vehicle_seat_front_left]
+    priority: 95
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\vehicle\utpp_tpp_pwa_sport2_passenger_r.anims
+    vars: [utpp_vehicle_tpp, sport2_vehicle_seat_front_right]
+    priority: 95

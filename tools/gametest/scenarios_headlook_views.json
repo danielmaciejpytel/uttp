@@ -1,0 +1,19 @@
+{
+  "_note": "Head look footage: V stands still, unarmed, third person, open ground; the camera orbits around V in four quarter turns with a hold after each, so the head, neck and eyes can be judged from the side, from the front and from the other side. Pad only (right stick). Use with the diagnostic logs on (head look status line) and read the sheets.",
+  "scenarios": {
+    "headlook_orbit": {
+      "description": "camera behind V -> ~90 deg to the side (right stick x 0.7 for 2.1 s), hold 3 s -> in front of V, hold 3 s -> other side, hold 3 s -> behind, hold 2 s. ~22 s.",
+      "steps": [
+        {"name": "settle", "duration": 2.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_side", "duration": 2.1, "rs": [[0, 0.7, 0]], "metrics": false},
+        {"name": "hold_side", "duration": 3.0, "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "turn_front", "duration": 2.1, "rs": [[0, 0.7, 0]], "metrics": false},
+        {"name": "hold_front", "duration": 3.0, "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "turn_other_side", "duration": 2.1, "rs": [[0, 0.7, 0]], "metrics": false},
+        {"name": "hold_other_side", "duration": 3.0, "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "turn_back", "duration": 2.1, "rs": [[0, 0.7, 0]], "metrics": false},
+        {"name": "hold_back", "duration": 2.0, "rs": [[0, 0, 0]], "metrics": false}
+      ]
+    }
+  }
+}

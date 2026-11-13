@@ -1,0 +1,44 @@
+{
+  "_note": "Side and front-quarter footage of the fist combo (use with Source\\tools\\analysis\\punch_direction_report.py). BEFORE the scenario, by hand (the scenario cannot do it, a console command is not a pad input): V stands still in third person, on open ground with ~3 m free in every direction, and the fists are equipped by script (night.py gn.FISTS_CMD = QuickSlotsManager.RequestEquipFists, wait ~1 s). The fists are then raised by one RT tap: 'fists_draw' below is a copy of melee_draw (pad only) and can be run first in the same call: --scenario-file Source\\tools\\gametest\\scenarios_fists_views.json --set fists_draw,fists_views. Without the script equip step RT does not raise the fists (the test profile holds a pistol). Inputs: only what the melee macro already uses (RT tap 0.15 s, three taps 0.7 s apart = melee_punch) plus the right stick for the camera. Camera yaw rate: the right stick is strongly non-linear (measured: x 0.45 -> ~12 deg/s with a weapon drawn, 20261112-201743; x 1.0 -> ~120 deg/s in a 0.6 s pulse, camera_whip) ~ 120 * x^2.9 deg/s, so x 0.7 ~ 43 deg/s: 2.1 s ~ 90 deg, 1.05 s ~ 45 deg, 3.15 s ~ 135 deg (return pulse is as long as both turns together, so the error cancels). With x > 0 the cam= value of the tick lines FALLS (body_views at x 0.45: -155 -> 56 over 12.5 s); 'fists_views_mirror' uses the opposite signs (camera on the other side of V). UNVERIFIED with fists: (1) the real rate (read cam= in the 'tick' lines of the step summaries before and after each turn); (2) whether V turns with the camera while the fists are raised or on an attack (melee runs 20261112-233440 / 233852 had pl= equal to cam= and the camera never moved, so there is no evidence either way): if pl= follows cam= after 'turn_side' / 'turn_quarter', the footage is a back view and this scenario cannot give a side view without a camera-independent V heading. Check |cam - pl| at the end of 'hold_side' (~90) and 'hold_quarter' (~135). All steps: metrics false (no verdict, footage only).",
+  "scenarios": {
+    "fists_draw": {
+      "description": "same input as melee_draw: unarmed RT TAP (0.15 s) raises the fists (they must have been equipped by script first), then 1.2 s idle. Pad only.",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 1.45, "rt": {"keys": [[0, 0], [0.1, 1], [0.25, 0]], "interp": "step"}, "metrics": false}
+      ]
+    },
+    "fists_views": {
+      "description": "fists already raised, V standing: (a) camera turned ~90 deg to V's side (right stick x 0.7 for 2.1 s), held, melee_punch combo (3 RT taps), 2 s wait; (b) camera turned another ~45 deg to V's front quarter (1.05 s), held, combo again, 2 s wait; (c) camera returned behind V (x -0.7 for 3.15 s), held. ~20 s. Pad only; needs fists raised (see _note).",
+      "steps": [
+        {"name": "settle", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_side", "duration": 2.1, "rs": [[0, 0.7, 0]], "metrics": false},
+        {"name": "hold_side", "duration": 1.0, "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "combo_side", "duration": 2.8, "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false},
+        {"name": "wait_side", "duration": 2.0, "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_quarter", "duration": 1.05, "rs": [[0, 0.7, 0]], "metrics": false},
+        {"name": "hold_quarter", "duration": 1.0, "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "combo_quarter", "duration": 2.8, "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false},
+        {"name": "wait_quarter", "duration": 2.0, "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_back", "duration": 3.15, "rs": [[0, -0.7, 0]], "metrics": false},
+        {"name": "hold_back", "duration": 1.0, "rs": [[0, 0, 0]], "metrics": false}
+      ]
+    },
+    "fists_views_mirror": {
+      "description": "fists_views with the camera turned to the other side of V (right stick signs reversed): use it for the second run, or when the first turned the camera to the side that hides the striking arm. Pad only; needs fists raised (see _note).",
+      "steps": [
+        {"name": "settle", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_side", "duration": 2.1, "rs": [[0, -0.7, 0]], "metrics": false},
+        {"name": "hold_side", "duration": 1.0, "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "combo_side", "duration": 2.8, "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false},
+        {"name": "wait_side", "duration": 2.0, "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_quarter", "duration": 1.05, "rs": [[0, -0.7, 0]], "metrics": false},
+        {"name": "hold_quarter", "duration": 1.0, "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "combo_quarter", "duration": 2.8, "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false},
+        {"name": "wait_quarter", "duration": 2.0, "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_back", "duration": 3.15, "rs": [[0, 0.7, 0]], "metrics": false},
+        {"name": "hold_back", "duration": 1.0, "rs": [[0, 0, 0]], "metrics": false}
+      ]
+    }
+  }
+}

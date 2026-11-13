@@ -1,0 +1,830 @@
+# h2 sidecar v1 (tools/replay/h2_sidecar_from_log.py; feed seconds = log wall time - 'MM feed dump on' wall time)
+session 20261015_0228
+feed utpp-feed-2026-10-15-02-28-51.txt
+log utpp-final-2026-10-15-02-28-13.log
+dumpon 2026-10-15 02:28:51.975
+frames 70859 1261.910
+align samples(body turning)=3769 camTrace=11904 median|dyaw| at lag 0: 0.18 deg; best lag 0.00 s -> 0.18 deg
+leasesource derived
+# stats: frames 70859 feed t 14.197..1261.910
+# stats: native-off frames 10460 (off windows 76, 247.21 s)
+# stats: native-off, ground, sp>=0.5, not ADS: 2454; outside strafe/act8 windows (-0.02/+0.15 s): 2101
+# stats:   sp>=1.5   all  2425 | outside windows  2080 | outside windows, no melee    60
+# stats:   in>=45    all  2111 | outside windows  1922 | outside windows, no melee     9
+# stats:   in>=105   all  1495 | outside windows  1429 | outside windows, no melee     8
+# stats:   vel>=105  all  1502 | outside windows  1432 | outside windows, no melee     8
+# stats:   vel>=90   all  1522 | outside windows  1451 | outside windows, no melee     8
+# stats:   vel>=130  all  1498 | outside windows  1433 | outside windows, no melee     8
+mask 8.297 0x5FBF 1
+freeMoveEnable 5.178 1
+off 5.178 14.205
+off 18.652 19.785
+off 82.981 83.031
+off 87.064 88.215
+off 88.981 91.114
+off 154.599 162.700
+off 172.433 180.941
+off 182.524 188.408
+off 189.991 190.542
+off 195.592 195.759
+off 197.159 201.793
+off 203.377 204.027
+off 318.168 323.101
+off 339.785 342.903
+off 376.622 383.490
+off 386.790 391.107
+off 395.958 396.258
+off 410.548 412.148
+off 428.652 429.102
+off 448.002 448.252
+off 620.094 625.971
+off 627.955 631.806
+off 633.392 634.009
+off 683.878 705.261
+off 708.160 721.512
+off 743.073 747.640
+off 789.257 791.023
+off 793.674 799.506
+off 802.273 803.390
+off 804.807 807.724
+off 813.690 817.507
+off 819.090 819.657
+off 845.809 846.409
+off 849.310 850.610
+off 854.978 855.678
+off 870.745 870.829
+off 873.246 875.480
+off 881.763 884.329
+off 892.213 903.298
+off 903.931 906.581
+off 920.318 924.469
+off 934.153 934.303
+off 937.253 937.753
+off 939.903 940.053
+off 944.187 944.686
+off 946.354 946.854
+off 948.787 949.287
+off 951.754 952.487
+off 964.504 965.254
+off 1005.986 1021.550
+off 1036.726 1037.226
+off 1039.009 1039.509
+off 1044.993 1045.142
+off 1065.227 1065.377
+off 1126.307 1127.074
+off 1133.358 1133.691
+off 1133.858 1135.108
+off 1135.125 1141.175
+off 1141.225 1142.891
+off 1144.425 1147.941
+off 1147.958 1149.575
+off 1151.041 1155.875
+off 1158.275 1159.375
+off 1159.658 1162.892
+off 1165.075 1169.741
+off 1169.808 1170.708
+off 1175.642 1178.108
+off 1178.775 1180.508
+off 1180.975 1184.595
+off 1185.278 1187.578
+off 1189.778 1195.662
+off 1198.635 1206.336
+off 1238.006 1244.056
+off 1244.074 1248.240
+off 1248.257 1252.424
+off 1255.857 1259.540
+freeMove 14.255 16.248
+freeMove 16.403 18.719
+freeMove 19.818 87.114
+freeMove 88.215 89.014
+freeMove 91.114 154.616
+freeMove 162.717 172.516
+freeMove 181.008 182.608
+freeMove 188.408 190.008
+freeMove 190.608 195.608
+freeMove 195.809 197.209
+freeMove 201.810 203.410
+freeMove 204.110 318.217
+freeMove 323.118 339.818
+freeMove 342.920 376.705
+freeMove 383.506 386.806
+freeMove 391.107 396.008
+freeMove 396.308 410.615
+freeMove 412.214 428.719
+freeMove 429.119 448.019
+freeMove 448.319 619.911
+freeMove 626.054 627.954
+freeMove 631.856 633.459
+freeMove 634.059 683.662
+freeMove 705.360 707.944
+freeMove 721.596 743.112
+freeMove 747.706 789.307
+freeMove 791.107 793.707
+freeMove 799.506 802.306
+freeMove 803.407 804.807
+freeMove 807.723 813.740
+freeMove 817.540 819.140
+freeMove 819.740 845.826
+freeMove 846.426 849.327
+freeMove 850.627 855.027
+freeMove 855.728 873.329
+freeMove 875.529 881.830
+freeMove 884.329 892.229
+freeMove 903.331 903.931
+freeMove 906.631 920.335
+freeMove 924.535 937.336
+freeMove 937.836 939.936
+freeMove 940.136 944.237
+freeMove 944.736 946.436
+freeMove 946.937 948.837
+freeMove 949.337 951.837
+freeMove 952.537 964.537
+freeMove 965.337 1005.737
+freeMove 1021.549 1036.759
+freeMove 1037.259 1039.059
+freeMove 1039.559 1065.260
+freeMove 1065.444 1126.357
+freeMove 1127.157 1133.358
+freeMove 1133.758 1133.858
+freeMove 1142.958 1144.458
+freeMove 1149.658 1151.058
+freeMove 1155.958 1158.358
+freeMove 1159.458 1159.658
+freeMove 1162.958 1165.159
+freeMove 1169.758 1169.858
+freeMove 1170.758 1175.658
+freeMove 1178.158 1178.858
+freeMove 1180.558 1181.058
+freeMove 1184.646 1185.345
+freeMove 1187.645 1189.845
+freeMove 1195.746 1198.454
+freeMove 1206.419 1238.023
+freeMove 1252.423 1255.924
+freeMove 1259.623 1261.924
+why off_aim_align 18.818 19.418
+why off_aim_align 154.716 155.116
+why off_aim_align 182.608 183.008
+why off_aim_align 195.608 195.809
+why off_aim_align 318.317 318.617
+why off_aim_align 320.217 320.917
+why off_aim_align 376.705 377.006
+why off_aim_align 386.806 387.207
+why off_aim_align 396.008 396.308
+why off_aim_align 410.615 410.914
+why off_aim_align 428.719 429.119
+why off_aim_align 448.019 448.319
+why off_aim_align 793.708 794.208
+why off_aim_align 874.829 875.129
+why off_aim_align 875.430 875.530
+why off_aim_align 882.129 882.429
+why off_aim_align 882.729 883.529
+why off_aim_align 883.929 884.229
+why off_aim_align 920.335 920.735
+why off_aim_align 964.537 965.037
+why off_aim_align 1126.358 1126.757
+why off_aim_align 1133.459 1133.758
+why off_aim_align 1144.458 1144.658
+why off_aim_align 1151.057 1151.157
+why off_aim_align 1158.358 1158.458
+why off_aim_align 1159.758 1159.858
+why off_aim_align 1165.158 1165.658
+why off_aim_align 1175.658 1175.958
+why off_aim_align 1178.858 1179.158
+why off_aim_align 1181.458 1181.958
+why off_aim_align 1186.144 1186.444
+why off_aim_align 1238.023 1238.224
+why off_aim_align 1255.923 1256.023
+why off_aim_align_waiting 18.718 18.818
+why off_aim_align_waiting 83.014 83.114
+why off_aim_align_waiting 87.114 88.315
+why off_aim_align_waiting 89.014 91.214
+why off_aim_align_waiting 154.616 154.716
+why off_aim_align_waiting 318.217 318.317
+why off_aim_align_waiting 789.307 789.407
+why off_aim_align_waiting 845.826 846.026
+why off_aim_align_waiting 870.829 870.929
+why off_aim_aligned 19.418 19.818
+why off_aim_aligned 155.116 162.719
+why off_aim_aligned 172.517 181.008
+why off_aim_aligned 183.008 188.508
+why off_aim_aligned 190.008 190.609
+why off_aim_aligned 197.209 201.810
+why off_aim_aligned 203.411 204.110
+why off_aim_aligned 318.617 320.217
+why off_aim_aligned 320.919 323.117
+why off_aim_aligned 339.818 342.920
+why off_aim_aligned 377.005 383.506
+why off_aim_aligned 387.207 391.207
+why off_aim_aligned 410.914 412.214
+why off_aim_aligned 628.072 631.857
+why off_aim_aligned 633.459 634.059
+why off_aim_aligned 743.106 747.707
+why off_aim_aligned 789.407 791.107
+why off_aim_aligned 794.207 799.606
+why off_aim_aligned 802.306 803.407
+why off_aim_aligned 813.740 817.540
+why off_aim_aligned 819.140 819.724
+why off_aim_aligned 846.026 846.426
+why off_aim_aligned 849.327 850.627
+why off_aim_aligned 855.028 855.728
+why off_aim_aligned 873.329 874.829
+why off_aim_aligned 875.129 875.430
+why off_aim_aligned 881.830 882.129
+why off_aim_aligned 882.430 882.730
+why off_aim_aligned 883.529 883.930
+why off_aim_aligned 884.229 884.429
+why off_aim_aligned 904.031 906.631
+why off_aim_aligned 920.735 924.535
+why off_aim_aligned 965.037 965.337
+why off_aim_aligned 1126.757 1127.157
+why off_aim_aligned 1133.958 1134.259
+why off_aim_aligned 1135.158 1137.858
+why off_aim_aligned 1141.258 1141.358
+why off_aim_aligned 1148.058 1148.158
+why off_aim_aligned 1154.158 1155.958
+why off_aim_aligned 1160.958 1162.959
+why off_aim_aligned 1165.659 1166.858
+why off_aim_aligned 1175.958 1177.657
+why off_aim_aligned 1179.157 1180.058
+why off_aim_aligned 1181.058 1181.458
+why off_aim_aligned 1181.958 1183.458
+why off_aim_aligned 1185.344 1186.144
+why off_aim_aligned 1186.444 1187.144
+why off_aim_aligned 1189.844 1195.745
+why off_aim_aligned 1240.223 1240.424
+why off_locomotion_inactive 9.917 13.044
+why off_locomotion_inactive 13.344 14.285
+why off_locomotion_inactive 625.954 626.054
+why off_locomotion_inactive 705.244 705.344
+why off_locomotion_inactive 721.495 721.595
+why off_locomotion_inactive 807.723 807.823
+why off_locomotion_inactive 892.229 903.331
+why off_locomotion_inactive 934.236 934.336
+why off_locomotion_inactive 937.336 937.836
+why off_locomotion_inactive 939.936 940.136
+why off_locomotion_inactive 944.237 944.736
+why off_locomotion_inactive 946.436 946.936
+why off_locomotion_inactive 948.837 949.337
+why off_locomotion_inactive 951.837 952.537
+why off_locomotion_inactive 1014.843 1021.649
+why off_locomotion_inactive 1036.759 1037.259
+why off_locomotion_inactive 1039.059 1039.559
+why off_locomotion_inactive 1045.060 1045.160
+why off_locomotion_inactive 1065.260 1065.444
+why off_locomotion_inactive 1134.258 1135.158
+why off_locomotion_inactive 1137.858 1142.958
+why off_locomotion_inactive 1144.658 1147.958
+why off_locomotion_inactive 1148.158 1149.658
+why off_locomotion_inactive 1151.158 1154.158
+why off_locomotion_inactive 1158.458 1159.458
+why off_locomotion_inactive 1159.858 1160.958
+why off_locomotion_inactive 1166.858 1170.758
+why off_locomotion_inactive 1177.658 1178.159
+why off_locomotion_inactive 1180.057 1180.559
+why off_locomotion_inactive 1183.458 1184.644
+why off_locomotion_inactive 1187.144 1187.644
+why off_locomotion_inactive 1206.319 1206.419
+why off_locomotion_inactive 1238.223 1240.223
+why off_locomotion_inactive 1240.423 1252.523
+why off_locomotion_inactive 1256.023 1259.623
+why on_applied 17.818 18.418
+why on_applied 21.121 23.709
+why on_applied 24.008 26.511
+why on_applied 26.711 29.714
+why on_applied 30.214 38.505
+why on_applied 39.406 41.906
+why on_applied 42.808 68.509
+why on_applied 69.308 70.008
+why on_applied 70.809 71.408
+why on_applied 72.713 73.408
+why on_applied 75.209 75.709
+why on_applied 76.214 77.414
+why on_applied 77.814 77.914
+why on_applied 79.414 80.718
+why on_applied 81.414 81.814
+why on_applied 85.314 85.514
+why on_applied 85.714 85.814
+why on_applied 97.714 102.116
+why on_applied 102.717 102.917
+why on_applied 103.916 111.416
+why on_applied 112.516 117.916
+why on_applied 118.116 120.016
+why on_applied 120.516 124.816
+why on_applied 125.716 129.816
+why on_applied 130.117 137.316
+why on_applied 137.616 142.616
+why on_applied 143.616 143.816
+why on_applied 144.716 144.816
+why on_applied 145.617 145.816
+why on_applied 146.816 147.515
+why on_applied 148.216 148.316
+why on_applied 149.016 150.117
+why on_applied 150.816 151.915
+why on_applied 152.616 154.616
+why on_applied 163.316 163.416
+why on_applied 163.616 164.816
+why on_applied 165.616 169.216
+why on_applied 169.516 172.424
+why on_applied 181.008 182.009
+why on_applied 190.808 191.708
+why on_applied 191.908 192.309
+why on_applied 194.809 195.208
+why on_applied 195.809 196.409
+why on_applied 292.217 293.217
+why on_applied 294.317 295.017
+why on_applied 295.817 300.717
+why on_applied 300.917 317.817
+why on_applied 323.218 325.618
+why on_applied 326.717 327.517
+why on_applied 328.217 329.017
+why on_applied 329.817 335.417
+why on_applied 368.205 369.805
+why on_applied 371.105 376.705
+why on_applied 385.406 386.806
+why on_applied 391.207 392.206
+why on_applied 422.519 423.419
+why on_applied 423.619 424.019
+why on_applied 424.519 425.519
+why on_applied 471.505 473.305
+why on_applied 618.511 619.111
+why on_applied 640.661 641.360
+why on_applied 681.662 682.063
+why on_applied 722.295 722.895
+why on_applied 747.706 748.906
+why on_applied 749.506 749.806
+why on_applied 791.107 792.007
+why on_applied 792.210 792.310
+why on_applied 792.907 793.607
+why on_applied 804.106 804.907
+why on_applied 809.040 811.840
+why on_applied 863.729 864.029
+why on_applied 869.329 870.729
+why on_applied 871.130 873.329
+why on_applied 876.029 877.629
+why on_applied 880.129 880.629
+why on_applied 881.429 881.830
+why on_applied 884.430 885.029
+why on_applied 889.329 889.429
+why on_applied 889.730 890.929
+why on_applied 891.329 892.229
+why on_applied 906.631 911.832
+why on_applied 918.235 918.735
+why on_applied 919.835 920.335
+why on_applied 924.535 927.835
+why on_applied 928.835 929.835
+why on_applied 930.435 931.235
+why on_applied 932.735 933.737
+why on_applied 934.636 935.136
+why on_applied 935.436 936.836
+why on_applied 938.436 938.736
+why on_applied 939.136 939.737
+why on_applied 940.236 940.636
+why on_applied 940.837 942.436
+why on_applied 942.836 944.237
+why on_applied 944.736 946.236
+why on_applied 947.037 948.638
+why on_applied 949.437 950.137
+why on_applied 950.537 951.837
+why on_applied 953.037 953.137
+why on_applied 954.137 955.637
+why on_applied 956.237 956.537
+why on_applied 956.737 958.337
+why on_applied 958.537 960.837
+why on_applied 961.737 964.537
+why on_applied 965.337 971.037
+why on_applied 971.438 971.737
+why on_applied 972.237 973.537
+why on_applied 974.337 977.437
+why on_applied 977.937 978.737
+why on_applied 979.137 980.237
+why on_applied 989.937 990.837
+why on_applied 992.837 994.136
+why on_applied 994.737 995.037
+why on_applied 995.537 995.937
+why on_applied 996.737 996.837
+why on_applied 997.037 998.037
+why on_applied 998.737 999.738
+why on_applied 1000.437 1000.937
+why on_applied 1001.837 1003.737
+why on_applied 1003.937 1005.337
+why on_applied 1027.558 1029.359
+why on_applied 1029.658 1031.858
+why on_applied 1032.059 1033.059
+why on_applied 1033.759 1036.659
+why on_applied 1037.359 1037.859
+why on_applied 1038.059 1039.059
+why on_applied 1039.559 1040.059
+why on_applied 1040.359 1043.059
+why on_applied 1043.259 1045.059
+why on_applied 1045.259 1045.659
+why on_applied 1046.559 1046.959
+why on_applied 1047.159 1048.359
+why on_applied 1049.160 1049.764
+why on_applied 1050.159 1050.759
+why on_applied 1051.759 1053.359
+why on_applied 1053.959 1054.359
+why on_applied 1054.659 1055.259
+why on_applied 1055.860 1056.243
+why on_applied 1056.443 1057.644
+why on_applied 1058.243 1058.444
+why on_applied 1058.645 1060.144
+why on_applied 1061.243 1061.560
+why on_applied 1062.160 1062.443
+why on_applied 1062.660 1063.044
+why on_applied 1063.743 1063.843
+why on_applied 1064.060 1064.960
+why on_applied 1065.160 1065.260
+why on_applied 1066.748 1067.848
+why on_applied 1068.348 1068.948
+why on_applied 1069.849 1070.347
+why on_applied 1070.748 1075.650
+why on_applied 1077.950 1081.150
+why on_applied 1082.151 1082.650
+why on_applied 1083.050 1083.950
+why on_applied 1086.650 1089.451
+why on_applied 1090.051 1090.751
+why on_applied 1091.650 1092.351
+why on_applied 1092.850 1093.050
+why on_applied 1093.451 1093.551
+why on_applied 1094.051 1097.251
+why on_applied 1097.751 1097.851
+why on_applied 1098.550 1098.650
+why on_applied 1098.951 1099.051
+why on_applied 1100.551 1102.050
+why on_applied 1103.153 1103.253
+why on_applied 1103.650 1103.750
+why on_applied 1103.950 1104.050
+why on_applied 1104.550 1104.750
+why on_applied 1106.752 1109.152
+why on_applied 1109.352 1111.651
+why on_applied 1112.952 1113.652
+why on_applied 1113.852 1115.851
+why on_applied 1116.252 1117.151
+why on_applied 1118.052 1118.852
+why on_applied 1120.157 1120.357
+why on_applied 1120.857 1121.057
+why on_applied 1121.257 1121.657
+why on_applied 1122.057 1122.157
+why on_applied 1122.857 1123.657
+why on_applied 1124.957 1125.157
+why on_applied 1125.557 1126.357
+why on_applied 1127.157 1128.357
+why on_applied 1132.758 1133.058
+why on_applied 1143.358 1144.458
+why on_applied 1149.958 1150.658
+why on_applied 1156.158 1157.558
+why on_applied 1157.864 1158.358
+why on_applied 1163.258 1164.658
+why on_applied 1165.059 1165.159
+why on_applied 1171.058 1171.558
+why on_applied 1171.758 1172.557
+why on_applied 1172.958 1174.558
+why on_applied 1174.758 1175.158
+why on_applied 1175.358 1175.558
+why on_applied 1178.458 1178.858
+why on_applied 1180.858 1181.058
+why on_applied 1185.146 1185.345
+why on_applied 1187.944 1189.845
+why on_applied 1195.746 1196.152
+why on_applied 1207.619 1209.621
+why on_applied 1209.821 1210.721
+why on_applied 1210.921 1211.021
+why on_applied 1211.421 1211.521
+why on_applied 1218.428 1220.922
+why on_applied 1221.422 1221.921
+why on_applied 1223.021 1223.321
+why on_applied 1223.823 1229.023
+why on_applied 1229.223 1230.223
+why on_applied 1231.323 1233.824
+why on_applied 1236.123 1238.023
+why on_applied 1252.823 1255.924
+why on_deadband 18.420 18.618
+why on_deadband 21.304 21.404
+why on_deadband 23.708 24.008
+why on_deadband 26.512 26.712
+why on_deadband 28.215 28.315
+why on_deadband 38.505 38.905
+why on_deadband 41.905 42.807
+why on_deadband 65.508 65.809
+why on_deadband 66.008 66.108
+why on_deadband 72.308 72.708
+why on_deadband 75.709 75.916
+why on_deadband 77.214 79.414
+why on_deadband 80.514 80.614
+why on_deadband 100.916 101.016
+why on_deadband 102.116 102.716
+why on_deadband 111.416 112.516
+why on_deadband 113.916 114.016
+why on_deadband 117.916 118.116
+why on_deadband 120.016 120.516
+why on_deadband 122.516 122.616
+why on_deadband 129.816 130.116
+why on_deadband 132.716 132.816
+why on_deadband 137.316 137.616
+why on_deadband 163.416 163.617
+why on_deadband 164.816 165.016
+why on_deadband 166.716 166.816
+why on_deadband 169.216 169.515
+why on_deadband 170.816 170.916
+why on_deadband 182.008 182.608
+why on_deadband 191.708 191.908
+why on_deadband 195.208 195.308
+why on_deadband 293.218 293.617
+why on_deadband 295.017 295.817
+why on_deadband 300.717 300.917
+why on_deadband 303.517 303.617
+why on_deadband 317.817 318.217
+why on_deadband 325.617 325.817
+why on_deadband 333.018 333.118
+why on_deadband 371.505 371.605
+why on_deadband 376.206 376.306
+why on_deadband 392.207 392.307
+why on_deadband 423.419 423.619
+why on_deadband 682.062 682.162
+why on_deadband 722.896 723.095
+why on_deadband 748.906 749.506
+why on_deadband 791.307 791.407
+why on_deadband 792.008 792.907
+why on_deadband 846.525 847.226
+why on_deadband 864.029 864.329
+why on_deadband 869.229 869.329
+why on_deadband 876.429 876.529
+why on_deadband 880.629 881.429
+why on_deadband 885.029 889.730
+why on_deadband 908.733 908.833
+why on_deadband 909.633 909.733
+why on_deadband 911.832 912.232
+why on_deadband 918.735 919.835
+why on_deadband 927.235 927.335
+why on_deadband 927.835 927.935
+why on_deadband 929.535 929.635
+why on_deadband 930.936 931.036
+why on_deadband 945.537 945.637
+why on_deadband 952.937 953.037
+why on_deadband 954.739 954.839
+why on_deadband 955.637 956.737
+why on_deadband 958.337 958.537
+why on_deadband 960.837 961.737
+why on_deadband 962.437 962.537
+why on_deadband 967.937 968.037
+why on_deadband 968.937 969.037
+why on_deadband 971.037 971.437
+why on_deadband 971.737 972.437
+why on_deadband 973.537 974.337
+why on_deadband 977.436 977.937
+why on_deadband 978.737 979.137
+why on_deadband 994.137 994.737
+why on_deadband 995.037 995.537
+why on_deadband 995.937 997.036
+why on_deadband 1003.737 1003.937
+why on_deadband 1028.158 1028.258
+why on_deadband 1029.358 1029.658
+why on_deadband 1031.859 1032.059
+why on_deadband 1040.959 1041.059
+why on_deadband 1043.059 1043.259
+why on_deadband 1044.459 1044.559
+why on_deadband 1046.959 1047.159
+why on_deadband 1049.759 1050.159
+why on_deadband 1051.659 1051.759
+why on_deadband 1064.961 1065.160
+why on_deadband 1065.444 1065.860
+why on_deadband 1075.650 1077.950
+why on_deadband 1081.150 1081.250
+why on_deadband 1082.650 1083.051
+why on_deadband 1087.851 1087.951
+why on_deadband 1089.450 1090.051
+why on_deadband 1090.750 1091.651
+why on_deadband 1092.351 1092.852
+why on_deadband 1093.050 1094.051
+why on_deadband 1094.851 1094.951
+why on_deadband 1096.250 1096.350
+why on_deadband 1097.251 1100.551
+why on_deadband 1102.051 1104.550
+why on_deadband 1104.750 1106.752
+why on_deadband 1109.152 1109.352
+why on_deadband 1110.251 1110.351
+why on_deadband 1111.651 1112.952
+why on_deadband 1113.652 1113.852
+why on_deadband 1115.852 1116.252
+why on_deadband 1117.152 1118.052
+why on_deadband 1118.852 1120.157
+why on_deadband 1120.357 1120.857
+why on_deadband 1121.057 1121.257
+why on_deadband 1121.457 1122.858
+why on_deadband 1123.657 1124.957
+why on_deadband 1125.157 1125.557
+why on_deadband 1128.357 1130.157
+why on_deadband 1150.658 1151.058
+why on_deadband 1157.758 1157.858
+why on_deadband 1164.658 1165.058
+why on_deadband 1172.558 1172.957
+why on_deadband 1175.158 1175.357
+why on_deadband 1207.936 1208.036
+why on_deadband 1209.621 1209.821
+why on_deadband 1210.521 1212.221
+why on_deadband 1217.421 1218.421
+why on_deadband 1219.121 1219.221
+why on_deadband 1220.921 1221.422
+why on_deadband 1221.921 1223.021
+why on_deadband 1223.321 1223.821
+why on_deadband 1229.027 1229.223
+why on_deadband 1230.223 1231.324
+why on_deadband 1233.823 1233.923
+why on_deadband 1237.124 1237.224
+why on_native_inactive 14.255 16.248
+why on_native_inactive 16.403 17.818
+why on_native_inactive 18.619 18.719
+why on_native_inactive 19.818 21.124
+why on_native_inactive 29.714 30.214
+why on_native_inactive 38.905 39.406
+why on_native_inactive 68.508 69.308
+why on_native_inactive 70.009 70.809
+why on_native_inactive 71.408 72.308
+why on_native_inactive 73.409 75.208
+why on_native_inactive 75.914 76.214
+why on_native_inactive 80.714 81.414
+why on_native_inactive 81.814 85.315
+why on_native_inactive 85.514 87.114
+why on_native_inactive 88.314 89.014
+why on_native_inactive 91.214 97.714
+why on_native_inactive 102.916 103.917
+why on_native_inactive 124.816 125.716
+why on_native_inactive 142.616 143.620
+why on_native_inactive 143.816 145.617
+why on_native_inactive 145.816 146.816
+why on_native_inactive 147.516 149.016
+why on_native_inactive 150.116 150.816
+why on_native_inactive 151.916 152.616
+why on_native_inactive 162.717 163.316
+why on_native_inactive 165.016 165.617
+why on_native_inactive 172.416 172.516
+why on_native_inactive 188.508 190.008
+why on_native_inactive 190.608 190.809
+why on_native_inactive 192.309 194.809
+why on_native_inactive 195.308 195.608
+why on_native_inactive 196.409 197.209
+why on_native_inactive 201.810 203.410
+why on_native_inactive 204.110 292.217
+why on_native_inactive 293.617 294.317
+why on_native_inactive 323.118 323.218
+why on_native_inactive 325.817 326.717
+why on_native_inactive 327.517 328.218
+why on_native_inactive 329.017 329.817
+why on_native_inactive 335.417 339.818
+why on_native_inactive 342.920 368.205
+why on_native_inactive 369.805 371.105
+why on_native_inactive 383.506 385.406
+why on_native_inactive 392.306 396.008
+why on_native_inactive 396.308 410.615
+why on_native_inactive 412.214 422.519
+why on_native_inactive 424.019 424.519
+why on_native_inactive 425.524 428.719
+why on_native_inactive 429.119 448.019
+why on_native_inactive 448.319 471.505
+why on_native_inactive 473.305 618.511
+why on_native_inactive 619.111 619.911
+why on_native_inactive 626.054 628.054
+why on_native_inactive 631.856 633.459
+why on_native_inactive 634.059 640.660
+why on_native_inactive 641.361 681.662
+why on_native_inactive 682.162 683.662
+why on_native_inactive 705.360 707.944
+why on_native_inactive 721.596 722.313
+why on_native_inactive 723.095 743.112
+why on_native_inactive 749.806 789.307
+why on_native_inactive 793.607 793.707
+why on_native_inactive 799.607 802.306
+why on_native_inactive 803.407 804.107
+why on_native_inactive 807.840 809.040
+why on_native_inactive 811.840 813.740
+why on_native_inactive 817.540 819.140
+why on_native_inactive 819.740 845.826
+why on_native_inactive 846.426 846.526
+why on_native_inactive 847.226 849.327
+why on_native_inactive 850.627 855.027
+why on_native_inactive 855.728 863.729
+why on_native_inactive 864.329 869.229
+why on_native_inactive 870.728 871.130
+why on_native_inactive 875.529 876.029
+why on_native_inactive 877.629 880.129
+why on_native_inactive 890.929 891.329
+why on_native_inactive 903.331 904.031
+why on_native_inactive 912.233 918.235
+why on_native_inactive 927.935 928.835
+why on_native_inactive 929.835 930.435
+why on_native_inactive 931.235 932.735
+why on_native_inactive 933.736 934.636
+why on_native_inactive 935.137 935.437
+why on_native_inactive 936.836 937.336
+why on_native_inactive 937.836 938.436
+why on_native_inactive 938.736 939.137
+why on_native_inactive 939.736 939.936
+why on_native_inactive 940.136 940.236
+why on_native_inactive 940.637 940.837
+why on_native_inactive 942.436 942.837
+why on_native_inactive 946.236 946.436
+why on_native_inactive 946.937 947.037
+why on_native_inactive 947.437 947.537
+why on_native_inactive 948.637 948.837
+why on_native_inactive 949.337 949.437
+why on_native_inactive 950.137 950.537
+why on_native_inactive 952.537 952.937
+why on_native_inactive 953.137 954.137
+why on_native_inactive 980.237 989.937
+why on_native_inactive 990.837 992.837
+why on_native_inactive 998.036 998.737
+why on_native_inactive 999.737 1000.437
+why on_native_inactive 1000.936 1001.837
+why on_native_inactive 1005.336 1005.737
+why on_native_inactive 1021.649 1027.558
+why on_native_inactive 1033.059 1033.759
+why on_native_inactive 1036.659 1036.759
+why on_native_inactive 1037.259 1037.359
+why on_native_inactive 1037.859 1038.059
+why on_native_inactive 1040.059 1040.360
+why on_native_inactive 1045.159 1045.259
+why on_native_inactive 1045.659 1046.559
+why on_native_inactive 1048.359 1049.159
+why on_native_inactive 1050.759 1051.659
+why on_native_inactive 1053.359 1053.959
+why on_native_inactive 1054.159 1054.659
+why on_native_inactive 1055.259 1056.043
+why on_native_inactive 1056.245 1056.444
+why on_native_inactive 1057.660 1058.243
+why on_native_inactive 1058.444 1058.644
+why on_native_inactive 1060.144 1061.245
+why on_native_inactive 1061.560 1062.143
+why on_native_inactive 1062.443 1062.643
+why on_native_inactive 1063.060 1064.060
+why on_native_inactive 1065.860 1066.748
+why on_native_inactive 1067.848 1068.348
+why on_native_inactive 1068.948 1069.848
+why on_native_inactive 1070.348 1070.748
+why on_native_inactive 1081.250 1082.151
+why on_native_inactive 1083.950 1086.651
+why on_native_inactive 1130.157 1132.758
+why on_native_inactive 1133.058 1133.458
+why on_native_inactive 1133.758 1133.958
+why on_native_inactive 1142.958 1143.358
+why on_native_inactive 1147.958 1148.058
+why on_native_inactive 1149.658 1149.958
+why on_native_inactive 1155.958 1156.158
+why on_native_inactive 1157.558 1157.758
+why on_native_inactive 1159.458 1159.758
+why on_native_inactive 1162.958 1163.258
+why on_native_inactive 1169.758 1169.858
+why on_native_inactive 1170.758 1171.058
+why on_native_inactive 1171.558 1171.758
+why on_native_inactive 1174.558 1174.758
+why on_native_inactive 1175.558 1175.658
+why on_native_inactive 1178.158 1178.458
+why on_native_inactive 1180.558 1180.858
+why on_native_inactive 1184.646 1185.144
+why on_native_inactive 1187.645 1187.944
+why on_native_inactive 1196.152 1198.454
+why on_native_inactive 1206.419 1207.620
+why on_native_inactive 1212.221 1217.421
+why on_native_inactive 1233.923 1236.123
+why on_native_inactive 1252.523 1252.824
+why on_native_inactive 1254.823 1254.923
+why on_native_inactive 1259.623 1261.924
+strafe 18.644 19.773
+strafe 154.584 162.686
+strafe 172.422 180.927
+strafe 182.510 188.394
+strafe 189.978 190.528
+strafe 195.578 195.745
+strafe 197.146 201.780
+strafe 203.365 204.013
+strafe 318.152 323.088
+strafe 339.771 342.890
+strafe 376.608 383.476
+strafe 386.777 391.093
+strafe 395.944 396.244
+strafe 410.534 412.134
+strafe 428.639 429.089
+strafe 447.989 448.239
+strafe 627.942 631.794
+strafe 633.379 633.996
+strafe 743.060 747.625
+strafe 789.241 791.009
+strafe 793.662 799.493
+strafe 802.259 803.376
+strafe 804.794 807.708
+strafe 813.678 817.495
+strafe 819.077 819.644
+strafe 845.795 846.396
+strafe 849.296 850.596
+strafe 854.974 855.664
+strafe 870.730 870.814
+strafe 873.232 875.467
+strafe 881.756 884.315
+strafe 903.918 906.569
+strafe 920.305 924.455
+strafe 964.491 965.240
+strafe 1126.294 1127.060
+strafe 1160.893 1169.745
+strafe 1175.628 1188.864
+strafe 1189.765 1195.652
+melee 1133.409 1189.830
+melee 1238.057 1262.410

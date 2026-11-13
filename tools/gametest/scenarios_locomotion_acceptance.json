@@ -1,0 +1,290 @@
+{
+  "defaults": {
+    "rate_hz": 60,
+    "interp": "smooth"
+  },
+  "scenarios": {
+    "locomotion_acceptance": {
+      "description": "One32.5s locomotion acceptance: walk/run/sprint turn/stop, run to crouch, crouch turn, return to run, jump. Start standing unarmed FemaleV TPP in clear open area. Crouch toggles are R3 taps 0.08 s (InputSchemesMode=Alternative, verified 2026-10-23; B is Dodge). No CET commands or firing. Dry-run is preparation only.",
+      "thresholds": {
+        "crouch_turn.crouch_fraction": {
+          "min": 0.8,
+          "msg": "crouch not engaged"
+        },
+        "settle_end.stand_fraction": {
+          "min": 0.8,
+          "msg": "standing/ground recovery not observed"
+        }
+      },
+      "steps": [
+        {
+          "name": "settle",
+          "duration": 1.5,
+          "ls": [
+            [
+              0,
+              0,
+              0
+            ]
+          ],
+          "rs": [
+            [
+              0,
+              0,
+              0
+            ]
+          ],
+          "lt": [
+            [
+              0,
+              0
+            ]
+          ],
+          "rt": [
+            [
+              0,
+              0
+            ]
+          ],
+          "metrics": false
+        },
+        {
+          "name": "walk",
+          "duration": 4,
+          "ls": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              0.4,
+              0,
+              0.45
+            ],
+            [
+              4,
+              0,
+              0.45
+            ]
+          ]
+        },
+        {
+          "name": "run",
+          "duration": 3,
+          "ls": [
+            [
+              0,
+              0,
+              0.45
+            ],
+            [
+              0.3,
+              0,
+              1
+            ],
+            [
+              3,
+              0,
+              1
+            ]
+          ]
+        },
+        {
+          "name": "sprint_turn",
+          "duration": 4,
+          "ls_polar": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              1,
+              0,
+              1
+            ],
+            [
+              3,
+              90,
+              1
+            ],
+            [
+              4,
+              90,
+              1
+            ]
+          ],
+          "buttons": [
+            {
+              "t": 0.2,
+              "button": "LS",
+              "hold": 0.12
+            }
+          ]
+        },
+        {
+          "name": "sprint_stop",
+          "duration": 2.5,
+          "ls": [
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              0.15,
+              0,
+              0
+            ],
+            [
+              2.5,
+              0,
+              0
+            ]
+          ]
+        },
+        {
+          "name": "run_to_crouch",
+          "duration": 4,
+          "ls": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              0.3,
+              0,
+              1
+            ],
+            [
+              4,
+              0,
+              1
+            ]
+          ],
+          "buttons": [
+            {
+              "t": 1,
+              "button": "R3",
+              "hold": 0.08
+            }
+          ],
+          "metrics": false
+        },
+        {
+          "name": "crouch_turn",
+          "duration": 3,
+          "ls_polar": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              3,
+              -90,
+              1
+            ]
+          ]
+        },
+        {
+          "name": "crouch_stop",
+          "duration": 1.5,
+          "ls": [
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              0.15,
+              0,
+              0
+            ],
+            [
+              1.5,
+              0,
+              0
+            ]
+          ]
+        },
+        {
+          "name": "crouch_to_run",
+          "duration": 4,
+          "ls": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              0.3,
+              0,
+              1
+            ],
+            [
+              4,
+              0,
+              1
+            ]
+          ],
+          "buttons": [
+            {
+              "t": 1,
+              "button": "R3",
+              "hold": 0.08
+            }
+          ],
+          "metrics": false
+        },
+        {
+          "name": "jump_from_run",
+          "duration": 3,
+          "ls": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              2.5,
+              0,
+              1
+            ],
+            [
+              2.7,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ]
+          ],
+          "buttons": [
+            {
+              "t": 0.5,
+              "button": "A",
+              "hold": 0.12
+            }
+          ],
+          "metrics": false
+        },
+        {
+          "name": "settle_end",
+          "duration": 2,
+          "ls": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

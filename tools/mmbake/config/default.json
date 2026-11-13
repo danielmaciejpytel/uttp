@@ -1,0 +1,32 @@
+{
+  "fps": 30,
+  "trajectory_horizons_s": [0.3333333, 0.6666667, 1.0],
+  "weights": {
+    "foot_position": 0.75,
+    "foot_velocity": 1.0,
+    "hip_velocity": 1.0,
+    "trajectory_position": 1.0,
+    "trajectory_direction": 1.5
+  },
+  "group_weight_overrides": {},
+  "bones": {
+    "root": "Root",
+    "trajectory": "Trajectory",
+    "hips": "Hips",
+    "left_foot": "LeftFoot",
+    "right_foot": "RightFoot"
+  },
+  "num_pose_bones": 73,
+  "loop": {
+    "name_regex": "_Loop(_|$)",
+    "max_pose_delta_m": 0.01
+  },
+  "exclude_notifies": ["PoseSearchExcludeFromDatabase"],
+  "block_transition_notifies": ["PoseSearchBlockTransition"],
+  "branch_in_notifies": ["PoseSearchBranchIn"],
+  "block_transition_unsearchable": true,
+  "notify_time_epsilon_s": 0.0001,
+  "aabb": { "small": 16, "large": 64 },
+  "scale_tolerance": 1e-05,
+  "normalization_frames": "searchable"
+}

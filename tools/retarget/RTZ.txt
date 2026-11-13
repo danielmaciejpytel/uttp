@@ -1,0 +1,68 @@
+RTZ - root vertical track of retargeted clips          version 1
+
+Why
+  The v1 retarget removes only the planar source root (x, y, yaw); the root's vertical translation stayed in the pose and
+  so ended up in Hips (jump / land / traversal clips: Hips metres above or below the capsule). RTZ moves that vertical motion out of the pose
+  into its own per-frame track.
+
+Producer
+  retarget_batch.py --rtz (opt-in). Without --rtz the output is byte-identical to the previous script (5-clip hash test,
+  default CLI and the source pack --keep-all-curves call).
+  Used for the jump / land / traversal clips listed in Research/inventory/sourcepack-rtz-clips.json (outside this repo):
+    blender --background --factory-startup --python retarget_batch.py -- --root <project>
+      --fbx-dir Animations\sourcepack\als_export\fbx --meta-dir Animations\retarget\meta_sourcepack --list <clips.txt>
+      --no-preview --keep-all-curves --rtz --out-dir Animations\retarget\out_sourcepack_woman_rtz
+  Verification: check_rtz.py (Blender) against the FBX root track, the UE meta root track ends and the non-RTZ output.
+
+What is stored (clip json, format utppclip version 1, additive keys only)
+  "root_z": list of num_frames floats (7 decimals); root_z[f] belongs to frames[f] (time f / fps).
+    root_z[f] = hip_ratio * Zsrc[f]
+    Zsrc[f]   = world Z of the source root (UE root bone = FBX armature object) at frame f, metres.
+    Units: metres. Axis: CP model space +Z = up (same frame and same hip_ratio scale as Trajectory XY).
+    Sign: positive = up; root_z[b] - root_z[a] > 0 means the root rose between frames a and b.
+    Absolute, not frame-0 relative: 0 = floor level of the source animation origin. Typical shapes: a landing clip starts
+    high above 0 and ends at 0 (touch-down floor); a take-off clip starts at 0 and ends far below 0 (falling past the
+    take-off floor); a ledge move ends at the ledge height; an obstacle hop goes 0 -> obstacle height -> 0.
+    Source value = root_z / retarget.root_z.scale.
+  "retarget.root_z": descriptor {spec, version 1, track "root_z", units "m", axis, scale (= retarget.hip_ratio),
+    definition, not_transferred, trajectory}.
+  Root pitch / roll are not transferred (measured per clip as report rtz.root_tilt_max_deg; expected ~0);
+  root yaw and planar XY stay in Trajectory exactly as without --rtz.
+
+What changes in the pose
+  The in-place pose is taken relative to the full source root translation (x, y, z) and yaw, so every bone loses the
+  same vertical offset hip_ratio * Zsrc[f]. Hips (parent Root = identity) then holds only its height above the root:
+    Hips Z = CP rest Hips Z + hip_ratio * (pelvis Z - Zsrc - bind pelvis Z) - hip_drop        (hip_drop unchanged)
+  Identity with the non-RTZ clip: Hips Z(non-RTZ) - Hips Z(RTZ) = root_z[f]; Root and Trajectory bit-identical; curves,
+  notifies and the other keys equal; every other bone value equal up to float32 noise (Blender mathutils works in
+  float32; ~1e-5 on clips whose root is tens of metres from the origin, where the non-RTZ output is the less precise one).
+  A remaining Hips deviation from the rest height is the source pelvis height above its own root (landing absorption,
+  crouched take-off, tucked legs over an obstacle, the ledge root lagging the body), scaled by hip_ratio.
+
+Derived values (baker / runtime; not stored in the clip)
+  Vertical root velocity: root_vz[f] = (root_z[f+1] - root_z[f-1]) * fps / 2; one-sided differences at the first and
+  last frame. Baker v2 writes root_z and root_vz per frame into the RTZ section of .utppmm v2. Trajectory Z
+  features of the PSS_Jump schema in the database: root_z[f + k] - root_z[f] (m, up) and root_vz[f + k], same character
+  frame as the Trajectory XY features.
+  mmbake_base.py v1 ignores root_z (a v1 bake of an RTZ clip plays the pose with the vertical motion removed).
+
+How the runtime applies it (entity / capsule height vs pose root)
+  1. The game owns the entity / capsule height. In the default mode (jump, fall, land: states 14, 18, 23-25) the PSM and
+     physics move the player entity vertically; UTPP never moves the entity because of root_z and never writes root_z
+     into Hips or another bone. The pose is applied with Root at the entity origin (feet level): visual vertical offset
+     of the pose relative to the capsule = 0.
+  2. root_z is used for matching: database trajectory Z / vertical velocity features come from root_z; the query uses
+     the entity Z history (past samples) and the ballistic prediction projected onto the floor (future samples).
+  3. Optional, behind a switch (traversal and other clip-driven moves): if the entity follows its own vertical
+     curve that differs from the clip, the runtime may offset the whole pose (Root / model translation, not Hips) by
+       dz(t) = (root_z(t) - root_z(t0)) - (entity_z(t) - entity_z(t0)),   t0 = clip entry time,
+     clamped (proposed start value 0.3 m, to be tuned in 10.8) and blended to 0 towards the clip end, so the feet meet
+     the ledge the clip expects.
+     Default dz = 0.
+  4. Interpolation between frames: linear in root_z, like the bone translations.
+
+Notes
+  Retarget previews (without --no-preview) do not apply root_z: CP_world_preview shows the pose with the vertical root
+  motion removed. posture_offsets.py, crouch_posture.py and head_yaw_audit.py keep unknown top-level keys (they load and
+  re-dump the whole clip), so root_z survives them; none of them may alter it.
+  source pack / source pack derived data (clips, lists, logs) stays outside the Source repo.

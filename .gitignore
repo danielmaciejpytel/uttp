@@ -1,0 +1,20 @@
+# Compiled game archives are build output
+*.archive
+__pycache__/
+*.pyc
+# Runtime files written by Cyber Engine Tweaks
+*.log
+db.sqlite3
+settings.lua
+
+# Machine-specific paths (see tools/utpp_paths.py)
+tools/local_paths.json
+tools/release/scan_needles.local.json
+
+# Promotional material is kept outside the repository
+/marketing/
+tools/marketing/
+
+# .NET build output of the vehicle-entry WolvenKit bridge
+tools/anim/vehicle-entry/wkit_bridge/obj/
+tools/anim/vehicle-entry/wkit_bridge/bin/

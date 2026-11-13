@@ -1,0 +1,6 @@
+{
+  "game_dir": "<path to the Cyberpunk 2077 folder, the one that contains bin, archive, r6 and red4ext>",
+  "mod_manager_dir": "<optional: staging folder of the mod manager, if one manages the game folder>",
+  "captures_dir": "<optional: folder where screen recordings are saved>",
+  "blender_exe": "<optional: path to blender.exe; otherwise blender from PATH is used>"
+}

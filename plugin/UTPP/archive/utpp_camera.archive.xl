@@ -1,0 +1,14 @@
+# UTPP camera component patch (variant A1: gameCameraComponent "utppCamera", no parent binding).
+# Adds one component to the player entities; no game file is replaced. Only `components` are merged (props), so the
+# patch's own root entity is never applied. Install next to utpp_camera.archive in archive\pc\mod\.
+# Fallback variant A2 (gameFPPCameraComponent type): variant_fpptype\utpp_camera.archive.xl (use only one of the two).
+resource:
+  patch:
+    utpp\camera\utpp_player_camera.ent:
+      props:
+        - components
+      targets:
+        - base\characters\entities\player\player_wa_fpp.ent
+        - base\characters\entities\player\player_ma_fpp.ent
+        - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+        - ep1\characters\entities\player\player_ma_fpp_ep1.ent

@@ -1,0 +1,714 @@
+{
+ "format": "utpp_bonemap",
+ "version": 1,
+ "source_rig": "SK_UEFN_Mannequin (GASP, UE 5.8)",
+ "target_rig": "player_woman_skeleton",
+ "notes": [
+  "Each entry maps one CP body bone (game index 0..72) to one GASP bone.",
+  "mode=aim: target world rotation = B_src(t) * B_cp_rest^T * Q_cp_rest, where B = orthonormal basis (d, s, d x s); d = direction from the bone head to the 'aim' bone head (CP aim bone, GASP = its mapped bone), s = secondary axis (see 'secondary').",
+  "mode=world: target world rotation = dQ_src(t) * Q_cp_rest (dQ = source world delta from its bind pose); used where both rest poses are anatomically the same in world (upright head, flat toes).",
+  "mode=inherit: like world, but premultiplied by the parent's reference alignment R_ref(parent) (finger tips).",
+  "secondary.type: carry_axis = world axis in the bind pose of both rigs carried by the source bone (or 'src_bone' if given); live_pair = vector between two bone heads evaluated per frame (CP rest / source live); carry_pair = rest vector between two bone heads carried by the source bone.",
+  "Spine choice by normalized height between hips and neck (CP Hips->Neck vs GASP pelvis->neck_01): CP Spine 0.169 / Spine1 0.289 / Spine2 0.446 / Spine3 0.647; GASP spine_01 0.137 / spine_02 0.284 / spine_03 0.406 / spine_04 0.569 / spine_05 0.771. Nearest heads: Spine<-spine_01, Spine1<-spine_02, Spine2<-spine_03, Spine3<-spine_04. Spine3 aims at Neck (=neck_01), so the bend of spine_05 is kept in the Spine3 direction; its roll/twist is carried by spine_05 (the chest bone that parents clavicles and neck in GASP).",
+  "Thumb: CP has InHandThumb + Thumb1 + Thumb2, GASP thumb_01..03 (no thumb metacarpal): thumb_01->InHandThumb, thumb_02->Thumb1, thumb_03->Thumb2."
+ ],
+ "keep_rest": [
+  "reference_joint",
+  "LeftHandEnd",
+  "RightHandEnd",
+  "WeaponLeft",
+  "WeaponRight",
+  "LeftHeel",
+  "RightHeel",
+  "LeftEye",
+  "RightEye"
+ ],
+ "root_motion": {
+  "cp_bone": "Trajectory",
+  "source": "armature object transform (FBX root)",
+  "root_bone_identity": "Root"
+ },
+ "hips": {
+  "cp": "Hips",
+  "src": "pelvis",
+  "height_ratio_from": [
+   "Hips",
+   "pelvis"
+  ]
+ },
+ "ik_legs": [
+  {
+   "upleg": "LeftUpLeg",
+   "leg": "LeftLeg",
+   "foot": "LeftFoot",
+   "src_foot": "foot_l",
+   "contact_curve": "contact_l",
+   "toe": "LeftToeBase",
+   "src_toe": "ball_l"
+  },
+  {
+   "upleg": "RightUpLeg",
+   "leg": "RightLeg",
+   "foot": "RightFoot",
+   "src_foot": "foot_r",
+   "contact_curve": "contact_r",
+   "toe": "RightToeBase",
+   "src_toe": "ball_r"
+  }
+ ],
+ "bones": [
+  {
+   "cp": "Hips",
+   "src": "pelvis",
+   "mode": "aim",
+   "aim": "Spine",
+   "secondary": {
+    "type": "live_pair",
+    "a": "LeftUpLeg",
+    "b": "RightUpLeg"
+   }
+  },
+  {
+   "cp": "Spine",
+   "src": "spine_01",
+   "mode": "aim",
+   "aim": "Spine1",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "Spine1",
+   "src": "spine_02",
+   "mode": "aim",
+   "aim": "Spine2",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "Spine2",
+   "src": "spine_03",
+   "mode": "aim",
+   "aim": "Spine3",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "Spine3",
+   "src": "spine_04",
+   "mode": "aim",
+   "aim": "Neck",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "src_bone": "spine_05"
+   }
+  },
+  {
+   "cp": "Neck",
+   "src": "neck_01",
+   "mode": "aim",
+   "aim": "Neck1",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "Neck1",
+   "src": "neck_02",
+   "mode": "aim",
+   "aim": "Head",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "Head",
+   "src": "head",
+   "mode": "world"
+  },
+  {
+   "cp": "LeftShoulder",
+   "src": "clavicle_l",
+   "mode": "aim",
+   "aim": "LeftArm",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "LeftArm",
+   "src": "upperarm_l",
+   "mode": "aim",
+   "aim": "LeftForeArm",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "LeftForeArm",
+   "src": "lowerarm_l",
+   "mode": "aim",
+   "aim": "LeftHand",
+   "secondary": {
+    "type": "live_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHand",
+   "src": "hand_l",
+   "mode": "aim",
+   "aim": "LeftHandMiddle1",
+   "secondary": {
+    "type": "live_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "RightShoulder",
+   "src": "clavicle_r",
+   "mode": "aim",
+   "aim": "RightArm",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "RightArm",
+   "src": "upperarm_r",
+   "mode": "aim",
+   "aim": "RightForeArm",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "RightForeArm",
+   "src": "lowerarm_r",
+   "mode": "aim",
+   "aim": "RightHand",
+   "secondary": {
+    "type": "live_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHand",
+   "src": "hand_r",
+   "mode": "aim",
+   "aim": "RightHandMiddle1",
+   "secondary": {
+    "type": "live_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftInHandThumb",
+   "src": "thumb_01_l",
+   "mode": "aim",
+   "aim": "LeftHandThumb1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandThumb1",
+   "src": "thumb_02_l",
+   "mode": "aim",
+   "aim": "LeftHandThumb2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandThumb2",
+   "src": "thumb_03_l",
+   "mode": "inherit"
+  },
+  {
+   "cp": "LeftInHandIndex",
+   "src": "index_metacarpal_l",
+   "mode": "aim",
+   "aim": "LeftHandIndex1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandIndex1",
+   "src": "index_01_l",
+   "mode": "aim",
+   "aim": "LeftHandIndex2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandIndex2",
+   "src": "index_02_l",
+   "mode": "aim",
+   "aim": "LeftHandIndex3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandIndex3",
+   "src": "index_03_l",
+   "mode": "inherit"
+  },
+  {
+   "cp": "LeftInHandMiddle",
+   "src": "middle_metacarpal_l",
+   "mode": "aim",
+   "aim": "LeftHandMiddle1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandMiddle1",
+   "src": "middle_01_l",
+   "mode": "aim",
+   "aim": "LeftHandMiddle2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandMiddle2",
+   "src": "middle_02_l",
+   "mode": "aim",
+   "aim": "LeftHandMiddle3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandMiddle3",
+   "src": "middle_03_l",
+   "mode": "inherit"
+  },
+  {
+   "cp": "LeftInHandRing",
+   "src": "ring_metacarpal_l",
+   "mode": "aim",
+   "aim": "LeftHandRing1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandRing1",
+   "src": "ring_01_l",
+   "mode": "aim",
+   "aim": "LeftHandRing2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandRing2",
+   "src": "ring_02_l",
+   "mode": "aim",
+   "aim": "LeftHandRing3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandRing3",
+   "src": "ring_03_l",
+   "mode": "inherit"
+  },
+  {
+   "cp": "LeftInHandPinky",
+   "src": "pinky_metacarpal_l",
+   "mode": "aim",
+   "aim": "LeftHandPinky1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandPinky1",
+   "src": "pinky_01_l",
+   "mode": "aim",
+   "aim": "LeftHandPinky2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandPinky2",
+   "src": "pinky_02_l",
+   "mode": "aim",
+   "aim": "LeftHandPinky3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "LeftHandIndex1",
+    "b": "LeftHandPinky1"
+   }
+  },
+  {
+   "cp": "LeftHandPinky3",
+   "src": "pinky_03_l",
+   "mode": "inherit"
+  },
+  {
+   "cp": "RightInHandThumb",
+   "src": "thumb_01_r",
+   "mode": "aim",
+   "aim": "RightHandThumb1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandThumb1",
+   "src": "thumb_02_r",
+   "mode": "aim",
+   "aim": "RightHandThumb2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandThumb2",
+   "src": "thumb_03_r",
+   "mode": "inherit"
+  },
+  {
+   "cp": "RightInHandIndex",
+   "src": "index_metacarpal_r",
+   "mode": "aim",
+   "aim": "RightHandIndex1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandIndex1",
+   "src": "index_01_r",
+   "mode": "aim",
+   "aim": "RightHandIndex2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandIndex2",
+   "src": "index_02_r",
+   "mode": "aim",
+   "aim": "RightHandIndex3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandIndex3",
+   "src": "index_03_r",
+   "mode": "inherit"
+  },
+  {
+   "cp": "RightInHandMiddle",
+   "src": "middle_metacarpal_r",
+   "mode": "aim",
+   "aim": "RightHandMiddle1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandMiddle1",
+   "src": "middle_01_r",
+   "mode": "aim",
+   "aim": "RightHandMiddle2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandMiddle2",
+   "src": "middle_02_r",
+   "mode": "aim",
+   "aim": "RightHandMiddle3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandMiddle3",
+   "src": "middle_03_r",
+   "mode": "inherit"
+  },
+  {
+   "cp": "RightInHandRing",
+   "src": "ring_metacarpal_r",
+   "mode": "aim",
+   "aim": "RightHandRing1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandRing1",
+   "src": "ring_01_r",
+   "mode": "aim",
+   "aim": "RightHandRing2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandRing2",
+   "src": "ring_02_r",
+   "mode": "aim",
+   "aim": "RightHandRing3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandRing3",
+   "src": "ring_03_r",
+   "mode": "inherit"
+  },
+  {
+   "cp": "RightInHandPinky",
+   "src": "pinky_metacarpal_r",
+   "mode": "aim",
+   "aim": "RightHandPinky1",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandPinky1",
+   "src": "pinky_01_r",
+   "mode": "aim",
+   "aim": "RightHandPinky2",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandPinky2",
+   "src": "pinky_02_r",
+   "mode": "aim",
+   "aim": "RightHandPinky3",
+   "secondary": {
+    "type": "carry_pair",
+    "a": "RightHandIndex1",
+    "b": "RightHandPinky1"
+   }
+  },
+  {
+   "cp": "RightHandPinky3",
+   "src": "pinky_03_r",
+   "mode": "inherit"
+  },
+  {
+   "cp": "LeftUpLeg",
+   "src": "thigh_l",
+   "mode": "aim",
+   "aim": "LeftLeg",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "LeftLeg",
+   "src": "calf_l",
+   "mode": "aim",
+   "aim": "LeftFoot",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "LeftFoot",
+   "src": "foot_l",
+   "mode": "aim",
+   "aim": "LeftToeBase",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "cp": "LeftToeBase",
+   "src": "ball_l",
+   "mode": "world"
+  },
+  {
+   "cp": "RightUpLeg",
+   "src": "thigh_r",
+   "mode": "aim",
+   "aim": "RightLeg",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "RightLeg",
+   "src": "calf_r",
+   "mode": "aim",
+   "aim": "RightFoot",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "cp": "RightFoot",
+   "src": "foot_r",
+   "mode": "aim",
+   "aim": "RightToeBase",
+   "secondary": {
+    "type": "carry_axis",
+    "axis": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "cp": "RightToeBase",
+   "src": "ball_r",
+   "mode": "world"
+  }
+ ]
+}

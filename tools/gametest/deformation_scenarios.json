@@ -1,0 +1,16 @@
+{
+  "defaults": {"rate_hz": 60, "interp": "linear"},
+  "scenarios": {
+    "armed_short": {
+      "description": "18s pad-only Ready/Aim/two shots/Ready/Reload/neutral. Requires drawn loaded firearm, TPP, clear target and default X reload binding. No CET commands or settings changes.",
+      "steps": [
+        {"name": "ready", "duration": 3, "ls": [[0,0,0]], "rs": [[0,0,0]], "lt": [[0,0]], "rt": [[0,0]], "metrics": false},
+        {"name": "aim", "duration": 3, "lt": [[0,0],[0.1,1]], "metrics": false},
+        {"name": "aim_two_shots", "duration": 3, "lt": [[0,1]], "rt": {"keys": [[0,0],[0.5,1],[0.65,0],[1.5,1],[1.65,0]], "interp": "step"}, "metrics": false},
+        {"name": "ready_before_reload", "duration": 1, "lt": [[0,0]], "rt": [[0,0]], "metrics": false},
+        {"name": "reload", "duration": 4, "lt": [[0,0]], "rt": [[0,0]], "buttons": [{"t": 0.2, "button": "X", "hold": 0.1}], "metrics": false},
+        {"name": "neutral", "duration": 4, "ls": [[0,0,0]], "rs": [[0,0,0]], "lt": [[0,0]], "rt": [[0,0]], "metrics": false}
+      ]
+    }
+  }
+}

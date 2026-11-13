@@ -1,0 +1,4082 @@
+{
+ "_format": "run.py scenario file, see gt_scenario.py; ls/rs = [t, x, y], lt/rt = [t, v]; every step defines all channels (an undefined channel keeps the previous step's final value). Driven by car_cases.ps1.",
+ "_bindings": "Pad: X tap = vehicle enter, RT = accelerate, LT = brake, B hold 1.0 s = exit, B double tap = QuickExit (jump-out), DPAD_RIGHT = in-ride camera toggle, Y = draw weapon. On foot (onfoot_shoulders) the pad layout is RT = fire, LT = aim (RB / LB fired nothing in the 2026-11-10 run). In the car the car_weapon_exit* cases still press RB (fire) / LB (aim) - UNVERIFIED: the 2026-11-10 run logged shots=0 for the three RB taps, and RT is accelerate there. Approach steps are approximate (stick time = distance); the vehicle is spawned by car_cases.ps1 relative to V.",
+ "defaults": {
+  "rate_hz": 60,
+  "interp": "smooth"
+ },
+ "scenarios": {
+  "car_idle": {
+   "description": "1 s neutral (carrier for CET-only runs)",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  },
+  "car_exit_only": {
+   "description": "hold B 0.9 s: leave the vehicle the save loads mounted on",
+   "steps": [
+    {
+     "name": "exit",
+     "duration": 4.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "B",
+       "hold": 0.9
+      }
+     ]
+    }
+   ]
+  },
+  "car_walk_away": {
+   "description": "walk forward 3.2 s away from the vehicle",
+   "steps": [
+    {
+     "name": "fwd",
+     "duration": 4.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.8
+      ],
+      [
+       3.2,
+       0.0,
+       0.8
+      ],
+      [
+       3.21,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    }
+   ]
+  },
+  "car_cycle_parallel": {
+   "description": "case 1a / 7 / hold_off: approach (car at V's right) + enter, drive 2.4 s, brake, exit",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_cycle_door": {
+   "description": "case 1b: V faces the driver door (car 2.6 m ahead, turned 90 deg): enter, drive, brake, exit",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_door",
+     "duration": 1.8,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.45
+      ],
+      [
+       1.0,
+       0.0,
+       0.45
+      ],
+      [
+       1.01,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_cycle_behind": {
+   "description": "case 1c: approach from behind along the driver side: enter, drive, brake, exit",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_behind",
+     "duration": 2.8,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.5
+      ],
+      [
+       2.3,
+       0.0,
+       0.5
+      ],
+      [
+       2.3099999999999996,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_enter_parallel": {
+   "description": "case 2 first ride: approach + enter, 7 s seated (the camera event is typed afterwards)",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    }
+   ]
+  },
+  "car_exit": {
+   "description": "exit: B held 1.0 s in a 7 s step",
+   "steps": [
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_ride": {
+   "description": "enter, drive 2.4 s, brake (no exit; CET step follows, then car_exit)",
+   "steps": [
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  },
+  "car_cycle": {
+   "description": "enter, drive 2.4 s, brake, exit (V already beside the car)",
+   "steps": [
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_cycle_toggle": {
+   "description": "case 3 first ride: in-ride perspective toggle (DPAD_RIGHT 0.8 s into the drive), then brake and exit",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.8,
+       "button": "DPAD_RIGHT",
+       "hold": 0.1
+      }
+     ]
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_passenger": {
+   "description": "case 4: approach the passenger door (car at V's left), enter, 5 s look sweep, exit",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_passenger",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       -0.45,
+       0.0
+      ],
+      [
+       0.6,
+       -0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "look_sweep",
+     "duration": 5.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       0.6,
+       0.0
+      ],
+      [
+       2.5,
+       -0.6,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "smooth"
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_jump_stand": {
+   "description": "case 5a: stationary jump-out: enter, drive, brake, then B double tap (QuickExit), 6 s neutral",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "quick_exit",
+     "duration": 4.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.5,
+       "button": "B",
+       "hold": 0.08
+      },
+      {
+       "t": 0.68,
+       "button": "B",
+       "hold": 0.08
+      }
+     ]
+    },
+    {
+     "name": "after",
+     "duration": 6.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  },
+  "car_jump_move": {
+   "description": "case 5b: jump-out at speed: enter, RT 0.7 for 2.6 s (released before the second tap), B double tap, 6 s neutral",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive_fast_quick_exit",
+     "duration": 4.0,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.7
+      ],
+      [
+       2.6,
+       0.7
+      ],
+      [
+       2.75,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "buttons": [
+      {
+       "t": 2.6,
+       "button": "B",
+       "hold": 0.08
+      },
+      {
+       "t": 2.78,
+       "button": "B",
+       "hold": 0.08
+      }
+     ],
+     "metrics": false
+    },
+    {
+     "name": "after",
+     "duration": 6.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  },
+  "car_weapon_exit": {
+   "description": "case 6: enter, drive, brake, Y = draw weapon, 3 RB taps (hip fire, no LB), exit with the weapon out",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "draw_weapon",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "Y",
+       "hold": 0.12
+      }
+     ]
+    },
+    {
+     "name": "hip_fire",
+     "duration": 2.4,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "RB",
+       "hold": 0.12
+      },
+      {
+       "t": 0.7,
+       "button": "RB",
+       "hold": 0.12
+      },
+      {
+       "t": 1.1,
+       "button": "RB",
+       "hold": 0.12
+      }
+     ]
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_weapon_exit_lb": {
+   "description": "case 6 variant: as car_weapon_exit, LB held and released before B",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "draw_weapon",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "Y",
+       "hold": 0.12
+      }
+     ]
+    },
+    {
+     "name": "hip_fire",
+     "duration": 2.4,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "RB",
+       "hold": 0.12
+      },
+      {
+       "t": 0.7,
+       "button": "RB",
+       "hold": 0.12
+      },
+      {
+       "t": 1.1,
+       "button": "RB",
+       "hold": 0.12
+      }
+     ]
+    },
+    {
+     "name": "lb_hold",
+     "duration": 2.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "LB",
+       "hold": 1.2
+      }
+     ]
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "car_weapon_preentry": {
+   "description": "case 6 variant: weapon drawn on foot before the entry, then enter, drive, brake, exit",
+   "steps": [
+    {
+     "name": "idle",
+     "duration": 1.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "approach_parallel",
+     "duration": 1.2,
+     "ls": [
+      [
+       0,
+       0.45,
+       0.0
+      ],
+      [
+       0.6,
+       0.45,
+       0.0
+      ],
+      [
+       0.61,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "draw_weapon",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "Y",
+       "hold": 0.12
+      }
+     ]
+    },
+    {
+     "name": "enter",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.15
+      }
+     ]
+    },
+    {
+     "name": "drive",
+     "duration": 2.4,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.3,
+       0.6
+      ],
+      [
+       2.0,
+       0.6
+      ],
+      [
+       2.2,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "brake",
+     "duration": 2.5,
+     "interp": "linear",
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       1.0
+      ],
+      [
+       1.8,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "exit",
+     "duration": 7.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "B",
+       "hold": 1.0
+      }
+     ]
+    }
+   ]
+  },
+  "onfoot_shoulders": {
+   "description": "shoulder width on foot (no car): unarmed idle + camera orbit to the front and back, walk, run, stop; Y draw, armed idle, LT aim, LT aim + walk, 3 RT hip-fire pulls, X reload, armed walk, LS sprint, stop, Y double-tap holster",
+   "steps": [
+    {
+     "name": "idle_unarmed",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "orbit_front",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       0.05,
+       1.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0,
+       0.0
+      ],
+      [
+       1.05,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "orbit_back",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       0.05,
+       -1.0,
+       0.0
+      ],
+      [
+       1.0,
+       -1.0,
+       0.0
+      ],
+      [
+       1.05,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "walk",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       0.3,
+       0.0,
+       0.5
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "run",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.5
+      ],
+      [
+       0.3,
+       0.0,
+       1.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "stop",
+     "duration": 2.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       1.0
+      ],
+      [
+       0.2,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "draw",
+     "duration": 2.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "Y",
+       "hold": 0.12
+      }
+     ]
+    },
+    {
+     "name": "idle_armed",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "aim",
+     "duration": 3.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.2,
+       0.0
+      ],
+      [
+       0.21,
+       1.0
+      ],
+      [
+       3.2,
+       1.0
+      ],
+      [
+       3.21,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    },
+    {
+     "name": "aim_walk",
+     "duration": 3.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       0.3,
+       0.0,
+       0.5
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       0.01,
+       1.0
+      ],
+      [
+       3.2,
+       1.0
+      ],
+      [
+       3.21,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "hipfire",
+     "duration": 2.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.5
+      ],
+      [
+       0.2,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ],
+      [
+       0.4,
+       0.0
+      ],
+      [
+       0.41,
+       1.0
+      ],
+      [
+       0.54,
+       1.0
+      ],
+      [
+       0.55,
+       0.0
+      ],
+      [
+       1.0,
+       0.0
+      ],
+      [
+       1.01,
+       1.0
+      ],
+      [
+       1.14,
+       1.0
+      ],
+      [
+       1.15,
+       0.0
+      ],
+      [
+       1.6,
+       0.0
+      ],
+      [
+       1.61,
+       1.0
+      ],
+      [
+       1.74,
+       1.0
+      ],
+      [
+       1.75,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "reload",
+     "duration": 3.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.2,
+       "button": "X",
+       "hold": 0.1
+      }
+     ]
+    },
+    {
+     "name": "walk_armed",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       0.3,
+       0.0,
+       0.6
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "sprint_armed",
+     "duration": 3.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.6
+      ],
+      [
+       0.2,
+       0.0,
+       1.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear",
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "LS",
+       "hold": 0.12
+      }
+     ]
+    },
+    {
+     "name": "stop_armed",
+     "duration": 2.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       1.0
+      ],
+      [
+       0.2,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "linear"
+    },
+    {
+     "name": "holster",
+     "duration": 2.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "buttons": [
+      {
+       "t": 0.3,
+       "button": "Y",
+       "hold": 0.08
+      },
+      {
+       "t": 0.45,
+       "button": "Y",
+       "hold": 0.08
+      }
+     ]
+    }
+   ]
+  },
+  "getup_probe_hold": {
+   "description": "ragdoll R0 get-up offset probe: no movement; camera orbit right then left while the probe pose is held, then still",
+   "steps": [
+    {
+     "name": "orbit_right",
+     "duration": 2.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       0.05,
+       1.0,
+       0.0
+      ],
+      [
+       2.2,
+       1.0,
+       0.0
+      ],
+      [
+       2.25,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "orbit_left",
+     "duration": 2.5,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ],
+      [
+       0.05,
+       -1.0,
+       0.0
+      ],
+      [
+       2.2,
+       -1.0,
+       0.0
+      ],
+      [
+       2.25,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false,
+     "interp": "step"
+    },
+    {
+     "name": "still",
+     "duration": 4.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  },
+  "carhit_still": {
+   "description": "car hit probe: no input for 10 s (the hit event arrives 3 s after the CET command, the console is closed by then)",
+   "steps": [
+    {
+     "name": "still",
+     "duration": 10.0,
+     "ls": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "rs": [
+      [
+       0,
+       0.0,
+       0.0
+      ]
+     ],
+     "lt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "rt": [
+      [
+       0,
+       0.0
+      ]
+     ],
+     "metrics": false
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,53 @@
+# UTPP third-person motorcycle riding set. No new animation data: the game's own TPP bike sets
+# (base\animations\vehicle\sportbikeN\character\tpp_p{w,m}a_sportbikeN.anims) are registered again by path on the
+# player's root animated component, gated by the UTPP wrapper variable utpp_vehicle_tpp plus the vanilla seat variable.
+# Vanilla registers the same sets on MotorcycleAnimsets with vars [player_tpp_head, seat] at priority 100 and the
+# first-person sets pwa/pma_sportbikeN with [seat] at priority 119.
+# utpp_vehicle_anim.reds sets utpp_vehicle_tpp to 1 from the bike mount (UTPP third person) to the unmount, so the TPP
+# riding pose is used from the first seated frame instead of only after the game's vehicle TPP camera turns on.
+# Priority 95: inferred from the vanilla pattern that a lower number is the more specific (winning) entry.
+# Clips missing in the TPP sets (enter_l / enter_r, idle, slide_exit, combat_*) still come from the
+# first-person sets. Only the driver seat (seat_front_left) is covered. Nothing changes on foot or in cars.
+animations:
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: base\animations\vehicle\sportbike\character\tpp_pwa_sportbike.anims
+    vars: [utpp_vehicle_tpp, sportbike1_vehicle_seat_front_left]
+    priority: 95
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: base\animations\vehicle\sportbike2\character\tpp_pwa_sportbike2.anims
+    vars: [utpp_vehicle_tpp, sportbike2_vehicle_seat_front_left]
+    priority: 95
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: base\animations\vehicle\sportbike3\character\tpp_pwa_sportbike3.anims
+    vars: [utpp_vehicle_tpp, sportbike3_vehicle_seat_front_left]
+    priority: 95
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: base\animations\vehicle\sportbike\character\tpp_pma_sportbike.anims
+    vars: [utpp_vehicle_tpp, sportbike1_vehicle_seat_front_left]
+    priority: 95
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: base\animations\vehicle\sportbike2\character\tpp_pma_sportbike2.anims
+    vars: [utpp_vehicle_tpp, sportbike2_vehicle_seat_front_left]
+    priority: 95
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: base\animations\vehicle\sportbike3\character\tpp_pma_sportbike3.anims
+    vars: [utpp_vehicle_tpp, sportbike3_vehicle_seat_front_left]
+    priority: 95

@@ -1,0 +1,523 @@
+{
+ "_note": "Measured by gen_entry_approach.py --measure; vehicle frame x right, y forward, m; yaw UTPP convention (0 = forward, CCW). Do not edit by hand.",
+ "classes": {
+  "sport1": {
+   "arcs": {},
+   "box": {
+    "cx": 0.0,
+    "cy": -0.141,
+    "hx": 1.19,
+    "hy": 2.268,
+    "source": "v_sport1_quadra_turbo__ext01_body_01.glb",
+    "source_sha256": "C0D24FE6FCF698A006CD953CBDC7EEEF0D1FB344A6FE5EAA8C78543E27456595"
+   },
+   "seats": {
+    "driver": {
+     "seat_t_vehicle": [
+      -0.365,
+      -0.409,
+      -0.008
+     ],
+     "seat_var": "sport1_vehicle_seat_front_left",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_sport1_driver",
+       "clip_sha256": "630D10AF6DE6F17DD17102B41671E9CB49B76C8798B670002A356FD1A61B8A7A",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.248,
+        "y": -0.349,
+        "z": -0.266
+       },
+       "x": -1.612,
+       "y": -0.143,
+       "yaw_deg": -80.577
+      },
+      "male": {
+       "clip": "utpp_car_pma_sport1_driver",
+       "clip_sha256": "BF9008A6E7F93408BD0B39F96CEE1F3714324DB92EED472029E8CA35B8686FC9",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.248,
+        "y": -0.349,
+        "z": -0.266
+       },
+       "x": -1.612,
+       "y": -0.143,
+       "yaw_deg": -80.577
+      }
+     }
+    },
+    "passenger_r": {
+     "seat_t_vehicle": [
+      0.364,
+      -0.409,
+      -0.008
+     ],
+     "seat_var": "sport1_vehicle_seat_front_right",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_sport1_passenger_r",
+       "clip_sha256": "97C84216175FBB13E07DB5BC95B3985FBE00B9FC0F83BDCED82BF3D94C7102A9",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.187,
+        "y": -0.35,
+        "z": -0.465
+       },
+       "x": 1.551,
+       "y": 0.055,
+       "yaw_deg": 71.487
+      },
+      "male": {
+       "clip": "utpp_car_pma_sport1_passenger_r",
+       "clip_sha256": "00B0C8F6233725472BF195E4B7C15B0F866733C78C127839A608E19A1189D479",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.187,
+        "y": -0.35,
+        "z": -0.465
+       },
+       "x": 1.551,
+       "y": 0.055,
+       "yaw_deg": 71.487
+      }
+     }
+    }
+   },
+   "vehicle": "v_sport1_quadra_turbo"
+  },
+  "sport2": {
+   "arcs": {},
+   "box": {
+    "cx": 0.0,
+    "cy": -0.063,
+    "hx": 0.969,
+    "hy": 2.239,
+    "source": "v_sport2_porsche_911turbo__ext01_body_01.glb",
+    "source_sha256": "CE006D70C4BFE0FC35FDD3A1CE983F6A7513774C02E3C9303D2D8CCAF6B3C05D"
+   },
+   "seats": {
+    "driver": {
+     "seat_t_vehicle": [
+      -0.33,
+      -0.32,
+      0.125
+     ],
+     "seat_var": "sport2_vehicle_seat_front_left",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_sport2_driver",
+       "clip_sha256": "58C68D0AE8254B3D6A81829CA094EBE8855DDAA72C57C066B9374E33473626A2",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.682,
+        "y": -0.475,
+        "z": 0.462
+       },
+       "x": -2.013,
+       "y": -0.782,
+       "yaw_deg": -80.75
+      },
+      "male": {
+       "clip": "utpp_car_pma_sport2_driver",
+       "clip_sha256": "9CA3A1AD1A4B86DE6704DCC8C9C3BEB6BAE8FAB76AB7263E5142825651B3C890",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.682,
+        "y": -0.475,
+        "z": 0.462
+       },
+       "x": -2.013,
+       "y": -0.782,
+       "yaw_deg": -80.75
+      }
+     }
+    },
+    "passenger_r": {
+     "seat_t_vehicle": [
+      0.338,
+      -0.231,
+      0.125
+     ],
+     "seat_var": "sport2_vehicle_seat_front_right",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_sport2_passenger_r",
+       "clip_sha256": "61D35114F060B5A61A132D3024F80237AC98D052DE3DB6C369DDFB42EA8BA7C3",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.263,
+        "y": -0.5,
+        "z": 0.9
+       },
+       "x": 1.6,
+       "y": -1.131,
+       "yaw_deg": 71.487
+      },
+      "male": {
+       "clip": "utpp_car_pma_sport2_passenger_r",
+       "clip_sha256": "A5F513A7EFF0902416DBC4323422F8EA359461FEAB64DCB466628142DA84C3C9",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.263,
+        "y": -0.5,
+        "z": 0.9
+       },
+       "x": 1.6,
+       "y": -1.131,
+       "yaw_deg": 71.487
+      }
+     }
+    }
+   },
+   "vehicle": "v_sport2_porsche_911turbo"
+  },
+  "standard2": {
+   "arcs": {},
+   "box": {
+    "cx": 0.0,
+    "cy": -0.058,
+    "hx": 1.062,
+    "hy": 2.837,
+    "source": "v_standard2_archer_hella__ext01_body_01.glb",
+    "source_sha256": "0457FBB8CE2FFDF64F77CDE3C5DB571EEB4766CD609A72B774FDBB9EC60F64DC"
+   },
+   "seats": {
+    "driver": {
+     "seat_t_vehicle": [
+      -0.475,
+      0.145,
+      0.128
+     ],
+     "seat_var": "standard2_vehicle_seat_front_left",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_standard2_driver",
+       "clip_sha256": "97AB15FAC3446AE500350BE103E86ED37D461A6550EEBB1884E8CA90A13D0DBF",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.233,
+        "y": -0.5,
+        "z": 0.551
+       },
+       "x": -1.708,
+       "y": -0.406,
+       "yaw_deg": -80.75
+      },
+      "male": {
+       "clip": "utpp_car_pma_standard2_driver",
+       "clip_sha256": "C974EA9E162D03B79E1E677FD90768BD7E587D665A0C4C6D2C649EA14F4180B5",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.233,
+        "y": -0.5,
+        "z": 0.551
+       },
+       "x": -1.708,
+       "y": -0.406,
+       "yaw_deg": -80.75
+      }
+     }
+    },
+    "passenger_r": {
+     "seat_t_vehicle": [
+      0.475,
+      0.174,
+      0.128
+     ],
+     "seat_var": "standard2_vehicle_seat_front_right",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_standard2_passenger_r",
+       "clip_sha256": "C3F01E9FD65DE4B6CD2C1B904755A477E0B015B70804B2D9C6836C9F685E42E8",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.23,
+        "y": -0.5,
+        "z": 0.708
+       },
+       "x": 1.705,
+       "y": -0.534,
+       "yaw_deg": 71.487
+      },
+      "male": {
+       "clip": "utpp_car_pma_standard2_passenger_r",
+       "clip_sha256": "814FCA09A9FE6E38F3D4A2DD0154FAEB33122FA10CE854DB8B210AC545AFCFE6",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.23,
+        "y": -0.5,
+        "z": 0.708
+       },
+       "x": 1.705,
+       "y": -0.534,
+       "yaw_deg": 71.487
+      }
+     }
+    }
+   },
+   "vehicle": "v_standard2_archer_hella"
+  },
+  "standard25": {
+   "arcs": {},
+   "box": {
+    "cx": -0.0,
+    "cy": -0.109,
+    "hx": 1.036,
+    "hy": 2.606,
+    "source": "v_standard25_villefort_columbus__ext01_body_01.glb",
+    "source_sha256": "F57776920A2BDEF9DE77B7515ACAEF3D2F7D47129ED9938DC0666A42224B6091"
+   },
+   "seats": {
+    "driver": {
+     "seat_t_vehicle": [
+      -0.439,
+      0.224,
+      0.301
+     ],
+     "seat_var": "standard25_vehicle_seat_front_left",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_standard25_driver",
+       "clip_sha256": "3FD3DCDD204B74436AC07388B491E11ABF6D0C2124EFE67AC27E1278446B39F5",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.233,
+        "y": -0.7,
+        "z": 0.551
+       },
+       "x": -1.672,
+       "y": -0.328,
+       "yaw_deg": -80.75
+      },
+      "male": {
+       "clip": "utpp_car_pma_standard25_driver",
+       "clip_sha256": "64C7782B92D986EBB3F397EB6C16D98A30A0C1CD6895686592A5DBDF400D0BE3",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.233,
+        "y": -0.7,
+        "z": 0.551
+       },
+       "x": -1.672,
+       "y": -0.328,
+       "yaw_deg": -80.75
+      }
+     }
+    },
+    "passenger_r": {
+     "seat_t_vehicle": [
+      0.436,
+      0.253,
+      0.301
+     ],
+     "seat_var": "standard25_vehicle_seat_front_right",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_standard25_passenger_r",
+       "clip_sha256": "37B7F182BB95B42D7BE22F46997E585E87DEE5B158A58D3F3E5F53122BCBDAAD",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.178,
+        "y": -0.7,
+        "z": 0.599
+       },
+       "x": 1.614,
+       "y": -0.346,
+       "yaw_deg": 71.487
+      },
+      "male": {
+       "clip": "utpp_car_pma_standard25_passenger_r",
+       "clip_sha256": "8158C82945013585A3EA1B3296440F3E279BC5B4AEACEDE255AB3CFD4A1C1D6F",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.178,
+        "y": -0.7,
+        "z": 0.599
+       },
+       "x": 1.614,
+       "y": -0.346,
+       "yaw_deg": 71.487
+      }
+     }
+    }
+   },
+   "vehicle": "v_standard25_villefort_columbus"
+  },
+  "standard3": {
+   "arcs": {},
+   "box": {
+    "cx": -0.0,
+    "cy": -0.013,
+    "hx": 1.17,
+    "hy": 2.85,
+    "source": "v_standard3_chevalier_emperor__ext01_body_01.glb",
+    "source_sha256": "1CC0575AA2E0267A60BD6C534F8EA60FE0F0C1613946C6357C7729AFB6BEF6CB"
+   },
+   "seats": {
+    "driver": {
+     "seat_t_vehicle": [
+      -0.484,
+      -0.081,
+      0.535
+     ],
+     "seat_var": "standard3_vehicle_seat_front_left",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_standard3_driver",
+       "clip_sha256": "EFA06D83D47AA9714FD0819B5FEFFC698FAB073345EA14C215408A384AE659EB",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.51,
+        "y": -0.95,
+        "z": 0.433
+       },
+       "x": -1.994,
+       "y": -0.514,
+       "yaw_deg": -81.66
+      },
+      "male": {
+       "clip": "utpp_car_pma_standard3_driver",
+       "clip_sha256": "585EA3CF4BDF3841CF9EEC3B7C5F7289A2FD80890A39B1657055B4151578F8A0",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.71,
+        "y": -0.95,
+        "z": 1.267
+       },
+       "x": -2.194,
+       "y": -1.348,
+       "yaw_deg": -81.66
+      }
+     }
+    },
+    "passenger_r": {
+     "seat_t_vehicle": [
+      0.462,
+      -0.062,
+      0.535
+     ],
+     "seat_var": "standard3_vehicle_seat_front_right",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_standard3_passenger_r",
+       "clip_sha256": "E42CD016DAB08E73304438A59541D1F836C3C78A21D898B4C284E807132D20CE",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.233,
+        "y": -0.95,
+        "z": 1.086
+       },
+       "x": 1.695,
+       "y": -1.148,
+       "yaw_deg": 81.66
+      },
+      "male": {
+       "clip": "utpp_car_pma_standard3_passenger_r",
+       "clip_sha256": "74C9CE3731F28BC1D9416CFCEBC0F351AC0EAF86F5EE710A171956CA066B6361",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.483,
+        "y": -0.95,
+        "z": 0.986
+       },
+       "x": 1.945,
+       "y": -1.048,
+       "yaw_deg": 81.66
+      }
+     }
+    }
+   },
+   "vehicle": "v_standard3_chevalier_emperor"
+  },
+  "utility": {
+   "arcs": {},
+   "box": {
+    "cx": 0.0,
+    "cy": 1.646,
+    "hx": 1.662,
+    "hy": 3.686,
+    "source": "v_utility4_kaukaz_bratsk__ext01_body_01.glb",
+    "source_sha256": "5D0401B4D8C628F6564584D392F42A459AE12C3125BC2C5BBD5590A207D64068"
+   },
+   "seats": {
+    "driver": {
+     "seat_t_vehicle": [
+      -0.913,
+      3.625,
+      0.885
+     ],
+     "seat_var": "utility4_vehicle_seat_front_left",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_utility_driver",
+       "clip_sha256": "9AB53B7965988CD4112A26D83E0A74C8189498276A91072A034A531E33CFDE9D",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.772,
+        "y": -1.806,
+        "z": -0.032
+       },
+       "x": -2.685,
+       "y": 3.657,
+       "yaw_deg": -64.588
+      },
+      "male": {
+       "clip": "utpp_car_pma_utility_driver",
+       "clip_sha256": "8C96BBC2A9C834F00E38ACC3F84A5CD352B2FDA9641C13D1667E3A63546EE86B",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": -1.772,
+        "y": -1.806,
+        "z": -0.032
+       },
+       "x": -2.685,
+       "y": 3.657,
+       "yaw_deg": -64.588
+      }
+     }
+    },
+    "passenger_r": {
+     "seat_t_vehicle": [
+      0.904,
+      3.625,
+      0.885
+     ],
+     "seat_var": "utility4_vehicle_seat_front_right",
+     "spots": {
+      "female": {
+       "clip": "utpp_car_pwa_utility_passenger_r",
+       "clip_sha256": "AD648640EADCDDE7C25FB26756D39688DDD9D737C60CE298BF5669F017303627",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.372,
+        "y": -1.8,
+        "z": 0.069
+       },
+       "x": 2.276,
+       "y": 3.556,
+       "yaw_deg": 65.0
+      },
+      "male": {
+       "clip": "utpp_car_pma_utility_passenger_r",
+       "clip_sha256": "682887C5920D7881897E4DD50DE75FF8DCA3BAD3209F1EE6CDE9D9BB5837F94D",
+       "seat_frame": {
+        "note": "start offset from the seated root, seat rotation applied, rig axes (x, up, z); the vehicle frame spot adds the seat slot t",
+        "x": 1.362,
+        "y": -1.782,
+        "z": 0.752
+       },
+       "x": 2.266,
+       "y": 2.873,
+       "yaw_deg": 64.333
+      }
+     }
+    }
+   },
+   "vehicle": "v_utility4_kaukaz_bratsk"
+  }
+ },
+ "margin_m": 0.35,
+ "sources_file": "Build/work/vehicle-entry-car/vehall-20261106/sources-final-V2.txt"
+}

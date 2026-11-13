@@ -1,0 +1,22 @@
+# UTPP ragdoll proof of concept 'R1' -- LOCAL TEST ONLY, NOT FOR RELEASE.
+# Adds an engine ragdoll component (entRagdollComponent "RagdollComponent", the same component the NPC base entity carries) to the
+# four player entities. The physics bodies come from the companion archive content: utpp_ragdoll_poc.archive also holds FULL
+# replacement copies of base\characters\entities\player\player_woman_skeleton.rig and player_man_skeleton.rig (vanilla 2.5 rigs with
+# the 22 NPC ragdoll bodies + names copied in; .rig resources cannot be patched, so a full replacement is required for this test).
+# Replacing those rigs is not compatible with other skeleton replacers: install this archive only in a clean local test setup.
+# Delivery: `resource: patch:` with props [components]; the patch resources are packed into utpp_ragdoll_poc.archive
+# (make_ragdoll_ent_patch.py). Woman file -> wa entities, man file -> ma entities.
+resource:
+  patch:
+    utpp\ragdoll\utpp_ragdoll_wa.ent:
+      props:
+        - components
+      targets:
+        - base\characters\entities\player\player_wa_fpp.ent
+        - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    utpp\ragdoll\utpp_ragdoll_ma.ent:
+      props:
+        - components
+      targets:
+        - base\characters\entities\player\player_ma_fpp.ent
+        - ep1\characters\entities\player\player_ma_fpp_ep1.ent

@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!--
+  UTPP (Ultimate Third Person) - manual shoulder swap input. Packaged as r6\input\utpp_shoulder.xml.
+  Requires Input Loader: it merges every r6\input\*.xml into r6\cache\inputContexts.xml / inputUserMappings.xml.
+
+  Actions (listened to by UTPPShoulderInput in r6\scripts\UTPP\utpp_shoulder_input.reds):
+    UTPP_ShoulderSwap         keyboard / mouse, default L. Rebindable in Mod Settings: the overridableUI id below must
+                              equal the EInputKey field name utppShoulderSwapKey (Mod Settings replaces the key of the
+                              button that carries this id). Fires on press.
+    UTPP_ShoulderSwapPadR3    controller, right stick click HELD 0.5 s (BUTTON_HOLD_COMPLETE). A normal R3 tap keeps the
+                              game's own action (quick melee in the Legacy / Agile schemes, crouch in Alternative).
+    UTPP_ShoulderSwapPadDown  controller, d-pad down TAP (optional choice; the game's tap action also fires).
+    UTPP_ShoulderSwapPadLeft  controller, d-pad left TAP (optional choice; the game's radio toggle also fires).
+  Hold / multitap rules belong to an action, not to a button, so every gesture has its own action.
+
+  Scope: one own context included into Exploration (on foot). Exploration is also part of Aiming and Vision (scanner),
+  not of the vehicle, photo mode, braindance, quickhack panel, ladder, device control or menu contexts. utpp_camera (CET)
+  additionally ignores the swap in first person, menus, photo mode, vehicles, scenes, the scanner, takedowns and body carry.
+-->
+<bindings>
+    <context name="UTPP_Shoulder">
+        <action name="UTPP_ShoulderSwap"        map="UTPP_ShoulderSwap_Key" />
+        <action name="UTPP_ShoulderSwapPadR3"   map="UTPP_ShoulderSwap_PadR3" />
+        <action name="UTPP_ShoulderSwapPadDown" map="UTPP_ShoulderSwap_PadDown" />
+        <action name="UTPP_ShoulderSwapPadLeft" map="UTPP_ShoulderSwap_PadLeft" />
+    </context>
+
+    <context name="Exploration" append="true">
+        <include name="UTPP_Shoulder" />
+    </context>
+
+    <hold action="UTPP_ShoulderSwapPadR3"   timeout="0.5" />
+    <hold action="UTPP_ShoulderSwapPadDown" timeout="0.45" />
+    <hold action="UTPP_ShoulderSwapPadLeft" timeout="0.45" />
+
+    <mapping name="UTPP_ShoulderSwap_Key" type="Button" >
+        <button id="IK_L" overridableUI="utppShoulderSwapKey" />
+    </mapping>
+    <mapping name="UTPP_ShoulderSwap_PadR3" type="Button" >
+        <button id="IK_Pad_RightThumb" />
+    </mapping>
+    <mapping name="UTPP_ShoulderSwap_PadDown" type="Button" >
+        <button id="IK_Pad_DigitDown" />
+    </mapping>
+    <mapping name="UTPP_ShoulderSwap_PadLeft" type="Button" >
+        <button id="IK_Pad_DigitLeft" />
+    </mapping>
+</bindings>

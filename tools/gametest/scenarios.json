@@ -1,0 +1,287 @@
+{
+  "_format": "see gt_scenario.py docstring; ls/rs = [t, x, y] (x right, y forward), *_polar = [t, deg, mag] (0 = forward, + = clockwise/right), lt/rt = [t, v]; times relative to step start; undefined channels keep the previous step's final value",
+  "_bindings": "Pad mapping under InputSchemesMode=Alternative (verified in game 2026-10-23): L3 (LS) tap = sprint, R3 (RS click) TAP 0.08 s = crouch toggle (crouch_fraction 1.0; an R3 hold 0.35 s did not toggle), B = Dodge (a B hold 0.35 s never crouched: 2026-10-07 and 2026-10-23 runs); camera speed depends on the game's pad sensitivity (camera_whip_180 rs durations are a starting point, calibrate with the cam= yaw in the trace)",
+  "defaults": {"rate_hz": 60, "interp": "smooth"},
+  "scenarios": {
+    "slow_walk_half_stick": {
+      "description": "half-stick slow walk 0.40-0.55 for 6 s, then stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "ramp_in", "duration": 1.0, "ls": [[0, 0, 0], [0.8, 0, 0.45]]},
+        {"name": "half_stick", "duration": 6.0, "ls": [[0, 0, 0.45], [2, 0, 0.55], [4, 0, 0.40], [6, 0, 0.50]]},
+        {"name": "stop", "duration": 2.5, "ls": [[0, 0, 0.5], [0.3, 0, 0]]}
+      ]
+    },
+    "run_arc_left": {
+      "description": "full-stick run, stick rotating left at 60, 90 then 120 deg/s",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "accel", "duration": 2.0, "ls_polar": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "arc_60", "duration": 4.0, "interp": "linear", "ls_polar": [[0, 0, 1], [4, -240, 1]]},
+        {"name": "arc_90", "duration": 4.0, "interp": "linear", "ls_polar": [[0, -240, 1], [4, -600, 1]]},
+        {"name": "arc_120", "duration": 3.0, "interp": "linear", "ls_polar": [[0, -600, 1], [3, -960, 1]]},
+        {"name": "stop", "duration": 2.5, "ls_polar": [[0, -960, 1], [0.2, -960, 0]]}
+      ]
+    },
+    "run_arc_right": {
+      "description": "full-stick run, stick rotating right at 60, 90 then 120 deg/s",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "accel", "duration": 2.0, "ls_polar": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "arc_60", "duration": 4.0, "interp": "linear", "ls_polar": [[0, 0, 1], [4, 240, 1]]},
+        {"name": "arc_90", "duration": 4.0, "interp": "linear", "ls_polar": [[0, 240, 1], [4, 600, 1]]},
+        {"name": "arc_120", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 600, 1], [3, 960, 1]]},
+        {"name": "stop", "duration": 2.5, "ls_polar": [[0, 960, 1], [0.2, 960, 0]]}
+      ]
+    },
+    "slalom_stick": {
+      "description": "run with the stick swinging +-45 deg every second (2 s period), then stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "accel", "duration": 2.0, "ls_polar": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "slalom", "duration": 8.0, "ls_polar": {"keys": [[0, 0, 1], [0.5, 45, 1], [1.5, -45, 1], [2.0, 0, 1]], "loop": true, "interp": "linear"}},
+        {"name": "stop", "duration": 2.5, "ls_polar": [[0, 0, 1], [0.2, 0, 0]]}
+      ]
+    },
+    "flick_180_walk": {
+      "description": "walk (|stick| 0.45) forward, stick reversed through centre in 0.1 s, walk back, stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "accel", "duration": 1.5, "ls": [[0, 0, 0], [0.3, 0, 0.45]]},
+        {"name": "cruise", "duration": 2.5, "ls": [[0, 0, 0.45]]},
+        {"name": "flick", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 0.45], [0.1, 0, -0.45]]},
+        {"name": "cruise_back", "duration": 1.5, "ls": [[0, 0, -0.45]]},
+        {"name": "stop", "duration": 2.5, "ls": [[0, 0, -0.45], [0.2, 0, 0]]}
+      ]
+    },
+    "flick_180_run": {
+      "description": "run (full stick) forward, stick reversed in 0.1 s, run back, stop",
+      "_note_thresholds": "Design choice for 0.1.0: run 180 turn churn accepted up to 3.75 transitions/s; turn rework (compare with the GASPALS 1.2 turn) in the next update",
+      "thresholds": {"motion_transitions_per_s": {"max": 3.75}},
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "accel", "duration": 1.5, "ls": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "cruise", "duration": 2.5, "ls": [[0, 0, 1]]},
+        {"name": "flick", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "cruise_back", "duration": 1.5, "ls": [[0, 0, -1]]},
+        {"name": "stop", "duration": 2.5, "ls": [[0, 0, -1], [0.2, 0, 0]]}
+      ]
+    },
+    "flick_180_sprint": {
+      "description": "sprint (full stick + L3 tap) forward, stick reversed in 0.1 s, stop",
+      "_note_thresholds": "Design choice for 0.1.0: sprint 180 turn accepted up to 3.75 transitions/s and 15.75 cm foot-lock correction; turn rework in the next update",
+      "thresholds": {"motion_transitions_per_s": {"max": 3.75}, "footlock_corr_max_cm": {"max": 15.75}},
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "accel", "duration": 1.5, "ls": [[0, 0, 0], [0.3, 0, 1]], "buttons": [{"t": 0.4, "button": "LS", "hold": 0.12}]},
+        {"name": "cruise", "duration": 3.0, "ls": [[0, 0, 1]]},
+        {"name": "flick", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "cruise_back", "duration": 1.5, "ls": [[0, 0, -1]]},
+        {"name": "stop", "duration": 2.5, "ls": [[0, 0, -1], [0.2, 0, 0]]}
+      ]
+    },
+    "camera_whip_180": {
+      "description": "run forward, right stick full right ~0.6 s (about 180 deg camera turn, sensitivity dependent), run on, whip back left, stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "accel", "duration": 2.0, "ls": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "whip_right", "duration": 2.5, "interp": "linear", "rs": [[0, 0, 0], [0.05, 1, 0], [0.6, 1, 0], [0.65, 0, 0]]},
+        {"name": "run_on", "duration": 2.0},
+        {"name": "whip_left", "duration": 2.5, "interp": "linear", "rs": [[0, 0, 0], [0.05, -1, 0], [0.6, -1, 0], [0.65, 0, 0]]},
+        {"name": "stop", "duration": 2.5, "ls": [[0, 0, 1], [0.2, 0, 0]]}
+      ]
+    },
+    "crouch_walk_turns": {
+      "description": "crouch (R3 tap 0.08 s, one toggle; Alternative input scheme), crouch-walk forward, arc right then left at 90 deg/s, stop, uncrouch (one toggle), stand check; FAILs with 'crouch not engaged' / 'crouch not released' when MMTRACE loco is not 2 / 1",
+      "thresholds": {
+        "walk.crouch_fraction": {"min": 0.8, "msg": "crouch not engaged"},
+        "arc_right.crouch_fraction": {"min": 0.8, "msg": "crouch not engaged"},
+        "arc_left.crouch_fraction": {"min": 0.8, "msg": "crouch not engaged"},
+        "stand_check.stand_fraction": {"min": 0.8, "msg": "crouch not released"}
+      },
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "crouch", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "walk", "duration": 2.0, "ls_polar": [[0, 0, 0], [0.4, 0, 0.8]]},
+        {"name": "arc_right", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 0, 0.8], [3, 270, 0.8]]},
+        {"name": "arc_left", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 270, 0.8], [3, 0, 0.8]]},
+        {"name": "stop", "duration": 2.5, "ls_polar": [[0, 0, 0.8], [0.2, 0, 0]]},
+        {"name": "uncrouch", "duration": 1.5, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "stand_check", "duration": 2.5, "ls": [[0, 0, 0]]}
+      ]
+    },
+    "sprint_start_stop": {
+      "description": "sprint start from idle (stick 0->1 in 0.15 s + L3), stop by release, then a run start/stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "sprint_start", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}]},
+        {"name": "sprint_stop", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, 0]]},
+        {"name": "run_start", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]]},
+        {"name": "run_stop", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, 0]]}
+      ]
+    },
+    "idle_then_start_sideways": {
+      "description": "idle 3 s, quick start right, stop, start left, stop, start backwards, stop",
+      "steps": [
+        {"name": "idle", "duration": 3.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]]},
+        {"name": "start_right", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 1, 0]]},
+        {"name": "stop_right", "duration": 2.5, "interp": "linear", "ls": [[0, 1, 0], [0.1, 0, 0]]},
+        {"name": "start_left", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, -1, 0]]},
+        {"name": "stop_left", "duration": 2.5, "interp": "linear", "ls": [[0, -1, 0], [0.1, 0, 0]]},
+        {"name": "start_back", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, -1]]},
+        {"name": "stop_back", "duration": 2.5, "interp": "linear", "ls": [[0, 0, -1], [0.1, 0, 0]]}
+      ]
+    },
+    "sprint_dash": {
+      "description": "sprint (full stick + L3), then dodge/dash taps of B while moving (forward, left, right, back) and a sprint stop; pad dodge = Dodge_Button IK_Pad_B_CIRCLE (inputUserMappings.xml), fired by IsActionJustTapped(n\"Dodge\") with move input (locomotionTransitions.script:286); B is Dodge under the Alternative input scheme too (crouch = R3 tap since 2026-10-23)",
+      "_note_thresholds": "Design choice for 0.1.0: dash churn accepted up to 3.75 transitions/s; the dash animations are reworked in the next update",
+      "thresholds": {"motion_transitions_per_s": {"max": 3.75}},
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "sprint", "duration": 3.5, "ls": [[0, 0, 0], [0.3, 0, 1]], "buttons": [{"t": 0.4, "button": "LS", "hold": 0.12}]},
+        {"name": "dash_fwd", "duration": 2.0, "ls": [[0, 0, 1]], "buttons": [{"t": 0.3, "button": "B", "hold": 0.08}]},
+        {"name": "dash_left", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1], [0.15, -1, 0]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
+        {"name": "dash_right", "duration": 2.0, "interp": "linear", "ls": [[0, -1, 0], [0.15, 1, 0]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
+        {"name": "dash_back", "duration": 2.0, "interp": "linear", "ls": [[0, 1, 0], [0.15, 0, -1]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
+        {"name": "sprint_again", "duration": 3.0, "interp": "linear", "ls": [[0, 0, -1], [0.15, 0, 1]], "buttons": [{"t": 0.4, "button": "LS", "hold": 0.12}]},
+        {"name": "stop", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, 0]]}
+      ]
+    },
+    "weapon_draw": {
+      "description": "weapon macro part (night.py): draw = Y TAP (SwitchItem_Button IK_Pad_Y_TRIANGLE); a Y HOLD opens the weapon wheel (seen 2026-10-07 06:04) - never hold Y",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 2.5, "buttons": [{"t": 0.3, "button": "Y", "hold": 0.1}], "metrics": false}
+      ]
+    },
+    "weapon_aim": {
+      "description": "weapon macro part (night.py): walk armed, aim (LT = RangedADS_Button IK_Pad_LeftTrigger) for 2 s while walking slowly, stop; no firing",
+      "steps": [
+        {"name": "walk_armed", "duration": 3.0, "ls": [[0, 0, 0], [0.4, 0, 0.8]]},
+        {"name": "aim_walk", "duration": 3.0, "ls": [[0, 0, 0.8], [0.3, 0, 0.5]], "lt": [[0, 0], [0.1, 1], [2.1, 1], [2.2, 0]]},
+        {"name": "stop", "duration": 2.0, "ls": [[0, 0, 0.5], [0.2, 0, 0]], "lt": [[0, 0]]}
+      ]
+    },
+    "weapon_holster": {
+      "description": "weapon macro part (night.py): holster = DOUBLE TAP Y (two 0.08 s taps 0.15 s apart; like Alt on keyboard)",
+      "steps": [
+        {"name": "holster", "duration": 2.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "buttons": [{"t": 0.3, "button": "Y", "hold": 0.08}, {"t": 0.45, "button": "Y", "hold": 0.08}], "metrics": false}
+      ]
+    },
+    "weapon_walk": {
+      "description": "weapon macro part (night.py): walk unarmed after holstering, stop",
+      "steps": [
+        {"name": "walk_unarmed", "duration": 3.0, "ls": [[0, 0, 0], [0.4, 0, 0.8], [2.6, 0, 0.8], [2.8, 0, 0]]}
+      ]
+    },
+    "melee_draw": {
+      "description": "melee macro part (night.py): unarmed RT TAP (attack, 0.15 s) raises the fists; then 1.2 s idle (mask on reasons=0x1 expected in the UTPP log). Pad RT = attack; needs verifying on this profile",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 1.45, "rt": {"keys": [[0, 0], [0.1, 1], [0.25, 0]], "interp": "step"}, "metrics": false}
+      ]
+    },
+    "melee_punch": {
+      "description": "melee macro part (night.py): standing, 3 x RT tap 0.15 s, 0.7 s apart (start to start); MM weight must stay 1.00 while the upper-body mask is on",
+      "steps": [
+        {"name": "punches", "duration": 2.8, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false}
+      ]
+    },
+    "melee_punch_walk": {
+      "description": "melee macro part (night.py): left stick forward 0.5 (walk) with 2 RT taps 0.15 s - leg slip check (legs from MM while the arms punch), then stop",
+      "steps": [
+        {"name": "punch_walk", "duration": 3.2, "lt": [[0, 0]], "ls": {"keys": [[0, 0, 0], [0.3, 0, 0.5], [2.6, 0, 0.5], [2.8, 0, 0]], "interp": "linear"}, "rt": {"keys": [[0, 0], [0.8, 1], [0.95, 0], [1.6, 1], [1.75, 0]], "interp": "step"}}
+      ]
+    },
+    "melee_block": {
+      "description": "melee macro part (night.py): block = LT held 2.0 s standing (MeleeBlock; mask reasons 0x1 expected), release, 0.6 s idle",
+      "steps": [
+        {"name": "block", "duration": 2.8, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "rt": [[0, 0]], "lt": {"keys": [[0, 0], [0.1, 1], [2.1, 1], [2.2, 0]], "interp": "linear"}, "metrics": false}
+      ]
+    },
+    "melee_holster": {
+      "description": "melee macro part (night.py): same input as weapon_holster = DOUBLE TAP Y (two 0.08 s taps 0.15 s apart) to lower the fists; no aliasing in the scenario format, so a copy",
+      "steps": [
+        {"name": "holster", "duration": 2.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "buttons": [{"t": 0.3, "button": "Y", "hold": 0.08}, {"t": 0.45, "button": "Y", "hold": 0.08}], "metrics": false}
+      ]
+    },
+    "melee_punch_look_up": {
+      "description": "melee full body + aim tilt (2026-11-09): fists drawn by the RT tap (attack when already drawn), right stick up 0.4 s (camera pitch up; calibrate with the camera pitch in the trace), 3 x RT tap 0.15 s standing, then the camera back down. UTPP log (mm.trace on): 'MMMELEEFULL on why=on' after the first punch, 'MELEEAIM src=cam' with pitch > 0 (<= maxUp 20, flags 0x1 when clamped), MM weight 1.00",
+      "steps": [
+        {"name": "settle", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 1.45, "rt": {"keys": [[0, 0], [0.1, 1], [0.25, 0]], "interp": "step"}, "metrics": false},
+        {"name": "look_up", "duration": 0.7, "rs": {"keys": [[0, 0, 0], [0.1, 0, 0.6], [0.5, 0, 0.6], [0.6, 0, 0]], "interp": "linear"}, "metrics": false},
+        {"name": "punches", "duration": 2.8, "rs": [[0, 0, 0]], "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false},
+        {"name": "look_level", "duration": 1.0, "rs": {"keys": [[0, 0, 0], [0.1, 0, -0.6], [0.5, 0, -0.6], [0.6, 0, 0]], "interp": "linear"}, "metrics": false}
+      ]
+    },
+    "melee_punch_look_down": {
+      "description": "melee full body + aim tilt (2026-11-09): as melee_punch_look_up with the right stick down 0.5 s (camera pitch down): 'MELEEAIM' pitch < 0 (>= -maxDown 35, flags 0x2 when clamped), legs on the game pose ('MMMELEEFULL on'), no foot slide",
+      "steps": [
+        {"name": "settle", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 1.45, "rt": {"keys": [[0, 0], [0.1, 1], [0.25, 0]], "interp": "step"}, "metrics": false},
+        {"name": "look_down", "duration": 0.8, "rs": {"keys": [[0, 0, 0], [0.1, 0, -0.6], [0.6, 0, -0.6], [0.7, 0, 0]], "interp": "linear"}, "metrics": false},
+        {"name": "punches", "duration": 2.8, "rs": [[0, 0, 0]], "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false},
+        {"name": "look_level", "duration": 1.1, "rs": {"keys": [[0, 0, 0], [0.1, 0, 0.6], [0.6, 0, 0.6], [0.7, 0, 0]], "interp": "linear"}, "metrics": false}
+      ]
+    },
+    "melee_block_look_down": {
+      "description": "melee full body + aim tilt (2026-11-09): fists drawn, camera pitched down (right stick down 0.5 s), block = LT held 2.0 s standing (mask reasons 0x1, 'MMMELEEFULL on', 'MELEEAIM' pitch < 0), release, camera back up",
+      "steps": [
+        {"name": "settle", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 1.45, "rt": {"keys": [[0, 0], [0.1, 1], [0.25, 0]], "interp": "step"}, "metrics": false},
+        {"name": "look_down", "duration": 0.8, "rs": {"keys": [[0, 0, 0], [0.1, 0, -0.6], [0.6, 0, -0.6], [0.7, 0, 0]], "interp": "linear"}, "metrics": false},
+        {"name": "block", "duration": 2.8, "rs": [[0, 0, 0]], "rt": [[0, 0]], "lt": {"keys": [[0, 0], [0.1, 1], [2.1, 1], [2.2, 0]], "interp": "linear"}, "metrics": false},
+        {"name": "look_level", "duration": 1.1, "lt": [[0, 0]], "rs": {"keys": [[0, 0, 0], [0.1, 0, 0.6], [0.6, 0, 0.6], [0.7, 0, 0]], "interp": "linear"}, "metrics": false}
+      ]
+    },
+    "melee_punch_then_walk": {
+      "description": "melee full body -> upper-body mask transition (2026-11-09): fists drawn, 2 standing RT taps (full body: 'MMMELEEFULL on'), then left stick forward 0.5 (walk) with 2 more RT taps: 'MMMELEEFULL off why=speed' once the capsule passes 0.6 m/s, legs fade back to MM in 0.2 s (no pop, no foot skating), stop, idle",
+      "steps": [
+        {"name": "settle", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "draw", "duration": 1.45, "rt": {"keys": [[0, 0], [0.1, 1], [0.25, 0]], "interp": "step"}, "metrics": false},
+        {"name": "punch_standing", "duration": 1.6, "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.9, 1], [1.05, 0]], "interp": "step"}, "metrics": false},
+        {"name": "punch_walk", "duration": 3.2, "ls": {"keys": [[0, 0, 0], [0.3, 0, 0.5], [2.6, 0, 0.5], [2.8, 0, 0]], "interp": "linear"}, "rt": {"keys": [[0, 0], [0.8, 1], [0.95, 0], [1.6, 1], [1.75, 0]], "interp": "step"}, "metrics": false},
+        {"name": "idle", "duration": 1.5, "ls": [[0, 0, 0]], "rt": [[0, 0]], "metrics": false}
+      ]
+    },
+    "aim_probe_hold": {
+      "description": "aim_probe macro part (night.py): LT (aim) ramps to 1 at 0.2 s and is held until 4.0 s, RT taps (shots, 0.15 s each) at 1.5 s and 2.5 s, stick zero; utpp_probe AimProbe logs samples/shots meanwhile. Needs the weapon drawn (V holds a pistol on the test profile)",
+      "steps": [
+        {"name": "aim_hold", "duration": 4.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": {"keys": [[0, 0], [0.2, 1], [4.0, 1], [4.1, 0]], "interp": "linear"}, "rt": {"keys": [[0, 0], [1.5, 1], [1.65, 0], [2.5, 1], [2.65, 0]], "interp": "step"}, "metrics": false}
+      ]
+    },
+    "wheel_probe": {
+      "description": "night.py recovery probe: short walk forward (movement expected in MMTRACE / NightPos); no movement -> a menu or the weapon wheel is open",
+      "steps": [
+        {"name": "probe", "duration": 2.4, "ls": [[0, 0, 0], [0.15, 0, 0.75], [1.95, 0, 0.75], [2.1, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false}
+      ]
+    },
+    "veh_call": {
+      "description": "vehicle macro part (night.py): D-pad right tap = CallVehicle_Button IK_Pad_DigitRight (fallback when the CET spawn did not produce a vehicle)",
+      "steps": [
+        {"name": "call", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "buttons": [{"t": 0.2, "button": "DPAD_RIGHT", "hold": 0.15}], "metrics": false}
+      ]
+    },
+    "veh_enter": {
+      "description": "vehicle macro part (night.py): X tap = Choice1 IK_Pad_X_SQUARE (interaction 'Enter')",
+      "steps": [
+        {"name": "enter", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "buttons": [{"t": 0.2, "button": "X", "hold": 0.15}], "metrics": false}
+      ]
+    },
+    "veh_drive": {
+      "description": "vehicle macro part (night.py): RT throttle 3 s, release, LT brake 1.5 s, release",
+      "steps": [
+        {"name": "drive", "duration": 3.4, "interp": "linear", "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "rt": [[0, 0], [0.3, 1], [3.1, 1], [3.3, 0]], "lt": [[0, 0]], "metrics": false},
+        {"name": "brake", "duration": 2.2, "interp": "linear", "rt": [[0, 0]], "lt": [[0, 0], [0.2, 1], [1.7, 1], [1.9, 0]], "metrics": false}
+      ]
+    },
+    "veh_exit": {
+      "description": "vehicle macro part (night.py): B hold 1.0 s = ExitVehicle_Button IK_Pad_B_CIRCLE (last resort: cycle 4 B hold 0.8 s never exited; keyboard F tap / F hold come first)",
+      "steps": [
+        {"name": "exit", "duration": 2.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "buttons": [{"t": 0.2, "button": "B", "hold": 1.0}], "metrics": false}
+      ]
+    },
+    "shoulder_swap_input": {"description": "Pad R3 held 0.7 s swaps the UTPP camera shoulder (UTPP log 'shoulder -> left (pad)' then 'shoulder -> right (pad)'); R3 tapped 0.08 s keeps the game's R3 action (Alternative scheme: crouch toggle) and adds no 'shoulder ->' line", "steps": [{"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false}, {"name": "r3_hold_swap_left", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.7}], "metrics": false}, {"name": "r3_hold_swap_right", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.7}], "metrics": false}, {"name": "r3_tap_crouch", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false}, {"name": "r3_tap_stand", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false}]}
+  }
+}

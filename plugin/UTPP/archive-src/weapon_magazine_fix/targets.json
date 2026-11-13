@@ -1,0 +1,1866 @@
+{
+ "gameProductVersion": "2.5",
+ "field": "visibilityAnimationParam",
+ "from": "None",
+ "files": [
+  {
+   "path": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\appearances\\w_handgun__arasaka_kenshin__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "8270F590C2A6C741EC0106E3A82C2C9136BAB6728E3E49EE2B06FC665E604CF3",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "8270F590C2A6C741EC0106E3A82C2C9136BAB6728E3E49EE2B06FC665E604CF3"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2076606320055758852",
+     "mesh": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\meshes\\w_handgun__arasaka_kenshin__mag_std_01_decal_01_n.mesh",
+     "param": "showMagazine",
+     "hits": 20
+    }
+   ],
+   "expectedHits": 20
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\appearances\\w_handgun__arasaka_kenshin__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "5917F8202974993BC7FB8C5D32BD2A3EB285CC22C94582DE0A48A301EEAE1E20",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "5917F8202974993BC7FB8C5D32BD2A3EB285CC22C94582DE0A48A301EEAE1E20"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2076606459407314948",
+     "mesh": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\meshes\\w_handgun__arasaka_kenshin__mag_stdr_01_decal_01_n.mesh",
+     "param": "showMagazineReload",
+     "hits": 20
+    }
+   ],
+   "expectedHits": 20
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\w_handgun__arasaka_kenshin__mag_std_01_decal_01_n.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "37B6872C53165D157CA40BE7AB66687AF1E3ABFF7540AE7FFEFBE3255B2E8005",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "37B6872C53165D157CA40BE7AB66687AF1E3ABFF7540AE7FFEFBE3255B2E8005"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2076606320055758852",
+     "mesh": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\meshes\\w_handgun__arasaka_kenshin__mag_std_01_decal_01_n.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\w_handgun__arasaka_kenshin__mag_stdr_01_decal_01_n.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "F55A15DBA570CFD269483B4A4B88E2180FBDED7F70F37A0F07D3AB994C3D4142",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "F55A15DBA570CFD269483B4A4B88E2180FBDED7F70F37A0F07D3AB994C3D4142"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2076606459407314948",
+     "mesh": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\meshes\\w_handgun__arasaka_kenshin__mag_stdr_01_decal_01_n.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\w_handgun__arasaka_kenshin.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "592F4942A1572476B5DB08D01281C235079F1DFFFF0A0377E1A105D4607B83D1",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "3A982DE4DA770A6ECFEAA3D346FB46F041FC472394DB85F6FD9212248147B9D6"
+    },
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "592F4942A1572476B5DB08D01281C235079F1DFFFF0A0377E1A105D4607B83D1"
+    }
+   ],
+   "winnerReason": "content and ep1 copies differ; the ep1 copy (Phantom Liberty group, overrides content) is a strict superset of the content copy",
+   "components": [
+    {
+     "id": "2076606320055758852",
+     "mesh": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\meshes\\w_handgun__arasaka_kenshin__mag_std_01_decal_01_n.mesh",
+     "param": "showMagazine",
+     "hits": 20
+    },
+    {
+     "id": "2076606459407314948",
+     "mesh": "base\\weapons\\firearms\\handgun\\arasaka_kenshin\\entities\\meshes\\w_handgun__arasaka_kenshin__mag_stdr_01_decal_01_n.mesh",
+     "param": "showMagazineReload",
+     "hits": 20
+    }
+   ],
+   "expectedHits": 40
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\appearances\\w_handgun__constitutional_liberty__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+   "sha256": "5CD861D30FFB091874E6B937AC00B1975CB0A9927D0F7A424EF8658AEA419A48",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+     "sha256": "5CD861D30FFB091874E6B937AC00B1975CB0A9927D0F7A424EF8658AEA419A48"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2218420234656755716",
+     "mesh": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\meshes\\w_handgun__constitutional_liberty__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 22
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\appearances\\w_handgun__constitutional_liberty__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "DD55452CAFF18B0C7DDE6AA728EC1742E10D6343052AABF380CA5061B9304914",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "DD55452CAFF18B0C7DDE6AA728EC1742E10D6343052AABF380CA5061B9304914"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2218420773926809604",
+     "mesh": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\meshes\\w_handgun__constitutional_liberty__mag_stdr_01_decal_n01.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 22
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\w_handgun__constitutional_liberty__mag_std_01_decal_n01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "49F0D3A9495A688179E67FD15F27F30FCC0CB447D7A2A4BE7EDF2B39939FC530",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "49F0D3A9495A688179E67FD15F27F30FCC0CB447D7A2A4BE7EDF2B39939FC530"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2218420234656755716",
+     "mesh": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\meshes\\w_handgun__constitutional_liberty__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\w_handgun__constitutional_liberty__mag_stdr_01_decal_n01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "2B3F8E3EE7FF34AE0D1B1711AD204FFA5B4A0EA6145DF9010C2ED276D64A3BA8",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "2B3F8E3EE7FF34AE0D1B1711AD204FFA5B4A0EA6145DF9010C2ED276D64A3BA8"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2218420773926809604",
+     "mesh": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\meshes\\w_handgun__constitutional_liberty__mag_stdr_01_decal_n01.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\w_handgun__constitutional_liberty__rogue.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "2E97E0E4D2F76A7350CB0EBA86ED1476149A7142583C214B6B496B3610739426",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "2E97E0E4D2F76A7350CB0EBA86ED1476149A7142583C214B6B496B3610739426"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2218420234656755716",
+     "mesh": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\meshes\\w_handgun__constitutional_liberty__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    },
+    {
+     "id": "2218420773926809604",
+     "mesh": "base\\weapons\\firearms\\handgun\\constitutional_liberty\\entities\\meshes\\w_handgun__constitutional_liberty__mag_stdr_01_decal_n01.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 44
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\tsunami_nue\\appearances\\w_handgun__tsunami_nue__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "A3B0279AE42F6F9C9F331846C9D7E8C31EDCEDFD8616F0180D047401CCD610DD",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "A3B0279AE42F6F9C9F331846C9D7E8C31EDCEDFD8616F0180D047401CCD610DD"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2219884808422191108",
+     "mesh": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\meshes\\w_handgun__tsunami_nue__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\tsunami_nue\\appearances\\w_handgun__tsunami_nue__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "84F9C372630FB36B346BB498D668BF3B0706D302E1E1F1318DDDCBC5A56653FB",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "84F9C372630FB36B346BB498D668BF3B0706D302E1E1F1318DDDCBC5A56653FB"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2219884951498289156",
+     "mesh": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\meshes\\w_handgun__tsunami_nue__mag_stdr_01_decal_n01.mesh",
+     "param": "showMagazineReload",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\w_handgun__tsunami_nue__mag_std_01_decal_n01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "D1C5DDD418CD66090F8DDBCAEEA125D899D808D7D13B7F49538FA16F279EDDA1",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "D1C5DDD418CD66090F8DDBCAEEA125D899D808D7D13B7F49538FA16F279EDDA1"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2219884808422191108",
+     "mesh": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\meshes\\w_handgun__tsunami_nue__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\w_handgun__tsunami_nue__mag_stdr_01_decal_n01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "431D9513D7432E03B16BBA6DD07160312F882B0B9EF13A35F7A477089C0B1605",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "431D9513D7432E03B16BBA6DD07160312F882B0B9EF13A35F7A477089C0B1605"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2219884951498289156",
+     "mesh": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\meshes\\w_handgun__tsunami_nue__mag_stdr_01_decal_n01.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\handgun\\tsunami_nue\\w_handgun__tsunami_nue.app",
+   "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+   "sha256": "DF4EC3093B22F8760EF3BED55D6993FFD5F40DBE364840FDC7F9718CCE6EF8E4",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+     "sha256": "DF4EC3093B22F8760EF3BED55D6993FFD5F40DBE364840FDC7F9718CCE6EF8E4"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2219884808422191108",
+     "mesh": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\meshes\\w_handgun__tsunami_nue__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 16
+    },
+    {
+     "id": "2219884951498289156",
+     "mesh": "base\\weapons\\firearms\\handgun\\tsunami_nue\\entities\\meshes\\w_handgun__tsunami_nue__mag_stdr_01_decal_n01.mesh",
+     "param": "showMagazineReload",
+     "hits": 16
+    }
+   ],
+   "expectedHits": 32
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\darra_nova\\appearances\\w_revolver__darra_nova__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "6D5D29B7B2EB017769124F73C290C0308D754565C3D6D42808926C1DD9A6EB3B",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "6D5D29B7B2EB017769124F73C290C0308D754565C3D6D42808926C1DD9A6EB3B"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2067686114071752708",
+     "mesh": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\meshes\\w_revolver__darra_nova__mag_std_01_decal_01_n.mesh",
+     "param": "showMagazine",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\darra_nova\\appearances\\w_revolver__darra_nova__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "C39CA997277D18EDA9BA47AECFA7B61B22799B2DBEA16E0C3710E59B4653D324",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "C39CA997277D18EDA9BA47AECFA7B61B22799B2DBEA16E0C3710E59B4653D324"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2067826978613964804",
+     "mesh": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\meshes\\w_revolver__darra_nova__mag_stdr_01_decal_01_n.mesh",
+     "param": "showMagazineReload",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\w_revolver__darra_nova__mag_std_01_decal_01_n.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "43906A6C688723A3B238E672391F12B52E02D3CE9B585CA52771C7714093EA85",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "43906A6C688723A3B238E672391F12B52E02D3CE9B585CA52771C7714093EA85"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2067686114071752708",
+     "mesh": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\meshes\\w_revolver__darra_nova__mag_std_01_decal_01_n.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\w_revolver__darra_nova__mag_stdr_01_decal_01_n.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "80577B26A54B3D77038FE58A164E2237EB32F750084AC1E66711694C902EBA43",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "80577B26A54B3D77038FE58A164E2237EB32F750084AC1E66711694C902EBA43"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2067826978613964804",
+     "mesh": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\meshes\\w_revolver__darra_nova__mag_stdr_01_decal_01_n.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\darra_nova\\w_revolver__darra_nova.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "1A2D0E44D889D996BBC6B18B4270C2B68D48F0363A931201C042D1837CAF154B",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "477ACC281AA99D2CCE5125023F195815B9CF5227836087B3404F088C0EFFFCCC"
+    },
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "1A2D0E44D889D996BBC6B18B4270C2B68D48F0363A931201C042D1837CAF154B"
+    }
+   ],
+   "winnerReason": "content and ep1 copies differ; the ep1 copy (Phantom Liberty group, overrides content) is a strict superset of the content copy",
+   "components": [
+    {
+     "id": "2067686114071752708",
+     "mesh": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\meshes\\w_revolver__darra_nova__mag_std_01_decal_01_n.mesh",
+     "param": "showMagazine",
+     "hits": 18
+    },
+    {
+     "id": "2067826978613964804",
+     "mesh": "base\\weapons\\firearms\\revolver\\darra_nova\\entities\\meshes\\w_revolver__darra_nova__mag_stdr_01_decal_01_n.mesh",
+     "param": "showMagazineReload",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 36
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\militech_crusher\\appearances\\w_revolver__militech_crusher__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "85FE3584749E65A1FBB0D99A1D7891916D38EB4ED72D7578FC67A798FAEF1FF8",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "85FE3584749E65A1FBB0D99A1D7891916D38EB4ED72D7578FC67A798FAEF1FF8"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2410056398536671232",
+     "mesh": "base\\weapons\\firearms\\revolver\\militech_crusher\\entities\\meshes\\w_revolver__militech_crusher__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazine",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\militech_crusher\\appearances\\w_revolver__militech_crusher__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "3CDB76EB7AA2587C8DDD86D718B69AFE9A5A755475BA4BDA7F19C08884A5F819",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "3CDB76EB7AA2587C8DDD86D718B69AFE9A5A755475BA4BDA7F19C08884A5F819"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2410056031082086400",
+     "mesh": "base\\weapons\\firearms\\revolver\\militech_crusher\\entities\\meshes\\w_revolver__militech_crusher__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\militech_crusher\\entities\\w_revolver__militech_crusher__mag_std_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "27F439C51EE1569B1EC556EB4C2B687230592F694ACDE46860B67C18AE985107",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "27F439C51EE1569B1EC556EB4C2B687230592F694ACDE46860B67C18AE985107"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2410056398536671232",
+     "mesh": "base\\weapons\\firearms\\revolver\\militech_crusher\\entities\\meshes\\w_revolver__militech_crusher__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\militech_crusher\\entities\\w_revolver__militech_crusher__mag_stdr_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "0715410D33F4D66F43272BDF9E8AD28E554057566CCB300397BF279F3A22AFC5",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "0715410D33F4D66F43272BDF9E8AD28E554057566CCB300397BF279F3A22AFC5"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2410056031082086400",
+     "mesh": "base\\weapons\\firearms\\revolver\\militech_crusher\\entities\\meshes\\w_revolver__militech_crusher__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\revolver\\militech_crusher\\w_revolver__militech_crusher.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "C9C84D550D7DD9D8423DFC3AB90AC0A3933F3C1FC4033C1E1ACB2CC270C5A04B",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "C9C84D550D7DD9D8423DFC3AB90AC0A3933F3C1FC4033C1E1ACB2CC270C5A04B"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2410056398536671232",
+     "mesh": "base\\weapons\\firearms\\revolver\\militech_crusher\\entities\\meshes\\w_revolver__militech_crusher__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazine",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\appearances\\w_rifle_assault__arasaka_masamune__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "63141C15B0D331ADA202824DCAAC6B6DB13FB9A640C2D5B13BC86A727268B25D",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "63141C15B0D331ADA202824DCAAC6B6DB13FB9A640C2D5B13BC86A727268B25D"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2350715528822095876",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\meshes\\w_rifle_assault__arasaka_masamune__mag_std_02_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 4
+    }
+   ],
+   "expectedHits": 4
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\appearances\\w_rifle_assault__arasaka_masamune__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "0ABA7FA8E7CB4B1331067B5375BB6CBA62886C5D330741EFB6F5351AA115A9DA",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "0ABA7FA8E7CB4B1331067B5375BB6CBA62886C5D330741EFB6F5351AA115A9DA"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2350715707465891844",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\meshes\\w_rifle_assault__arasaka_masamune__mag_stdr_02_decal_01.mesh",
+     "param": "showMagazineReload",
+     "hits": 4
+    }
+   ],
+   "expectedHits": 4
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\w_rifle_assault__arasaka_masamune__mag_std_02_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "A61B05AADF8149BB9092C2E5079957653E4987EF4C55C0666E8443EAF10D7953",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "A61B05AADF8149BB9092C2E5079957653E4987EF4C55C0666E8443EAF10D7953"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2350715528822095876",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\meshes\\w_rifle_assault__arasaka_masamune__mag_std_02_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\w_rifle_assault__arasaka_masamune__mag_stdr_02_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "C8CE8FB8A829DD11AB5C291545E56531ED0721DCBE8CABE31D7DA52D319D0E9B",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "C8CE8FB8A829DD11AB5C291545E56531ED0721DCBE8CABE31D7DA52D319D0E9B"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2350715707465891844",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\meshes\\w_rifle_assault__arasaka_masamune__mag_stdr_02_decal_01.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\w_rifle_assault__arasaka_masamune.app",
+   "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+   "sha256": "E5167F7EB07E0DD9E7F77BA77057C6B49A14C636942196DFC8A93E4FA9631BDF",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+     "sha256": "E5167F7EB07E0DD9E7F77BA77057C6B49A14C636942196DFC8A93E4FA9631BDF"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2350715528822095876",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\meshes\\w_rifle_assault__arasaka_masamune__mag_std_02_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 4
+    },
+    {
+     "id": "2350715707465891844",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\arasaka_masamune\\entities\\meshes\\w_rifle_assault__arasaka_masamune__mag_stdr_02_decal_01.mesh",
+     "param": "showMagazineReload",
+     "hits": 4
+    }
+   ],
+   "expectedHits": 8
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_copperhead\\appearances\\w_rifle_assault__nokota_copperhead__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "28C6B6D0D60A67DDC5523B93C58E71641A215B5E2FA331A0F917A8FA6AC74526",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "28C6B6D0D60A67DDC5523B93C58E71641A215B5E2FA331A0F917A8FA6AC74526"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2270529706959466500",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_copperhead\\entities\\meshes\\w_rifle_assault__nokota_copperhead__mag_std_01_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 20
+    }
+   ],
+   "expectedHits": 20
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_copperhead\\entities\\w_rifle_assault__nokota_copperhead__mag_std_01_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "7EBC08923538154BCD73AE4D2A94150C4E4B4BD894F784A49871D5E1C56D7E81",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "7EBC08923538154BCD73AE4D2A94150C4E4B4BD894F784A49871D5E1C56D7E81"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2270529706959466500",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_copperhead\\entities\\meshes\\w_rifle_assault__nokota_copperhead__mag_std_01_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_copperhead\\w_rifle_assault__nokota_copperhead.app",
+   "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+   "sha256": "2E2D5BB059320F752D47D483CBCDA18E04D21B2452DA07FA39017F5EB08A94A7",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+     "sha256": "2E2D5BB059320F752D47D483CBCDA18E04D21B2452DA07FA39017F5EB08A94A7"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2270529706959466500",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_copperhead\\entities\\meshes\\w_rifle_assault__nokota_copperhead__mag_std_01_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 20
+    }
+   ],
+   "expectedHits": 20
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\appearances\\w_rifle_assault__nokota_sidewinder__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "B7C2FAEBE524EB608E6E55378F36893B668124A31FB11B272A1DA8345B75E955",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "B7C2FAEBE524EB608E6E55378F36893B668124A31FB11B272A1DA8345B75E955"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2279562455145934852",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\meshes\\w_rifle_assault__nokota_sidewinder__mag_std_01_decal_flag.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\appearances\\w_rifle_assault__nokota_sidewinder__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "822B7183A47E36A73CC65F2471DC63C71DA80728BC687DDF75B8A4ADF69B9932",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "822B7183A47E36A73CC65F2471DC63C71DA80728BC687DDF75B8A4ADF69B9932"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2279562583743295492",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\meshes\\w_rifle_assault__nokota_sidewinder__mag_stdr_01_decal_flag.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\w_rifle_assault__nokota_sidewinder__mag_std_01_decal_flag.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "251708353027F9FCF8FB12CDE493EAF9BC0EE32960F3A34DAA75559CDCFA9899",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "251708353027F9FCF8FB12CDE493EAF9BC0EE32960F3A34DAA75559CDCFA9899"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2279562455145934852",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\meshes\\w_rifle_assault__nokota_sidewinder__mag_std_01_decal_flag.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\w_rifle_assault__nokota_sidewinder__mag_stdr_01_decal_flag.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "B9AA75981D0D10B5ABE0B633C2C35BC39ED4C7AFE19F02B3B6258A49B823FD2C",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "B9AA75981D0D10B5ABE0B633C2C35BC39ED4C7AFE19F02B3B6258A49B823FD2C"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2279562583743295492",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\meshes\\w_rifle_assault__nokota_sidewinder__mag_stdr_01_decal_flag.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\w_rifle_assault__nokota_sidewinder.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "4C9510D736DE9D4116735A9E80DA5FD0EB73CEDD04B725273AF94E86936C9ECF",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "4C9510D736DE9D4116735A9E80DA5FD0EB73CEDD04B725273AF94E86936C9ECF"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2279562455145934852",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\meshes\\w_rifle_assault__nokota_sidewinder__mag_std_01_decal_flag.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    },
+    {
+     "id": "2279562583743295492",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\nokota_sidewinder\\entities\\meshes\\w_rifle_assault__nokota_sidewinder__mag_stdr_01_decal_flag.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 4
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\appearances\\w_rifle_assault__tsunami_kyubi__mag_std_01.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "972B188195F17E5BA954C7F61678594DE004C9E5C26DB99AEC4D8E90ADE03AD0",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "E512453710ABCB297CAC96527CAAD66D8A9783A4642F757389810BAE623CDC9E"
+    },
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "972B188195F17E5BA954C7F61678594DE004C9E5C26DB99AEC4D8E90ADE03AD0"
+    }
+   ],
+   "winnerReason": "content and ep1 copies differ; the ep1 copy (Phantom Liberty group, overrides content) is a strict superset of the content copy",
+   "components": [
+    {
+     "id": "2778137456556412928",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\meshes\\w_rifle_assault__tsunami_kyubi__mag_std_01_legendary.mesh",
+     "param": "showMagazine",
+     "hits": 6
+    },
+    {
+     "id": "3592651127143428100",
+     "mesh": "ep1\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\meshes\\w_rifle_assault__tsunami_kyubi__mag_std_01_decals_nusa.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 8
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\w_rifle_assault__tsunami_kyubi__mag_std_01_legendary.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "3ED60683742ECE6502024986CCD260B1C86F21FFF03420AF20713070E2551B47",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "3ED60683742ECE6502024986CCD260B1C86F21FFF03420AF20713070E2551B47"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2778137456556412928",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\meshes\\w_rifle_assault__tsunami_kyubi__mag_std_01_legendary.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\w_rifle_assault__tsunami_kyubi.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "D81DC549D8CDFCBA240F9DC6C663E313CE755D78A6BCF5FBA39BB3BF8B9D56FE",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "063C65A958ED42ED8DB865A04813887D5C714EA30AEB8685F0F0582FF7F5A714"
+    },
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "D81DC549D8CDFCBA240F9DC6C663E313CE755D78A6BCF5FBA39BB3BF8B9D56FE"
+    }
+   ],
+   "winnerReason": "content and ep1 copies differ; the ep1 copy (Phantom Liberty group, overrides content) is a strict superset of the content copy",
+   "components": [
+    {
+     "id": "2778137456556412928",
+     "mesh": "base\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\meshes\\w_rifle_assault__tsunami_kyubi__mag_std_01_legendary.mesh",
+     "param": "showMagazine",
+     "hits": 6
+    },
+    {
+     "id": "3592651127143428100",
+     "mesh": "ep1\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\meshes\\w_rifle_assault__tsunami_kyubi__mag_std_01_decals_nusa.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 8
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\w_rifle_assault__tsunami_kyubi_myers.app",
+   "archive": "archive\\pc\\ep1\\ep1_1_nightcity.archive",
+   "sha256": "331F5D147A0363A6E5A962491449FD4F3537E693923383E3223F92012E4785A3",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "DA041826A37FDB247F0468322C5EE7899C5E5D01BF692B1B8769AB9E0270426E"
+    },
+    {
+     "archive": "archive\\pc\\ep1\\ep1_1_nightcity.archive",
+     "sha256": "331F5D147A0363A6E5A962491449FD4F3537E693923383E3223F92012E4785A3"
+    }
+   ],
+   "winnerReason": "content and ep1 copies differ; the ep1 copy (Phantom Liberty group, overrides content) is a strict superset of the content copy",
+   "components": [
+    {
+     "id": "3592651127143428100",
+     "mesh": "ep1\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\meshes\\w_rifle_assault__tsunami_kyubi__mag_std_01_decals_nusa.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\appearances\\w_rifle_sniper__tsunami_nekomata__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "C604BCBE4BE9E9D9DA31E1E8576BEDD4931165A43F6647817F53BD6E08F2C5A6",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "C604BCBE4BE9E9D9DA31E1E8576BEDD4931165A43F6647817F53BD6E08F2C5A6"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2318370029650915332",
+     "mesh": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\meshes\\w_rifle_sniper__tsunami_nekomata__mag_std_01_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 22
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\appearances\\w_rifle_sniper__tsunami_nekomata__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "48C4BF81373DF6D7E3A791B166DAD886A794E80E824D275D8F325E95D7546558",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "48C4BF81373DF6D7E3A791B166DAD886A794E80E824D275D8F325E95D7546558"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2318370150111326212",
+     "mesh": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\meshes\\w_rifle_sniper__tsunami_nekomata__mag_stdr_01_decal_01.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 22
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\w_rifle_sniper__tsunami_nekomata__mag_std_01_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "95DE77FAB4D38B1AC2B7AB27C52CE67490882AD627DA894CFC9EFC4C440AA08B",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "95DE77FAB4D38B1AC2B7AB27C52CE67490882AD627DA894CFC9EFC4C440AA08B"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2318370029650915332",
+     "mesh": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\meshes\\w_rifle_sniper__tsunami_nekomata__mag_std_01_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\w_rifle_sniper__tsunami_nekomata__mag_stdr_01_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "6518A25491CEBD61DF427A8F5E70B21D002EE674BE58EB795576791DB7E5FDCC",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "6518A25491CEBD61DF427A8F5E70B21D002EE674BE58EB795576791DB7E5FDCC"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2318370150111326212",
+     "mesh": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\meshes\\w_rifle_sniper__tsunami_nekomata__mag_stdr_01_decal_01.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\w_rifle_sniper__tsunami_nekomata.app",
+   "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+   "sha256": "3F9C805935F1A3491416DD8F2519397AC3A94468FFA07F0514FFF04128C56AD7",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+     "sha256": "3F9C805935F1A3491416DD8F2519397AC3A94468FFA07F0514FFF04128C56AD7"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2318370029650915332",
+     "mesh": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\meshes\\w_rifle_sniper__tsunami_nekomata__mag_std_01_decal_01.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    },
+    {
+     "id": "2318370150111326212",
+     "mesh": "base\\weapons\\firearms\\rifle_sniper\\tsunami_nekomata\\entities\\meshes\\w_rifle_sniper__tsunami_nekomata__mag_stdr_01_decal_01.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 44
+  },
+  {
+   "path": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\appearances\\w_shotgun_dual__rostovic_palica__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "301CE012F1ABAB93E3B28A26CFD63F7ED879D1A5599AF2CAB54903FDEE2094C8",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "301CE012F1ABAB93E3B28A26CFD63F7ED879D1A5599AF2CAB54903FDEE2094C8"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2323123056920309764",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_left_01_decal_01.mesh",
+     "param": "showMagazineLeft",
+     "hits": 14
+    },
+    {
+     "id": "2323123187614822404",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_right_01_decal_01.mesh",
+     "param": "showMagazineRight",
+     "hits": 14
+    }
+   ],
+   "expectedHits": 28
+  },
+  {
+   "path": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\appearances\\w_shotgun_dual__rostovic_palica__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "AC25582034F7A0293325D9B3DB020D4BF8E5A9165888694DCD29606993F5FCC6",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "AC25582034F7A0293325D9B3DB020D4BF8E5A9165888694DCD29606993F5FCC6"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2323123292740857860",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_stdr_01_left_01_decal_01.mesh",
+     "param": "showMagazineReloadLeft",
+     "hits": 14
+    },
+    {
+     "id": "2323123386810707972",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_stdr_01_right_01_decal_01.mesh",
+     "param": "showMagazineReloadRight",
+     "hits": 14
+    }
+   ],
+   "expectedHits": 28
+  },
+  {
+   "path": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\w_shotgun_dual__rostovic_palica__mag_std_01_left_01_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "9E084207D155F0688914FF12B6D02994322163C7B57CB9C0B01EFAAD2EBB744A",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "9E084207D155F0688914FF12B6D02994322163C7B57CB9C0B01EFAAD2EBB744A"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2323123056920309764",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_left_01_decal_01.mesh",
+     "param": "showMagazineLeft",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\w_shotgun_dual__rostovic_palica__mag_std_01_right_01_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "B2E57038861C65F8DB8FCF9FB8648273D1D28B7AE5CFC2CE4235D5AC76815DC7",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "B2E57038861C65F8DB8FCF9FB8648273D1D28B7AE5CFC2CE4235D5AC76815DC7"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2323123187614822404",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_right_01_decal_01.mesh",
+     "param": "showMagazineRight",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\w_shotgun_dual__rostovic_palica__mag_stdr_01_left_01_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "F5598AF8A8D22924347242B49B4D86F5E5C20CA29A5DCA77487E2B7270898959",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "F5598AF8A8D22924347242B49B4D86F5E5C20CA29A5DCA77487E2B7270898959"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2323123292740857860",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_stdr_01_left_01_decal_01.mesh",
+     "param": "showMagazineReloadLeft",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\w_shotgun_dual__rostovic_palica__mag_stdr_01_right_01_decal_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "4947F93375D6A3E207BB5E5987CAC98ED21730502FE69BE539C36752FE6BFCF7",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "4947F93375D6A3E207BB5E5987CAC98ED21730502FE69BE539C36752FE6BFCF7"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2323123386810707972",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_stdr_01_right_01_decal_01.mesh",
+     "param": "showMagazineReloadRight",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\w_shotgun_dual__rostovic_palica.app",
+   "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+   "sha256": "0D241C4D5F19834056D851ADD60AE09D51CFF977DCD5FE095467AB89EDB8C703",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_3_nightcity.archive",
+     "sha256": "0D241C4D5F19834056D851ADD60AE09D51CFF977DCD5FE095467AB89EDB8C703"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2323123056920309764",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_left_01_decal_01.mesh",
+     "param": "showMagazineLeft",
+     "hits": 14
+    },
+    {
+     "id": "2323123187614822404",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_right_01_decal_01.mesh",
+     "param": "showMagazineRight",
+     "hits": 14
+    },
+    {
+     "id": "2323123292740857860",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_stdr_01_left_01_decal_01.mesh",
+     "param": "showMagazineReloadLeft",
+     "hits": 14
+    },
+    {
+     "id": "2323123386810707972",
+     "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_stdr_01_right_01_decal_01.mesh",
+     "param": "showMagazineReloadRight",
+     "hits": 14
+    }
+   ],
+   "expectedHits": 56
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\darra_pulsar\\appearances\\w_submachinegun__darra_pulsar__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "31F85215BE37A61C5C490AFD3ACBD04735FB388F5FEB07699BF7AD7DDC9E1DF7",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "31F85215BE37A61C5C490AFD3ACBD04735FB388F5FEB07699BF7AD7DDC9E1DF7"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2425975759847784448",
+     "mesh": "base\\weapons\\firearms\\smg\\darra_pulsar\\entities\\meshes\\w_smg__darra_pulsar__mag_std_01_decal_d01_default.mesh",
+     "param": "showMagazine",
+     "hits": 16
+    }
+   ],
+   "expectedHits": 16
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\darra_pulsar\\entities\\w_smg__darra_pulsar__mag_std_01.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "B5A4C54181DE709DC6394B39A4E3CA1D790889470C5F7E7235978C6E02C5F69F",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "B5A4C54181DE709DC6394B39A4E3CA1D790889470C5F7E7235978C6E02C5F69F"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2425975759847784448",
+     "mesh": "base\\weapons\\firearms\\smg\\darra_pulsar\\entities\\meshes\\w_smg__darra_pulsar__mag_std_01_decal_d01_default.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\darra_pulsar\\w_smg__darra_pulsar.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "419AE78CCD4419E2AD18C0D1FB25A5227BE2780865C3FA38B81788FFAD0B29BA",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "419AE78CCD4419E2AD18C0D1FB25A5227BE2780865C3FA38B81788FFAD0B29BA"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2425975759847784448",
+     "mesh": "base\\weapons\\firearms\\smg\\darra_pulsar\\entities\\meshes\\w_smg__darra_pulsar__mag_std_01_decal_d01_default.mesh",
+     "param": "showMagazine",
+     "hits": 16
+    }
+   ],
+   "expectedHits": 16
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\militech_saratoga\\appearances\\w_submachinegun__militech_saratoga__mag_std_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "7B7F2EF714FEC8765F7C3A8F233A32C50F26812B153BBFA9A44A25CCCAEB1ED4",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "7B7F2EF714FEC8765F7C3A8F233A32C50F26812B153BBFA9A44A25CCCAEB1ED4"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2062150174561611780",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    },
+    {
+     "id": "2067876162817830912",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_std_01_decal_d01_default.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 44
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\militech_saratoga\\appearances\\w_submachinegun__militech_saratoga__mag_stdr_01.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "8A9B72F8556946D8209EC534D01D44F3A8400ED3741139FDF4203620148F7DD0",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "8A9B72F8556946D8209EC534D01D44F3A8400ED3741139FDF4203620148F7DD0"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2062149495503794176",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_stdr_01_decal_n01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    },
+    {
+     "id": "2062149924899860484",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_stdr_01_decal_d01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 44
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\w_smg__militech_saratoga__mag_std_01_decal_d01_default.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "61100D59AEBB50DC1FD0AD1168447144F2546E78B46C08D841CBAA32E21A79B6",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "61100D59AEBB50DC1FD0AD1168447144F2546E78B46C08D841CBAA32E21A79B6"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2067876162817830912",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_std_01_decal_d01_default.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\w_smg__militech_saratoga__mag_std_01_decal_n01_default.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "0DD01919702D2276694905CAFBCAC02C85A0F286B1D5AE1E6A65A08C99CB9338",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "0DD01919702D2276694905CAFBCAC02C85A0F286B1D5AE1E6A65A08C99CB9338"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2062150174561611780",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\w_smg__militech_saratoga__mag_stdr_01_decal_d01_default.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "C0E674046564A0636B428B2E61E7A1B460B066C2C8DD9B0AD411124F7BC5F914",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "C0E674046564A0636B428B2E61E7A1B460B066C2C8DD9B0AD411124F7BC5F914"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2062149924899860484",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_stdr_01_decal_d01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\w_smg__militech_saratoga__mag_stdr_01_decal_n01_default.ent",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "67CD353EF01101BDD9BEC4E391F208E27123BEBBADBB2F17EA995BF5D73D7C0D",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "67CD353EF01101BDD9BEC4E391F208E27123BEBBADBB2F17EA995BF5D73D7C0D"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2062149495503794176",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_stdr_01_decal_n01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "base\\weapons\\firearms\\smg\\militech_saratoga\\w_smg__militech_saratoga.app",
+   "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+   "sha256": "22D0439AD13F935E189AC91C56674E583728BBDA9B3944EEE84E520B790058A6",
+   "copies": [
+    {
+     "archive": "archive\\pc\\content\\basegame_4_gamedata.archive",
+     "sha256": "22D0439AD13F935E189AC91C56674E583728BBDA9B3944EEE84E520B790058A6"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "2062149495503794176",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_stdr_01_decal_n01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    },
+    {
+     "id": "2062149924899860484",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_stdr_01_decal_d01_default.mesh",
+     "param": "showMagazineReload",
+     "hits": 22
+    },
+    {
+     "id": "2062150174561611780",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_std_01_decal_n01_default.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    },
+    {
+     "id": "2067876162817830912",
+     "mesh": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_std_01_decal_d01_default.mesh",
+     "param": "showMagazine",
+     "hits": 22
+    }
+   ],
+   "expectedHits": 88
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\revolver\\techtronika_metel\\appearances\\w_revolver__techtronika_metel__mag_std_01.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "AADD1919C71FED6E98E9C2B6A6940F762313775F6C7BD62916C3D7598B2C493B",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "AADD1919C71FED6E98E9C2B6A6940F762313775F6C7BD62916C3D7598B2C493B"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3272336401859465220",
+     "mesh": "ep1\\weapons\\firearms\\revolver\\techtronika_metel\\entities\\meshes\\w_revolver__techtronika_metel__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 16
+    }
+   ],
+   "expectedHits": 16
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\revolver\\techtronika_metel\\entities\\w_revolver__techtronika_metel__mag_std_01_decal_n01.ent",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "983CFFE4B713F57B9C1DF3B81021B9C383D7C5C08B4D03283A996CC58C7EAF06",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "983CFFE4B713F57B9C1DF3B81021B9C383D7C5C08B4D03283A996CC58C7EAF06"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3272336401859465220",
+     "mesh": "ep1\\weapons\\firearms\\revolver\\techtronika_metel\\entities\\meshes\\w_revolver__techtronika_metel__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\revolver\\techtronika_metel\\w_revolver__techtronika_metel.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "5C1ACC6212E77DCE1EE67652A6E661B0D3E068496D8596DCC21DD87DA2444D54",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "5C1ACC6212E77DCE1EE67652A6E661B0D3E068496D8596DCC21DD87DA2444D54"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3272336401859465220",
+     "mesh": "ep1\\weapons\\firearms\\revolver\\techtronika_metel\\entities\\meshes\\w_revolver__techtronika_metel__mag_std_01_decal_n01.mesh",
+     "param": "showMagazine",
+     "hits": 18
+    }
+   ],
+   "expectedHits": 18
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\w_rifle_assault__tsunami_kyubi__mag_std_01_decals_nusa.ent",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "0F856DE94E2019A4D0F218E6683026A675E2D63776B8AD98A43485A3D854C2AB",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "0F856DE94E2019A4D0F218E6683026A675E2D63776B8AD98A43485A3D854C2AB"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3592651127143428100",
+     "mesh": "ep1\\weapons\\firearms\\rifle_assault\\tsunami_kyubi\\entities\\meshes\\w_rifle_assault__tsunami_kyubi__mag_std_01_decals_nusa.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\appearances\\w_rifle_sniper__tsunami_rasetsu__mag_std_01.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "1ADA958EE3019540B4EF0789CD444F91546A71E508116A0330B169B54AFDC381",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "1ADA958EE3019540B4EF0789CD444F91546A71E508116A0330B169B54AFDC381"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3408690686487203840",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_std_01_decal.mesh",
+     "param": "showMagazine",
+     "hits": 14
+    }
+   ],
+   "expectedHits": 14
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\appearances\\w_rifle_sniper__tsunami_rasetsu__mag_stdr_01.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "3736E47C69E1E473C9E2D6BCEC0D5A7B0F3334280ECE98CC8A05D3D6D47F2383",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "3736E47C69E1E473C9E2D6BCEC0D5A7B0F3334280ECE98CC8A05D3D6D47F2383"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3408690430148120576",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_stdr_01_decal.mesh",
+     "param": "showMagazineReload",
+     "hits": 14
+    }
+   ],
+   "expectedHits": 14
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\appearances\\w_rifle_sniper__tsunami_tech_sniper_rifle__mag_std_01.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "12EA0A8BA46C82D6C046C8A565B5A203F946DCBC4275F5483D79BA34789AB8A3",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "12EA0A8BA46C82D6C046C8A565B5A203F946DCBC4275F5483D79BA34789AB8A3"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3408690686487203840",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_std_01_decal.mesh",
+     "param": "showMagazine",
+     "hits": 14
+    }
+   ],
+   "expectedHits": 14
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\appearances\\w_rifle_sniper__tsunami_tech_sniper_rifle__mag_stdr_01.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "29BA90C23816586A175FD11137C096F96E1CC21AF2F754A8870583235F68B5D6",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "29BA90C23816586A175FD11137C096F96E1CC21AF2F754A8870583235F68B5D6"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3408690430148120576",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_stdr_01_decal.mesh",
+     "param": "showMagazineReload",
+     "hits": 14
+    }
+   ],
+   "expectedHits": 14
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\w_rifle_sniper__tsunami_rasetsu__mag_std_01.ent",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "7BB79C1810A81D839D7C84DA93AFB56975063951A01C63FBE73934ACF5CB668C",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "7BB79C1810A81D839D7C84DA93AFB56975063951A01C63FBE73934ACF5CB668C"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3408690686487203840",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_std_01_decal.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\w_rifle_sniper__tsunami_rasetsu__mag_stdr_01.ent",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "EFD2DB6CE9BDAFF96D7B6DCFFADB30663B8012B3A9A96ABF5E7EB4F3DC8D9998",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "EFD2DB6CE9BDAFF96D7B6DCFFADB30663B8012B3A9A96ABF5E7EB4F3DC8D9998"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3408690430148120576",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_stdr_01_decal.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 2
+  },
+  {
+   "path": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\w_rifle_sniper__tsunami_rasetsu.app",
+   "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+   "sha256": "E07917380C4C468C83505B4353334172DFA3A15BFA5FE85039FBCBE188282BAB",
+   "copies": [
+    {
+     "archive": "archive\\pc\\ep1\\ep1_2_gamedata.archive",
+     "sha256": "E07917380C4C468C83505B4353334172DFA3A15BFA5FE85039FBCBE188282BAB"
+    }
+   ],
+   "winnerReason": "all copies identical",
+   "components": [
+    {
+     "id": "3408690430148120576",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_stdr_01_decal.mesh",
+     "param": "showMagazineReload",
+     "hits": 2
+    },
+    {
+     "id": "3408690686487203840",
+     "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\tsunami_rasetsu\\entities\\meshes\\w_rifle_sniper__tsunami_rasetsu__mag_std_01_decal.mesh",
+     "param": "showMagazine",
+     "hits": 2
+    }
+   ],
+   "expectedHits": 4
+  }
+ ],
+ "excluded": [
+  {
+   "ent": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\w_smg__militech_saratoga__mag_std_02_decal_n01_default.ent",
+   "componentId": "2062150174561611780",
+   "mesh": [
+    "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_std_02_decal_n01_default.mesh"
+   ],
+   "reason": "same component id as the .app component, but a different mesh that no live 2.5 appearance uses"
+  },
+  {
+   "ent": "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\w_smg__militech_saratoga__mag_stdr_02_decal_n01_default.ent",
+   "componentId": "2062149495503794176",
+   "mesh": [
+    "base\\weapons\\firearms\\smg\\militech_saratoga\\entities\\meshes\\w_smg__militech_saratoga__mag_stdr_02_decal_n01_default.mesh"
+   ],
+   "reason": "same component id as the .app component, but a different mesh that no live 2.5 appearance uses"
+  },
+  {
+   "app": "ep1\\weapons\\firearms\\rifle_sniper\\nokota_osprey\\appearances\\w_rifle_sniper__nokota_osprey__mag_std_01.app",
+   "componentId": "2769495047295504384",
+   "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\nokota_osprey\\entities\\meshes\\w_rifle_sniper__nokota_osprey__mag_std_01_shadow.mesh",
+   "reason": "showMagazine never hides the magazine in an evaluated player weapon clip (or the anim set was not evaluated)"
+  },
+  {
+   "app": "ep1\\weapons\\firearms\\rifle_sniper\\nokota_osprey\\appearances\\w_rifle_sniper__nokota_osprey__mag_stdr_01.app",
+   "componentId": "2769495047295504384",
+   "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\nokota_osprey\\entities\\meshes\\w_rifle_sniper__nokota_osprey__mag_std_01_shadow.mesh",
+   "reason": "showMagazineReload never hides the magazine in an evaluated player weapon clip (or the anim set was not evaluated)"
+  },
+  {
+   "app": "ep1\\weapons\\firearms\\rifle_sniper\\nokota_osprey\\w_rifle_sniper__nokota_osprey.app",
+   "componentId": "2769495047295504384",
+   "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\nokota_osprey\\entities\\meshes\\w_rifle_sniper__nokota_osprey__mag_std_01_shadow.mesh",
+   "reason": "showMagazine never hides the magazine in an evaluated player weapon clip (or the anim set was not evaluated)"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "2008604900396666884",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "2038922881718628352",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_decal_01_n.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "2049129480487579652",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_decal_d01_default.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "2049129440591360004",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_decal_d01_panam.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "2481014697571201028",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_silencer_panam.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "2482202771793719300",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_silencer_panam_decal.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "3658038051545886724",
+   "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_scav.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\appearances\\w_rifle_sniper__techtronika_grad__base1_01.app",
+   "componentId": "3658038227085897728",
+   "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_scav_decals.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "2008604900396666884",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "2038922881718628352",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_decal_01_n.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "2049129480487579652",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_decal_d01_default.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "2049129440591360004",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_decal_d01_panam.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "2481014697571201028",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_silencer_panam.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "2482202771793719300",
+   "mesh": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_silencer_panam_decal.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "3658038051545886724",
+   "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_scav.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\w_rifle_sniper__techtronika_grad.app",
+   "componentId": "3658038227085897728",
+   "mesh": "ep1\\weapons\\firearms\\rifle_sniper\\techtronika_grad\\entities\\meshes\\w_rifle_sniper__techtronika_grad__base1_01_scav_decals.mesh",
+   "reason": "unresolved: bound to Barrel with parameters ['showMagazine'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\appearances\\w_shotgun_dual__rostovic_palica__mag_std_01.app",
+   "componentId": "2323116480369078276",
+   "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_decal_01.mesh",
+   "reason": "unresolved: bound to Magazine with parameters ['showMagazineLeft', 'showMagazineRight'] and no single magazine parameter used by a sibling"
+  },
+  {
+   "app": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\w_shotgun_dual__rostovic_palica.app",
+   "componentId": "2323116480369078276",
+   "mesh": "base\\weapons\\firearms\\shotgun_dual\\rostovic_palica\\entities\\meshes\\w_shotgun_dual__rostovic_palica__mag_std_01_decal_01.mesh",
+   "reason": "unresolved: bound to Magazine with parameters ['showMagazineLeft', 'showMagazineRight'] and no single magazine parameter used by a sibling"
+  }
+ ]
+}

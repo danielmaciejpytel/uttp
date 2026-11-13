@@ -1,0 +1,94 @@
+UTPP traversal montage file (.utpptrav), FORMAT VERSION 1 - written by tools/mmbake/travbake.py
+source pack derived (Data/traversal/utpp_traversal_{woman,man}.utpptrav).
+
+ASCII text, LF line ends, tokens separated by one space, floats printed "%.6f" (-0.000000 written as 0.000000).
+Byte-identical output for identical inputs (determinism). Readers must fail closed on any deviation.
+
+Line 1   utpp-traversal 1
+Line 2   RIG <rig name> 0x<identity hash, 16 hex> <rig bone count>
+         identity hash = FNV-1a 64 over every rig bone: UTF-8 name, 0x00, int32 parent, int32 qx qy qz where
+         q = floor(float32(rest translation m) * 1000 + 0.5)  (same rule as FORMAT.txt v2 "Rig identity").
+Line 3   COUNT <montage count>
+Then COUNT montage blocks, then the line END.
+
+Montage block:
+M <montage> <sequence> <length_s> <rate_scale> <blend_in_s> <blend_in_option> <blend_out_s> <blend_out_option>
+  <auto_blend_out 0|1> <blend_out_trigger_s> <action> <fps> <frames> <root_z_from_rtz 0|1>
+    action: Hurdle | Vault | Mantle | ClimbStart | Catch | Other (from the montage name).
+    blend options: UE EAlphaBlendOption spelled as Montage.hpp (Linear, Cubic, HermiteCubic, ...).
+    frames = sequence frames of the single montage segment [anim_start_time, anim_end_time] (inclusive, rounded).
+SEC <name> <start_s> <next section | ->     one or more; montages without exported sections get "SEC Default 0.000000 -".
+W <target> <start_s> <end_s> <start_frame> <end_frame> <modifier class> <warp_translation> <warp_rotation>
+  <ignore_z> <warp_to_feet> <rotation_type> <rotation_time_multiplier> <warp point provider> <UE warp bone>
+  <contact bone> <off_x> <off_y> <off_z> <max_speed_clamp_ratio>
+    zero or more, sorted by start, one per AnimNotifyState_MotionWarping; target FrontLedge | BackLedge | BackFloor.
+    frames = floor(time * fps + 0.5) relative to the segment start, clamped to frames-1.
+    contact bone: BackFloor -> Root (offset 0, root warped). Otherwise the UE warp bone ("attach") does not exist on
+    the CP rig; the contact bone is the hand (LeftHand / RightHand) with the smaller world displacement between
+    end_frame-1 and end_frame+1 (planted hand; tie -> LeftHand), world = (x, y, z) + RotZ(yaw) * FK hand.
+    off = hand - root at end_frame in root space, metres = the FK hand position of the clip pose (Root = identity),
+    because the retarget pose is in place relative to the full root (Trajectory x y yaw and root_z, RTZ.txt).
+R <x> <y> <z> <yaw>      exactly <frames> lines: Trajectory bone of the retarget clip (metres, CP axes, yaw radians
+                         about +Z); z = root_z of the *_rtz clip when root_z_from_rtz = 1, else Trajectory z.
+C Distance_From_Ledge <frames values | ->   curve copied unchanged from the retarget clip (UE units) or "-" if absent.
+E
+
+FORMAT VERSION 2 (trav, travbake.py --format 2; file names follow the v2 databases:
+  Data/traversal/utpp_traversal_{woman,man}_v2.utpptrav      --variant base: out_sourcepack_<rig> / _rtz (utpp_motion_<rig>_v2.utppmm, tests)
+  Data/traversal/utpp_traversal_{woman,man}_v2_knee.utpptrav --variant knee: out_sourcepack_<rig>_knee / _rtz_knee
+      (utpp_motion_<rig>_v2_knee.utppmm; staged as v2\utpp_traversal_<rig>.utpptrav). A format 2 bake never overwrites.)
+Everything of version 1, with these differences:
+Line 1   utpp-traversal 2
+Line 3   POSEBONES <n> <bone name 0> ... <bone name n-1>     n >= 1, <= rig bone count, no duplicates; the bone list of
+         every retarget clip of the file (the bake fails if two clips differ).
+Montage block: after the C line and before E exactly <frames> lines
+P <x0> <y0> <z0> <qx0> <qy0> <qz0> <qw0> ... <x n-1> ... <qw n-1>
+         the local transform of every POSEBONES bone at that montage frame (same frame range as the R lines), copied from
+         the clip (the *_rtz clip when root_z_from_rtz = 1, as the R lines): metres, quaternion normalised (float64)
+         = the .utppmm POSE convention of mmbake_motion (FORMAT.txt) before the float32 cast. Readers reject a P quaternion
+         whose norm differs from 1 by more than 1e-4.
+Use (MotionDriver, UTPP-MOTION SEAM trav): a montage whose sequence is not a clip of the v2 database is played from its
+P lines (pose bones mapped to the database bones by name; every database bone must be present), sampled like the
+database (frame lerp + quaternion nlerp at the montage pose time).
+A version 1 reader rejects version 2 files (header); the C++ reader (mm/TraversalFile.hpp) reads both.
+
+GET-UP FILES (ragdoll get-up, getupbake.py + getup_fixup.py; utpp_getup_{woman,man}.utpptrav)
+source pack derived: Data/getup and the *_getupfix clips are not tracked in git; the only files in git are the small frame-0 fixtures plugin/UTPP/tests/data/getup_frame0_{woman,man}.json.
+Same grammar as FORMAT VERSION 2 above (parsed by the same ParseTraversalText), in a SEPARATE file per body, not in
+utpp_traversal_<rig>.utpptrav (the traversal planner must not see them). Installed as <dll dir>\data\utpp_getup_<body>.utpptrav.
+  RIG / POSEBONES   as the traversal file: the 73 bones of M_ragdoll_getup_stand_*.utppclip.json in clip order.
+  COUNT 4           montages GetUp_B, GetUp_F, GetUp_L, GetUp_R in that order (sequence M_ragdoll_getup_stand_{B,F,L,R}).
+  M line            length = (frames-1)/fps, rate 1.0, blend in/out 0.3 SmoothStep, action Other, fps 30, rtz 0.
+                    frames = cut frame + 1: the montage ends at the cut frame (the last P line is the hand-off pose).
+  SEC               Default 0; HandOff = (frames-1)/fps; Interrupt = first time Hips z >= 0.80 m with both feet planted
+                    (foot joint z <= 0.16 m, xy speed <= 0.25 m/s; early hand-off on input); informational Plant_<k> / Lift_<k>
+                    (k = LH RH LF RF: start of the longest locked contact interval / first frame after it).
+  W lines           none (zero W lines are legal; the reader rejects a W window in these files' test, not in the DLL).
+  R lines           the SOURCE Trajectory bone track (x y 0 yaw), kept for reference only. It is ALREADY folded into the Hips
+                    (next item); never apply it again.
+  P lines           local pose of the FIXED clip, frames 0..cut, Root-relative and in place:
+                    * Trajectory folded into Hips: the source clips are authored relative to Root + Trajectory (planted hands and
+                      feet are stationary in the world only after the Trajectory translation is added; Root-relative without it
+                      a planted hand slips up to 0.42 m). Hips local = Trajectory * Hips; the Trajectory bone is identity.
+                      The Trajectory is 0 at the cut for all 8 clips, so the standing end pose is at Root.
+                    * the whole clip is rotated about Root +Z so that the standing end pose faces +Y like the MM idle (yaw_fix in
+                      the report, 6-8 deg).
+                    * floor fix-up (see getup_fixup.py): only local rotations of the Shoulder/Arm/ForeArm/Hand and UpLeg/Leg/Foot
+                      chains and the Hips z are changed; every bone length is unchanged (non-Root-child local translations equal the
+                      source). Planted wrists / ankles are locked in XY to the interval mean, hands/feet are tilted and lifted
+                      so that fingers/toes clear the floor, elbows/knees are swivelled, the pelvis is lifted (max about 0.06 m) only
+                      where the shoulder/hip/trunk joints would still be under the floor. Corrections are max-filtered then blurred
+                      over +-3 frames and rate-limited, so a correction never gets smaller than the raw requirement.
+                    * no joint rotates more than 25 deg between two frames.
+  Ground / floor    z = 0 in the Root frame. Clamp set (shared with the DLL clamp and the metric tool), radii in metres:
+                    Hips 0.10, Spine3 0.10, Head 0.09, LeftArm/RightArm (shoulder joint) 0.05, LeftForeArm/RightForeArm (elbow)
+                    0.04, LeftHand/RightHand (wrist) 0.03, LeftLeg/RightLeg (knee) 0.05, LeftFoot/RightFoot (ankle) 0.05,
+                    LeftToeBase/RightToeBase 0.02, the 15 finger bones <Side>Hand{Thumb,Index,Middle,Ring,Pinky}{1,2,3} 0.01.
+                    Not in the set: Root, Trajectory, reference_joint, Weapon*, *HandEnd, *InHand*, *Eye, *Heel, Neck*, Spine,
+                    Spine1, Spine2, *Shoulder, *UpLeg (the fix-up itself keeps UpLeg above 0.08 m, not part of the gate).
+Sidecar utpp_getup_<body>.contacts.json (offline only, never loaded by the DLL):
+  {rig, fps, body, trajectory_baked_into_hips, radii{bone:r}, clips{B|F|L|R:{cut, interrupt, cut_s, interrupt_s, label,
+   features{front_z, lateral_z, spine_up_z}, frame0_model{bone:[x,y,z]}, contacts{LF,RF,LH,RH:[0|1 per frame 0..cut]}, result{...}}}}
+  contacts = frames where the lock weight is 1 (the planted effector does not move in XY); lateral = LeftUpLeg - RightUpLeg,
+  front = cross(lateral, spine up) (inv/analyze_getup.py convention); frame0_model = FK of frame 0 of the P lines (Root frame).
+Fixture plugin/UTPP/tests/data/getup_frame0_<body>.json: {rig, body, fps, note, clips{label:{label, frame0_model, features, cut}}}.

@@ -1,0 +1,13 @@
+# UTPP camera component patch (Phase 5N.3, FALLBACK variant A2: gameFPPCameraComponent type, input sensitivity 0).
+# Use instead of the default utpp_camera.archive.xl only if the plain camera (A1) does not take over the view or the
+# audio listener in game. Same component name "utppCamera", so the CET controller works unchanged.
+resource:
+  patch:
+    utpp\camera\utpp_player_camera_fpptype.ent:
+      props:
+        - components
+      targets:
+        - base\characters\entities\player\player_wa_fpp.ent
+        - base\characters\entities\player\player_ma_fpp.ent
+        - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+        - ep1\characters\entities\player\player_ma_fpp_ep1.ent

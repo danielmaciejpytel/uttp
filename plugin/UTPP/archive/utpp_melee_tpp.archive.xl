@@ -1,0 +1,100 @@
+# UTPP third-person melee (full body). New animation data: utpp\melee\utpp_<set>.anims (archive utpp_melee.archive). Each UTPP set holds only
+# the NON-ADDITIVE clips that were re-solved for the third-person body, under the vanilla clip names (same rig, duration, events, float tracks and
+# root motion as the vanilla clip). Additive clips (add_*) and the clips listed below stay in the vanilla sets.
+# Registration (static analysis of the 2.5 player entities):
+#   the 2.5 player entities (player_wa_fpp.ent / player_ma_fpp.ent and the ep1 *_ep1.ent, which carry the same entries) register the vanilla
+#   sets on the root animated component: default_melee_weapon / pma_default_melee_weapon at 200 without variables, and per weapon
+#   p?a_<weapon>.anims at 128 with the weapon variable (w_melee_fists, w_melee_katana, w_melee_knife, w_melee_one_hand_blunt, w_two_hand_blunt);
+#   the ep1 entities add the Gorilla Arms set p?a_strongarms_melee_fists.anims at 128 [StrongArms] on the extension component "EP1 animsets".
+#   Each entry written below mirrors one of those vanilla entries: same entities and component, the variables of the vanilla entry + the UTPP
+#   wrapper variable utpp_melee_tpp (the default set, which has no variable in vanilla, gets the variable of the weapon family it serves
+#   so that it does not reach other weapons), priority one lower (199 / 127). "Lower number wins" (static evidence in the 2.5 entities, see also
+#   utpp_foot_tpp.archive.xl): specific entries carry lower numbers than generic ones (dual-wield pistol sets 64 [dual_wield, <weapon>] < dual-wield
+#   base 100 < per-weapon sets 128 < base-weapon sets 150 < default sets 200); the hacking crouch seen in game came from a 199 set winning over
+#   the 200 locomotion set.
+#   Several variables in one entry must ALL be set (static evidence: the dual-wield entries [dual_wield, w_handgun_X] at 64 sit next to the
+#   single-weapon entries [w_handgun_X] at 128; if one variable were enough, every single-handed pistol would play the dual-wield clips; the
+#   UTPP vehicle entries [utpp_vehicle_tpp, <seat variable>] pick the clip of the seat's class / bike only - these live in the vehicle workspot
+#   override, not on this component). So an entry below is active only when the vanilla entry is active AND utpp_melee_tpp is set (and, for the
+#   default set, the weapon variable listed), and it then wins exactly for the clip names it holds; every other clip name still resolves as in
+#   vanilla.
+#   No other entry of the entities sits between the vanilla priority and the new one for these clip names, except the cases handled below.
+# FPP / vanilla: the UTPP body script sets utpp_melee_tpp to 1 only while the UTPP third-person body is wanted on foot (the value of
+#   utpp_foot_tpp, which is 0 during a vanilla take-over) and the mod's animations are the animation pack in force (0 with the Game
+#   Animations pack); with 0 this file has no effect and the vanilla sets apply unchanged.
+# Entries written in this file (set | component | variables | priority | entities):
+#   utpp\melee\utpp_default_melee_weapon.anims | root | [w_melee_fists, utpp_melee_tpp] | 199 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_default_melee_weapon.anims | root | [w_melee_fists, utpp_melee_tpp] | 199 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_fists.anims | root | [w_melee_fists, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_fists.anims | root | [w_melee_fists, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_strongarms_melee_fists.anims | EP1 animsets | [StrongArms, utpp_melee_tpp] | 127 | player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_strongarms_melee_fists.anims | EP1 animsets | [StrongArms, utpp_melee_tpp] | 127 | player_ma_fpp_ep1.ent
+# Not mirrored (the clips of these paths stay vanilla): paths gated by a modifier variable of the vanilla entities - the fists set gated by
+#   StrongArms on the root component (the ep1 entities add the Gorilla Arms set at the same priority on an extension component; a mirrored entry
+#   would outrank or tie with it), the one-handed blunt set gated by additives (an extra
+#   source for other weapons; a mirrored entry would tie with the other weapons' new entries), the knife set gated by knife_thumb_override
+#   (meaning not established). The Gorilla Arms set itself is mirrored only where an entry above names it.
+# Not mirrored in this file (set, path of the vanilla entity):
+#   vanilla set of pwa_fists, component root, variables [StrongArms]: modifier-gated path stays vanilla
+#   vanilla set of pma_fists, component root, variables [StrongArms]: modifier-gated path stays vanilla
+# Clip names that stay vanilla (another entry that can be active at the same time has the same priority as the new entry or as the vanilla
+#   one, so the order would be unknown): melee_first_equip in the weapon sets (p?a_one_handed_blunt_dildo.anims at 127 [dildo]) and,
+#   male default set only, vault (pma_default_weapon.anims at 200, no variable). Held pose clips of fewer than 6 frames (melee_idlepose,
+#   melee_safepose, melee_crouchpose, block, melee_air_sprint, ...) have no re-solved version and also stay vanilla.
+# Root motion: unchanged (the vanilla motionExtraction, copied verbatim); the new clips are built in the anim buffer frame (Root = the vanilla
+#   buffer Root, identity), so the engine moves the entity, and the new body with it, exactly as in vanilla.
+# Known risks (not verified in game): (1) entries gated by a MODIFIER variable at the vanilla priority 128 that hold the same clip names
+#   (knife_thumb_override, additives, StrongArms). If such a variable is set together with a weapon variable and its entry won over the weapon's
+#   own set in vanilla, the new weapon entry now wins instead (e.g. fists clips instead of Gorilla Arms clips of the same name). Where a Gorilla
+#   Arms entry (StrongArms, component "EP1 animsets") is listed above next to a fists entry (component root), both sit at priority 127 on
+#   different components; which of them wins for a shared clip name is not established.
+#   (2) Fallback data: the per-clip fallback frame indices of every replaced clip are cleared (as for the vehicle-entry clips); the set-level
+#   fallback data (fallbackAnimDataBuffer / fallbackAnimFrameDescs / fallbackAnimDescIndexes) is still the vanilla one (first-person poses
+#   of the full vanilla set) and is no longer referenced by the replaced clips. Not verified in game for these sets.
+# Clips rejected by a gate of the export (round trip, SIMD frame count; listed in the run manifest, set_details) also stay vanilla.
+# NOT verified in game: the winning direction for these entries, that a script-set wrapper variable gates an ArchiveXL-merged entry of this
+#   component, that an entry on the "EP1 animsets" component is merged and gated the same way, and the visual result. Verify: draw each weapon
+#   type in third person (utpp_melee_tpp = 1) and in first person, compare with the vanilla clip; strong-arms cyberware with fists (including the
+#   charged one_punch heavy attack); the first equip of a weapon (stays vanilla); body vs capsule alignment on the fists clips with root motion
+#   (melee_slide_start / melee_slide_end, jump_attack, safe_attack).
+animations:
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_default_melee_weapon.anims
+    vars: [w_melee_fists, utpp_melee_tpp]
+    priority: 199
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_default_melee_weapon.anims
+    vars: [w_melee_fists, utpp_melee_tpp]
+    priority: 199
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pwa_fists.anims
+    vars: [w_melee_fists, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_fists.anims
+    vars: [w_melee_fists, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: EP1 animsets
+    set: utpp\melee\utpp_pwa_strongarms_melee_fists.anims
+    vars: [StrongArms, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: EP1 animsets
+    set: utpp\melee\utpp_pma_strongarms_melee_fists.anims
+    vars: [StrongArms, utpp_melee_tpp]
+    priority: 127

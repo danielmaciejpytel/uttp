@@ -1,0 +1,1180 @@
+{
+  "convention": "All times in seconds. 'open_start_s', 'vanilla_close_start_s' are measured relative to the MOUNT LINE (log line '[utpp_vehicle_anim] ride N: workspot animVariables') in door-timeline.json of the car-door game test of 2026-11-01. The entry clip frame 0 plays 'clip_start_after_mount_s' after the mount line (measured 0.010..0.040 s). OFFLINE MODEL: the door-open event E (the instant the door starts to move) is at mount line + open_start_s = clip time open_start_s - clip_start_after_mount_s; 'close_after_s' (per seat clip) = seconds from E to the start of the door close; vanilla close_after = vanilla_close_start_s - open_start_s (about 1.51 s swing doors, 1.80 s Turbo-R). The offline model maps the startup/recover clips of the vehicle linearly onto open_dur_s / close_dur_s (measured: first to last movement frame). GAME (redscript utpp_vehicle_door.reds): the close is scheduled from the OnVehicleDoorOpen event with the event's own vanilla autoCloseTime, NOT from the detected door motion (some doors start moving ~0.05 s after the event), so the shipped number is only the extra delay: UTPPCarDoorCloseDeltaS(seat variable) = max over the female / male clip of (close_after_s - vanilla_close_after_s of the class / door side), clamped at >= 0 and rounded up to the ms (generated utpp_vehicle_door_timing.reds; -1.0 = seat without UTPP timing); redscript closeAfter = evt.autoCloseTime + delta, applied only when delta > 0. Both numbers share the event anchor, so the anchor cancels. The shipped close the offline gate must clear is vanilla_close_after_s + delta (check_door_clearance.py --table --close-from-timing).",
+  "clip_start_after_mount_s": 0.025,
+  "window_s": 0.02,
+  "v_lag_s": 0.3,
+  "v_lag_set_s": [
+    0.0,
+    0.15,
+    0.3
+  ],
+  "v_lag_note": "UNVERIFIED safety allowance, not a measurement: V's body is evaluated v_lag_s LATER than the clip clock (frame 0 held for that long). Reason: with zero lag the closing sweep at the measured vanilla close time clears most installed (pk-door2) clips, but the 2026-11-01 review saw the door close on V's shoulder/head/arm/knee at 1.6-1.9 s; a lag scan (check_door_clearance.py --v-lag) reproduces those failures at 0.2 s (standard2, standard25/3/utility passenger), 0.3 s (standard25/3 driver) and 0.4 s (sport1). The real offset between the mount line and V's motion in the game has not been measured to this precision.",
+  "margin_s": 0.15,
+  "classes": {
+    "standard2": {
+      "vehicle": "Archer Hella",
+      "left": {
+        "open_start_s": 0.046,
+        "open_dur_s": 0.6,
+        "close_dur_s": 0.45,
+        "vanilla_close_start_s": 1.562,
+        "status": "measured",
+        "source": "3 clean fl rides (hella)"
+      },
+      "right": {
+        "open_start_s": 0.047,
+        "open_dur_s": 0.583,
+        "close_dur_s": 0.45,
+        "vanilla_close_start_s": 1.563,
+        "status": "measured",
+        "source": "1 clean fr ride (hella passenger)"
+      },
+      "measured_open_start_range_s": [
+        0.041,
+        0.051
+      ],
+      "measured_open_start_note": "door-motion start after the mount line, car-door2 session 2026-11-02 (probe moving lines, 5 rides; range = min / max of the rides). open_start_s of the sides stays the value the shipped fragments were solved with; the approach gate sweeps the range +-0.03 s."
+    },
+    "standard25": {
+      "vehicle": "Villefort Columbus",
+      "left": {
+        "open_start_s": 0.095,
+        "open_dur_s": 0.416,
+        "close_dur_s": 0.466,
+        "vanilla_close_start_s": 1.545,
+        "status": "measured",
+        "source": "2 clean fl rides (columbus)"
+      },
+      "right": {
+        "open_start_s": 0.095,
+        "open_dur_s": 0.417,
+        "close_dur_s": 0.467,
+        "vanilla_close_start_s": 1.54,
+        "status": "measured",
+        "source": "1 clean fr ride (columbus passenger)"
+      },
+      "measured_open_start_range_s": [
+        0.077,
+        0.101
+      ],
+      "measured_open_start_note": "door-motion start after the mount line, car-door2 session 2026-11-02 (probe moving lines, 5 rides; range = min / max of the rides). open_start_s of the sides stays the value the shipped fragments were solved with; the approach gate sweeps the range +-0.03 s."
+    },
+    "standard3": {
+      "vehicle": "Chevalier Emperor",
+      "left": {
+        "open_start_s": 0.03,
+        "open_dur_s": 0.483,
+        "close_dur_s": 0.466,
+        "vanilla_close_start_s": 1.545,
+        "status": "measured",
+        "source": "2 clean fl rides (emperor)"
+      },
+      "right": {
+        "open_start_s": 0.03,
+        "open_dur_s": 0.483,
+        "close_dur_s": 0.466,
+        "vanilla_close_start_s": 1.545,
+        "status": "derived_from_left",
+        "source": "no clean fr ride; same vehicle clip frame counts as the left door (41 recover frames)"
+      },
+      "measured_open_start_range_s": [
+        0.027,
+        0.045
+      ],
+      "measured_open_start_note": "door-motion start after the mount line, car-door2 session 2026-11-02 (probe moving lines, 5 rides; range = min / max of the rides). open_start_s of the sides stays the value the shipped fragments were solved with; the approach gate sweeps the range +-0.03 s."
+    },
+    "sport1": {
+      "vehicle": "Quadra Turbo-R (lifting door)",
+      "left": {
+        "open_start_s": 0.081,
+        "open_dur_s": 1.05,
+        "close_dur_s": 1.031,
+        "vanilla_close_start_s": 1.88,
+        "status": "measured",
+        "source": "2 clean fl rides (turbo)"
+      },
+      "right": {
+        "open_start_s": 0.081,
+        "open_dur_s": 1.35,
+        "close_dur_s": 1.0,
+        "vanilla_close_start_s": 1.787,
+        "status": "measured",
+        "source": "car-door3 session 2026-11-02 11:38, passenger-lines.txt: 1 entry ride (ride 21) + the exit that follows (cam exit lines, no ride line): door_fr_a moving -> settled 1.35 s (open) and moving -> settled 1.0 s (close) in both, the same settled pose (0.84, -0.53, 0.70) yaw 2.9 pitch 3.5. The exit close is the un-delayed vanilla close: 1.700 s after the open start; the entry close 2.076 s = vanilla 1.706 s + the shipped UTPP delta 0.370 s (the left door: 2.166 s observed = 1.799 + 0.370) -> vanilla close 1.706 s after the event (1.787 s after the mount line). open_start_s kept at the left-door value 0.081 s (approach_fixtures.json ride 21: fr door motion 0.025 s after the mount line; the approach gate sweeps measured_open_start_range_s +-0.03 s)"
+      },
+      "lag_set_s": [
+        0.76,
+        0.82,
+        0.88
+      ],
+      "lag_set_note": "V clip clock lag of the Turbo-R: the vanilla slide is 0.815 / 0.82 / 0.825 s in all 3 fitted rides (approach_fixtures.json slide_T_samples, clip time 0 = mount + T + 0.02 s, door event mount + 0.081 s -> lag = T - 0.005 s) - V cannot play earlier than the slide ends, so the legacy lags 0 / 0.15 / 0.3 (UNVERIFIED allowance for the 0.3 s slide classes) do not occur; +-0.06 s spread kept (door start range 0.025..0.083 s, T +-0.01 s). 2026-11-02 door7 (door3 game test).",
+      "pose_envelope": [
+        {
+          "name": "fr-settled-0.19",
+          "d_veh": [
+            0.0,
+            0.19,
+            0.07
+          ],
+          "note": "game probe 2026-11-02 11:38 (rides 21 + 22, passenger): door_fr_a 'settled after 1.35 s' at pos (0.84, -0.53, 0.70) yaw 2.9 pitch 3.5; the clip pose of the fully open door is (0.87, -0.72, 0.63) yaw 2.4 pitch 10.7: +0.19 m forward, +0.07 m up"
+        },
+        {
+          "name": "fl-late-0.10",
+          "d_veh": [
+            0.0,
+            0.1,
+            0.12
+          ],
+          "note": "later left-door readings of the car-door logs: pos (-0.84, -0.63, 0.75) pitch 3.6 (+0.10 m forward, +0.12 m up against the clip pose (-0.87, -0.73, 0.63))"
+        }
+      ],
+      "body_margin_cm": 2.0,
+      "body_margin_note": "every capsule radius +2 cm in the sport1 door model (radii by hand, no skin mesh; door skin pose uncertainty beyond the envelope; checks run on the 2.0 cm fattened body). door7-turbo 2026-11-02.",
+      "pose_envelope_note": "check_door_clearance.Model: the verdict / solve is the worst over the nominal clip pose and every entry (added to the door parts scaled by the open fraction of the door bone travel). The Turbo-R door is a physical mesh; its rest pose after the open animation varies by 0.1-0.2 m in game.",
+      "measured_open_start_range_s": [
+        0.025,
+        0.083
+      ],
+      "measured_open_start_note": "door-motion start after the mount line, car-door2 session 2026-11-02 (probe moving lines, 5 rides; range = min / max of the rides). open_start_s of the sides stays the value the shipped fragments were solved with; the approach gate sweeps the range +-0.03 s."
+    },
+    "sport2": {
+      "vehicle": "Herrera Outlaw",
+      "left": {
+        "open_start_s": 0.047,
+        "open_dur_s": 0.6,
+        "close_dur_s": 0.45,
+        "vanilla_close_start_s": 1.563,
+        "status": "measured",
+        "source": "2 clean fl rides (outlaw)"
+      },
+      "right": {
+        "open_start_s": 0.047,
+        "open_dur_s": 0.6,
+        "close_dur_s": 0.45,
+        "vanilla_close_start_s": 1.563,
+        "status": "derived_from_left",
+        "source": "no clean fr ride; same vehicle clip frame counts as the left door"
+      },
+      "measured_open_start_range_s": [
+        0.028,
+        0.05
+      ],
+      "measured_open_start_note": "door-motion start after the mount line, car-door2 session 2026-11-02 (probe moving lines, 5 rides; range = min / max of the rides). open_start_s of the sides stays the value the shipped fragments were solved with; the approach gate sweeps the range +-0.03 s."
+    },
+    "utility": {
+      "vehicle": "Kaukaz Bratsk (utility4)",
+      "left": {
+        "open_start_s": 0.13,
+        "open_dur_s": 0.6,
+        "close_dur_s": 0.45,
+        "vanilla_close_start_s": 1.545,
+        "status": "open_start_measured_duration_assumed",
+        "source": "open start 0.13 s MEASURED in every Bratsk ride of the car-door2 session (0.126-0.131 s after the mount line, 5 rides, both doors); open_dur_s 0.6 / close_dur_s 0.45 ASSUMED FROM ANIM: the Bratsk door clip door_front_* has the same 34 startup / 25 recover frames as the Hella / Outlaw (0.6 / 0.45 s measured there); the probe cannot confirm it (its \"settled\" lines are stale and report motion until +2.0 s). vanilla_close_start_s 1.545 ASSUMED (no vanilla Bratsk close was ever measured, UTPP delays it): the lower end of the measured band of the other classes (Emperor / Columbus 1.545, Hella / Outlaw 1.562) = the close request 1.5 s after the event plus ~0.045 s door latency, independent of the open lag (Columbus opens 0.095 s late and still closes at 1.545); the lower value gives the larger UTPP delta (conservative). Replace with a probe that logs the door angle (decision.md section 11)."
+      },
+      "right": {
+        "open_start_s": 0.13,
+        "open_dur_s": 0.6,
+        "close_dur_s": 0.45,
+        "vanilla_close_start_s": 1.545,
+        "status": "open_start_measured_duration_assumed",
+        "source": "open start 0.13 s MEASURED in every Bratsk ride of the car-door2 session (0.126-0.131 s after the mount line, 5 rides, both doors); open_dur_s 0.6 / close_dur_s 0.45 ASSUMED FROM ANIM: the Bratsk door clip door_front_* has the same 34 startup / 25 recover frames as the Hella / Outlaw (0.6 / 0.45 s measured there); the probe cannot confirm it (its \"settled\" lines are stale and report motion until +2.0 s). vanilla_close_start_s 1.545 ASSUMED (no vanilla Bratsk close was ever measured, UTPP delays it): the lower end of the measured band of the other classes (Emperor / Columbus 1.545, Hella / Outlaw 1.562) = the close request 1.5 s after the event plus ~0.045 s door latency, independent of the open lag (Columbus opens 0.095 s late and still closes at 1.545); the lower value gives the larger UTPP delta (conservative). Replace with a probe that logs the door angle (decision.md section 11)."
+      },
+      "measured_open_start_range_s": [
+        0.126,
+        0.131
+      ],
+      "measured_open_start_note": "door-motion start after the mount line, car-door2 session 2026-11-02 (probe moving lines, 5 rides; range = min / max of the rides). open_start_s of the sides stays the value the shipped fragments were solved with; the approach gate sweeps the range +-0.03 s.",
+      "utility_note": "replaced the copied Hella numbers (open_start 0.047) of 2026-11-02 morning; clip fragments solved against the old table are stale (validate_fragment) and must be re-solved"
+    }
+  },
+  "clips": {
+    "sport1": {
+      "driver": {
+        "pwa": {
+          "close_after_s": 2.219,
+          "earliest_close_after_s": 2.069,
+          "vanilla_close_after_s": 1.799,
+          "timing_status": "measured",
+          "v_lag_s": 0.88,
+          "lags_s": [
+            0.76,
+            0.82,
+            0.88
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_sport1_driver.anims.glb",
+          "clip_sha256": "630D10AF6DE6F17DD17102B41671E9CB49B76C8798B670002A356FD1A61B8A7A"
+        },
+        "pma": {
+          "close_after_s": 2.269,
+          "earliest_close_after_s": 2.119,
+          "vanilla_close_after_s": 1.799,
+          "timing_status": "measured",
+          "v_lag_s": 0.88,
+          "lags_s": [
+            0.76,
+            0.82,
+            0.88
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_sport1_driver.anims.glb",
+          "clip_sha256": "BF9008A6E7F93408BD0B39F96CEE1F3714324DB92EED472029E8CA35B8686FC9"
+        }
+      },
+      "passenger_r": {
+        "pwa": {
+          "close_after_s": 2.244,
+          "earliest_close_after_s": 2.094,
+          "vanilla_close_after_s": 1.706,
+          "timing_status": "measured",
+          "v_lag_s": 0.88,
+          "lags_s": [
+            0.76,
+            0.82,
+            0.88
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_sport1_passenger_r.anims.glb",
+          "clip_sha256": "97C84216175FBB13E07DB5BC95B3985FBE00B9FC0F83BDCED82BF3D94C7102A9"
+        },
+        "pma": {
+          "close_after_s": 2.244,
+          "earliest_close_after_s": 2.094,
+          "vanilla_close_after_s": 1.706,
+          "timing_status": "measured",
+          "v_lag_s": 0.88,
+          "lags_s": [
+            0.76,
+            0.82,
+            0.88
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_sport1_passenger_r.anims.glb",
+          "clip_sha256": "00B0C8F6233725472BF195E4B7C15B0F866733C78C127839A608E19A1189D479"
+        }
+      }
+    },
+    "sport2": {
+      "driver": {
+        "pma": {
+          "close_after_s": 1.878,
+          "earliest_close_after_s": 1.728,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "measured",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_sport2_driver.anims.glb",
+          "clip_sha256": "9CA3A1AD1A4B86DE6704DCC8C9C3BEB6BAE8FAB76AB7263E5142825651B3C890"
+        },
+        "pwa": {
+          "close_after_s": 2.053,
+          "earliest_close_after_s": 1.903,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "measured",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_sport2_driver.anims.glb",
+          "clip_sha256": "58C68D0AE8254B3D6A81829CA094EBE8855DDAA72C57C066B9374E33473626A2"
+        }
+      },
+      "passenger_r": {
+        "pwa": {
+          "close_after_s": 2.028,
+          "earliest_close_after_s": 1.878,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "derived_from_left",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_sport2_passenger_r.anims.glb",
+          "clip_sha256": "61D35114F060B5A61A132D3024F80237AC98D052DE3DB6C369DDFB42EA8BA7C3"
+        },
+        "pma": {
+          "close_after_s": 1.753,
+          "earliest_close_after_s": 1.603,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "derived_from_left",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_sport2_passenger_r.anims.glb",
+          "clip_sha256": "A5F513A7EFF0902416DBC4323422F8EA359461FEAB64DCB466628142DA84C3C9"
+        }
+      }
+    },
+    "standard25": {
+      "passenger_r": {
+        "pma": {
+          "close_after_s": 1.705,
+          "earliest_close_after_s": 1.555,
+          "vanilla_close_after_s": 1.445,
+          "timing_status": "measured",
+          "v_lag_s": 0.31,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.31
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_standard25_passenger_r.anims.glb",
+          "clip_sha256": "8158C82945013585A3EA1B3296440F3E279BC5B4AEACEDE255AB3CFD4A1C1D6F"
+        },
+        "pwa": {
+          "close_after_s": 1.605,
+          "earliest_close_after_s": 1.455,
+          "vanilla_close_after_s": 1.445,
+          "timing_status": "measured",
+          "v_lag_s": 0.31,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.31
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_standard25_passenger_r.anims.glb",
+          "clip_sha256": "37B7F182BB95B42D7BE22F46997E585E87DEE5B158A58D3F3E5F53122BCBDAAD"
+        }
+      },
+      "driver": {
+        "pwa": {
+          "close_after_s": 1.555,
+          "earliest_close_after_s": 1.405,
+          "vanilla_close_after_s": 1.45,
+          "timing_status": "measured",
+          "v_lag_s": 0.31,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.31
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_standard25_driver.anims.glb",
+          "clip_sha256": "3FD3DCDD204B74436AC07388B491E11ABF6D0C2124EFE67AC27E1278446B39F5"
+        },
+        "pma": {
+          "close_after_s": 1.655,
+          "earliest_close_after_s": 1.505,
+          "vanilla_close_after_s": 1.45,
+          "timing_status": "measured",
+          "v_lag_s": 0.31,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.31
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_standard25_driver.anims.glb",
+          "clip_sha256": "64C7782B92D986EBB3F397EB6C16D98A30A0C1CD6895686592A5DBDF400D0BE3"
+        }
+      }
+    },
+    "standard2": {
+      "passenger_r": {
+        "pma": {
+          "close_after_s": 1.703,
+          "earliest_close_after_s": 1.553,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "measured",
+          "v_lag_s": 0.305,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.305
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_standard2_passenger_r.anims.glb",
+          "clip_sha256": "814FCA09A9FE6E38F3D4A2DD0154FAEB33122FA10CE854DB8B210AC545AFCFE6"
+        },
+        "pwa": {
+          "close_after_s": 1.753,
+          "earliest_close_after_s": 1.603,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "measured",
+          "v_lag_s": 0.305,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.305
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_standard2_passenger_r.anims.glb",
+          "clip_sha256": "C3F01E9FD65DE4B6CD2C1B904755A477E0B015B70804B2D9C6836C9F685E42E8"
+        }
+      },
+      "driver": {
+        "pwa": {
+          "close_after_s": 1.804,
+          "earliest_close_after_s": 1.654,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "measured",
+          "v_lag_s": 0.305,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.305
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_standard2_driver.anims.glb",
+          "clip_sha256": "97AB15FAC3446AE500350BE103E86ED37D461A6550EEBB1884E8CA90A13D0DBF"
+        },
+        "pma": {
+          "close_after_s": 1.804,
+          "earliest_close_after_s": 1.654,
+          "vanilla_close_after_s": 1.516,
+          "timing_status": "measured",
+          "v_lag_s": 0.305,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3,
+            0.305
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_standard2_driver.anims.glb",
+          "clip_sha256": "C974EA9E162D03B79E1E677FD90768BD7E587D665A0C4C6D2C649EA14F4180B5"
+        }
+      }
+    },
+    "standard3": {
+      "passenger_r": {
+        "pma": {
+          "close_after_s": 1.545,
+          "earliest_close_after_s": 1.395,
+          "vanilla_close_after_s": 1.515,
+          "timing_status": "derived_from_left",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_standard3_passenger_r.anims.glb",
+          "clip_sha256": "74C9CE3731F28BC1D9416CFCEBC0F351AC0EAF86F5EE710A171956CA066B6361"
+        },
+        "pwa": {
+          "close_after_s": 1.62,
+          "earliest_close_after_s": 1.47,
+          "vanilla_close_after_s": 1.515,
+          "timing_status": "derived_from_left",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_standard3_passenger_r.anims.glb",
+          "clip_sha256": "E42CD016DAB08E73304438A59541D1F836C3C78A21D898B4C284E807132D20CE"
+        }
+      },
+      "driver": {
+        "pwa": {
+          "close_after_s": 1.645,
+          "earliest_close_after_s": 1.495,
+          "vanilla_close_after_s": 1.515,
+          "timing_status": "measured",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_standard3_driver.anims.glb",
+          "clip_sha256": "EFA06D83D47AA9714FD0819B5FEFFC698FAB073345EA14C215408A384AE659EB"
+        },
+        "pma": {
+          "close_after_s": 1.82,
+          "earliest_close_after_s": 1.67,
+          "vanilla_close_after_s": 1.515,
+          "timing_status": "measured",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_standard3_driver.anims.glb",
+          "clip_sha256": "585EA3CF4BDF3841CF9EEC3B7C5F7289A2FD80890A39B1657055B4151578F8A0"
+        }
+      }
+    },
+    "utility": {
+      "driver": {
+        "pma": {
+          "close_after_s": 2.195,
+          "earliest_close_after_s": 2.045,
+          "vanilla_close_after_s": 1.415,
+          "timing_status": "open_start_measured_duration_assumed",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pma_utility_driver.anims.glb",
+          "clip_sha256": "8C96BBC2A9C834F00E38ACC3F84A5CD352B2FDA9641C13D1667E3A63546EE86B"
+        },
+        "pwa": {
+          "close_after_s": 2.17,
+          "earliest_close_after_s": 2.02,
+          "vanilla_close_after_s": 1.415,
+          "timing_status": "open_start_measured_duration_assumed",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_utility_driver.anims.glb",
+          "clip_sha256": "9AB53B7965988CD4112A26D83E0A74C8189498276A91072A034A531E33CFDE9D"
+        }
+      },
+      "passenger_r": {
+        "pwa": {
+          "close_after_s": 1.695,
+          "earliest_close_after_s": 1.545,
+          "vanilla_close_after_s": 1.415,
+          "timing_status": "open_start_measured_duration_assumed",
+          "v_lag_s": 0.3,
+          "lags_s": [
+            0.0,
+            0.15,
+            0.3
+          ],
+          "margin_s": 0.15,
+          "tol_cm": 1.0,
+          "clip": "utpp_car_pwa_utility_passenger_r.anims.glb",
+          "clip_sha256": "AD648640EADCDDE7C25FB26756D39688DDD9D737C60CE298BF5669F017303627"
+        }
+      }
+    }
+  },
+  "arcs": {
+    "_note": "front-door arcs, vehicle frame (x right, y forward); see the gen_door_timing.py docstring (DOOR ARC contract). Computed by gen_door_timing.py --arcs.",
+    "standard2": {
+      "door_data_file": "door-data\\standard2.json",
+      "door_data_sha256": "79D9AD8FD80E9A5C8B3E3A75A8C940D2FBA1E834C43E2E03B07742527C0CFF30",
+      "left": {
+        "hingeX": -0.9931,
+        "hingeY": 1.1698,
+        "hingeZ": 0.3404,
+        "length": 1.3202,
+        "closedDirDeg": -95.175,
+        "openDeg": -70.01,
+        "settledDeg": -67.46,
+        "peakFrame": 21,
+        "startupFrames": 34,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.041,
+        "valid": true,
+        "trailingDirDeg": -78.425,
+        "leadDeg": 16.75,
+        "lengthRearMostM": 1.3202,
+        "openDurS": 0.418,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.6,
+          "max_early_s": 0.063,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.418,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 6732,
+          "touched": 3988,
+          "violations": 0,
+          "early_median_s": 0.074,
+          "early_max_s": 0.21
+        },
+        "probe_hinge_xy": [
+          -0.985,
+          1.19
+        ],
+        "probe_hinge_delta_m": 0.0218
+      },
+      "right": {
+        "hingeX": 0.9905,
+        "hingeY": 1.1682,
+        "hingeZ": 0.3404,
+        "length": 1.3184,
+        "closedDirDeg": -85.398,
+        "openDeg": 70.0,
+        "settledDeg": 67.46,
+        "peakFrame": 21,
+        "startupFrames": 34,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.041,
+        "valid": true,
+        "trailingDirDeg": -101.148,
+        "leadDeg": 15.75,
+        "lengthRearMostM": 1.3184,
+        "openDurS": 0.399,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.583,
+          "max_early_s": 0.063,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.406,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 6755,
+          "touched": 3984,
+          "violations": 0,
+          "early_median_s": 0.073,
+          "early_max_s": 0.2
+        },
+        "probe_hinge_xy": [
+          1.0,
+          1.18
+        ],
+        "probe_hinge_delta_m": 0.0151
+      }
+    },
+    "standard25": {
+      "door_data_file": "door-data\\standard25.json",
+      "door_data_sha256": "0114A22005EB808FC37B319663998AC412A93D58A3A81E2017B53F8C26242E36",
+      "left": {
+        "hingeX": -0.9371,
+        "hingeY": 1.3625,
+        "hingeZ": 0.5756,
+        "length": 1.4028,
+        "closedDirDeg": -96.431,
+        "openDeg": -70.01,
+        "settledDeg": -65.3,
+        "peakFrame": 22,
+        "startupFrames": 45,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.077,
+        "valid": true,
+        "trailingDirDeg": -83.931,
+        "leadDeg": 12.5,
+        "lengthRearMostM": 1.4028,
+        "openDurS": 0.225,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.416,
+          "max_early_s": 0.049,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.229,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 7557,
+          "touched": 4309,
+          "violations": 0,
+          "early_median_s": 0.047,
+          "early_max_s": 0.153
+        },
+        "probe_hinge_xy": [
+          -0.93,
+          1.37
+        ],
+        "probe_hinge_delta_m": 0.0103
+      },
+      "right": {
+        "hingeX": 0.9371,
+        "hingeY": 1.3625,
+        "hingeZ": 0.5756,
+        "length": 1.4028,
+        "closedDirDeg": -84.069,
+        "openDeg": 70.0,
+        "settledDeg": 65.29,
+        "peakFrame": 22,
+        "startupFrames": 45,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.077,
+        "valid": true,
+        "trailingDirDeg": -96.069,
+        "leadDeg": 12.0,
+        "lengthRearMostM": 1.4028,
+        "openDurS": 0.225,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.417,
+          "max_early_s": 0.049,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.229,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 7563,
+          "touched": 4308,
+          "violations": 0,
+          "early_median_s": 0.046,
+          "early_max_s": 0.152
+        },
+        "probe_hinge_xy": [
+          0.95,
+          1.37
+        ],
+        "probe_hinge_delta_m": 0.0149
+      }
+    },
+    "standard3": {
+      "door_data_file": "door-data\\standard3.json",
+      "door_data_sha256": "A4A7504C75C8E7378BAE960D63AAB1F4BAC13D8F204904BBC486BDA459974BB3",
+      "left": {
+        "hingeX": -0.9922,
+        "hingeY": 0.9347,
+        "hingeZ": 0.668,
+        "length": 1.2932,
+        "closedDirDeg": -91.289,
+        "openDeg": -70.0,
+        "settledDeg": -66.28,
+        "peakFrame": 22,
+        "startupFrames": 40,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.027,
+        "valid": true,
+        "trailingDirDeg": -90.789,
+        "leadDeg": 0.5,
+        "lengthRearMostM": 1.2932,
+        "openDurS": 0.138,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.483,
+          "max_early_s": 0.063,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.138,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 7391,
+          "touched": 3917,
+          "violations": 0,
+          "early_median_s": 0.026,
+          "early_max_s": 0.142
+        },
+        "probe_hinge_xy": [
+          -0.97,
+          0.95
+        ],
+        "probe_hinge_delta_m": 0.027
+      },
+      "right": {
+        "hingeX": 0.9932,
+        "hingeY": 0.9347,
+        "hingeZ": 0.668,
+        "length": 1.2962,
+        "closedDirDeg": -85.82,
+        "openDeg": 70.0,
+        "settledDeg": 67.18,
+        "peakFrame": 22,
+        "startupFrames": 40,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.027,
+        "valid": true,
+        "trailingDirDeg": -88.32,
+        "leadDeg": 2.5,
+        "lengthRearMostM": 1.2962,
+        "openDurS": 0.299,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.483,
+          "max_early_s": 0.045,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.299,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 7428,
+          "touched": 3914,
+          "violations": 0,
+          "early_median_s": 0.054,
+          "early_max_s": 0.105
+        },
+        "probe_hinge_xy": [
+          1.01,
+          0.95
+        ],
+        "probe_hinge_delta_m": 0.0227
+      }
+    },
+    "sport1": {
+      "door_data_file": "door-data\\sport1.json",
+      "door_data_sha256": "8A67343C87AE940B6DA080535B1570F44685D9F700983200DEAB59AB6BF4677C",
+      "left": {
+        "hingeX": -0.7708,
+        "hingeY": 0.4586,
+        "hingeZ": 0.1897,
+        "length": 1.352,
+        "closedDirDeg": -105.193,
+        "openDeg": -9.01,
+        "settledDeg": 0.59,
+        "peakFrame": 19,
+        "startupFrames": 49,
+        "hingeMoveM": 1.1905,
+        "openDelayS": 0.025,
+        "valid": false,
+        "invalid_reason": "lifting door: the hinge travels 1.19 m during the startup phase, swing -9.0 deg (no swing-door arc)"
+      },
+      "right": {
+        "hingeX": 0.7708,
+        "hingeY": 0.4586,
+        "hingeZ": 0.1897,
+        "length": 1.343,
+        "closedDirDeg": -74.807,
+        "openDeg": 8.68,
+        "settledDeg": -0.55,
+        "peakFrame": 2,
+        "startupFrames": 34,
+        "hingeMoveM": 1.1815,
+        "openDelayS": 0.025,
+        "valid": false,
+        "invalid_reason": "lifting door: the hinge travels 1.18 m during the startup phase, swing 8.7 deg (no swing-door arc)"
+      }
+    },
+    "sport2": {
+      "door_data_file": "door-data\\sport2.json",
+      "door_data_sha256": "F3876AD65EBF3BF00488450CF2F568EE45E30B7EBBE4DBA67179936C3FDF3A79",
+      "left": {
+        "hingeX": -0.8525,
+        "hingeY": 0.6246,
+        "hingeZ": 0.4571,
+        "length": 1.3648,
+        "closedDirDeg": -92.259,
+        "openDeg": -70.0,
+        "settledDeg": -67.46,
+        "peakFrame": 21,
+        "startupFrames": 34,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.028,
+        "valid": true,
+        "trailingDirDeg": -79.509,
+        "leadDeg": 12.75,
+        "lengthRearMostM": 1.3648,
+        "openDurS": 0.408,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.6,
+          "max_early_s": 0.061,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.418,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 7251,
+          "touched": 4097,
+          "violations": 0,
+          "early_median_s": 0.071,
+          "early_max_s": 0.208
+        },
+        "probe_hinge_xy": [
+          -0.83,
+          0.665
+        ],
+        "probe_hinge_delta_m": 0.0462
+      },
+      "right": {
+        "hingeX": 0.8525,
+        "hingeY": 0.6246,
+        "hingeZ": 0.4571,
+        "length": 1.3648,
+        "closedDirDeg": -87.741,
+        "openDeg": 70.0,
+        "settledDeg": 67.46,
+        "peakFrame": 21,
+        "startupFrames": 34,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.028,
+        "valid": true,
+        "trailingDirDeg": -100.491,
+        "leadDeg": 12.75,
+        "lengthRearMostM": 1.3648,
+        "openDurS": 0.408,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.6,
+          "max_early_s": 0.061,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.418,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 7251,
+          "touched": 4097,
+          "violations": 0,
+          "early_median_s": 0.071,
+          "early_max_s": 0.208
+        },
+        "probe_hinge_xy": [
+          0.87,
+          0.66
+        ],
+        "probe_hinge_delta_m": 0.0395
+      }
+    },
+    "utility": {
+      "door_data_file": "door-data\\utility.json",
+      "door_data_sha256": "C6157D395A9D1B2DF045C96AB59FAFC9A756A9EC070A5B9E4819E0A68408AA1B",
+      "left": {
+        "hingeX": -1.5472,
+        "hingeY": 4.5414,
+        "hingeZ": 1.4215,
+        "length": 1.4424,
+        "closedDirDeg": -90.291,
+        "openDeg": -70.0,
+        "settledDeg": -67.46,
+        "peakFrame": 21,
+        "startupFrames": 34,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.126,
+        "valid": true,
+        "trailingDirDeg": -87.791,
+        "leadDeg": 2.5,
+        "lengthRearMostM": 1.4424,
+        "openDurS": 0.407,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.6,
+          "max_early_s": 0.066,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.418,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 8323,
+          "touched": 4435,
+          "violations": 0,
+          "early_median_s": 0.079,
+          "early_max_s": 0.177
+        },
+        "probe_hinge_xy": [
+          -1.515,
+          4.52
+        ],
+        "probe_hinge_delta_m": 0.0387
+      },
+      "right": {
+        "hingeX": 1.5458,
+        "hingeY": 4.5131,
+        "hingeZ": 1.4241,
+        "length": 1.414,
+        "closedDirDeg": -90.693,
+        "openDeg": 70.0,
+        "settledDeg": 67.46,
+        "peakFrame": 21,
+        "startupFrames": 34,
+        "hingeMoveM": 0.0,
+        "openDelayS": 0.126,
+        "valid": true,
+        "trailingDirDeg": -92.193,
+        "leadDeg": 1.5,
+        "lengthRearMostM": 1.414,
+        "openDurS": 0.398,
+        "fit": {
+          "phi_range": [
+            0.1,
+            0.95
+          ],
+          "anim_open_dur_s": 0.6,
+          "max_early_s": 0.067,
+          "max_late_s": 0.0,
+          "dur_rearmost_fit_s": 0.418,
+          "dur_safety": 0.95,
+          "rule": "closedDir = trailing-edge direction rotated toward the opening by the lead (0.25 deg step) with the smallest median earliness among those for which every anchor outboard of the car that the door reaches is covered (also at +-0.5 deg and on the unseen check grids); duration = min(rear-most-point fit, INV_DUR_SAFETY * largest duration for which the cap model is never later than the data)"
+        },
+        "invariant": {
+          "contact_m": 0.15,
+          "body_m": 0.2,
+          "r_min_m": 0.4,
+          "outboard_m": 0.1,
+          "grids": [
+            0.0,
+            0.25,
+            0.5,
+            0.75
+          ],
+          "anchors": 8146,
+          "touched": 4328,
+          "violations": 0,
+          "early_median_s": 0.079,
+          "early_max_s": 0.172
+        },
+        "probe_hinge_xy": [
+          1.56,
+          4.49
+        ],
+        "probe_hinge_delta_m": 0.0271
+      }
+    }
+  }
+}
