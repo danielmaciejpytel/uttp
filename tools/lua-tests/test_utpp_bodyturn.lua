@@ -452,7 +452,7 @@ do -- registration: key, type, default, section, label; apply routes into SetWea
                  Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end }
   m.RegisterSettings(core)
   local d = regs[1]
-  xcheck("weaponTurn setting: key / type / default / section", #regs == 11 and d.key == "bodyturn.weaponTurn" and d.type == "bool"
+  xcheck("weaponTurn setting: key / type / default / section", #regs == 12 and d.key == "bodyturn.weaponTurn" and d.type == "bool"
     and d.default == true and d.section == "bodyturn" and sections[1][1] == "bodyturn", d and d.key)
   xcheck("smooth aim: production and registered defaults ON", UTPP.exec.aimSmooth == true and regs[10].key == "bodyturn.aimSmooth"
     and regs[10].default == true and m.exec.aimSmooth == true)
@@ -646,7 +646,7 @@ do
   local regs = {}
   local core = { RegisterSection = function() end, Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end }
   local _, _, calls, err = wired(newWiredWorld(), { core = core })
-  xcheck("wired: setting registered at onInit, default ON", err == nil and #regs == 11 and regs[1].key == "bodyturn.weaponTurn"
+  xcheck("wired: setting registered at onInit, default ON", err == nil and #regs == 12 and regs[1].key == "bodyturn.weaponTurn"
     and regs[1].default == true, tostring(err))
   xcheck("wired: bodyturn.guardFix registered, default on", regs[9] ~= nil and regs[9].key == "bodyturn.guardFix" and regs[9].default == true)
   xcheck("wired: fresh profile -> 0x5FBF sent once to the game after the executor was selected; onShutdown restores 0x7FBF",
@@ -1449,9 +1449,9 @@ do
     local core = { RegisterSection = function() end,
                    Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end }
     m.RegisterSettings(core)
-    local d = regs[11]
-    xcheck("B1 shooterMode: 11 registrations, aimSmooth stays #10, bodyturn.shooterMode is the LAST one", #regs == 11
-      and regs[10].key == "bodyturn.aimSmooth" and d ~= nil and d.key == "bodyturn.shooterMode", d and d.key)
+    local d = regs[12]
+    xcheck("B1 shooterMode: 12 registrations, aimSmooth stays #10, meleeStrikeTurn #11, bodyturn.shooterMode is the LAST one", #regs == 12
+      and regs[10].key == "bodyturn.aimSmooth" and regs[11].key == "bodyturn.meleeStrikeTurn" and d ~= nil and d.key == "bodyturn.shooterMode", d and d.key)
     xcheck("B1 shooterMode: type bool, default false, section bodyturn, label exactly 'Shooter mode' (2026-10-23), English description (camera-relative)",
       d.type == "bool" and d.default == false and d.section == "bodyturn" and d.label == "Shooter mode"
       and d.desc ~= nil and d.desc:find("relative to the camera", 1, true) ~= nil
@@ -1469,7 +1469,7 @@ do
     local regs2 = {}
     m2.RegisterSettings({ RegisterSection = function() end,
                           Register = function(def) regs2[#regs2 + 1] = def; if def.apply then def.apply(def.default) end end })
-    xcheck("B1 shooterMode: native missing + setting off -> no log line at all", lines(m2, "Shooter") == 0 and #regs2 == 11
+    xcheck("B1 shooterMode: native missing + setting off -> no log line at all", lines(m2, "Shooter") == 0 and #regs2 == 12
       and m2.ShooterModeActive() == false)
   end
 
@@ -1981,8 +1981,8 @@ do
       return state, err, nativeCalls
     end
     local st, err, calls = wiredFn({ mods = { utpp_motion = { want = { enabled = true } } }, live = true })
-    xcheck("wired shooterMode: motion enabled + DLL live -> effective, setting is the 11th registration, native(true) sent",
-      err == nil and st ~= nil and st.eff == true and st.regs == 11 and calls[1] == true, tostring(err))
+    xcheck("wired shooterMode: motion enabled + DLL live -> effective, setting is the 12th registration, native(true) sent",
+      err == nil and st ~= nil and st.eff == true and st.regs == 12 and calls[1] == true, tostring(err))
     st, err = wiredFn({ mods = { utpp_motion = { want = { enabled = false } } }, live = true })
     xcheck("wired shooterMode: utpp_motion setting off -> inert", err == nil and st ~= nil and st.eff == false and st.v2 == false)
     st, err = wiredFn({ mods = {}, live = true })
@@ -2119,6 +2119,225 @@ do
       not sustained(mutantModule("(E.hipFireSustained and E.hipFireSustainedHold or E.hipFireIsolatedHold)", "E.hipFireIsolatedHold"), hz))
     xcheck("HIP-2 lease " .. hz .. "Hz: mutation [sprint ignored] is caught",
       not sprintCut(mutantModule("if sig.sprint ~= false and", "if false and"), hz))
+  end
+end
+
+-- melee strike turn (bodyturn.meleeStrikeTurn): V turns toward the direction of the game's fist hit (api.meleeStrikeYaw, the tracked
+-- target) in an eased, capped turn; nothing without the signal, the melee bit, third person, the setting or an armed executor
+do
+  local function mutantStrike(from, to)
+    local f = assert(io.open(UTPP_BODYTURN_PATH, "rb"))
+    local src = f:read("*a"); f:close()
+    local a, b = src:find(from, 1, true)
+    assert(a and not src:find(from, b + 1, true), "mutation anchor must exist exactly once: " .. from)
+    local m = assert(loadstring(src:sub(1, a - 1) .. to .. src:sub(b + 1), "=utpp_bodyturn_strike_mutant"))()
+    m.exec.aimSmooth = true
+    m.lines = {}
+    m.log = function(msg) m.lines[#m.lines + 1] = msg end
+    return m
+  end
+  -- world: body yaw 0, melee attack state (reasons 2048) with a hit direction of `strike` degrees.
+  -- o.lag = 1: a request lands one frame late; o.drop: every second request is queued but never applied (the executor drops stale
+  -- requests and ones that meet a game adjustTransform)
+  local function strikeWorld(m, o)
+    o = o or {}
+    local w = newWorld({ utppCamera = true, locomotion = function() return false end, arm = o.arm })
+    w.reasons, w.strike, w.holds, w.looks, w.queue, w.sent = 2048, o.strike, {}, {}, {}, 0
+    w.lag = o.lag or 0
+    w.api.locomotionReasons = function() return w.reasons end
+    w.api.meleeStrikeYaw = function() return w.strike end
+    w.api.alignHold = function(on) w.holds[#w.holds + 1] = on; return true end
+    w.api.lookStep = function(step) w.looks[#w.looks + 1] = step; return true end
+    if o.reject then
+      w.api.applyAim = function() return false end
+    else
+      w.api.applyAim = function(yaw)
+        w.calls.apply[#w.calls.apply + 1] = yaw
+        w.sent = w.sent + 1
+        if not (o.drop and w.sent % 2 == 0) then w.queue[#w.queue + 1] = { yaw = yaw, due = w.frame + w.lag } end
+        return true
+      end
+    end
+    m.SelectExecutor(w.api)
+    m.SetStrikeTurn(o.on ~= false)
+    return w
+  end
+  local function runStrike(m, w, n, dt)
+    local why, maxStep, atHit = nil, 0, nil
+    for i = 1, n do
+      w.frame = w.frame + 1
+      local before = w.body
+      why = m.ExecStep(w.api, dt or 1 / 60)
+      -- requests are applied by the next locomotion update (lag 0: this frame)
+      local rest = {}
+      for _, q in ipairs(w.queue) do
+        if q.due <= w.frame then w.body = q.yaw else rest[#rest + 1] = q end
+      end
+      w.queue = rest
+      maxStep = math.max(maxStep, math.abs(norm(w.body - before)))
+      if i == 12 then atHit = w.body end -- 0.2 s after the strike starts (attackEffectDelay) at 60 fps
+    end
+    return why, maxStep, atHit
+  end
+
+  -- 1) default off: no turn although the signal is there
+  do
+    local m = freshModule(true)
+    xcheck("strike turn: default OFF", m.exec.strikeTurn == false)
+    local w = strikeWorld(m, { strike = 40, on = false })
+    local why = runStrike(m, w, 20)
+    xcheck("strike turn: off -> nothing applied", #w.calls.apply == 0 and why == "locomotion inactive", why)
+  end
+  -- 2) 40 deg: eased turn, no overshoot, <= 540 deg/s, ends within the deadband, heading lock on then off, exact look steps
+  local function turnCase(m)
+    local w = strikeWorld(m, { strike = 40 })
+    local why, maxStep = runStrike(m, w, 18)
+    local sumLook = 0
+    for _, s in ipairs(w.looks) do sumLook = sumLook + s end
+    local ok = w.body > 40 - m.exec.strikeDeadband - 1e-6 and w.body <= 40 + 1e-9 and maxStep <= 540 / 60 + 1e-9
+      and why == "strike aligned" and #w.looks == #w.calls.apply and math.abs(sumLook - w.body) < 1e-6
+      and #w.holds == 2 and w.holds[1] == true and w.holds[2] == false
+    return ok, string.format("body %.2f maxStep %.2f why %s holds %d", w.body, maxStep, tostring(why), #w.holds)
+  end
+  do
+    local ok, d = turnCase(freshModule(true))
+    xcheck("strike turn: 40 deg turn is eased, <= 540 deg/s, ends within the deadband, no overshoot, heading lock on then off, exact look steps", ok, d)
+  end
+  -- 2b) the turn is done by the hit (frame 12 at 60 fps): ideal, one frame late, every second request dropped
+  do
+    local function atHit(o)
+      local m = freshModule(true)
+      local w = strikeWorld(m, o)
+      local _, _, hit = runStrike(m, w, 30)
+      return hit, w.body
+    end
+    local h0, f0 = atHit({ strike = 40 })
+    local h1, f1 = atHit({ strike = 40, lag = 1 })
+    local h2, f2 = atHit({ strike = 40, drop = true })
+    xcheck("strike turn: ideal executor - within 6 deg of the hit direction at the hit (0.2 s), no overshoot", math.abs(40 - h0) <= 6 and h0 <= 40 + 1e-9
+      and f0 <= 40 + 1e-9, string.format("%.2f / %.2f", h0, f0))
+    xcheck("strike turn: requests landing one frame late - within 6 deg at the hit, no overshoot", math.abs(40 - h1) <= 6 and f1 <= 40 + 1e-9,
+      string.format("%.2f / %.2f", h1, f1))
+    xcheck("strike turn: every second request dropped - within 9 deg at the hit and 6 deg after 0.5 s, no overshoot", math.abs(40 - h2) <= 9
+      and math.abs(40 - f2) <= 6 and f2 <= 40 + 1e-9, string.format("%.2f / %.2f", h2, f2))
+  end
+  -- 3) cap: a hit 120 deg away turns V at most strikeMax (50) from where the episode started, then holds - also with late / dropped requests
+  local function capCase(m, o)
+    local w = strikeWorld(m, o or { strike = 120 })
+    local why = runStrike(m, w, 90)
+    return w.body >= 50 - m.exec.strikeDeadband - 1e-6 and w.body <= 50 + 1e-6 and why == "strike hold" and w.holds[#w.holds] == false, w.body
+  end
+  do
+    local ok, body = capCase(freshModule(true))
+    xcheck("strike turn: a 120 deg hit direction is capped at 50 deg per episode, then holds", ok, body)
+    local okL, bodyL = capCase(freshModule(true), { strike = 120, lag = 2 })
+    xcheck("strike turn: the cap holds with requests landing two frames late (no overshoot past 50)", okL, bodyL)
+    local okD, bodyD = capCase(freshModule(true), { strike = 120, drop = true })
+    xcheck("strike turn: the cap holds with every second request dropped", okD, bodyD)
+    local okMut = capCase(mutantStrike("local goal = E.strikeStart + math.max(-E.strikeMax, math.min(E.strikeMax, off))",
+      "local goal = E.strikeStart + off"))
+    xcheck("strike turn: mutation [no cap] is caught", not okMut)
+  end
+  -- 4) episode: a gap of > 0.5 s without the signal starts a new episode from V's current facing, a short gap does not
+  do
+    local m = freshModule(true)
+    local w = strikeWorld(m, { strike = 120 })
+    runStrike(m, w, 60)
+    local b1 = w.body
+    w.strike = nil
+    runStrike(m, w, 20) -- 0.33 s: same episode
+    w.strike = 170
+    runStrike(m, w, 40)
+    xcheck("strike turn: a 0.33 s gap keeps the episode (V stays within 50 deg of where it started)", w.body <= 50 + 1e-6 and w.body >= b1 - 1e-6, w.body)
+    w.strike = nil
+    runStrike(m, w, 40) -- 0.67 s without a signal
+    w.strike = 170
+    runStrike(m, w, 60)
+    xcheck("strike turn: after > 0.5 s without a signal a new episode may turn 50 deg again", w.body - b1 >= 50 - m.exec.strikeDeadband - 1e-6
+      and w.body - b1 <= 50 + 1e-6, w.body)
+  end
+  -- 5) gates: no signal / sentinel / NaN / no melee bit / not third person / not armed / inside the start threshold / rejected request
+  do
+    local function noTurn(setup, factory)
+      local m = (factory or freshModule)(true)
+      local w = strikeWorld(m, { strike = 40 })
+      setup(w)
+      runStrike(m, w, 10)
+      return #w.calls.apply == 0 and #w.looks == 0 and #w.holds == 0
+    end
+    xcheck("strike turn: no tracked target (nil) -> no turn", noTurn(function(w) w.strike = nil end))
+    xcheck("strike turn: sentinel 1000 -> no turn", noTurn(function(w) w.strike = 1000 end))
+    xcheck("strike turn: NaN -> no turn", noTurn(function(w) w.strike = 0 / 0 end))
+    xcheck("strike turn: no melee attack bit (aim / hold bit 4096 only) -> no turn", noTurn(function(w) w.reasons = 4096 end))
+    xcheck("strike turn: not third person (bit 65536) -> no turn", noTurn(function(w) w.reasons = 2048 + 65536 end))
+    xcheck("strike turn: executor not armed -> no turn", noTurn(function(w) w.api.arm = function() return false end end))
+    xcheck("strike turn: inside the start threshold (7 deg) -> no turn, no heading lock", noTurn(function(w) w.strike = 7 end))
+    xcheck("strike turn: V moving faster than 1 m/s -> no turn (legs are motion matching)", noTurn(function(w) w.api.speed = function() return 3.5 end end))
+    local m = freshModule(true)
+    local w = strikeWorld(m, { strike = 40, reject = true })
+    local why = runStrike(m, w, 10)
+    xcheck("strike turn: a rejected request sends no look step and does not move V", #w.looks == 0 and w.body == 0
+      and why == "strike turn rejected", why)
+    local function mutGate()
+      return mutantStrike("math.floor(reasons / 2048) % 2 == 1 and ", "")
+    end
+    local gateHeld = noTurn(function(w) w.reasons = 4096 end, function() return mutGate() end)
+    xcheck("strike turn: mutation [no melee bit gate] is caught", not gateHeld)
+  end
+  -- 5b) hysteresis: a target jittering around the 8 / 4 deg thresholds does not toggle the heading lock every frame
+  do
+    local m = freshModule(true)
+    local w = strikeWorld(m, { strike = 6 })
+    for i = 1, 60 do
+      w.strike = (i % 2 == 0) and 9 or 5 -- crosses the 8 deg start only on the even frames, never the 4 deg stop
+      runStrike(m, w, 1)
+    end
+    xcheck("strike turn: a target jittering 5 / 9 deg gives one lock engage and release at most", #w.holds <= 2, #w.holds)
+  end
+  -- 6) the heading lock is released when the attack state ends
+  do
+    local m = freshModule(true)
+    local w = strikeWorld(m, { strike = 40 })
+    runStrike(m, w, 5)
+    w.reasons = 0
+    w.strike = nil
+    runStrike(m, w, 2)
+    xcheck("strike turn: the heading lock is released when the attack state ends", w.holds[#w.holds] == false and m.exec.strikeHeld ~= true)
+  end
+  -- 6b) with the setting ON the aim align (hold / block / gun aim, bit 4096) keeps its heading lock exactly as before:
+  -- one engage while turning, one release once aligned (the strike step must not release a lock it does not own)
+  do
+    local function aimCase(m)
+      local w = strikeWorld(m, { strike = nil })
+      w.reasons = 4096
+      w.body, w.cam, w.free = -16, 166, true
+      local why = runStrike(m, w, 40)
+      local seq = {}
+      for i, v in ipairs(w.holds) do seq[i] = tostring(v) end
+      return math.abs(norm(w.cam - w.body)) < 2 and #w.holds == 2 and w.holds[1] == true and w.holds[2] == false,
+        table.concat(seq, ",") .. " " .. tostring(why)
+    end
+    -- the legacy aim policy of the original aim align test (no weapon signals needed)
+    local ok, d = aimCase(freshModule())
+    xcheck("strike turn ON: aim align unchanged - reaches the look, lock engaged once and released once", ok, d)
+    local okMut = aimCase(mutantStrike("    if E.strikeHeld then\n      if not E.alignHeld then try(api.alignHold, false) end\n      E.strikeHeld = false\n    end\n  end\n  -- melee attack state",
+      "    try(api.alignHold, false); E.alignHeld = false\n  end\n  -- melee attack state"))
+    xcheck("strike turn: mutation [releases the aim align's lock] is caught", not okMut)
+  end
+  -- 7) the setting is registered (default off) after aimSmooth and before shooterMode
+  do
+    local m = freshModule(true)
+    local regs = {}
+    m.RegisterSettings({ RegisterSection = function() end,
+                         Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end })
+    local d
+    for _, r in ipairs(regs) do if r.key == "bodyturn.meleeStrikeTurn" then d = r end end
+    xcheck("strike turn: registered, bool, default false, section bodyturn, English text", d ~= nil and d.type == "bool" and d.default == false
+      and d.section == "bodyturn" and type(d.label) == "string" and type(d.desc) == "string" and d.desc:find("tracked target", 1, true) ~= nil)
+    d.apply(true)
+    local onOk = m.exec.strikeTurn == true
+    d.apply(false)
+    xcheck("strike turn: the setting switches the turn on and off", onOk and m.exec.strikeTurn == false)
   end
 end
 

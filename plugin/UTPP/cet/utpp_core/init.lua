@@ -427,7 +427,8 @@ local LAYOUT = {
                             "perspective.meleeBlockTpp", "perspective.takedown" } },
   --   Melee guard (fists only; the shipped third-person melee_idlepose is the guard pose every fist clip starts and ends in):
   -- developer level switches (default on for the guard, off for its aim tilt and the legs), no release menu option yet
-  { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt" } },
+  { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt",
+                              "bodyturn.meleeStrikeTurn" } },
   -- Interactions
   { "player", "world", { "perspective.scene", "lootView.impl", "interactRange.impl", "headLook.impl",
                         "headLook.faceCamera" } },
