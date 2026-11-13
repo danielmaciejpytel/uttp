@@ -887,7 +887,7 @@ static void TestDriverTerms()
             const melee::MaskTimes mt = melee::ComputeMaskTimes(t, longOut, false, kMaskFadeSeconds, 0.25f, kMeleeReleaseFadeOutSeconds); // no guard: no soft latch
             const float maskTime = t.aimFadeLong ? 0.25f : kMaskFadeSeconds;
             const float outOld = (!t.maskWanted && longOut && !t.aimFadeLong) ? kMeleeReleaseFadeOutSeconds : maskTime;
-            ident = ident && mt.in == maskTime && mt.out == outOld;
+            ident = ident && mt.in == maskTime && mt.out == outOld && mt.tiltOut == outOld;
         }
         Expect("fade times: guard not wanted -> (in, out) equal the pre-guard maskTime / maskOutTime (256 inputs)", ident);
         melee::DriverIn g;
@@ -1364,7 +1364,7 @@ std::vector<Frame> RunTimeline(const std::vector<Seg>& aSegs, const SimCfg& aCfg
             const melee::MaskTimes mt = times.Update(terms, mti, kMaskFadeSeconds, 0.25f, aCfg.releaseOut);
             const bool rawGateOpen = !active && !s.hardGate;
             mask.UpdateInOut(terms.maskWanted, rawGateOpen, true, dt, mt.in, mt.out);
-            tilt.UpdateInOut(terms.tiltWanted, true, true, dt, kMaskFadeSeconds, mt.out);
+            tilt.UpdateInOut(terms.tiltWanted, true, true, dt, kMaskFadeSeconds, mt.tiltOut);
             melee::Input fi = StandingMelee();
             fi.meleeState = s.state;
             fi.allowedStates = 3669472u; // fists line of utpp_melee.reds UTPPMeleeFullBodyStates
@@ -1543,6 +1543,19 @@ static void TestGuardSequences()
             tiltMinOff = std::fmin(tiltMinOff, f.tilt);
     Expect("sequence, guard on: tilt weight stays 1 with guardAimTilt, but fades out in the pauses without it", tiltMin == 1.0f && tiltMinOff < 0.05f,
            Fmt("with %.3f, without %.3f", tiltMin, tiltMinOff));
+    {
+        // guard on, guardAimTilt off: after a strike the tilt unwinds with the eased 0.35 s (not the quick 0.15 s of the held mask)
+        float maxStep = 0.0f, prev = -1.0f;
+        for (const Frame& f : fNoTilt)
+            if (f.t >= tPunch1End - 1.0f && f.t < tPunch2Start)
+            {
+                if (prev >= 0.0f && f.tilt < prev)
+                    maxStep = std::fmax(maxStep, prev - f.tilt);
+                prev = f.tilt;
+            }
+        Expect("sequence, guard on, guardAimTilt off: the tilt after a strike eases out over 0.35 s (step <= 1.5 dt / 0.35, not 0.15)",
+               maxStep > 0.0f && maxStep <= 1.5f * dt / kMeleeReleaseFadeOutSeconds + 1e-4f, Fmt("max step %.4f", maxStep));
+    }
     (void)tPunch2End;
     (void)tStand;
 

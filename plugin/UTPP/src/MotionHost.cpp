@@ -5087,7 +5087,7 @@ void Feed(const FeedInput& aRawIn)
         g_meleeFullBlend.UpdateInOut(fullWant, g_effGate == 0, shown, dt, mm::melee::kFadeSeconds,
                                      mm::melee::LegFadeOutSeconds(g_meleeFullGate.LastWhy(), g_meleeGate.LongRelease()));
         // tilt: follows the mask (the same eased fade out, else 25 deg of tilt would unwind in 0.15 s under slow arms)
-        g_meleeAimBlend.UpdateInOut(terms.tiltWanted, true, shown, dt, kMaskFadeSeconds, maskOutTime); // melee reason (+ guard with guardAimTilt)
+        g_meleeAimBlend.UpdateInOut(terms.tiltWanted, true, shown, dt, kMaskFadeSeconds, maskTimes.tiltOut); // melee reason (+ guard with guardAimTilt)
         if (g_trace && g_log && g_meleeAimLogSource)
         {
             const int64_t nowTicks = Qpc();

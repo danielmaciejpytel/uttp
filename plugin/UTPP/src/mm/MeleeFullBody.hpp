@@ -408,14 +408,20 @@ struct MaskTimes
 {
     float in = 0.0f;
     float out = 0.0f;
+    float tiltOut = 0.0f; // the aim tilt's fade out (see aTiltLong)
 };
 
-inline MaskTimes ComputeMaskTimes(const DriverTerms& aT, bool aLongOut, bool aGuardSoftOut, float aFade, float aAimFade, float aReleaseOut)
+// aTiltLong = the tilt was last wanted by the melee reason of a melee weapon (MaskTimeTracker latch). While the guard alone holds the
+// mask the tilt (melee.guardAimTilt off) would otherwise unwind with the quick 0.15 s of the held mask: up to 25 deg of lean in
+// 0.15 s, the fast unwind the eased release (2026-11-12) removed. It eases out over aReleaseOut instead. Without the guard tiltOut == out.
+inline MaskTimes ComputeMaskTimes(const DriverTerms& aT, bool aLongOut, bool aGuardSoftOut, float aFade, float aAimFade, float aReleaseOut,
+                                  bool aTiltLong = false)
 {
     MaskTimes m;
     const float base = aT.aimFadeLong ? aAimFade : aFade;
     m.in = aT.guardOnly ? kGuardFadeInSeconds : base;
     m.out = (!aT.maskWanted && (aLongOut || aGuardSoftOut) && !aT.aimFadeLong) ? aReleaseOut : base;
+    m.tiltOut = (!aT.tiltWanted && aT.guardOnly && aTiltLong) ? aReleaseOut : m.out;
     return m;
 }
 
@@ -442,6 +448,7 @@ public:
         m_longOut = false;
         m_softOut = false;
         m_guardWas = false;
+        m_tiltLong = false;
     }
     MaskTimes Update(const DriverTerms& aT, const MaskTimeIn& aIn, float aFade, float aAimFade, float aReleaseOut)
     {
@@ -456,7 +463,9 @@ public:
         else if (!aT.maskWanted && aIn.maskProgress <= 0.0f)
             m_softOut = false;
         m_guardWas = aIn.guardWanted;
-        return ComputeMaskTimes(aT, m_longOut, m_softOut, aFade, aAimFade, aReleaseOut);
+        if (aT.tiltWanted)
+            m_tiltLong = aIn.meleeReasonOnly && !aIn.weaponMaskWanted && aIn.longRelease;
+        return ComputeMaskTimes(aT, m_longOut, m_softOut, aFade, aAimFade, aReleaseOut, m_tiltLong);
     }
     bool LongOut() const { return m_longOut; }
     bool SoftOut() const { return m_softOut; }
@@ -465,6 +474,7 @@ private:
     bool m_longOut = false;
     bool m_softOut = false;
     bool m_guardWas = false;
+    bool m_tiltLong = false;
 };
 
 } // namespace utpp::mm::melee

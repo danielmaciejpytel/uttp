@@ -426,7 +426,7 @@ local LAYOUT = {
                             "camera.aimReturnBlend", "perspective.combatCut", "perspective.combatExit",
                             "perspective.meleeBlockTpp", "perspective.takedown" } },
   --   Melee guard (fists only; the shipped third-person melee_idlepose is the guard pose every fist clip starts and ends in):
-  -- developer level switches (default on for the guard and its aim tilt, off for the legs), no release menu option yet
+  -- developer level switches (default on for the guard, off for its aim tilt and the legs), no release menu option yet
   { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt" } },
   -- Interactions
   { "player", "world", { "perspective.scene", "lootView.impl", "interactRange.impl", "headLook.impl",
@@ -2390,7 +2390,8 @@ end
 -- the game's guard pose (the shipped third-person melee_idlepose = the start / end pose of every fist clip) between strikes;
 -- guardFullBody = the legs too while standing in the guard (default off: the guard stance is 67 cm between the ankles, the feet
 -- would slide on entering and leaving it); guardAimTilt = the melee aim tilt also through the guard, so it does not fade in and
--- out at every strike. Default: guard and aim tilt on, legs off.
+-- out at every strike. Default: guard on, aim tilt and legs off (the game's melee target also picks neutral bystanders within 5 m, so
+-- a standing lean toward them is unverified).
 local function applyMeleeGuardBool(key, field, fn, label)
   return function(v)
     local on = v == true
@@ -2640,7 +2641,7 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
     desc = "With Melee guard and Melee full body on: standing in the guard, the legs play the guard animation too. Off: the legs "
       .. "keep the locomotion while guarding.",
     apply = applyMeleeGuardFullBody })
-  M.Register({ key = "melee.guardAimTilt", section = "animation", type = "bool", default = true,
+  M.Register({ key = "melee.guardAimTilt", section = "animation", type = "bool", default = false,
     label = "Melee guard: aim tilt",
     desc = "With Melee guard and Melee aim tilt on: the guard leans toward where you aim as well, so the lean does not fade in "
       .. "and out at every strike.",
