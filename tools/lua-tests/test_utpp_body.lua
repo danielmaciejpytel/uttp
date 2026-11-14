@@ -1272,6 +1272,63 @@ do
     gm.comps[1].enabled == false and gm.comps[2].enabled == false and gm.comps[3].enabled == true)
 end
 
+-- ---------------------------------------------------------------- neck seam mesh: one off / on cycle per TPP phase
+do
+  local function seamSet()
+    return { { name = "t0_000_pma_base__full_seamfix", hash = 4561485924538273707, enabled = true },
+             { name = "t0_000_pma_base__full", hash = H("male", "t0_000_pma_base__full"), enabled = true } }
+  end
+  check("seam: name rule covers both bodies only", M.IsSeamMesh("t0_000_pma_base__full_seamfix") and M.IsSeamMesh("t0_000_pwa_base__full_seamfix")
+    and not M.IsSeamMesh("t0_000_pma_base__full") and not M.IsSeamMesh("t0_000_pma_base__full_seamfix2") and not M.IsSeamMesh(nil))
+  local g = mock("male", seamSet())
+  local slot = "fpp"
+  local offSeen = 0
+  local set = g.body.api.setEnabled
+  g.body.api.setEnabled = function(c, on)
+    if c.name == "t0_000_pma_base__full_seamfix" and on == false then offSeen = offSeen + 1 end
+    return set(c, on)
+  end
+  g.body.api.headSlot = function() return slot end
+  g.body:SetWanted(true, "test")
+  g.run(1.0)
+  check("seam: untouched while the TPP head is not in its slot", offSeen == 0 and g.comps[1].enabled == true and g.count("neck seam mesh") == 0)
+  slot = "tpp"
+  g.run(1.0)
+  check("seam: switched off and on once after the TPP head arrived", offSeen == 1 and g.comps[1].enabled == true
+    and g.count("TPP: neck seam mesh t0_000_pma_base__full_seamfix switched off and on") == 1 and g.body.stats.seamRefreshed == 1,
+    table.concat(g.logs, " | "))
+  check("seam: the other meshes are not touched and nothing stays recorded", g.comps[2].enabled == true and g.body.l2Count == 0)
+  g.run(5.0)
+  check("seam: not repeated inside the same TPP phase", offSeen == 1 and g.body.stats.seamRefreshed == 1)
+  slot = "spawning"; g.run(1.0); slot = "tpp"; g.run(1.0)
+  check("seam: repeated after the head slot was not the TPP head", offSeen == 2 and g.comps[1].enabled == true and g.body.stats.seamRefreshed == 2)
+  g.body:SetWanted(false, "test")
+  g.run(0.5)
+  g.body:SetWanted(true, "test")
+  g.run(1.0)
+  check("seam: repeated in the next TPP phase", offSeen == 3 and g.comps[1].enabled == true and g.body.stats.seamRefreshed == 3)
+  -- leaving TPP in the moment the mesh is off: it is switched on again
+  local g2 = mock("male", seamSet())
+  g2.body.api.headSlot = function() return "tpp" end
+  g2.body:SetWanted(true, "test")
+  local steps = 0
+  while g2.comps[1].enabled == true and steps < 200 do g2.run(1 / 60); steps = steps + 1 end
+  check("seam: the off moment is reached", g2.comps[1].enabled == false and g2.body.l2Count == 1, steps)
+  g2.body:SetWanted(false, "test")
+  g2.run(0.5)
+  check("seam: leaving TPP while it is off switches it on again", g2.comps[1].enabled == true and g2.body.l2Count == 0)
+  -- an api without headSlot (older host): the cycle still runs once
+  local g3 = mock("female", { { name = "t0_000_pwa_base__full_seamfix", hash = 1, enabled = true } })
+  g3.body:SetWanted(true, "test")
+  g3.run(1.0)
+  check("seam: female mesh, api without headSlot: one cycle", g3.comps[1].enabled == true and g3.body.stats.seamRefreshed == 1)
+  -- a mesh the game left disabled is not touched
+  local g4 = mock("male", { { name = "t0_000_pma_base__full_seamfix", hash = 1, enabled = false } })
+  g4.body:SetWanted(true, "test")
+  g4.run(1.0)
+  check("seam: a disabled mesh stays disabled", g4.comps[1].enabled == false and (g4.body.stats.seamRefreshed or 0) == 0)
+end
+
 -- ---------------------------------------------------------------- 0.1.6 vehicle windows
 -- PSM Vehicle sequence of the motorcycle exit in earlier test log (14:14:11.42 mount start state 4 + mounted,
 -- 14:14:13.32 seated state 1, 14:14:16.75 exit start state 4, unmount later). vw.state / vw.mounted are what the game reports.

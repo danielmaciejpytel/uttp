@@ -33,7 +33,9 @@
 -- TPP body) is hidden in TPP and restored in FPP; class shadowProxy (t0_000_p?a_base__full_shadow, head_shadowmesh: the
 -- FPP shadow-only proxy) is left as the game sets it unless body.shadowProxy is on - with ray-traced shadows the proxy
 -- casts the shadow of the torso and the legs, and its skeleton follows the written pose; one log line per corrected /
--- restored component. The head guard
+-- restored component. The neck seam mesh of the body (t0_000_p?a_base__full_seamfix) is switched off and on once per
+-- TPP phase after the TPP head is in its slot: until then its shadow stays where the body stood (Body:RefreshSeam).
+-- The head guard
 -- windows (mount / exit / unmount) are opened by utpp_body itself from the PSM vehicle state + GetMountedVehicle
 -- (M.NewVehicleWindows), and the unmount re-checks the TPP representation at once (retry budget reset)).
 -- After the save load the body was
@@ -266,6 +268,8 @@ function Body:ResetEntity()
   self.nextVerify = 0
   self.l2 = {}              -- key -> { from = bool, to = bool, name }
   self.l2Count = 0
+  self.seam = {}            -- neck seam mesh key -> "off" | "done" (RefreshSeam), of the TPP phase seamPhase
+  self.seamPhase = nil
   self.l3 = {}              -- garment key -> { from, to, slot }
   self.l3Count = 0
   self.offsetsOff = false
@@ -400,6 +404,44 @@ function Body:HasChanges() return self.l2Count > 0 or self.l3Count > 0 or self.o
 -- ---------------------------------------------------------------- L2
 local function compKey(c) return tostring(c.name) .. "|" .. (M.NormHash(c.hash) or "-") end
 
+-- Neck seam mesh of the body. With ray-traced shadows it kept casting its shadow from the place where the body stood when the
+-- TPP head arrived: a small arc of shadow next to the shadow of the head, left behind as soon as V moved or crouched (seen on
+-- the male body). One off / on cycle of the component puts the shadow back on the body; it is done once per TPP phase and
+-- again whenever the head slot was not the TPP head in between. While the mesh is off it counts as an L2 change, so leaving
+-- TPP in that moment switches it on again (RestoreL2).
+function M.IsSeamMesh(name)
+  return type(name) == "string" and string.find(name, "^t0_000_p[mw]a_base__full_seamfix$") ~= nil
+end
+
+function Body:RefreshSeam(c, key)
+  if self.seamPhase ~= self.repOkSince then self.seam, self.seamPhase = {}, self.repOkSince end
+  local now = self.now or 0
+  local stage = self.seam[key]
+  if stage == "off" then
+    local okS, res = pcall(self.api.setEnabled, c, true)
+    if okS and res ~= false then
+      self.seam[key] = "done"
+      if self.l2[key] ~= nil then self.l2[key] = nil; self.l2Count = self.l2Count - 1 end
+      self.stats.seamRefreshed = (self.stats.seamRefreshed or 0) + 1
+      self:Log(string.format("t=%.2f TPP: neck seam mesh %s switched off and on (its shadow follows the body again)", now,
+        tostring(c.name)))
+    end
+    return
+  end
+  if self.api.headSlot then
+    local okH, slot = pcall(self.api.headSlot)
+    if okH and slot ~= "tpp" then self.seam[key] = nil; return end -- the TPP head is not in (again): refresh when it is
+  end
+  if stage == "done" or c.enabled ~= true or self.l2[key] ~= nil then return end
+  local okS, res = pcall(self.api.setEnabled, c, false)
+  if okS and res ~= false then
+    self.seam[key] = "off"
+    self.l2[key] = { from = true, to = false, name = c.name, cls = "seam" }
+    self.l2Count = self.l2Count + 1
+    self.nextVerify = math.min(self.nextVerify or 0, now + self.opt.fastVerifyInterval) -- back on at the next fast check
+  end
+end
+
 function Body:ApplyL2(cfg)
   local gender = self.api.gender and self.api.gender() or nil
   if gender ~= "female" and gender ~= "male" then
@@ -415,6 +457,7 @@ function Body:ApplyL2(cfg)
   for _, c in ipairs(comps) do
     local cls = M.Classify(gender, c.name, c.hash, c.path)
     local key = compKey(c)
+    if M.IsSeamMesh(c.name) then self:RefreshSeam(c, key) end
     local want = nil
     if cls == "fppOnly" and cfg.hideFpp ~= false then want = false
     elseif cls == "tppOnly" and cfg.showTpp ~= false then want = true
