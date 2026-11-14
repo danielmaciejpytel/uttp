@@ -92,6 +92,44 @@ foreach(_rm "OWNER_MUTATION=1;foreign" "OWNER_MUTATION=2;is played: the last lea
     add_test(NAME utpp_CameraTargetRoot_mut_${_tag} COMMAND utpp_CameraTargetRoot_mut_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
     set_tests_properties(utpp_CameraTargetRoot_mut_${_tag} PROPERTIES PASS_REGULAR_EXPRESSION "FAIL .*${_what}")
 endforeach()
+# The coming tick's body turn derived by the real host from its last body yaw command, in the game's order and with the command applied
+# before the feed (tests/BodyTurnAheadHostTest.cpp).
+add_executable(utpp_bodyturn_ahead_host_test tests/BodyTurnAheadHostTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+target_compile_features(utpp_bodyturn_ahead_host_test PRIVATE cxx_std_20)
+target_compile_options(utpp_bodyturn_ahead_host_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_definitions(utpp_bodyturn_ahead_host_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
+target_link_libraries(utpp_bodyturn_ahead_host_test PRIVATE bcrypt)
+add_test(NAME utpp_bodyturn_ahead_host_test COMMAND utpp_bodyturn_ahead_host_test "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+# Mutants: YAW_AHEAD 1 = the tolerance-only match (an applied step below 0.5 deg is counted again), ROOT_AHEAD 1 = the root frame ignores
+# the derived turn (heading dip at the long frame); each MUST print its FAIL line.
+foreach(_m "YAW_AHEAD;applied first: the derived turn stays 0" "ROOT_AHEAD;game order: no heading dip at the long frame")
+    list(GET _m 0 _def)
+    list(GET _m 1 _what)
+    string(TOLOWER "${_def}" _tag)
+    add_executable(utpp_bodyturn_ahead_host_mut_${_tag} tests/BodyTurnAheadHostTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+    target_compile_features(utpp_bodyturn_ahead_host_mut_${_tag} PRIVATE cxx_std_20)
+    target_compile_options(utpp_bodyturn_ahead_host_mut_${_tag} PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_bodyturn_ahead_host_mut_${_tag} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV
+                               UTPP_${_def}_MUTATION=1)
+    target_link_libraries(utpp_bodyturn_ahead_host_mut_${_tag} PRIVATE bcrypt)
+    add_test(NAME utpp_bodyturn_ahead_host_mut_${_tag} COMMAND utpp_bodyturn_ahead_host_mut_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+    set_tests_properties(utpp_bodyturn_ahead_host_mut_${_tag} PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ${_what}")
+endforeach()
+# StanceGuard on a one-feed ground loss reported only by the physics probe: fade instead of a one-feed cut (tests/StanceGroundLossFadeTest.cpp).
+# Mutant: STANCE_FADE 1 = the ground loss cuts the guard in one feed; it MUST print its FAIL line.
+foreach(_v "test;0" "mut_stance_fade;1")
+    list(GET _v 0 _tag)
+    list(GET _v 1 _mut)
+    add_executable(utpp_stance_ground_loss_${_tag} tests/StanceGroundLossFadeTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+    target_compile_features(utpp_stance_ground_loss_${_tag} PRIVATE cxx_std_20)
+    target_compile_options(utpp_stance_ground_loss_${_tag} PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_stance_ground_loss_${_tag} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV
+                               UTPP_STANCE_FADE_MUTATION=${_mut})
+    target_link_libraries(utpp_stance_ground_loss_${_tag} PRIVATE bcrypt)
+    add_test(NAME utpp_stance_ground_loss_${_tag} COMMAND utpp_stance_ground_loss_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+endforeach()
+set_tests_properties(utpp_stance_ground_loss_mut_stance_fade PROPERTIES
+                     PASS_REGULAR_EXPRESSION "FAIL ground loss: the guard fades out instead of dropping its correction in one feed")
 add_executable(utpp_CapsuleBraking_test tests/CapsuleBrakingTest.cpp)
 target_compile_features(utpp_CapsuleBraking_test PRIVATE cxx_std_20)
 target_compile_options(utpp_CapsuleBraking_test PRIVATE ${UTPP_WARNINGS} /EHsc)

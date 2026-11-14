@@ -114,6 +114,10 @@ public:
     // False (default) = the 0.3.9 / batch 2 path bit for bit.
     static constexpr float kPlantedSwivelGain = 0.3f; // offline sweep 0 / 0.15 / 0.3 / 0.5 (v6, utpp_base): 0.3 best on both
     void SetPlantedHold(bool aOn) { m_plantedHold = aOn; }
+    // Share (0..1) of the lateral push and of the knee swivel written to the output; the held push and the swivel filter keep running
+    // at their full values. 1 (default) = the full correction, bit for bit. Used to fade the guard out and in (ground loss).
+    void SetOutputWeight(float aWeight) { m_weight = std::isfinite(aWeight) ? std::fmax(0.0f, std::fmin(1.0f, aWeight)) : 1.0f; }
+    float OutputWeight() const { return m_weight; }
     void Reset() { m_held[0] = m_held[1] = m_swivel[0] = m_swivel[1] = m_heldVel[0] = m_heldVel[1] = 0.0f; }
     void ResetDiagnostics() { m_diag = StanceGuardDiagnostics{}; } // b5 testorder (driver session reset)
     // b5 testorder repair: the filtered knee swivel / held push is non-zero (state Reset() clears)
@@ -216,6 +220,7 @@ public:
                 }
                 push = m_held[s]; // planted: held
             }
+            push *= m_weight;
             if (!(push > 1e-6f))
                 continue;
             math::Quat qa{}, qb{};
@@ -319,7 +324,7 @@ public:
                         m_swivel[s] = 0.0f;
                     if (!(std::fabs(m_swivel[s]) > 1e-6f))
                         continue;
-                    const math::Quat r = rotS(m_swivel[s]);
+                    const math::Quat r = rotS(m_swivel[s] * m_weight);
                     const math::Quat qa = math::QuatNormalize(math::QuatMul(r, ga.q));
                     const math::Quat qb = math::QuatNormalize(math::QuatMul(r, gb.q));
                     const math::Quat la = math::QuatNormalize(math::QuatMul(math::QuatInv(gp.q), qa));
@@ -357,7 +362,7 @@ public:
                         if (sgn * (kb.x - mid) >= kneeFloor || sgn * (gb.p.x - mid) < kneeFloor)
                             break; // ok (or the animated knee is already inside the floor: only reduce further)
                     }
-                    ang *= std::fmax(scale, 0.0f);
+                    ang *= std::fmax(scale, 0.0f) * m_weight;
                 }
                 if (!(std::fabs(ang) > 1e-4f))
                     continue;
@@ -453,6 +458,7 @@ private:
     float m_heldVel[2] = {0.0f, 0.0f}; // 0.3.9 push spring velocity
     bool m_swivelOff = false;          // batch 2 knee fix (SetSwivelSuppressed)
     bool m_plantedHold = false;        // batch 5 knee fix bit 4 (SetPlantedHold)
+    float m_weight = 1.0f;             // SetOutputWeight: share of the push / swivel applied to the output
     float m_speed = 0.0f;              // 0.3.9 capsule speed (SetSpeed) // 0.3.9 filtered knee swivel per leg (rad) // 0.3.7 swing mode: current push per foot (m)
 };
 } // namespace utpp::mm

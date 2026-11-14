@@ -3,6 +3,7 @@
 // snapshot ("final": root offset applied, stance guard, foot locker, head lead, hand-in). No game or input access.
 //
 //   utpp_replay_pose_stages <data dir> <base database> <feed dump> <out prefix> [--from T] [--to T] [--settings-log LOG] [--ahead recorded]
+//                           [--body man]
 //
 // <out prefix>.txt  header: bone names and parents, the record layout, the clip names seen
 // <out prefix>.bin  per feed one record of float32: kMetaFloats meta values (see kMeta below), then driver pose, then final pose
@@ -10,6 +11,7 @@
 // --from / --to limit the written records to feed times in [T0, T1]; every feed is still stepped.
 // --settings-log applies the setting calls of a game log of the session (the ones this tool knows, in their order) before the first feed.
 // --ahead recorded passes the recorded turn of the coming tick (next feed's yaw minus this one) as the drawn capsule's turn.
+// --body man replays with the male motion database and rig (default: woman); the clip dump (--clips) is always the woman database.
 // <feed dump> = --clips [name part] writes the stored frames of the woman database clips whose name contains the part (all without it)
 // instead (same layout, see the clip mode below).
 #include <filesystem>
@@ -110,7 +112,7 @@ int main(int argc, char** argv)
     const std::string data = argv[1], feedPath = argv[3], out = argv[4];
     float from = -1e30f, to = 1e30f;
     std::string settingsLog;
-    bool aheadRecorded = false;
+    bool aheadRecorded = false, man = false;
     for (int i = 5; i + 1 < argc; i += 2)
     {
         if (std::strcmp(argv[i], "--from") == 0)
@@ -121,11 +123,13 @@ int main(int argc, char** argv)
             settingsLog = argv[i + 1];
         else if (std::strcmp(argv[i], "--ahead") == 0)
             aheadRecorded = std::strcmp(argv[i + 1], "recorded") == 0;
+        else if (std::strcmp(argv[i], "--body") == 0)
+            man = std::strcmp(argv[i + 1], "man") == 0;
     }
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
     const auto womanPaths = DataPaths(data, "woman");
-    if (!RigFromDb(womanPaths.files.db, rig, &db))
+    if (!RigFromDb(DataPaths(data, man ? "man" : "woman").files.db, rig, &db))
         return 3;
     if (feedPath == "--clips")
     {
@@ -229,7 +233,7 @@ int main(int argc, char** argv)
     g_baseDb = Wide(argv[2]);
     motiondriver::SetPathsOverride(0, womanPaths);
     motiondriver::SetPathsOverride(1, DataPaths(data, "man"));
-    motiondriver::SetRigBody(0);
+    motiondriver::SetRigBody(man ? 1 : 0);
     motiondriver::SetOverlayInputs(0, 0, false, false);
     motionhost::SetMotionHooks(&hooks);
     if (!ResetBase(rig))

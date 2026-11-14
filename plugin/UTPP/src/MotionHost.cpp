@@ -1430,6 +1430,7 @@ bool InitMatcherLocked()
     g_airLandGroundFirstHipsError = 0.0f;
     g_airHoldGroundReplantLeft = 0.0f;
     g_stanceAirBypassed = false;
+    g_stanceGuard.SetOutputWeight(1.0f);
     g_legPipelineOutput = {};
     // Foot lock is optional: a failed init (missing leg bones) leaves the matcher output unchanged.
     if (ok && g_footLock.Init(g_db))
@@ -1479,6 +1480,7 @@ void ApplyCatchupLocked()
 struct LegContext
 {
     bool airborne = false;           // air area (AirState decision of this feed, AIR HOLD stage): FootLocker contacts -> 0
+    bool airOwned = false;           // the air area owns the feed with its contacts at 0 (airborne without a physics-only ground loss)
     float contactScale = 1.0f;       // air area: landing ramp 0 -> 1 of the FootLocker contacts (1 with the air area off / grounded)
     bool placementAllowed = false;   // gate open, no hold, |vz| < the debounce's maxVertical, stand / crouch / sprint (crouch C2)
     int32_t stance = 0;              // conditioned locomotion state (1 stand, 2 crouch, 3 sprint; 0 other)
@@ -1512,7 +1514,8 @@ LegContext ComputeLegContextLocked(const FeedInput& aIn, float aCapsuleSpeed)
                          aIn.locoState >= kLocoStand && aIn.locoState <= kLocoSprint;
     // AIR HOLD stage: from the air decision of this feed (UpdateAirLocked ran before the matcher block): no plants in the air,
     // contacts ramp back after the touchdown. Air area off / grounded: false / 1 (the sampled contacts exactly).
-    c.airborne = physicsAir || (g_airOwns && g_airDec.contactScale <= 0.0f);
+    c.airOwned = g_airOwns && g_airDec.contactScale <= 0.0f;
+    c.airborne = physicsAir || c.airOwned;
     c.contactScale = physicsAir ? 0.0f : g_airDec.contactScale;
     return c;
 }
@@ -1665,7 +1668,28 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
     // StanceGuard modifies thigh/shin rotations even when both contacts are zero, including
     // its legacy no-contact path. AIR frames must retain the supplied animation legs.
     // Reset its temporal filters on the airborne edge, then resume from a clean state at touchdown.
-    const bool stanceAirBypass = g_airSetting != 3 && aCtx.airborne;
+    // Air-area-owned frames cut the guard at once. A ground loss reported only by the physics probe (a one-feed onGround flicker on a
+    // slope or a step) fades its output out over kStanceGroundLossFadeSec instead: cut in one feed, the knee swivel and push leave
+    // the thigh and the foot in one frame (up to ~20 deg) and regrow over the next feeds. Back on the ground a partly faded guard
+    // fades in at the same rate; after a full cut (weight 0, filters reset) it resumes at full weight as before.
+    constexpr float kStanceGroundLossFadeSec = 0.1f;
+    const bool stanceAirCut = g_airSetting != 3 && aCtx.airOwned;
+    const bool stanceGroundLoss = g_airSetting != 3 && aCtx.airborne && !aCtx.airOwned;
+    const float stanceFadeStep = (std::isfinite(aDt) && aDt > 0.0f) ? aDt / kStanceGroundLossFadeSec : 1.0f;
+    float stanceWeight = g_stanceGuard.OutputWeight();
+#if defined(UTPP_STANCE_FADE_MUTATION) && UTPP_STANCE_FADE_MUTATION == 1
+    stanceWeight = (stanceAirCut || stanceGroundLoss) ? 0.0f : 1.0f; // mutation 1: the ground loss cuts in one feed
+    (void)stanceFadeStep;
+#else
+    if (stanceAirCut)
+        stanceWeight = 0.0f;
+    else if (stanceGroundLoss)
+        stanceWeight = std::fmax(0.0f, stanceWeight - stanceFadeStep);
+    else
+        stanceWeight = stanceWeight <= 0.0f ? 1.0f : std::fmin(1.0f, stanceWeight + stanceFadeStep);
+#endif
+    g_stanceGuard.SetOutputWeight(stanceWeight);
+    const bool stanceAirBypass = (stanceAirCut || stanceGroundLoss) && stanceWeight <= 0.0f;
     g_stanceAirBypassed = stanceAirBypass;
     if (stanceAirBypass && g_stanceGuard.FilterActive())
         g_stanceGuard.Reset();
@@ -2372,6 +2396,7 @@ void ResetDbPlaybackStateLocked()
     g_chestOut = false;
     g_chestValid = false;
     g_stanceGuard.Reset(); // filtered knee swivel / held push of the old pose stream (StanceGuard::Init keeps them)
+    g_stanceGuard.SetOutputWeight(1.0f); // and its ground-loss fade
     {
         // RootRate::Reset (InitMatcherLocked) keeps the active-window timer / flags of the old clip: a fresh one, config kept
         const RootRateConfig rc = g_rootRate.Config();
@@ -2537,6 +2562,7 @@ void ResetSessionStateLocked()
     g_airLandGroundFirstHipsError = 0.0f;
     g_airHoldGroundReplantLeft = 0.0f;
     g_stanceAirBypassed = false;
+    g_stanceGuard.SetOutputWeight(1.0f);
     g_legPipelineOutput = {};
     // melee / mount / upper-body mask / hold / release
     g_meleeGate = MeleeGate{}; // with its counters
@@ -3713,9 +3739,21 @@ void Feed(const FeedInput& aRawIn)
     g_yawAhead = 0.0f;
     if (std::isfinite(aIn.yawAheadDeg))
         g_yawAhead = std::clamp(WrapPi(aIn.yawAheadDeg * kDegToRad), -1.5f, 1.5f);
-    else if (!aRaw.synthetic && g_cmdFeed != ~0ull && g_cmdFeed + 1 == g_feedCalls &&
-             std::fabs(WrapPi(g_lastCmdCurDeg * kDegToRad - yaw)) <= 0.5f * kDegToRad)
-        g_yawAhead = std::clamp(WrapPi((g_lastCmdDeg - g_lastCmdCurDeg) * kDegToRad), -1.5f, 1.5f);
+    else if (!aRaw.synthetic && g_cmdFeed != ~0ull && g_cmdFeed + 1 == g_feedCalls)
+    {
+        // The fed yaw is the yaw the command was issued for (not applied yet): within 0.5 deg of it AND nearer to it than to the
+        // commanded yaw. A command already applied before this feed (fed yaw = commanded yaw) derives nothing, also for steps below 0.5 deg.
+        const float fromCur = std::fabs(WrapPi(g_lastCmdCurDeg * kDegToRad - yaw));
+        const float fromCmd = std::fabs(WrapPi(g_lastCmdDeg * kDegToRad - yaw));
+#if defined(UTPP_YAW_AHEAD_MUTATION) && UTPP_YAW_AHEAD_MUTATION == 1
+        const bool pending = fromCur <= 0.5f * kDegToRad; // mutation 1: tolerance only (a small applied step counts again)
+        (void)fromCmd;
+#else
+        const bool pending = fromCur <= 0.5f * kDegToRad && fromCur < fromCmd;
+#endif
+        if (pending)
+            g_yawAhead = std::clamp(WrapPi((g_lastCmdDeg - g_lastCmdCurDeg) * kDegToRad), -1.5f, 1.5f);
+    }
     // the change of the drawn yaw since the last feed (offset roots)
     const float yawStepDrawn = g_havePrevYaw ? WrapPi(yawStep + g_yawAhead - g_prevYawAhead) : 0.0f;
     if (g_havePrevYaw && dt > 0.0f)
