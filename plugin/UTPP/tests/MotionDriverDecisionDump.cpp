@@ -110,6 +110,8 @@ FeedFile ClosedLoop(const FeedFile& aOpen, float aRateDegS, int aRepeat)
 int g_dumpBody = 0; // UTPP_DUMP_BODY=man: the Male V bundle (body slot 1)
 bool g_dumpCorr = false; // UTPP_DUMP_SLIDE=3: the foot lock correction of each foot after every frame
 std::vector<float> g_corr; // 2 per frame (cm): corrL, corrR of motionhost::Status()
+bool g_dumpFeet = false;         // with g_dumpCorr: the foot lock fields of the status after every frame
+std::vector<std::string> g_feet; // 1 per frame
 bool g_dumpDiag = false; // UTPP_DUMP_DIAG=1 (full-feed dump): the chooser inputs and the match result of every frame
 std::vector<motiondriver::SelectionDiag> g_diag; // 1 per frame
 
@@ -140,6 +142,7 @@ std::vector<FrameOut> RunDriver(const Rig& aRig, const FeedFile& aF)
     motiondriver::SetEnabled(false);
     motiondriver::SetEnabled(true);
     g_corr.clear();
+    g_feet.clear();
     g_diag.clear();
     if (!g_dumpCorr && !g_dumpDiag)
         return RunFeed(aF, kNoop);
@@ -151,6 +154,19 @@ std::vector<FrameOut> RunDriver(const Rig& aRig, const FeedFile& aF)
             ReadFootLockCorr(l, r);
             g_corr.push_back(l);
             g_corr.push_back(r);
+            if (g_dumpFeet)
+            {
+                // the foot lock fields of the status (lock, weight, correction per foot) and the capsule velocity
+                const std::string st = motionhost::Status();
+                const size_t a = st.find("velChar="), b = st.find(" move=", a == std::string::npos ? 0 : a);
+                const size_t c = st.find("lockL="), e = st.find(" flMaxCorr=", c == std::string::npos ? 0 : c);
+                std::string s;
+                if (a != std::string::npos && b != std::string::npos)
+                    s += st.substr(a, b - a);
+                if (c != std::string::npos && e != std::string::npos)
+                    s += " " + st.substr(c, e - c);
+                g_feet.push_back(s);
+            }
         }
         if (g_dumpDiag)
             g_diag.push_back(motiondriver::SelectionDiagnostics());

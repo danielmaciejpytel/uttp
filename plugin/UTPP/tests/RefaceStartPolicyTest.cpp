@@ -50,8 +50,10 @@ static void Lifecycle(int hz)
     Check(!e.direction, "ineligible air or crouch releases", hz);
     e.Step(dt, true, true, true, 0, 0, target, 1);
     Check(!e.direction, "landing or stance return does not consume held input as new edge", hz);
-    e = Armed(dt); e.Step(dt, true, true, true, 0, 0, target, 2);
-    Check(!e.direction, "gait change releases", hz);
+    e = Armed(dt); e.Selected(397, 1); e.Step(dt, true, true, true, 2.0f, 0, target, 2);
+    Check(e.direction == 1 && e.clip == 397 && e.gait == 2, "gait upshift with the same goal keeps the side", hz);
+    e.Step(dt, true, true, true, 2.0f, 0, target, 0);
+    Check(!e.direction && e.clip == -1, "drop to walk releases", hz);
     e = Armed(dt); e.Step(0.251f, true, true, true, 0, 0, target, 1);
     Check(!e.direction, "feed gap releases", hz);
     e = Armed(dt);
@@ -69,12 +71,24 @@ static void Lifecycle(int hz)
     {
         e = Armed(dt); e.Selected(397, 1);
         e.Step(0, cancel != 4, cancel != 0, cancel != 1, 0, 0,
-               cancel == 3 ? target + 21 * rs::kDeg : target, cancel == 2 ? 2 : 1);
+               cancel == 3 ? target + 21 * rs::kDeg : target, cancel == 2 ? 0 : 1);
         Check(!e.direction && e.clip == -1, "zero dt still cancels on release/start/goal/gait/eligibility", hz);
     }
 
     e.Reset(); e.Step(dt, true, true, true, .501f, 0, target, 1);
     Check(!e.direction, "already moving cannot admit", hz);
+    // a new press while still moving (stick pressed again during a stop) takes the side of the reface start picked on that feed
+    e.Selected(399, -1);
+    Check(e.direction == -1 && e.clip == 399, "press while moving adopts the picked reface side", hz);
+    e.Step(dt, true, true, true, 2.0f, 0, -target, 1);
+    Check(e.direction == -1 && e.clip == 399, "adopted side survives the half-turn wrap", hz);
+    e.Reset(); e.Step(dt, true, true, true, .501f, 0, target, 1); e.Selected(20, 0);
+    Check(!e.direction, "press while moving with a non-reface pick stays inactive", hz);
+    e.Reset(); e.Step(dt, true, true, true, .501f, 0, target, 1); e.Step(dt, true, true, true, .501f, 0, target, 1);
+    e.Selected(399, -1);
+    Check(!e.direction, "press while moving adopts only on its own feed", hz);
+    e.Reset(); e.Step(dt, true, true, true, 2.0f, 0, 90 * rs::kDeg, 1); e.Selected(399, -1);
+    Check(!e.direction, "press while moving below 120 degrees does not adopt", hz);
     e.Reset(); e.Step(dt, true, true, true, .5f, 0, target, 1);
     Check(e.direction == 1, "0.5 m/s admission boundary", hz);
     e.Reset(); e.Step(dt, true, true, true, 0, 0, 90 * rs::kDeg, 1);

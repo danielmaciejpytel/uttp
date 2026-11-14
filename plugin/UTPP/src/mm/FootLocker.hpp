@@ -53,6 +53,12 @@ struct FootLockConfig
     float blendInTime = 0.08f;  // s, lock start
     float blendOutTime = 0.15f; // s, after unlock
     float maxDrift = 0.25f;     // m, locked target vs animated ankle; beyond -> immediate unlock + blend out
+    // m, bound of the ankle target offset of a soft-slip lock (slip on, 0.5.9 path): the ankle target stays at most this far from
+    // the animated ankle, toward the lock point; the lock point itself (and so the maxDrift unlock and the release) is unchanged.
+    // The exponential slip lags the toe by about halflife / ln 2 x its speed, so a toe running away at 3-8 m/s (a start clip swinging
+    // a foot still in contact, a start clip over a capsule that does not move, a fast turn) held the leg 15-17 cm off its pose while
+    // the lock point already slid at 90 % of the toe's speed. Never below the slip start in effect.
+    float maxSlipOffset = 0.14f;
     float maxExtension = 0.995f; // fraction of (thigh + shin) length the IK may reach
     float softExtension = 0.97f; // above this fraction the reach is limited softly towards maxExtension
     float maxDt = 0.25f;        // s, larger steps are clamped
@@ -175,6 +181,7 @@ struct FootLockDiagnostics
     uint64_t nonFiniteResets = 0;
     uint64_t settles = 0; // locked-foot updates with settling applied
     uint64_t slips = 0;   // 0.5.9: locked-foot updates with the soft slip applied
+    uint64_t slipBounds = 0; // locked-foot updates whose soft-slip offset was bounded by FootLockConfig::maxSlipOffset
     float maxCorrection = 0.0f; // m, since Init/Reset
     // loco C0 (diagnostics only): per-foot counters (index kLeft / kRight; the sums equal the totals above) and last events
     uint64_t footSlips[2] = {0, 0};        // locked-foot updates with the soft slip applied
@@ -465,6 +472,7 @@ private:
         math::Quat delta[3];      // last IK local rotation deltas (UpLeg, Leg, Foot): local = delta * animated
         float lockX = 0.0f, lockY = 0.0f; // world
         math::Vec3 offset{};      // character frame, target - animated ankle (z = 0)
+        float targetScale = 1.0f; // this update: the ankle target takes offset x this (< 1 = soft-slip bound, FootLockConfig::maxSlipOffset)
         // loco C1b plant / replant (only while locked)
         bool replant = false;     // this lock runs in replant mode
         bool stepping = false;    // replant step in progress
@@ -489,7 +497,8 @@ private:
     {
         auto pos = [](float v) { return std::isfinite(v) && v > 0.0f; };
         return std::isfinite(c.onThreshold) && std::isfinite(c.offThreshold) && c.offThreshold <= c.onThreshold &&
-               pos(c.blendInTime) && pos(c.blendOutTime) && pos(c.maxDrift) && pos(c.maxExtension) && c.maxExtension < 1.0f &&
+               pos(c.blendInTime) && pos(c.blendOutTime) && pos(c.maxDrift) && pos(c.maxSlipOffset) && c.maxSlipOffset < c.maxDrift &&
+               pos(c.maxExtension) && c.maxExtension < 1.0f &&
                pos(c.softExtension) && c.softExtension <= c.maxExtension &&
                pos(c.maxDt) &&
                std::isfinite(c.settleSpeed) && c.settleSpeed >= 0.0f && std::isfinite(c.settleCapsuleSpeed) && c.settleCapsuleSpeed >= 0.0f;
@@ -803,6 +812,7 @@ private:
             f.crouchSourceValid = f.crouchSourceQuiet = false;
 
         const float wPrev = Smoothstep(f.s);
+        f.targetScale = 1.0f; // set below by the soft-slip bound only
         if (f.contact && !f.locked && !f.suppressed)
         {
             math::Vec3 shown = gl.p;
@@ -913,6 +923,16 @@ private:
                         ++m_diag.slips;
                         ++m_diag.footSlips[aSide]; // loco C0
                     }
+                    // the slip lags a fast toe: beyond the bound the ankle target stays at the bound toward the lock point (the shown
+                    // foot moves with the toe, the leg is not stretched further). The lock point itself is unchanged, so the drift
+                    // unlock and the release happen exactly when they did without the bound.
+                    const float bound = std::fmax(m_cfg.maxSlipOffset, m_slipStart);
+                    const float lb = Len(f.offset);
+                    if (!holdSupport && m_slipStart > 0.0f && lb > bound)
+                    {
+                        f.targetScale = bound / lb;
+                        ++m_diag.slipBounds;
+                    }
                 }
             }
         }
@@ -939,7 +959,7 @@ private:
         }
         if (f.locked)
         {
-            math::Vec3 target = gc.p + f.offset * w;
+            math::Vec3 target = gc.p + f.offset * (w * f.targetScale);
             if (f.lift > 0.0f) // loco C1b replant step: lifted ankle target (never in the 0.5.9 path)
                 target.z += f.lift * w;
             Solve(aSide, gp, ga, gb, gc, target, gl.p, d);
