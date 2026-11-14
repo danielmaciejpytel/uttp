@@ -2817,7 +2817,7 @@ return {
     "apply headGuard.impl(true,\"ok\")",
     "apply interactRange.impl(true,\"ok\")",
     "apply interactRange.scale(1,\"ok\")",
-    "apply vehicle.keepTpp(true,\"ok\")",
+    "apply perspective.vehicleKeepTpp(true,\"ok\")",
     "apply vehicle.pullOut(true,\"ok\")",
     "apply vehicle.rideWatchdog(true,\"ok\")",
     "apply vehicle.safeTeleportExit(true,\"ok\")",
@@ -2826,6 +2826,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
+core.defaultsRevision=1\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -3397,6 +3398,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
+core.defaultsRevision=1\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -3609,7 +3611,6 @@ other.module=42\r\
     "/utpp/animation|switch|mm.idleHold",
     "/utpp/animation|switch|mm.kneeFix",
     "/utpp/animation|switch|mm.kneeHold",
-    "/utpp/animation|switch|mm.headLead",
     "/utpp/animation|selector|mm.air",
     "/utpp/animation|switch|mm.airProbe",
     "/utpp/animation|switch|mm.airSteer",
@@ -3717,7 +3718,6 @@ other.module=42\r\
     "/utpp/perspective|switch|perspective.toggleOverrides",
     "/utpp/perspective|float|perspective.sceneExit",
     "/utpp/perspective|switch|perspective.animate",
-    "/utpp/perspective|float|perspective.blend",
     "/utpp/perspective|switch|perspective.log",
     "/utpp/headguard|switch|headGuard.impl",
     "/utpp/interact|switch|interactRange.impl",

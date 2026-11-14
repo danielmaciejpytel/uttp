@@ -432,12 +432,11 @@ local ok, err = pcall(function()
 
   -- ---------------------------------------------------------------- T17 hidden options (registry flag hidden = true, 2026-11-12)
   -- the six head look options are hidden in 0.1.0: no class field, never in the snapshot. Their CET value, default and settings
-  -- file stay as they are; nothing is pushed, imported or kept in the baseline for them. A shown switch (mm.headLead, moved
-  -- to the player menu) syncs both ways; a baseline of false must not read as "no baseline" (ModSettingsSync).
+  -- file stay as they are; nothing is pushed, imported or kept in the baseline for them. A shown switch syncs both ways; a baseline of false must not read as "no baseline" (ModSettingsSync).
   local reds = SAVED.open((string.gsub(UTPP_CORE_PATH, "[/\\]cet[/\\]utpp_core[/\\]init%.lua$", "/scripts/utpp_modsettings.reds")), "rb")
   local redsText = reds and reds:read("*a") or ""
   if reds then reds:close() end
-  check("T17 generated class: no field, snapshot line or listing for the four hidden head look options; the head look switch, Look at the camera and Head follows turns are there",
+  check("T17 generated class: no field, snapshot line or listing for the four hidden head look options; the head look switch and Look at the camera are there",
     #redsText > 1000 and string.find(redsText, "UTPPSnapshot", 1, true) ~= nil
     and string.find(redsText, "headLook_whileWalking", 1, true) == nil and string.find(redsText, "headLook_lookAtLoot", 1, true) == nil
     and string.find(redsText, "headLook_maxYaw", 1, true) == nil and string.find(redsText, "headLook_chest", 1, true) == nil
@@ -445,21 +444,19 @@ local ok, err = pcall(function()
     and string.find(redsText, '"headLook_impl=" + UTPPMSBool(this.headLook_impl)', 1, true) ~= nil
     and string.find(redsText, "public let headLook_faceCamera: Bool = true;", 1, true) ~= nil
     and string.find(redsText, '"headLook_faceCamera=" + UTPPMSBool(this.headLook_faceCamera)', 1, true) ~= nil
-    and string.find(redsText, "public let mm_headLead: Bool = true;", 1, true) ~= nil
-    and string.find(redsText, '"mm_headLead=" + UTPPMSBool(this.mm_headLead)', 1, true) ~= nil
     and string.find(redsText, "public let camera_aim_distance", 1, true) ~= nil)
-  -- the 21 options hidden on 2026-11-13 (registered by other modules, flagged through utpp_core's HIDDEN_KEYS) have no field either
+  -- the options flagged through utpp_core's HIDDEN_KEYS (registered by other modules) have no field either
   local leaked = {}
   for _, f in ipairs({ "camera_aim_occlusion", "mm_pelvisYawTrim", "mm_bodyYawOffset", "mm_minWalkSpeed", "camera_body", "camera_collision",
                        "mm_aimAtCrosshair", "perspective_sceneTier", "interactRange_scale", "lootRange_scale", "lootView_zoom",
                        "lootView_radius", "vehicle_keepTpp", "vehicle_pullOut", "vehicle_rideWatchdog", "vehicle_safeTeleportExit",
                        "camera_mouseScale", "perspective_minGap", "camera_aim_range", "camera_zoomUnarmed_fov",
-                       "camera_zoomUnarmed_lastFov" }) do
+                       "camera_zoomUnarmed_lastFov", "perspective_blend", "mm_headLead" }) do
     if string.find(redsText, "public let " .. f .. ":", 1, true) or string.find(redsText, '"' .. f .. '="', 1, true) then
       leaked[#leaked + 1] = f
     end
   end
-  check("T17 generated class: no field for the 21 options hidden on 2026-11-13", #redsText > 1000 and #leaked == 0,
+  check("T17 generated class: no field, snapshot line or listing for the 23 options flagged hidden by utpp_core", #redsText > 1000 and #leaked == 0,
     table.concat(leaked, ", "))
   os.remove(settingsFile)
   os.remove(baseFile)
@@ -472,7 +469,7 @@ local ok, err = pcall(function()
   c17.Set("headLook.maxYaw", 80)
   c17.Set("headLook.impl", false)
   c17.Set("t.steps", 5)
-  c17.Register({ key = "t.lead", section = "test", type = "bool", default = true, label = "Lead" })  -- a shown switch like mm.headLead
+  c17.Register({ key = "t.lead", section = "test", type = "bool", default = true, label = "Lead" })  -- a shown switch
   c17.Set("t.lead", false)
   -- the page as generated: the shown switch (class default true), no field for the hidden options
   local m17 = mockMS({ t_lead = "true", crosshair_color = "0", t_view = "1", t_steps = "3" })

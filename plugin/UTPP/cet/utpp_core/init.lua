@@ -145,15 +145,30 @@ end
 -- position of each key in S.order (presentation tie-break of the menu layout; S.order itself is never re-sorted)
 local orderIndex = {}
 
--- Options left out of every menu in 0.1.0: the same hidden = true flag as on the head look
+-- Options left out of every menu: the same hidden = true flag as on the head look
 -- registrations, applied here for the options that other modules register (Register sets def.hidden). They are registered and work
 -- on their current values (defaults, fresh-install initial values, Get / Set / Effective, the Game Animations pack's forced
 -- values, the settings file and the console are unchanged); only their menu entries are left out. The layout entries stay.
+-- perspective.blend: nothing reads the value (the camera's own enter / exit times set the transition length).
+-- mm.headLead: the lean head layer takes the head in the default configuration, so the switch changes nothing there.
 M.HIDDEN_KEYS = {}
 for _, k in ipairs({ "camera.aim.occlusion", "mm.pelvisYawTrim", "mm.bodyYawOffset", "mm.minWalkSpeed", "camera.body",
   "camera.collision", "mm.aimAtCrosshair", "perspective.sceneTier", "interactRange.scale", "lootRange.scale", "lootView.zoom",
   "lootView.radius", "vehicle.keepTpp", "vehicle.pullOut", "vehicle.rideWatchdog", "vehicle.safeTeleportExit", "camera.mouseScale",
-  "perspective.minGap", "camera.aim.range", "camera.zoomUnarmed.fov", "camera.zoomUnarmed.lastFov" }) do M.HIDDEN_KEYS[k] = true end
+  "perspective.minGap", "camera.aim.range", "camera.zoomUnarmed.fov", "camera.zoomUnarmed.lastFov",
+  "perspective.blend", "mm.headLead" }) do M.HIDDEN_KEYS[k] = true end
+
+-- Options that follow another option: vehicle.keepTpp holds the same behaviour as perspective.vehicleKeepTpp, which is the
+-- option of the menu and the single authority. A follower takes the value of its authority whenever either is registered, read
+-- from the settings file or changed, and its apply callback runs on every such change. Set on a follower sets the authority.
+-- The follower stays registered and readable (Get / Effective / the settings file).
+M.FOLLOWS = { ["vehicle.keepTpp"] = "perspective.vehicleKeepTpp" }
+local FOLLOWERS = {}
+for follower, authority in pairs(M.FOLLOWS) do
+  FOLLOWERS[authority] = FOLLOWERS[authority] or {}
+  table.insert(FOLLOWERS[authority], follower)
+end
+for _, list in pairs(FOLLOWERS) do table.sort(list) end
 
 function M.RegisterSection(id, label, opts)
   if S.sections[id] then return S.sections[id] end
@@ -185,11 +200,14 @@ function M.Register(def)
   if v == nil and def.initial ~= nil then v = validate(def, def.initial) end
   if v == nil then v = default end
   if diagHeld(def.key) then v = true end -- registered while the diagnostic logs are on (stored value ignored)
+  local authority = M.FOLLOWS[def.key]
+  if authority ~= nil and S.defs[authority] ~= nil then v = S.values[authority] end -- a follower holds its authority's value
   S.values[def.key] = v
   if def.apply then
     local ok, err = pcall(def.apply, M.Effective(def.key))
     if not ok then M.Log("apply " .. def.key .. " failed: " .. tostring(err)) end
   end
+  if FOLLOWERS[def.key] ~= nil then M.PushFollowers(def.key) end
   if def.section then
     local sec = S.sections[def.section] or M.RegisterSection(def.section, def.section)
     if fresh then
@@ -201,6 +219,20 @@ function M.Register(def)
 end
 
 function M.Get(key) return S.values[key] end
+
+-- the registered followers of an authority take its value; their apply callbacks run when the value changed
+function M.PushFollowers(authority)
+  for _, follower in ipairs(FOLLOWERS[authority] or {}) do
+    local def = S.defs[follower]
+    if def ~= nil and S.defs[authority] ~= nil and S.values[follower] ~= S.values[authority] then
+      S.values[follower] = S.values[authority]
+      if def.apply then
+        local ok, err = pcall(def.apply, M.Effective(follower))
+        if not ok then M.Log("apply " .. follower .. " failed: " .. tostring(err)) end
+      end
+    end
+  end
+end
 -- the effective value of a setting (a bool switch: its boolean); the animation pack in force may override it (PACK_FORCED)
 function M.Effective(key)
   local forced = M.PACK_FORCED[M.pack.applied]
@@ -226,6 +258,8 @@ end
 function M.Set(key, value, opts)
   local def = S.defs[key]
   if not def then return nil, "unknown setting " .. tostring(key) end
+  local authority = M.FOLLOWS[key]
+  if authority ~= nil and S.defs[authority] ~= nil then return M.Set(authority, value, opts) end
   local v = validate(def, value)
   if v == nil then return nil, "invalid value for " .. key .. ": " .. tostring(value) end
   if v ~= true and diagHeld(key) then
@@ -239,6 +273,7 @@ function M.Set(key, value, opts)
     local ok, err = pcall(def.apply, M.Effective(key))
     if not ok then M.Log("apply " .. key .. " failed: " .. tostring(err)) end
   end
+  if FOLLOWERS[key] ~= nil then M.PushFollowers(key) end
   if changed and not (opts and opts.noSave) then pcall(M.Save) end
   if not S.uiSync then syncWidget(key) end
   return v
@@ -278,14 +313,36 @@ local MIGRATED_KEYS = {
 }
 M.MIGRATED_KEYS = MIGRATED_KEYS
 
+-- Defaults revision. The settings file carries the revision of the defaults it was written under (M.DEFAULTS_REVISION_KEY; no
+-- line = revision 0). When a default changes, an entry is added to M.DEFAULT_CHANGES with the revision that introduces it:
+-- the first time a file older than that revision is loaded, a stored value equal to the old default is replaced by the new
+-- default (it cannot be told from a value nobody chose); any other stored value is a choice and stays. Save writes the
+-- current revision, so the replacement happens once.
+M.DEFAULTS_REVISION_KEY = "core.defaultsRevision"
+M.DEFAULTS_REVISION = 1
+M.DEFAULT_CHANGES = {
+  { rev = 1, key = "melee.guard", from = false, to = true },
+}
+S.fileRevision = nil
+
+local function sameStoredValue(text, want)
+  if type(want) == "number" then return tonumber(text) == want end
+  return text == tostring(want)
+end
+
 function M.Load(path)
   local f = io.open(path or M.SETTINGS_FILE, "r")
   if not f then return false end
+  local before = {}
+  for key, value in pairs(S.values) do before[key] = value end
   local migrated = {}
+  local fileRevision = 0
   for line in f:lines() do
     local k, v = string.match(line, "^%s*([%w_%.]+)%s*=%s*(.-)%s*$")
     if k and not string.match(line, "^%s*#") then
-      if MIGRATED_KEYS[k] then
+      if k == M.DEFAULTS_REVISION_KEY then
+        fileRevision = math.floor(tonumber(v) or 0)
+      elseif MIGRATED_KEYS[k] then
         S.stored[k] = nil
         migrated[#migrated + 1] = { from = k, raw = v }
       elseif RETIRED_KEYS[k] then
@@ -320,12 +377,48 @@ function M.Load(path)
       M.LogOnce("migrated:" .. m.from, "setting " .. m.from .. " dropped (" .. to .. " is stored)")
     end
   end
-  -- Load writes values without apply callbacks. The pack in force is taken from the stored setting here (nothing runs yet, so
-  -- nothing is deferred), and the diagnostic logs are applied, so a stored "until switched off" holds the diagnostic switches
-  -- (in the game both keys are registered before this file is read, so this is the normal start path). "On for 5 minutes" does
-  -- not survive a restart: it becomes "off" (and is pushed to Mod Settings as such).
+  -- changed defaults: a stored value equal to the old default becomes the new default (once, see M.DEFAULT_CHANGES)
+  S.fileRevision = fileRevision
+  local moved = {}
+  for _, change in ipairs(M.DEFAULT_CHANGES) do
+    if change.rev > fileRevision and change.rev <= M.DEFAULTS_REVISION and S.stored[change.key] ~= nil
+      and sameStoredValue(S.stored[change.key], change.from) then
+      local def = S.defs[change.key]
+      S.stored[change.key] = def and encode(def, change.to) or tostring(change.to)
+      if def then
+        local val = validate(def, S.stored[change.key])
+        if val ~= nil then S.values[change.key] = val end
+      end
+      moved[#moved + 1] = change.key .. " " .. tostring(change.from) .. " -> " .. tostring(change.to)
+    end
+  end
+  if #moved > 0 then
+    M.Log("settings defaults revision " .. fileRevision .. " -> " .. M.DEFAULTS_REVISION .. ": " .. table.concat(moved, ", ")
+      .. " (the stored value was the old default)")
+  end
+  -- followers hold the value of their authority
+  for authority in pairs(FOLLOWERS) do
+    for _, follower in ipairs(FOLLOWERS[authority]) do
+      if S.defs[authority] ~= nil and S.defs[follower] ~= nil then S.values[follower] = S.values[authority] end
+    end
+  end
+  -- The pack in force is taken from the stored setting here (nothing runs yet, so nothing is deferred), and the diagnostic logs
+  -- are applied, so a stored "until switched off" holds the diagnostic switches (in the game both keys are registered before
+  -- this file is read, so this is the normal start path). "On for 5 minutes" does not survive a restart: it becomes "off" (and
+  -- is pushed to Mod Settings as such).
   if S.defs[M.PACK_KEY] and M.LoadPack then pcall(M.LoadPack) end
   if S.defs[M.DIAG_KEY] and M.LoadDiagnosticLogs then pcall(M.LoadDiagnosticLogs) end
+  -- Options registered before this file was read ran their apply callback with the default; the ones whose value the file
+  -- changed run it again with the value they hold now (an option registered later is read from S.stored by Register).
+  for _, key in ipairs(S.order) do
+    local def = S.defs[key]
+    if def.apply and key ~= M.PACK_KEY and key ~= M.DIAG_KEY and S.values[key] ~= before[key] then
+      local ok, err = pcall(def.apply, M.Effective(key))
+      if not ok then M.Log("apply " .. key .. " failed: " .. tostring(err)) end
+    end
+  end
+  -- a replaced default is written back at once (with the current revision), so it is replaced only once
+  if #moved > 0 then pcall(M.Save, path) end
   return true
 end
 
@@ -334,6 +427,7 @@ function M.Save(path)
   local f = io.open(path or M.SETTINGS_FILE, "w")
   if not f then return false end
   f:write("# UTPP settings (utpp_core " .. M.VERSION .. "): key=value, delete a line to restore its default\n")
+  f:write(M.DEFAULTS_REVISION_KEY .. "=" .. math.max(M.DEFAULTS_REVISION, S.fileRevision or 0) .. "\n")
   local written = {}
   for _, key in ipairs(S.order) do
     if M.diag and M.diag.mode ~= "off" and DIAG_SET[key] then
@@ -401,8 +495,7 @@ local LAYOUT = {
   -- (distance, shoulder offset, FOV, height: ranks 1-4) come first, then these
   --   "Run pelvis yaw trim" (mm.pelvisYawTrim, registered by utpp_motion) after the camera controls, then
   -- "Body yaw offset" (mm.bodyYawOffset, utpp_motion: the whole character turned against the over-the-shoulder parallax);
-  --   "Head follows turns" (mm.headLead, registered below: the head turns into a run turn; player level since 0.1.0) right
-  -- after it;
+  --   "Head follows turns" (mm.headLead, registered below: hidden, the lean head layer takes the head) right after it;
   --   "Walk speed (m/s)" (mm.walkSpeed, utpp_motion: capsule speed under the walk toggle) after it, then "Minimum walk
   -- speed (m/s)" (mm.minWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the

@@ -658,9 +658,9 @@ if not WRITE then
     -- 2026-10-30 user: Run pelvis yaw trim, then Body yaw offset right after it (both registered by utpp_motion); 2026-10-31: Walk speed,
     -- then Minimum walk speed; 2026-11-09 (user K5): Shoulder width (female V) last
     -- 2026-11-13: Run pelvis yaw trim, Body yaw offset and Minimum walk speed are hidden in 0.1.0 (level "hidden", layout place kept)
-    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset), Head follows turns, Walk speed, (hidden: Minimum walk speed), Shoulder width, then the advanced camera options",
+    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset, Head follows turns), Walk speed, (hidden: Minimum walk speed), Shoulder width, then the advanced camera options",
       placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffset") == "hidden/frame/60"
-      and placeOf("mm.headLead") == "player/frame/70"
+      and placeOf("mm.headLead") == "hidden/frame/70"
       and placeOf("mm.walkSpeed") == "player/frame/80" and placeOf("mm.minWalkSpeed") == "hidden/frame/90"
       and placeOf("mm.shoulderWidth") == "player/frame/100" and placeOf("camera.idleOrbit") == "advanced/frame/110",
       placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.bodyYawOffset") .. " " .. placeOf("mm.walkSpeed") .. " "
@@ -751,7 +751,7 @@ if not WRITE then
       and core.settings.defs["camera.startTpp"].label == "Start in third person")
     check("standard: building calls no apply / native and no Save", #LOG == 0 and saves.save == 0, table.concat(LOG, "; "))
     check("standard: settings file and values unchanged by the build", readFile(tmpSettings) == before and valuesOf(core) == valsBefore)
-    -- registry flag hidden = true in 0.1.0: four head look tuning options and 21 more options (2026-11-13) are registered
+    -- registry flag hidden = true: four head look tuning options and 23 more options are registered
     -- and working on their defaults, listed in no view; HIDDEN is the exact set (the head look switch and "Look at the camera"
     -- are visible since 2026-11-13: they keep their defaults, DEFAULTS lists them too, but HIDDEN does not)
     do
@@ -762,7 +762,8 @@ if not WRITE then
                          ["interactRange.scale"] = 1.0, ["lootRange.scale"] = 1.0, ["lootView.zoom"] = 0.9, ["lootView.radius"] = 1.8,
                          ["vehicle.keepTpp"] = true, ["vehicle.pullOut"] = true, ["vehicle.rideWatchdog"] = true,
                          ["vehicle.safeTeleportExit"] = true, ["camera.mouseScale"] = 0, ["perspective.minGap"] = 0.5,
-                         ["camera.aim.range"] = 60, ["camera.zoomUnarmed.fov"] = 45, ["camera.zoomUnarmed.lastFov"] = 25 }
+                         ["camera.aim.range"] = 60, ["camera.zoomUnarmed.fov"] = 45, ["camera.zoomUnarmed.lastFov"] = 25,
+                         ["perspective.blend"] = 0.8, ["mm.headLead"] = true }
       local HIDDEN = {}
       for key in pairs(DEFAULTS) do HIDDEN[key] = true end
       HIDDEN["headLook.impl"], HIDDEN["headLook.faceCamera"] = nil, nil
@@ -773,7 +774,7 @@ if not WRITE then
         if (def.hidden == true) ~= (HIDDEN[key] == true) then bad[#bad + 1] = key end
       end
       for _, s in ipairs(list) do if HIDDEN[string.match(s, "|(.*)$")] then listed[#listed + 1] = s end end
-      check("hidden: exactly the 25 listed options carry the flag (4 head look + 21 more)", flagged == 25 and #bad == 0, table.concat(bad, ", "))
+      check("hidden: exactly the 27 listed options carry the flag (4 head look + 23 more)", flagged == 27 and #bad == 0, table.concat(bad, ", "))
       check("hidden: level 'hidden' (kept layout group), no widget, not in the standard list", #listed == 0
         and core.MenuPlacement("headLook.maxYaw") == "hidden" and select(2, core.MenuPlacement("headLook.maxYaw")) == "world"
         and core.settings.widgets["headLook.whileWalking"] == nil and core.settings.widgets["headLook.lookAtLoot"] == nil
@@ -796,15 +797,21 @@ if not WRITE then
       end
       check("hidden: the Debug group has no widget, so the standard view has no g_debug subcategory",
         core.settings.widgets["camera.aim.occlusion"] == nil and not ns.pathExists("/utpp/g_debug"))
-      -- the head lead switch moved to the player menu (Camera group, after Body yaw offset), default and key unchanged
+      -- the head lead switch is hidden (the lean head layer takes the head in the default configuration): key, label, default
+      -- and description unchanged
       local leadShown = false
       for _, s in ipairs(list) do if s == "g_frame|mm.headLead" then leadShown = true end end
       local lead = core.settings.defs["mm.headLead"]
-      check("player menu: 'Head follows turns' (mm.headLead) in the Camera group, player level, default on", leadShown
-        and core.MenuPlacement("mm.headLead") == "player" and lead.label == "Head follows turns" and lead.default == true
-        and lead.type == "bool" and core.settings.widgets["mm.headLead"] ~= nil
-        and core.settings.widgets["mm.headLead"].path == "/utpp/g_frame"
+      check("hidden: 'Head follows turns' (mm.headLead) has no widget; key, label, default and text are unchanged", not leadShown
+        and core.MenuPlacement("mm.headLead") == "hidden" and lead.label == "Head follows turns" and lead.default == true
+        and lead.type == "bool" and core.settings.widgets["mm.headLead"] == nil
         and lead.desc == "While V runs or sprints through a turn, her head turns into the turn. Off: the head stays as the run animations have it. No effect with the Game Animations pack.")
+      local blendShown = false
+      for _, s in ipairs(list) do if s == "g_frame|perspective.blend" then blendShown = true end end
+      local blend = core.settings.defs["perspective.blend"]
+      check("hidden: 'Transition time (s)' (perspective.blend) has no widget; key, label, default and range are unchanged", not blendShown
+        and core.MenuPlacement("perspective.blend") == "hidden" and blend.label == "Transition time (s)" and blend.default == 0.8
+        and blend.min == 0.2 and blend.max == 2.5 and core.settings.widgets["perspective.blend"] == nil)
       local dflt = {}
       for key, v in pairs(DEFAULTS) do
         if core.settings.defs[key].default ~= v or core.Get(key) ~= v or core.Effective(key) ~= v then dflt[#dflt + 1] = key end
@@ -1037,8 +1044,8 @@ if not WRITE then
     local ns = newNS()
     core.BuildNativeSettings(ns)
     local s0 = table.concat(ns.subs(), ",")
-    -- core's own options: Animation pack and Diagnostic logs in General, mm.shinobiBonusReload in Combat, mm.headLead (Head follows turns, player level since 0.1.0) in Camera, ragdoll.enabled is developer level since 0.1.0 (no Vehicles group from core alone); the rest of the frame group and advanced are created late
-    check("late: core only -> groups that have options", s0 == "g_start,g_frame,g_combat,g_world,g_menu", s0)
+    -- core's own options: Animation pack and Diagnostic logs in General, mm.shinobiBonusReload in Combat, mm.headLead (Head follows turns, hidden: no Camera group from core alone), ragdoll.enabled is developer level since 0.1.0 (no Vehicles group from core alone); the rest of the frame group and advanced are created late
+    check("late: core only -> groups that have options", s0 == "g_start,g_combat,g_world,g_menu", s0)
     -- the other modules register after the build
     LOG = {}
     local mods = bootModules(core, { skip = { vehiclecam = true } })
@@ -1335,6 +1342,270 @@ if not WRITE then
       and core.Get("camera.trace") == true and core.Get("core.log") == false and core.Get("mm.feedDump") == false)
     check("diagnostic logs stored off: no diagnostic native called", #nat == 0 and core.diag.calls == 0, table.concat(nat, ","))
     os.remove(tmpSettings)
+  end
+end
+
+-- ================================================================ T03 stored values, hidden options, followers, defaults revision
+do
+  local function writeStored(text)
+    local f = assert(io.open(tmpSettings, "wb"))
+    f:write(text)
+    f:close()
+  end
+  -- the game's order: utpp_core registers its own options and reads the file, the other modules register afterwards; the
+  -- apply callbacks are recorded from the start (the ones of the options registered before the file is read as well)
+  local function bootWithFile(text, opts)
+    os.remove(tmpSettings)
+    LOG = {}
+    coreLines = {}
+    local core = loadCore()
+    for _, key in ipairs(core.settings.order) do wrapApply(core.settings.defs[key]) end
+    hookRegister(core)
+    if text then
+      writeStored(text)
+      core.Load(tmpSettings)
+    end
+    local mods = bootModules(core, opts)
+    return core, mods
+  end
+  local function lastApplied()
+    local out = {}
+    for _, line in ipairs(LOG) do
+      local key, arg = string.match(line, '^apply ([^%(]+)%((.*),"%a+"%)$')
+      if key then out[key] = arg end
+    end
+    return out
+  end
+  local function count(text, needle)
+    local n, from = 0, 1
+    while true do
+      local a, b = string.find(text, needle, from, true)
+      if not a then return n end
+      n, from = n + 1, b + 1
+    end
+  end
+  local function defaultsLines()
+    local n = 0
+    for _, l in ipairs(coreLines) do if string.find(l, "settings defaults revision", 1, true) then n = n + 1 end end
+    return n
+  end
+
+  -- ---------------------------------------------------------------- every registered key gets its stored value
+  -- Keys with their own start path and a value that cannot be arbitrary are left out here (they have their own tests):
+  -- core.diagnosticLogs ("On for 5 minutes" becomes "off" on a restart, "until" holds the diagnostic switches) and
+  -- animation.pack (the pack in force forces eight other options).
+  local EXCLUDED = { ["core.diagnosticLogs"] = true, ["animation.pack"] = true }
+  do
+    local probe = bootWithFile(nil)
+    local lines, chosen = {}, {}
+    for _, key in ipairs(probe.settings.order) do
+      local def = probe.settings.defs[key]
+      if not EXCLUDED[key] then
+        local text
+        if def.type == "bool" then text = tostring(not def.default)
+        elseif def.type == "choice" then
+          for _, c in ipairs(def.choices) do if c[1] ~= def.default then text = c[1]; break end end
+        else
+          local other
+          if def.max ~= nil and def.default ~= def.max then other = def.max
+          elseif def.min ~= nil and def.default ~= def.min then other = def.min
+          else other = def.default + 1 end
+          text = string.format("%.9g", other)
+        end
+        if text ~= nil then
+          chosen[key] = probe.ValidateSetting(def, text)
+          lines[#lines + 1] = key .. "=" .. text
+        end
+      end
+    end
+    -- a follower holds the value of its authority (see T03 followers)
+    for follower, authority in pairs(probe.FOLLOWS or { ["vehicle.keepTpp"] = "perspective.vehicleKeepTpp" }) do chosen[follower] = chosen[authority] end
+    local nKeys = #lines
+    -- a file of the current defaults revision (a stored value equal to an old default is a choice, not a leftover)
+    table.insert(lines, 1, "core.defaultsRevision=" .. tostring(probe.DEFAULTS_REVISION or 1))
+    check("T03 stored values: every key of the whole registry could be given a non-default value (" .. nKeys .. " keys)",
+      nKeys >= 150 and nKeys == #probe.settings.order - 2, nKeys .. " of " .. #probe.settings.order)
+
+    local core = bootWithFile(table.concat(lines, "\n") .. "\n")
+    local last = lastApplied()
+    local wrong, notApplied = {}, {}
+    for key, want in pairs(chosen) do
+      local def = core.settings.defs[key]
+      if def == nil then wrong[#wrong + 1] = key .. " (not registered)"
+      else
+        if core.Get(key) ~= want then wrong[#wrong + 1] = key .. "=" .. tostring(core.Get(key)) .. " want " .. tostring(want) end
+        -- the callback must have seen the stored value, not the default it was registered with
+        if def.apply ~= nil and last[key] ~= ser(core.Effective(key)) then
+          notApplied[#notApplied + 1] = key .. " (last apply " .. tostring(last[key]) .. ", value " .. ser(core.Effective(key)) .. ")"
+        end
+      end
+    end
+    table.sort(wrong)
+    table.sort(notApplied)
+    check("T03 stored values: after a restart every registered key reads back its stored value", #wrong == 0, table.concat(wrong, "; "))
+    check("T03 stored values: the apply callback of every key last ran with the stored value, whatever the registration order",
+      #notApplied == 0, table.concat(notApplied, "; "))
+    -- the options that utpp_core registers before it reads the file: their callbacks fill the head look / loot view config
+    local hl, la = core.hl.cfg, core.la.cfg
+    check("T03 stored values: head look options reach the head look config (faceCamera, whileWalking, lookAtLoot, maxYaw)",
+      hl.faceCamera == chosen["headLook.faceCamera"] and hl.whileWalking == chosen["headLook.whileWalking"]
+      and hl.lookAtLoot == chosen["headLook.lookAtLoot"] and hl.maxYaw == chosen["headLook.maxYaw"] and hl.faceCamera ~= true,
+      tostring(hl.faceCamera) .. " " .. tostring(hl.whileWalking) .. " " .. tostring(hl.lookAtLoot) .. " " .. tostring(hl.maxYaw))
+    check("T03 stored values: loot view options reach the loot view config (zoom, radius)",
+      la.zoom == chosen["lootView.zoom"] and la.radius == chosen["lootView.radius"] and la.zoom ~= 0.9 and la.radius ~= 1.8,
+      tostring(la.zoom) .. " " .. tostring(la.radius))
+    -- one concrete value that is neither the default nor a limit
+    local core2 = bootWithFile("headLook.faceCamera=false\nheadLook.maxYaw=60\nlootView.zoom=0.3\nlootView.radius=1.2\n")
+    check("T03 stored values: a stored head look limit / loot view zoom is what the config holds after the start",
+      core2.hl.cfg.faceCamera == false and core2.hl.cfg.maxYaw == 60 and math.abs(core2.la.cfg.zoom - 0.3) < 1e-9
+      and math.abs(core2.la.cfg.radius - 1.2) < 1e-9 and core2.hl.cfg.whileWalking == true)
+    -- Load twice: no callback runs again for a value that did not change
+    local before = #LOG
+    core2.Load(tmpSettings)
+    check("T03 stored values: loading the same file again runs no callback", #LOG == before, #LOG - before)
+  end
+
+  -- ---------------------------------------------------------------- options hidden from the player menu keep working
+  do
+    local core = bootWithFile("perspective.blend=1.6\nmm.headLead=false\nvehicle.keepTpp=false\n")
+    local names = { "perspective.blend", "mm.headLead" }
+    local ok = true
+    for _, key in ipairs(names) do
+      local def = core.settings.defs[key]
+      ok = ok and def ~= nil and def.hidden == true and core.MenuPlacement(key) == "hidden" and core.settings.widgets[key] == nil
+    end
+    check("T03 hidden options: perspective.blend and mm.headLead are registered, flagged hidden and have no widget", ok)
+    check("T03 hidden options: their stored values are read (no error, no change of the published key or default)",
+      core.Get("perspective.blend") == 1.6 and core.Get("mm.headLead") == false
+      and core.settings.defs["perspective.blend"].default == 0.8 and core.settings.defs["mm.headLead"].default == true)
+    core.Save(tmpSettings)
+    local text = readFile(tmpSettings)
+    check("T03 hidden options: the next Save keeps both keys in the file", string.find(text, "perspective.blend=1.6", 1, true) ~= nil
+      and string.find(text, "mm.headLead=false", 1, true) ~= nil)
+  end
+
+  -- ---------------------------------------------------------------- followers: one authority for the vehicle camera switch
+  do
+    local function followCase(authorityFirst)
+      os.remove(tmpSettings)
+      local core = loadCore()
+      writeStored("perspective.vehicleKeepTpp=false\nvehicle.keepTpp=true\n")
+      core.Load(tmpSettings)
+      local applied = {}
+      local function reg(key)
+        core.Register({ key = key, section = "vehicle", type = "bool", default = true, label = key,
+          apply = function(v) applied[key] = v end })
+      end
+      if authorityFirst then reg("perspective.vehicleKeepTpp"); reg("vehicle.keepTpp")
+      else reg("vehicle.keepTpp"); reg("perspective.vehicleKeepTpp") end
+      local tag = authorityFirst and "authority registered first" or "follower registered first"
+      check("T03 follower (" .. tag .. "): the follower holds the authority's value and its callback saw it",
+        core.Get("vehicle.keepTpp") == false and core.Effective("vehicle.keepTpp") == false and applied["vehicle.keepTpp"] == false
+        and core.Get("perspective.vehicleKeepTpp") == false)
+      core.Set("perspective.vehicleKeepTpp", true, { noSave = true })
+      check("T03 follower (" .. tag .. "): setting the authority runs the follower's callback",
+        core.Get("vehicle.keepTpp") == true and applied["vehicle.keepTpp"] == true)
+      local v = core.Set("vehicle.keepTpp", false)
+      check("T03 follower (" .. tag .. "): setting the follower sets the authority",
+        v == false and core.Get("perspective.vehicleKeepTpp") == false and core.Get("vehicle.keepTpp") == false
+        and applied["perspective.vehicleKeepTpp"] == false and applied["vehicle.keepTpp"] == false)
+      local text = readFile(tmpSettings)
+      check("T03 follower (" .. tag .. "): both keys stay in the file with the same value",
+        string.find(text, "perspective.vehicleKeepTpp=false", 1, true) ~= nil and string.find(text, "vehicle.keepTpp=false", 1, true) ~= nil)
+      core.ResetAll()
+      check("T03 follower (" .. tag .. "): Defaults restores both", core.Get("vehicle.keepTpp") == true
+        and core.Get("perspective.vehicleKeepTpp") == true)
+    end
+    followCase(true)
+    followCase(false)
+
+    -- the real modules, both registration orders: the vehicle camera hold follows the visible option
+    local core, mods = bootWithFile("perspective.vehicleKeepTpp=false\nvehicle.keepTpp=true\n")
+    check("T03 follower (real modules): the vehicle camera hold and the perspective rule both follow the visible option",
+      mods.vehiclecam.ctrl.cfg.keepTpp == false and mods.perspective.cfg.vehicleKeepTpp == false
+      and core.Get("vehicle.keepTpp") == false)
+    sandboxIo() -- the vehicle camera writes its own utpp_settings.txt next to the working directory when the hold changes
+    core.Set("perspective.vehicleKeepTpp", true, { noSave = true })
+    unsandboxIo()
+    check("T03 follower (real modules): switching the visible option on turns the hold on",
+      mods.vehiclecam.ctrl.cfg.keepTpp == true and mods.perspective.cfg.vehicleKeepTpp == true)
+    local core3, mods3 = bootWithFile("perspective.vehicleKeepTpp=false\nvehicle.keepTpp=true\n", { skip = { perspective = true } })
+    check("T03 follower (real modules, vehicle camera first): the hold starts on its own stored value",
+      mods3.vehiclecam.ctrl.cfg.keepTpp == true)
+    registerForEvent, registerInput = nil, nil
+    local persp = dofile(UTPP_PERSPECTIVE_PATH)
+    sandboxIo()
+    persp.AttachCore(core3)
+    unsandboxIo()
+    restoreGlobals()
+    check("T03 follower (real modules, vehicle camera first): the perspective option registering later turns the hold off",
+      mods3.vehiclecam.ctrl.cfg.keepTpp == false and persp.cfg.vehicleKeepTpp == false and core3.Get("vehicle.keepTpp") == false)
+  end
+
+  -- ---------------------------------------------------------------- defaults revision
+  do
+    local REV = "core.defaultsRevision=" .. tostring(1)
+    local oldFile = bootWithFile("melee.guard=false\nmm.headLead=false\n")
+    local onDisk = readFile(tmpSettings) or ""
+    check("T03 defaults revision: the moved value is written back at once (with the revision) and the other keys stay in the file",
+      count(onDisk, "core.defaultsRevision=1") == 1 and string.find(onDisk, "melee.guard=true", 1, true) ~= nil
+      and string.find(onDisk, "mm.headLead=false", 1, true) ~= nil)
+    check("T03 defaults revision: the registered default is on", oldFile.settings.defs["melee.guard"].default == true)
+    check("T03 defaults revision: a file without a revision with the old default stored (false) moves to the new default (once)",
+      oldFile.Get("melee.guard") == true and defaultsLines() == 1, tostring(oldFile.Get("melee.guard")) .. " lines=" .. defaultsLines())
+    local logged = ""
+    for _, l in ipairs(coreLines) do if string.find(l, "settings defaults revision", 1, true) then logged = l end end
+    check("T03 defaults revision: the log line names the revisions and the key",
+      string.find(logged, "0 -> 1", 1, true) ~= nil and string.find(logged, "melee.guard false -> true", 1, true) ~= nil, logged)
+    check("T03 defaults revision: another stored value of the same file is untouched", oldFile.Get("mm.headLead") == false)
+    oldFile.Save(tmpSettings)
+    local saved = readFile(tmpSettings)
+    check("T03 defaults revision: Save writes the revision once and the new value", count(saved, "core.defaultsRevision=") == 1
+      and string.find(saved, REV, 1, true) ~= nil and string.find(saved, "melee.guard=true", 1, true) ~= nil)
+    check("T03 defaults revision: the revision is not a stored setting", oldFile.settings.stored["core.defaultsRevision"] == nil
+      and oldFile.Get("core.defaultsRevision") == nil)
+
+    -- loading the saved file again: nothing moves, nothing is logged
+    local again = bootWithFile(saved)
+    check("T03 defaults revision: loading the file written after the move changes nothing and logs nothing",
+      again.Get("melee.guard") == true and defaultsLines() == 0 and again.Get("mm.headLead") == false)
+
+    -- a choice made after the move survives restarts
+    again.Set("melee.guard", false)
+    local chosen = readFile(tmpSettings)
+    local restart = bootWithFile(chosen)
+    check("T03 defaults revision: a later choice of the old default is kept after a restart (no second move)",
+      restart.Get("melee.guard") == false and defaultsLines() == 0 and count(chosen, "core.defaultsRevision=") == 1)
+
+    -- a file of the current revision with the old default is a choice
+    local newFile = bootWithFile(REV .. "\nmelee.guard=false\n")
+    check("T03 defaults revision: a file of the current revision keeps a stored false", newFile.Get("melee.guard") == false and defaultsLines() == 0)
+
+    -- other stored values and absent keys
+    local trueFile = bootWithFile("melee.guard=true\n")
+    check("T03 defaults revision: an old file with the new value stored stays on, nothing logged",
+      trueFile.Get("melee.guard") == true and defaultsLines() == 0)
+    local absent = bootWithFile("mm.headLead=false\n")
+    check("T03 defaults revision: key absent from an old file: the new default applies, nothing logged",
+      absent.Get("melee.guard") == true and defaultsLines() == 0)
+    local fresh = bootWithFile(nil)
+    fresh.Save(tmpSettings)
+    check("T03 defaults revision: a fresh install gets the new default and the file carries the revision",
+      fresh.Get("melee.guard") == true and defaultsLines() == 0 and string.find(readFile(tmpSettings), REV, 1, true) ~= nil)
+
+    -- a newer revision written by another build is kept
+    local newer = bootWithFile("core.defaultsRevision=7\nmelee.guard=false\n")
+    newer.Save(tmpSettings)
+    check("T03 defaults revision: a higher revision in the file is kept and no move happens", newer.Get("melee.guard") == false
+      and string.find(readFile(tmpSettings), "core.defaultsRevision=7", 1, true) ~= nil)
+    -- an old default that was a number is compared by value
+    check("T03 defaults revision: every listed change names a registered key with a valid new default", (function()
+      for _, change in ipairs(oldFile.DEFAULT_CHANGES or {}) do
+        local def = oldFile.settings.defs[change.key]
+        if def == nil or def.default ~= change.to or change.rev > (oldFile.DEFAULTS_REVISION or 0) then return false end
+      end
+      return oldFile.DEFAULT_CHANGES ~= nil and #oldFile.DEFAULT_CHANGES > 0
+    end)())
   end
 end
 
