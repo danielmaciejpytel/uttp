@@ -2433,14 +2433,18 @@ bool PrepareRootOverlay(void *opaque, const motionpose::BaseFrameView &base, mot
         return false;
     if (in.haveAim && ctx.haveActorAim)
     {
+        // the aim point is given in the fed actor's axes, the frame is relative to the drawn actor (turned by Ahead)
+        math::Vec3 aimPoint = ctx.actorAim;
+        if (ctx.proposal.Ahead() != 0.0f)
+            math::Rot2(-ctx.proposal.Ahead(), ctx.actorAim.x, ctx.actorAim.y, aimPoint.x, aimPoint.y);
         visualroot::Aim aim;
-        if (!visualroot::ComputeAim(ctx.proposal.Frame(), ctx.actorAim, aim))
+        if (!visualroot::ComputeAim(ctx.proposal.Frame(), aimPoint, aim))
             return false;
         in.aimYawDeg = aim.yawDeg;
         in.aimPitchDeg = aim.pitchDeg;
         // seam C: the barrel loop target is the same actor point in the same frame as the aim angles above (pose frame)
         math::Vec3 visual;
-        in.haveAimPointVisual = visualroot::InversePoint(ctx.proposal.Frame(), ctx.actorAim, visual);
+        in.haveAimPointVisual = visualroot::InversePoint(ctx.proposal.Frame(), aimPoint, visual);
         if (in.haveAimPointVisual)
             in.aimPointVisual = visual;
         ctx.aimFromRoot = in.haveAimPointVisual;
@@ -4666,6 +4670,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         rootEvaluation.input.actorYaw = graph.actorWorldYaw;
         rootEvaluation.input.capsuleDeltaCurrent = {aRaw.capsuleDeltaCurrent[0], aRaw.capsuleDeltaCurrent[1], 0};
         rootEvaluation.input.capsuleYawDelta = aRaw.capsuleYawDelta;
+        // The pose is drawn with the capsule after this tick's requested turn: the frame stays relative to it (MotionRootFrame.hpp).
+        rootEvaluation.input.capsuleYawAhead = std::isfinite(aRaw.capsuleYawAhead) ? std::clamp(aRaw.capsuleYawAhead, -1.5f, 1.5f) : 0.0f;
         // The offset seen by the pose frame changes its velocity at a bounded rate: a capsule that jumps in speed or direction carries the
         // body with it instead of moving it inside the frame (MotionOffsetRoot.hpp item 3).
         rootEvaluation.input.offsetAccel = motionRoot::kOffsetAccel;
@@ -4776,6 +4782,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             p.capsuleYawDelta = ri.capsuleYawDelta;
             p.animDelta[0] = ri.animationDeltaPreviousVisual.x, p.animDelta[1] = ri.animationDeltaPreviousVisual.y;
             p.animYawDelta = ri.animationYawDelta;
+            p.yawAhead = rootEvaluation.proposal.Ahead();
             p.movingGround = ri.movingGround, p.montage = ri.montage, p.aimFacing = ri.aimFacing;
             const auto before = b.root.Frame(), after = rootEvaluation.proposal.Frame();
             p.before[0] = before.x, p.before[1] = before.y, p.before[2] = before.yaw;

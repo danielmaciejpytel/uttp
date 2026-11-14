@@ -150,5 +150,51 @@ class StagePopsTest(unittest.TestCase):
         self.assertEqual(psp.summarize(hit, 2.0)['per_class_big'], {'hips_pos': 1})
 
 
+class WorldStepsTest(unittest.TestCase):
+    """world_steps / capsule_track: the drawn body in world space, the capsule's own steps and the steps relative to it."""
+
+    @staticmethod
+    def turn(n, rate_deg, body_offset_deg):
+        """Model-space Hips / Head (q, p) turned by body_offset_deg [n] against the capsule; the capsule turns at rate_deg per feed."""
+        q = np.array([quat_z(a) for a in body_offset_deg])
+        p = np.zeros((n, 3))
+        p[:, 2] = 1.0
+        yaw = np.cumsum(np.full(n, rate_deg))
+        return {'Hips': (q, p), 'Head': (q.copy(), p + 0.6)}, yaw
+
+    def test_capsule_track_next_is_the_following_row(self):
+        x, y, yaw = psp.capsule_track([0, 1, 2], [0, 0, 0], [0, 10, 20], 'next')
+        self.assertEqual(list(x), [1, 2, 2])
+        self.assertAlmostEqual(float(np.degrees(yaw[0])), 10.0)
+        x, _, _ = psp.capsule_track([0, 1, 2], [0, 0, 0], [0, 10, 20], 'fed')
+        self.assertEqual(list(x), [0, 1, 2])
+
+    def test_a_body_step_that_cancels_a_capsule_step_is_clean_in_world_space(self):
+        n = 120
+        dt = np.full(n, DT)
+        offset = np.zeros(n)
+        offset[60] = -12.0  # the body turns back against the capsule for one frame ...
+        fk, yaw = self.turn(n, 3.0, offset)
+        yaw[60:] += 12.0    # ... exactly while the capsule jumps ahead (one frame early, then on time again)
+        yaw[61:] -= 12.0
+        res = psp.world_steps(fk, np.zeros(n), np.zeros(n), np.radians(yaw), dt)
+        self.assertEqual([f for f, _, _ in res['world']], [])
+        self.assertIn(60, res['relative'])
+        self.assertIn(60, res['capsule']['yaw'])
+
+    def test_a_body_step_alone_is_a_world_step_relative_to_the_capsule(self):
+        n = 120
+        dt = np.full(n, DT)
+        offset = np.zeros(n)
+        offset[60] = 12.0
+        fk, yaw = self.turn(n, 3.0, offset)
+        res = psp.world_steps(fk, np.zeros(n), np.zeros(n), np.radians(yaw), dt)
+        rows = [f for f, _, _ in res['world']]
+        self.assertIn(60, rows)
+        table = psp.world_table(res, n * DT)
+        self.assertEqual(table['axial']['relative'], len(rows))
+        self.assertEqual(table['capsule_steps'], {'yaw': 0, 'pos': 0})
+
+
 if __name__ == '__main__':
     unittest.main()

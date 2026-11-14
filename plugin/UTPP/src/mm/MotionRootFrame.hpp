@@ -4,6 +4,11 @@
 #include "MotionOffsetRoot.hpp"
 #include "VisualRootFrame.hpp"
 #include <cstdint>
+
+#ifndef UTPP_ROOT_AHEAD_MUTATION
+#define UTPP_ROOT_AHEAD_MUTATION 0 // 1 = Inputs::capsuleYawAhead is ignored (the frame follows the fed yaw): tests must FAIL
+#endif
+
 namespace utpp::mm::rootframe
 {
 struct Inputs
@@ -21,6 +26,11 @@ struct Inputs
     bool airFollow = false;       // Shooter mode in the air: bounded follow of the actor at lockMaxRate (MotionOffsetRoot.hpp Step::airFollow)
     bool holdOnGap = false;       // Shooter mode, standing: a frame gap (dt > 0.25 s) keeps the held visual heading instead of reseeding onto the actor
     float offsetAccel = 0;        // m/s^2 translation continuity bound (MotionOffsetRoot.hpp Step::offsetAccel), 0 = off
+    // Turn of the capsule requested for the coming tick (rad). The pose of this feed is drawn with the capsule AFTER the tick's movement:
+    // its translation is capsuleDeltaCurrent (velocity x dt) and its yaw actorYaw + capsuleYawAhead. The frame is kept relative to that
+    // drawn capsule, so a turn that reaches the actor one feed after the clip turned (a long frame sizes both) adds no step to the
+    // drawn heading. 0 = the drawn yaw is the fed yaw.
+    float capsuleYawAhead = 0;
 };
 enum class Reseed
 {
@@ -61,6 +71,11 @@ class Proposal
     {
         return m_reseed;
     }
+    // Inputs::capsuleYawAhead as used (0 under the mutation): the frame is relative to the fed actor turned by this angle.
+    float Ahead() const
+    {
+        return m_ahead;
+    }
 
   private:
     friend class Processor;
@@ -68,7 +83,7 @@ class Proposal
     uint64_t m_baseEpoch = 0, m_baseSequence = 0, m_nextEpoch = 0;
     motionRoot::OffsetRoot m_native;
     visualroot::Frame m_frame{};
-    float m_visual = 0, m_actor = 0, m_tail = 0;
+    float m_visual = 0, m_actor = 0, m_tail = 0, m_ahead = 0;
     bool m_reliable = false;
     Reseed m_reseed = Reseed::None;
 };
@@ -82,6 +97,7 @@ class Processor
         m_native.Reset();
         m_actor = Wrap(actorYaw);
         m_visual = m_actor;
+        m_ahead = 0;
         m_initialized = true;
         m_first = true;
         ++m_epoch;
@@ -98,6 +114,7 @@ class Processor
         m_actor = Wrap(actorYaw);
         m_visual = Wrap(aVisualYaw);
         m_native.Seed(0, 0, Wrap(double(m_visual) - double(m_actor)));
+        m_ahead = 0;
         m_initialized = true;
         m_first = false;
         ++m_epoch;
@@ -125,15 +142,23 @@ class Processor
         if (!std::isfinite(in.dt) || in.dt < 0 || !std::isfinite(in.actorYaw) ||
             !math::IsFinite(in.capsuleDeltaCurrent) || !math::IsFinite(in.animationDeltaPreviousVisual) ||
             !std::isfinite(in.capsuleYawDelta) || !std::isfinite(in.animationYawDelta) ||
-            !std::isfinite(in.staticTailWeight) || in.staticTailWeight < 0 || in.staticTailWeight > 1)
+            !std::isfinite(in.staticTailWeight) || in.staticTailWeight < 0 || in.staticTailWeight > 1 ||
+            !(std::fabs(in.capsuleYawAhead) <= 3.14159265f))
             return false;
+#if UTPP_ROOT_AHEAD_MUTATION == 1
+        const float ahead = 0;
+#else
+        const float ahead = in.capsuleYawAhead;
+#endif
         Proposal p;
         p.m_owner = this;
         p.m_baseEpoch = m_epoch;
         p.m_baseSequence = m_sequence;
         p.m_nextEpoch = m_epoch;
         p.m_native = m_native;
-        p.m_actor = Wrap(in.actorYaw);
+        // the drawn capsule: fed yaw + the coming tick's turn (Inputs::capsuleYawAhead)
+        p.m_actor = Wrap(double(in.actorYaw) + ahead);
+        p.m_ahead = ahead;
         p.m_tail = in.staticTailWeight;
         p.m_reliable = in.rootReliable && in.staticTailWeight == 0;
         const double displacement = std::hypot(double(in.capsuleDeltaCurrent.x), double(in.capsuleDeltaCurrent.y));
@@ -162,13 +187,18 @@ class Processor
             // transform.
             p.m_actor = m_actor;
             p.m_visual = m_visual;
+            p.m_ahead = m_ahead;
         }
         else
         {
             motionRoot::Step step;
             step.dt = in.dt;
-            step.capsuleDeltaCurrent = {in.capsuleDeltaCurrent.x, in.capsuleDeltaCurrent.y, 0};
-            step.capsuleYawDelta = in.capsuleYawDelta;
+            // Both capsule motions as drawn: the translation in the axes of the drawn capsule, the yaw change of the drawn capsule (the
+            // fed change plus the change of the coming turn; a requested turn that did not happen is taken back here on the next feed).
+            float cx = 0, cy = 0;
+            math::Rot2(-ahead, in.capsuleDeltaCurrent.x, in.capsuleDeltaCurrent.y, cx, cy);
+            step.capsuleDeltaCurrent = {cx, cy, 0};
+            step.capsuleYawDelta = Wrap(double(in.capsuleYawDelta) + ahead - m_ahead);
             step.animationDeltaVisual = {in.animationDeltaPreviousVisual.x, in.animationDeltaPreviousVisual.y, 0};
             step.animationYawDelta = in.animationYawDelta;
             step.movingGround = in.movingGround;
@@ -196,6 +226,7 @@ class Processor
         m_native = p.m_native;
         m_actor = p.m_actor;
         m_visual = p.m_visual;
+        m_ahead = p.m_ahead;
         m_epoch = p.m_nextEpoch;
         ++m_sequence;
         m_initialized = true;
@@ -209,7 +240,7 @@ class Processor
         return float(std::remainder(yaw, 2 * 3.14159265358979323846));
     }
     motionRoot::OffsetRoot m_native;
-    float m_actor = 0, m_visual = 0;
+    float m_actor = 0, m_visual = 0, m_ahead = 0;
     uint64_t m_epoch = 1, m_sequence = 0;
     bool m_initialized = false, m_first = true;
 };

@@ -293,6 +293,10 @@ float g_rawAnimRate = 0.0f;      // rad/s real time, last feed
 int64_t g_lastCmdTicks = 0;
 float g_lastCmdDeg = 0.0f, g_lastCmdCurDeg = 0.0f, g_lastCmdBaseDeg = 0.0f, g_lastCmdDt = 0.0f;
 uint64_t g_bodyCmds = 0, g_bodyPassThrough = 0;
+// Drawn capsule yaw: the body turn requested for the coming tick (the last command, if issued after the previous feed for the yaw the
+// feed reads; the game applies it after the feed in the same tick), rad. g_cmdFeed = g_feedCalls when the last command was issued.
+uint64_t g_cmdFeed = ~0ull;
+float g_yawAhead = 0.0f, g_prevYawAhead = 0.0f;
 bt::TargetLatch g_latch;         // 0.3.1: world target held during a turn (no camera feedback)
 
 // Phase 5.3 (0.3.3): offset root (visual body lags the capsule, spring back) and capsule acceleration matching.
@@ -1571,6 +1575,7 @@ const MotionSetFrame* MotionStepLocked(const FeedInput& aRaw, float aDt, float c
     raw.capsuleDeltaCurrent[0] = capX * aDt;
     raw.capsuleDeltaCurrent[1] = capY * aDt;
     raw.capsuleYawDelta = capYaw;
+    raw.capsuleYawAhead = g_yawAhead; // the pose is drawn with the capsule turned by the coming tick's request
     if (!g_motion || !g_motion->step || !g_motion->step(raw, g_effGate, aDt)) // UTPP-MOTION SEAM
         return nullptr; // UTPP-MOTION SEAM
     // UTPP-MOTION SEAM no leg stage ready -> PipelineOutputLocked would be the v1 matcher pose: v2 publishes its raw pose (apply)
@@ -2439,6 +2444,8 @@ void ResetSessionStateLocked()
     g_followFed = false;
     g_lastCmdTicks = 0;
     g_lastCmdDeg = g_lastCmdCurDeg = g_lastCmdBaseDeg = g_lastCmdDt = 0.0f;
+    g_cmdFeed = ~0ull;
+    g_yawAhead = g_prevYawAhead = 0.0f;
     g_bodyCmds = g_bodyPassThrough = 0;
     g_latch.holds = 0;
     {
@@ -3701,6 +3708,16 @@ void Feed(const FeedInput& aRawIn)
     }
     float yawRate = 0.0f;
     const float yawStep = g_havePrevYaw ? WrapPi(yaw - g_prevYaw) : 0.0f;
+    // The turn of the coming tick (drawn capsule yaw = yaw + g_yawAhead; root frame and foot locker). A replay passes the recorded one.
+    g_prevYawAhead = g_havePrevYaw ? g_yawAhead : 0.0f;
+    g_yawAhead = 0.0f;
+    if (std::isfinite(aIn.yawAheadDeg))
+        g_yawAhead = std::clamp(WrapPi(aIn.yawAheadDeg * kDegToRad), -1.5f, 1.5f);
+    else if (!aRaw.synthetic && g_cmdFeed != ~0ull && g_cmdFeed + 1 == g_feedCalls &&
+             std::fabs(WrapPi(g_lastCmdCurDeg * kDegToRad - yaw)) <= 0.5f * kDegToRad)
+        g_yawAhead = std::clamp(WrapPi((g_lastCmdDeg - g_lastCmdCurDeg) * kDegToRad), -1.5f, 1.5f);
+    // the change of the drawn yaw since the last feed (offset roots)
+    const float yawStepDrawn = g_havePrevYaw ? WrapPi(yawStep + g_yawAhead - g_prevYawAhead) : 0.0f;
     if (g_havePrevYaw && dt > 0.0f)
         yawRate = WrapPi(yaw - g_prevYaw) / dt;
     g_haveTarget = aIn.haveTarget && std::isfinite(aIn.targetYawDeg);
@@ -4880,7 +4897,7 @@ void Feed(const FeedInput& aRawIn)
             if (motionf && motionf->providedRoot)
                 (void)g_offsetRoot.AdoptFrame(motionf->rootOffsetX, motionf->rootOffsetY, motionf->rootOffsetYaw);
             else
-                g_offsetRoot.Update(dt, capVel, yawStep, animVel, offYawRate, g_effGate == 0 && !g_airDec.releaseOffsetRoot);
+                g_offsetRoot.Update(dt, capVel, yawStepDrawn, animVel, offYawRate, g_effGate == 0 && !g_airDec.releaseOffsetRoot);
             g_offsetRoot.Apply(pose);
             pose = g_offsetRoot.Output();
         }
@@ -4910,7 +4927,7 @@ void Feed(const FeedInput& aRawIn)
         }
         else if (g_airLandGroundBlendLeft > 0.0f)
             pose = BlendAirLandToGroundLocked(pose, dt);
-        ApplyLegPipelineLocked(pose, g_legCtx, dt, aIn, yaw);
+        ApplyLegPipelineLocked(pose, g_legCtx, dt, aIn, yaw + g_yawAhead); // drawn capsule yaw (planted feet in the drawn frame)
         if (!motionf && !motionHandback && g_airSetting != 3 && g_airDec.phase == air::Phase::Recover &&
             g_airDec.effectiveMode == air::Mode::Clips && !g_airLandGroundBlendOutputValid)
         {
@@ -4951,13 +4968,13 @@ void Feed(const FeedInput& aRawIn)
                     const float cap[2] = {cx, cy};
                     const float anim[2] = {frame->travFrame ? cx : frame->rootVel[0],
                                            frame->travFrame ? cy : frame->rootVel[1]};
-                    g_offsetRoot.Update(dt, cap, yawStep, anim, frame->rootYawRate, g_effGate == 0);
+                    g_offsetRoot.Update(dt, cap, yawStepDrawn, anim, frame->rootYawRate, g_effGate == 0);
                 }
                 g_offsetRoot.Apply(pose);
                 pose = g_offsetRoot.Output();
             }
             g_legCtx = MotionLegContextLocked(*frame, aIn, capsuleSpeed);
-            ApplyLegPipelineLocked(pose, g_legCtx, dt, aIn, yaw);
+            ApplyLegPipelineLocked(pose, g_legCtx, dt, aIn, yaw + g_yawAhead);
             g_poseValid = true;
         }
     }
@@ -5877,6 +5894,7 @@ float BodyYawCommand(float aCurrentYawDeg, float aBaseYawDeg)
     {
         ++g_bodyPassThrough;
         g_stSign = 0;
+        g_cmdFeed = ~0ull; // no turn requested
         return aBaseYawDeg;
     }
     // dt between commands (called once per frame while the body is turning); after a pause use the last feed dt.
@@ -5898,6 +5916,7 @@ float BodyYawCommand(float aCurrentYawDeg, float aBaseYawDeg)
         ++g_bodyCmds;
         ++g_airSteerCmds;
         g_airSteerMaxRateDeg = std::fmax(g_airSteerMaxRateDeg, std::fabs(g_bodyCtl.Diagnostics().rate) / kDegToRad);
+        g_cmdFeed = g_feedCalls;
         g_lastCmdCurDeg = aCurrentYawDeg;
         g_lastCmdBaseDeg = aBaseYawDeg;
         g_lastCmdDt = dt;
@@ -5932,6 +5951,7 @@ float BodyYawCommand(float aCurrentYawDeg, float aBaseYawDeg)
     }
     const float cmd = g_bodyCtl.Command(aCurrentYawDeg * kDegToRad, target, dt, g_followFed); // 5.3c follow law
     ++g_bodyCmds;
+    g_cmdFeed = g_feedCalls;
     g_lastCmdCurDeg = aCurrentYawDeg;
     g_lastCmdBaseDeg = aBaseYawDeg;
     g_lastCmdDt = dt;

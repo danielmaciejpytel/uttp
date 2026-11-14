@@ -223,6 +223,7 @@ struct RootProbe
 {
     bool prepared = false;
     float dt = 0, capsuleDelta[2] = {0, 0}, capsuleYawDelta = 0, animDelta[2] = {0, 0}, animYawDelta = 0;
+    float yawAhead = 0; // the coming tick's capsule turn the frame is relative to (rad, Proposal::Ahead)
     bool movingGround = false, montage = false, aimFacing = false;
     float before[3] = {0, 0, 0}, after[3] = {0, 0, 0}; // x, y (m), yaw (rad): visual minus capsule, capsule axes
 };

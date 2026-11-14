@@ -46,6 +46,17 @@ foreach(_graph_test MotionRootFrame MotionOrientationPose MotionOrientationFeet 
     target_link_libraries(utpp_${_graph_test}_test PRIVATE bcrypt)
 endforeach()
 add_test(NAME utpp_MotionRootFrame_test COMMAND utpp_MotionRootFrame_test)
+# Root frame relative to the drawn capsule (the coming tick's turn); the mutant ignores it and must FAIL.
+add_executable(utpp_MotionRootFrameAhead_test tests/MotionRootFrameAheadTest.cpp)
+target_compile_features(utpp_MotionRootFrameAhead_test PRIVATE cxx_std_20)
+target_compile_options(utpp_MotionRootFrameAhead_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_MotionRootFrameAhead_test COMMAND utpp_MotionRootFrameAhead_test)
+add_executable(utpp_MotionRootFrameAhead_mut1 tests/MotionRootFrameAheadTest.cpp)
+target_compile_features(utpp_MotionRootFrameAhead_mut1 PRIVATE cxx_std_20)
+target_compile_options(utpp_MotionRootFrameAhead_mut1 PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_definitions(utpp_MotionRootFrameAhead_mut1 PRIVATE UTPP_ROOT_AHEAD_MUTATION=1)
+add_test(NAME utpp_MotionRootFrameAhead_mut1 COMMAND utpp_MotionRootFrameAhead_mut1)
+set_tests_properties(utpp_MotionRootFrameAhead_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
 add_test(NAME utpp_MotionOrientationPose_test COMMAND utpp_MotionOrientationPose_test)
 add_test(NAME utpp_MotionOrientationFeet_test COMMAND utpp_MotionOrientationFeet_test "${UTPP_MOTION_DB_TEST_FILE}")
 add_test(NAME utpp_PoseRootHook_test COMMAND utpp_PoseRootHook_test

@@ -10,6 +10,10 @@ driver stage does not contain was added by the leg tail (root offset, stance gua
 Classes (worst bone of a frame): hips_pos (Hips translation, model space, cm), foot (LeftFoot / RightFoot rotation relative to the parent,
 deg), hand (LeftHand / RightHand, model space), axial (spine, neck, head). 'big' = hips step >= 3 cm, other bones >= 6 deg.
 
+--world next|fed: the published pose in world space (capsule position and yaw of the feed rows; 'next' = the capsule after the tick's
+movement, which the game draws with, 'fed' = as the feed read it). Steps are counted per class and split into steps of the capsule itself
+and steps of the body relative to the capsule. STAGES_PREFIX '-' with --game and --world: the in-game recording alone.
+
 --game POSE_DIR: the in-game recording of the same session (compact rings, log, feed dump). Its feed rows are matched to the recorded
 frames (pose_metrics.align_feed); the replay record of a feed row is the row itself, so for every in-game frame the replayed pose is known.
 Reported: the per-frame difference of the published local rotations (replay against game: how well the replay reproduces the session),
@@ -154,6 +158,101 @@ def summarize(pops, seconds):
     return dict(per_class=dict(c), per_class_big=dict(b), big_per_s={k: round(v / seconds, 4) for k, v in b.items()} if seconds > 0 else None)
 
 
+def capsule_track(x, y, yaw_deg, convention):
+    """Capsule the pose is drawn with, per row: x, y (m), yaw (rad). 'next' = after the tick's movement (the next feed's values: the game moves
+    and turns the capsule after the feed read it, before drawing), 'fed' = the values this feed read."""
+    x, y, yaw = (np.asarray(v, dtype=np.float64) for v in (x, y, yaw_deg))
+    if convention == 'next':
+        x, y, yaw = (np.concatenate([v[1:], v[-1:]]) for v in (x, y, yaw))
+    return x, y, np.radians(yaw)
+
+
+def world_steps(fk, x, y, yaw, dt, valid=None):
+    """Single-frame steps of the drawn body in world space, split into the capsule's own step and the body's step relative to it.
+
+    fk: name -> (model q [N,4], model p [N,3] in metres); x, y, yaw: drawn capsule. Returns dict with
+      'world': [(row, bone, excess)] worst tracked bone per row (rotation deg, Hips_pos cm) of the world series,
+      'capsule': {'yaw': rows, 'pos': rows} spikes of the capsule itself (deg, cm),
+      'relative': rows with a model-space (relative to the capsule) spike of any tracked bone."""
+    half = 0.5 * yaw
+    cq = np.stack([np.zeros_like(half), np.zeros_like(half), np.sin(half), np.cos(half)], axis=1)
+    cp = np.stack([x, y, np.zeros_like(x)], axis=1)
+    ok = (lambda f: True) if valid is None else (lambda f: bool(valid[f] and (f == 0 or valid[f - 1])))
+    world, rel = {}, set()
+    for name, (q, p) in fk.items():
+        qw = pm.qmul(cq, q)
+        series = [(name, pm.angular_series(qw, dt, local=False)[1], pm.SPIKE_MIN_DEG, pm.angular_series(q, dt, local=False)[1])]
+        if name == 'Hips':
+            pw = (pm.qrotate(cq, p) + cp) * 100.0
+            series.append(('Hips_pos', pm.linear_series(pw, dt)[1], pm.SPIKE_MIN_CM, pm.linear_series(p * 100.0, dt)[1]))
+        for bone, speed, floor, model_speed in series:
+            m, ex = pm.spike_mask(speed, dt, floor)
+            for f in np.nonzero(m)[0]:
+                if ok(f) and (f not in world or ex[f] > world[f][2]):
+                    world[f] = (int(f), bone, float(ex[f]))
+            mm, _ = pm.spike_mask(model_speed, dt, floor)
+            rel.update(int(f) for f in np.nonzero(mm)[0] if ok(f))
+    cyaw = np.degrees(np.abs(np.angle(np.exp(1j * np.diff(yaw, prepend=yaw[:1])))))
+    cyaw[0] = np.nan
+    my, _ = pm.spike_mask(cyaw / dt, dt, pm.SPIKE_MIN_DEG)
+    mp, _ = pm.spike_mask(pm.linear_series(cp * 100.0, dt)[1], dt, pm.SPIKE_MIN_CM)
+    cap = {'yaw': {int(f) for f in np.nonzero(my)[0] if ok(f)}, 'pos': {int(f) for f in np.nonzero(mp)[0] if ok(f)}}
+    return {'world': [world[f] for f in sorted(world)], 'capsule': cap, 'relative': rel}
+
+
+def world_table(res, seconds):
+    """Counts of world_steps per class (all / big) and by source: 'capsule' (the capsule stepped in the same row), 'relative' (the body stepped
+    against the capsule), 'both', 'neither' (a world step that is in neither series alone, e.g. two smooth motions that do not match)."""
+    tab = collections.defaultdict(collections.Counter)
+    for f, bone, size in res['world']:
+        cls = classify(bone)
+        capsule = f in res['capsule']['yaw'] or f in res['capsule']['pos']
+        relative = f in res['relative']
+        src = 'both' if capsule and relative else ('capsule' if capsule else ('relative' if relative else 'neither'))
+        tab[cls]['all'] += 1
+        tab[cls]['big'] += int(is_big(bone, size))
+        tab[cls][src] += 1
+        if is_big(bone, size):
+            tab[cls]['big_' + src] += 1
+    out = {k: dict(v) for k, v in sorted(tab.items())}
+    out['capsule_steps'] = {'yaw': len(res['capsule']['yaw']), 'pos': len(res['capsule']['pos'])}
+    out['seconds'] = round(seconds, 1)
+    return out
+
+
+def replay_world(st, stage, convention, valid):
+    """world_steps of a stage replay (capsule from the feed columns capX / capY / yawDeg of the records)."""
+    dt = np.maximum(np.nan_to_num(st.meta['dt'], nan=1 / 60.0), 1e-3)
+    x, y, yaw = capsule_track(st.meta['capX'], st.meta['capY'], st.meta['yawDeg'], convention)
+    return world_steps(st.fk(stage, TRACK), x, y, yaw, dt, valid)
+
+
+def game_world(pose_dir, skip_s, convention):
+    """world_steps of an in-game recording (published pose) with the capsule of the aligned feed rows; frames without a feed row are skipped."""
+    segs = sorted(glob.glob(os.path.join(pose_dir, 'utpp-pose-ring-*.utpppose')) or glob.glob(os.path.join(pose_dir, 'utpp-pose-*.utpppose')))
+    feed_path = sorted(glob.glob(os.path.join(pose_dir, 'utpp-feed-*.txt')))[-1]
+    rec, data = pm.load_recording(segs, set(TRACK))
+    sec = data['sec']
+    feed = pm.read_feed(feed_path)
+    r2f, info = pm.align_feed(sec, feed)
+    if r2f is None:
+        return None, info
+    f2r = np.full(len(sec), -1)
+    ok = r2f >= 0
+    f2r[r2f[ok]] = np.nonzero(ok)[0]
+    keep = np.nonzero(f2r >= 0)[0]
+    rows = f2r[keep]
+    x, y, yaw = capsule_track(feed['capX'], feed['capY'], feed['yawDeg'], convention)
+    fk = pm.forward_kinematics(rec, data, 1, TRACK)
+    fk = {n: (q[keep], p[keep]) for n, (q, p) in fk.items()}
+    dt = np.maximum(np.diff(sec[keep], prepend=sec[keep][0] - 1 / 60.0), 1e-3)
+    mv = np.hypot(np.nan_to_num(feed['mvx'][rows]), np.nan_to_num(feed['mvy'][rows])) > 0.1
+    contiguous = np.concatenate([[False], np.diff(rows) == 1])
+    valid = mv & contiguous & (sec[keep] - sec[0] >= skip_s)
+    res = world_steps(fk, x[rows], y[rows], yaw[rows], dt, valid)
+    return world_table(res, float(np.sum(dt[valid]))), info
+
+
 def moving_mask(st):
     """Feeds with a ground locomotion stick input or a moving capsule (the meter's movement window)."""
     mv = np.hypot(np.nan_to_num(st.meta['mvx']), np.nan_to_num(st.meta['mvy'])) > 0.1
@@ -290,7 +389,18 @@ def main(argv=None):
     ap.add_argument('--skip', type=float, default=20.0)
     ap.add_argument('--clips', help='clip dump prefix (utpp_replay_pose_stages --clips) for the clip content check')
     ap.add_argument('--json')
+    ap.add_argument('--world', choices=('next', 'fed'), help='also count the single-frame steps of the drawn body in world space, with the '
+                    'capsule after the tick\'s movement (next) or as fed; split into capsule steps and steps relative to the capsule')
     a = ap.parse_args(argv)
+    if a.stages == '-' and a.game and a.world:
+        # in-game recording only (no replay): world-space table of the published pose
+        table, info = game_world(a.game, a.skip, a.world)
+        print('game alignment:', info)
+        print(json.dumps({'world_' + a.world: table}, indent=1))
+        if a.json:
+            with open(a.json, 'w', encoding='utf-8') as f:
+                json.dump({'world_' + a.world: table, 'alignment': info}, f, indent=0)
+        return 0
     st = load_stages(a.stages)
     content = ClipContent(a.clips) if a.clips else None
     t = st.meta['t']
@@ -303,6 +413,8 @@ def main(argv=None):
         out[name + '_pops'] = [dict(row=f, t=round(float(t[f]), 3), bone=b, space=s, size=round(x, 2),
                                     clip=st.clips.get(int(st.meta['clip'][f]), str(int(st.meta['clip'][f]))))
                                for f, b, s, x in pops]
+    if a.world:
+        out['world_' + a.world] = world_table(replay_world(st, 1, a.world, valid), seconds)
     if a.game:
         out['game'] = compare_game(st, a.game, a.skip, content)
     txt = {k: v for k, v in out.items() if not k.endswith('_pops') and k != 'game'}

@@ -8,6 +8,7 @@
 // Tick() (RED4ext Running-state update, every frame) fades the weight to 0 when no feed arrived for kStaleFeedSeconds.
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -85,6 +86,12 @@ struct FeedInput
     uint64_t rootFeedSequence = 0;
     float capsuleDeltaCurrent[2] = {0, 0};
     float capsuleYawDelta = 0;
+    // Native host -> MOTION only: the body turn requested for the coming tick (rad). The game applies it after this feed read the
+    // yaw, in the same tick, so the pose of this feed is drawn with playerYaw + capsuleYawAhead (rootframe::Inputs::capsuleYawAhead).
+    float capsuleYawAhead = 0;
+    // Recorded replays: the coming tick's turn in degrees (the next feed's yaw minus this one). NaN = the host derives it from its last
+    // body yaw command (BodyYawCommand issued since the previous feed for the yaw of this feed).
+    float yawAheadDeg = std::numeric_limits<float>::quiet_NaN();
 };
 
 // Loads <aPath> (wide path). Fail closed: on error MM stays unavailable, reason kept for the status.

@@ -2,13 +2,14 @@
 // stages per feed: the driver output handed to the leg tail ("driver": sampled clips, blends, root frame not yet applied) and the published
 // snapshot ("final": root offset applied, stance guard, foot locker, head lead, hand-in). No game or input access.
 //
-//   utpp_replay_pose_stages <data dir> <base database> <feed dump> <out prefix> [--from T] [--to T] [--settings-log LOG]
+//   utpp_replay_pose_stages <data dir> <base database> <feed dump> <out prefix> [--from T] [--to T] [--settings-log LOG] [--ahead recorded]
 //
 // <out prefix>.txt  header: bone names and parents, the record layout, the clip names seen
 // <out prefix>.bin  per feed one record of float32: kMetaFloats meta values (see kMeta below), then driver pose, then final pose
 //                   (numBones x [px py pz qx qy qz qw] each, database local space)
 // --from / --to limit the written records to feed times in [T0, T1]; every feed is still stepped.
 // --settings-log applies the setting calls of a game log of the session (the ones this tool knows, in their order) before the first feed.
+// --ahead recorded passes the recorded turn of the coming tick (next feed's yaw minus this one) as the drawn capsule's turn.
 // <feed dump> = --clips [name part] writes the stored frames of the woman database clips whose name contains the part (all without it)
 // instead (same layout, see the clip mode below).
 #include <filesystem>
@@ -24,7 +25,7 @@ constexpr const char* kMeta[] = {"t", "dt", "owned", "published", "tailed", "cli
                                  "lockL", "wL", "corrL_cm", "lockR", "wR", "corrR_cm", "playRate", "capX", "capY", "yawDeg",
                                  "mvx", "mvy", "loco", "rpPrepared", "rpCapDX", "rpCapDY", "rpCapDYaw", "rpAnimDX", "rpAnimDY",
                                  "rpAnimDYaw", "rpMovingGround", "rpMontage", "rpBeforeX", "rpBeforeY", "rpBeforeYaw", "rpAfterX", "rpAfterY",
-                                 "rpAfterYaw"};
+                                 "rpAfterYaw", "rpYawAhead"};
 constexpr size_t kMetaFloats = sizeof(kMeta) / sizeof(kMeta[0]);
 
 motionhost::MotionSetFrame g_tail;
@@ -109,6 +110,7 @@ int main(int argc, char** argv)
     const std::string data = argv[1], feedPath = argv[3], out = argv[4];
     float from = -1e30f, to = 1e30f;
     std::string settingsLog;
+    bool aheadRecorded = false;
     for (int i = 5; i + 1 < argc; i += 2)
     {
         if (std::strcmp(argv[i], "--from") == 0)
@@ -117,6 +119,8 @@ int main(int argc, char** argv)
             to = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--settings-log") == 0)
             settingsLog = argv[i + 1];
+        else if (std::strcmp(argv[i], "--ahead") == 0)
+            aheadRecorded = std::strcmp(argv[i + 1], "recorded") == 0;
     }
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
@@ -215,6 +219,11 @@ int main(int argc, char** argv)
     }
     if (inputs.empty())
         return 6;
+    // --ahead recorded: the body turn of the coming tick is the next feed's yaw minus this one (what the game applied after the feed);
+    // without it the host derives it from its own body yaw command, which an open-loop replay never issues (0).
+    if (aheadRecorded)
+        for (size_t i = 0; i + 1 < inputs.size(); ++i)
+            inputs[i].yawAheadDeg = std::remainder(rows[i + 1].yawDeg - rows[i].yawDeg, 360.0f);
     const motionhost::MotionHooks hooks{&WStep, &WApply, &motiondriver::OnArmed, &motiondriver::OnDisarmed, &CaptureTail,
                                         &motiondriver::OwnsTraversal};
     g_baseDb = Wide(argv[2]);
@@ -265,7 +274,8 @@ int main(int argc, char** argv)
                                          Num(st, "rate="), rows[i].cap[0], rows[i].cap[1], rows[i].yawDeg, rows[i].mvx, rows[i].mvy,
                                          float(rows[i].loco), rp.prepared ? 1.f : 0.f, rp.capsuleDelta[0], rp.capsuleDelta[1],
                                          rp.capsuleYawDelta, rp.animDelta[0], rp.animDelta[1], rp.animYawDelta, rp.movingGround ? 1.f : 0.f,
-                                         rp.montage ? 1.f : 0.f, rp.before[0], rp.before[1], rp.before[2], rp.after[0], rp.after[1], rp.after[2]};
+                                         rp.montage ? 1.f : 0.f, rp.before[0], rp.before[1], rp.before[2], rp.after[0], rp.after[1], rp.after[2],
+                                         rp.yawAhead};
         std::copy(meta, meta + kMetaFloats, rec.begin());
         std::fill(rec.begin() + kMetaFloats, rec.end(), std::nanf(""));
         if (g_tailValid && g_driverPose.size() == size_t(nb) * 7)
