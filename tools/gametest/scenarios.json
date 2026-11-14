@@ -147,6 +147,78 @@
         {"name": "stop", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, 0]]}
       ]
     },
+    "kbd_taps": {
+      "description": "keyboard-like input: full forward presses of 0.25 - 1.0 s with instant edges (key taps), then rest",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "taps", "duration": 5.0, "interp": "step", "ls": [[0, 0, 1], [0.25, 0, 0], [0.7, 0, 1], [1.1, 0, 0], [1.6, 0, 1], [2.2, 0, 0], [2.8, 0, 1], [3.8, 0, 0]]},
+        {"name": "rest", "duration": 1.5, "interp": "step", "ls": [[0, 0, 0]]}
+      ]
+    },
+    "kbd_switch_90": {
+      "description": "keyboard-like input: run forward, then instant switches right, back, left, forward (one key released, the next pressed), stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "fwd", "duration": 1.8, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "right", "duration": 1.4, "interp": "step", "ls": [[0, 1, 0]]},
+        {"name": "back", "duration": 1.4, "interp": "step", "ls": [[0, 0, -1]]},
+        {"name": "left", "duration": 1.4, "interp": "step", "ls": [[0, -1, 0]]},
+        {"name": "fwd_again", "duration": 1.4, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "stop", "duration": 2.0, "interp": "step", "ls": [[0, 0, 0]]}
+      ]
+    },
+    "kbd_switch_180": {
+      "description": "keyboard-like input: instant reversals forward / back and left / right at run speed",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "fwd", "duration": 1.8, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "back", "duration": 1.6, "interp": "step", "ls": [[0, 0, -1]]},
+        {"name": "fwd_again", "duration": 1.6, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "pause", "duration": 1.2, "interp": "step", "ls": [[0, 0, 0]]},
+        {"name": "left", "duration": 1.6, "interp": "step", "ls": [[0, -1, 0]]},
+        {"name": "right", "duration": 1.6, "interp": "step", "ls": [[0, 1, 0]]},
+        {"name": "left_again", "duration": 1.6, "interp": "step", "ls": [[0, -1, 0]]},
+        {"name": "stop", "duration": 2.0, "interp": "step", "ls": [[0, 0, 0]]}
+      ]
+    },
+    "kbd_diagonals": {
+      "description": "keyboard-like input: a second key added or released at full deflection - forward, forward+right, right, back+right, back, back+left, left, forward+left, forward",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "fwd", "duration": 1.5, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "fwd_right", "duration": 0.9, "interp": "step", "ls": [[0, 0.7071, 0.7071]]},
+        {"name": "right", "duration": 0.9, "interp": "step", "ls": [[0, 1, 0]]},
+        {"name": "back_right", "duration": 0.9, "interp": "step", "ls": [[0, 0.7071, -0.7071]]},
+        {"name": "back", "duration": 0.9, "interp": "step", "ls": [[0, 0, -1]]},
+        {"name": "back_left", "duration": 0.9, "interp": "step", "ls": [[0, -0.7071, -0.7071]]},
+        {"name": "left", "duration": 0.9, "interp": "step", "ls": [[0, -1, 0]]},
+        {"name": "fwd_left", "duration": 0.9, "interp": "step", "ls": [[0, -0.7071, 0.7071]]},
+        {"name": "fwd_again", "duration": 0.9, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "stop", "duration": 2.0, "interp": "step", "ls": [[0, 0, 0]]}
+      ]
+    },
+    "kbd_strafe_weave": {
+      "description": "keyboard-like input: forward held with the left / right key alternated every 0.4 s (weaving run), then pure left / right alternation every 0.35 s",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "fwd", "duration": 1.2, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "weave", "duration": 3.2, "interp": "step", "ls": [[0.0, -0.7071, 0.7071], [0.4, 0.7071, 0.7071], [0.8, -0.7071, 0.7071], [1.2, 0.7071, 0.7071], [1.6, -0.7071, 0.7071], [2.0, 0.7071, 0.7071], [2.4, -0.7071, 0.7071], [2.8, 0.7071, 0.7071]]},
+        {"name": "strafe_taps", "duration": 2.8, "interp": "step", "ls": [[0.00, -1, 0], [0.35, 1, 0], [0.70, -1, 0], [1.05, 1, 0], [1.40, -1, 0], [1.75, 1, 0], [2.10, -1, 0], [2.45, 1, 0]]},
+        {"name": "stop", "duration": 2.0, "interp": "step", "ls": [[0, 0, 0]]}
+      ]
+    },
+    "kbd_mouse_turns": {
+      "description": "keyboard-and-mouse-like input: forward held while the camera turns steadily right, then left, then two quick camera flicks; stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "fwd", "duration": 1.5, "interp": "step", "ls": [[0, 0, 1]]},
+        {"name": "turn_right", "duration": 3.0, "interp": "linear", "rs": [[0, 0, 0], [0.05, 0.4, 0], [2.9, 0.4, 0], [2.95, 0, 0]]},
+        {"name": "turn_left", "duration": 3.0, "interp": "linear", "rs": [[0, 0, 0], [0.05, -0.4, 0], [2.9, -0.4, 0], [2.95, 0, 0]]},
+        {"name": "flick_right", "duration": 1.5, "interp": "linear", "rs": [[0, 0, 0], [0.03, 1, 0], [0.25, 1, 0], [0.28, 0, 0]]},
+        {"name": "flick_left", "duration": 1.5, "interp": "linear", "rs": [[0, 0, 0], [0.03, -1, 0], [0.25, -1, 0], [0.28, 0, 0]]},
+        {"name": "stop", "duration": 2.0, "interp": "step", "ls": [[0, 0, 0]]}
+      ]
+    },
     "weapon_draw": {
       "description": "weapon macro part (night.py): draw = Y TAP (SwitchItem_Button IK_Pad_Y_TRIANGLE); a Y HOLD opens the weapon wheel (seen 2026-10-07 06:04) - never hold Y",
       "steps": [
