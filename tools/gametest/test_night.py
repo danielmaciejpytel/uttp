@@ -3244,7 +3244,7 @@ class EnemyMacroTests(unittest.TestCase):
         w = self.world()
         r = self.run_macro(w)
         self.assertEqual((r['verdict'], r['fails']), ('PASS', []), r)
-        self.assertEqual(w.played, ['melee_draw', 'melee_punch', 'melee_punch', 'melee_punch', 'melee_block'])
+        self.assertEqual(w.played, ['melee_draw', 'melee_face_forward', 'melee_punch', 'melee_punch', 'melee_punch', 'melee_block'])
         labels = [lab for lab, _ in w.cmds]
         self.assertEqual(labels, ['nightauto_enemy', 'fists_cmd',
                                   'enemy_place/far', 'enemy/placed', 'enemy_place/near', 'enemy/placed',
@@ -3287,7 +3287,7 @@ class EnemyMacroTests(unittest.TestCase):
         w = self.world(spawn_at=6.0)                     # the spawn lands 6 m away whatever distance was asked
         r = self.run_macro(w)
         self.assertEqual(r['verdict'], 'FAIL')
-        self.assertEqual(w.played, ['melee_draw'])                                   # no punch into the air
+        self.assertEqual(w.played, ['melee_draw', 'melee_face_forward'])                                 # no punch into the air
         self.assertTrue(any('never placed' in f and '6.0 m from V, wanted 2.0 m' in f for f in r['fails']), r['fails'])
         self.assertNotIn('no `src=lock`', ' '.join(r['fails']))
         self.assertEqual([p['name'] for p in r['enemy']['phases']], ['far'])         # nothing to try again with no record that worked
@@ -3298,7 +3298,7 @@ class EnemyMacroTests(unittest.TestCase):
         w = self.world(spawn_at_nth={3: 6.0})            # the orbit target does not come
         r = self.run_macro(w)
         self.assertEqual(r['verdict'], 'FAIL')
-        self.assertEqual(w.played, ['melee_draw', 'melee_punch', 'melee_punch', 'melee_block'])   # orbit not punched
+        self.assertEqual(w.played, ['melee_draw', 'melee_face_forward', 'melee_punch', 'melee_punch', 'melee_block'])   # orbit not punched
         self.assertEqual([f for f in r['fails'] if f.startswith('orbit:')],
                          ['orbit: the target is 6.0 m from V, wanted 1.2 m (+-0.4 m)'])
         self.assertEqual(r['enemy']['hits']['near'], True)
@@ -3348,7 +3348,7 @@ class EnemyMacroTests(unittest.TestCase):
         self.assertEqual(r['verdict'], 'FAIL')
         self.assertEqual(r['enemy']['tried'], list(gn.ENEMY_RECORDS))
         self.assertTrue(any('never placed' in f and 'no target entity found' in f for f in r['fails']), r['fails'])
-        self.assertEqual(w.played, ['melee_draw'])                                   # no punch without a target
+        self.assertEqual(w.played, ['melee_draw', 'melee_face_forward'])                                 # no punch without a target
         self.assertIn('enemy_off', [lab for lab, _ in w.cmds])                       # cleaned up all the same
 
     def test_friendly_target_fails_when_neutral_does_not_take(self):
@@ -3356,7 +3356,7 @@ class EnemyMacroTests(unittest.TestCase):
         r = self.run_macro(w)
         self.assertEqual(r['verdict'], 'FAIL')
         self.assertTrue(any('Friendly' in f for f in r['fails']), r['fails'])
-        self.assertEqual(w.played, ['melee_draw'])                                   # phases skipped
+        self.assertEqual(w.played, ['melee_draw', 'melee_face_forward'])                                 # phases skipped
         self.assertEqual(len(r['fails']), 1)                                         # no lock / health noise
         self.assertIn('enemy_off', [lab for lab, _ in w.cmds])
 
@@ -3365,7 +3365,7 @@ class EnemyMacroTests(unittest.TestCase):
         r = self.run_macro(w)
         self.assertEqual(r['verdict'], 'PASS', r)
         self.assertEqual(r['enemy']['spawn']['att'], 1)
-        self.assertEqual(len(w.played), 5)
+        self.assertEqual(len(w.played), 6)
 
     def test_unreadable_attitude_gets_neutral_and_is_a_warning_only_when_still_unknown(self):
         w = self.world(att=None, att_after_neutral=1)
@@ -3508,7 +3508,7 @@ class EnemyBackgroundTests(unittest.TestCase):
         n.overlay_grab = lambda guard: self.fail('the overlay is never looked at with the file channel')
         r = n.enemy_macro(_Pad(), g, {'runs': []})
         self.assertEqual((r['verdict'], r['fails']), ('PASS', []), r)
-        self.assertEqual(w.played, ['melee_draw', 'melee_punch', 'melee_punch', 'melee_punch', 'melee_block'])
+        self.assertEqual(w.played, ['melee_draw', 'melee_face_forward', 'melee_punch', 'melee_punch', 'melee_punch', 'melee_block'])
         self.assertEqual(w.state['n_spawn'], 4)
         self.assertEqual([c for c in api.calls if c[0] in ('keys', 'char', 'click', 'cursor', 'focus', 'raw')], [])
         self.assertTrue(any('UTPPENEMY=function' in chunk for _, chunk in mod.ran))   # the commands really went through the file

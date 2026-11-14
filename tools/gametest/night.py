@@ -2200,6 +2200,17 @@ class Night:
             res['checks'].append({'phase': 'melee_draw', 'mask_on': ms['on'], 'active_end': ms['active_now']})
             if not ms['on']:
                 warns.append('melee_draw: no "MMMASK on reasons=0x1" / "MMGATE melee=0x.." after the RT tap')
+            # the game's target lock looks along the camera from the body: a camera pitched down or a body turned away from
+            # it misses a target that stands in front of V, so both are set before the first target is placed
+            try:
+                self.level_camera(pad, guard, plan, tol=gn.ENEMY_LEVEL_TOL)
+                self.play(pad, guard, 'melee_face_forward', plan)
+                res['checks'].append({'phase': 'face_forward', 'ok': True})
+            except ScenarioTimeout:
+                raise
+            except Exception as ex:  # noqa: BLE001 - the phases still run, the report says the set-up was skipped
+                res['checks'].append({'phase': 'face_forward', 'ok': False, 'error': repr(ex)})
+                warns.append(f'camera level / body turn before the phases failed: {ex!r}')
             for name, dist, required, orbit, part in gn.ENEMY_PHASES:
                 ph = {'name': name, 'dist_set': dist, 'required': required, 'orbit_deg': orbit, 'part': part,
                       'placed': False, 'why': None, 'aim': gn.meleeaim_stats(''), 'lock': 0, 'dist': None,

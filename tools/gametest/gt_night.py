@@ -217,6 +217,7 @@ ENEMY_PLACE_TOL = 0.4        # a placed target counts when |V <-> target distanc
 ENEMY_POLL_S = 0.25          # period of the "is the new target there" state reads
 ENEMY_POS_PERIOD = 0.2       # NightAuto period during the macro (distance resolution around a punch)
 ENEMY_ORBIT_TOL = 8.0        # camera orbit tolerance (deg)
+ENEMY_LEVEL_TOL = 3.0        # camera pitch tolerance before the first target is placed (deg): the lock looks along the camera
 ENEMY_MIN_DROP = 0.5         # health drop (absolute, else percent points) that counts as "the punch hit"
 # (phase, target distance along the camera forward in m, health drop required, camera orbit deg, pad part)
 # near and orbit are the close-range phases (1.2 m): their punches must connect; far (2.0 m) and block are report only

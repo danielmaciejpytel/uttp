@@ -243,6 +243,13 @@
         {"name": "walk_unarmed", "duration": 3.0, "ls": [[0, 0, 0], [0.4, 0, 0.8], [2.6, 0, 0.8], [2.8, 0, 0]]}
       ]
     },
+    "melee_face_forward": {
+      "description": "enemy macro part (night.py): a short forward nudge turns the body to the camera direction before a target is placed, then V stands",
+      "steps": [
+        {"name": "nudge", "duration": 0.25, "interp": "step", "ls": [[0, 0, 1]], "metrics": false},
+        {"name": "stand", "duration": 0.8, "interp": "step", "ls": [[0, 0, 0]], "metrics": false}
+      ]
+    },
     "melee_draw": {
       "description": "melee macro part (night.py): unarmed RT TAP (attack, 0.15 s) raises the fists; then 1.2 s idle (mask on reasons=0x1 expected in the UTPP log). Pad RT = attack; needs verifying on this profile",
       "steps": [
