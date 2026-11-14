@@ -86,6 +86,11 @@ REGISTRY = {
     'release/test_make_release.py': {},
     'airz/test_make_airz.py': {'markers': {'data'}, 'note': 'reads the real Data .airz, recreates Build\\test-data\\airz_test'},
     'analysis/test_calibrate_nue_mount_capture.py': {},
+    'analysis/test_export_player_helper_bundle.py': {},
+    'analysis/test_helper_coverage_report.py': {},
+    'analysis/test_helper_graph_batch.py': {},
+    'analysis/test_helper_residual_report.py': {},
+    'analysis/test_skin_displacement_report.py': {},
     'analysis/test_post_helper_skin_capture.py': {},
     'analysis/test_pose_capture_to_csv.py': {
         'requires': ['Build/test-data/posecapture/utpp-bodytrace-slice.csv'],
