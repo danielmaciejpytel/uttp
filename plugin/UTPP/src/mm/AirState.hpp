@@ -58,6 +58,12 @@ inline constexpr float kStepDownSeconds = 0.12f;
 // AirConfig::stepDownDepthM / stepDownMaxS the runtime uses (= adapter::kGroundDropStepM / kGroundDropStepMaxS, the step-down reach of the chooser mapping).
 inline constexpr float kStepDownDepthM = 0.30f;
 inline constexpr float kStepDownMaxSeconds = 0.20f;
+// PSM Fall on a step-down (= adapter::kGroundDropPsmFallS / kGroundDropFallM of the chooser mapping): with stepDownS on, a not-grounded run that
+// carries the PSM Fall detail (and no other air detail) is a fall once it lasted kStepDownPsmFallSeconds over two feeds or the capsule fell
+// kStepDownFallM; the step-down reach does not extend it. The game reports its Fall detail for small drops of two feeds while running too.
+inline constexpr int kPsmFallDetail = 14;
+inline constexpr float kStepDownPsmFallSeconds = 0.04f;
+inline constexpr float kStepDownFallM = 0.2f;
 
 enum class Mode : uint8_t { Off, Hold, Clips };
 enum class Phase : uint8_t { Ground, TakeOff, Descend, FallLoop, LandApproach, Recover };
@@ -327,6 +333,8 @@ public:
         airTime_ = grounded ? 0.0f : airTime_ + in.dt;
         airFeeds_ = grounded ? 0 : airFeeds_ + 1;
         airDropM_ = grounded ? 0.0f : airDropM_ + (in.vz < 0.0f ? -in.vz * in.dt : 0.0f);
+        airPsmFall_ = !grounded && (airPsmFall_ || in.psmDetail == kPsmFallDetail);
+        airPsmFallDescending_ = grounded || (airPsmFallDescending_ && !(in.psmDetail == kPsmFallDetail && in.vz > 0.0f)); // a rising PSM Fall (dodge) is no step-down
         if (phase_ != Phase::Ground) episodeTime_ += in.dt;
         if (!grounded && wasAirborne && phase_ != Phase::Ground && in.dt > 1e-4f) LearnGravity(in.vz, in.dt);
         // Dead reckoning (trapezoid) and probe fusion.
@@ -385,11 +393,16 @@ public:
             // Ledge fall: hDR is not valid (no jump); the probe (if any) has been fused above.
             const float fallTtl = hValid_ ? TimeToLand(h_, in.vz, gUp_, gDown_) : cfg_.noHitTtl;
             // stepDownS: only a capsule that keeps falling past a step-down counts; the other fall evidence starts at once
-            const bool fallEvidence = IsAirDetail(in.psmDetail) || in.vehicleExit || in.distToGround > cfg_.physFallDist;
+            // (a PSM Fall run without another air detail waits kStepDownPsmFallSeconds / kStepDownFallM; the chooser mapping does the same)
+            const bool psmFallGrace = cfg_.stepDownS > 0.0f && airPsmFall_ && airPsmFallDescending_ && !(IsAirDetail(in.psmDetail) && in.psmDetail != kPsmFallDetail);
+            const bool psmFallOver =
+                airFeeds_ >= 2 && (airTime_ >= std::fmin(cfg_.stepDownS, kStepDownPsmFallSeconds) || airDropM_ >= kStepDownFallM);
+            const bool fallEvidence = (IsAirDetail(in.psmDetail) && !psmFallGrace) || (psmFallGrace && psmFallOver) || in.vehicleExit ||
+                                      in.distToGround > cfg_.physFallDist;
             // step-down reach: a known floor within stepDownDepthM of the drop start keeps the step-down until stepDownMaxS
             // (h_ dead-reckoned below 0 = the floor is reached, the touchdown is a feed late: clamped like the chooser floor, AirFloorStep)
             const bool stepReach = cfg_.stepDownDepthM > 0.0f && hValid_ && probeAnchored_ && airDropM_ + std::fmax(h_, 0.0f) <= cfg_.stepDownDepthM &&
-                                   airTime_ < cfg_.stepDownMaxS;
+                                   airTime_ < cfg_.stepDownMaxS && !airPsmFall_;
             const bool stepDownOver =
                 cfg_.stepDownS <= 0.0f || fallEvidence || (airTime_ >= cfg_.stepDownS && airFeeds_ >= 2 && !stepReach); // one long frame is no fall
             const bool physStepDownOver = stepDownOver || in.vz > cfg_.physFallVz;
@@ -900,6 +913,8 @@ private:
     int physRun_ = 0, groundRun_ = 0;
     int airFeeds_ = 0; // consecutive not-grounded feeds (AirConfig::stepDownS)
     float airDropM_ = 0.0f; // capsule drop over those feeds (m, AirConfig::stepDownDepthM)
+    bool airPsmFall_ = false; // those feeds carried the PSM Fall detail (kStepDownPsmFallSeconds)
+    bool airPsmFallDescending_ = true; // ... and none of their PSM Fall feeds rose
     float lastAirVz_ = 0.0f;
     bool exitEpisode_ = false; // a feed of this episode carried AirInput::vehicleExit (false-touch take-back only)
 };

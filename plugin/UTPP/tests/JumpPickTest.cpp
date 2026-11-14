@@ -21,8 +21,14 @@
 #include <vector>
 
 #include "../src/MotionDriver.hpp" // AirFloorStep (J2 take-off plane seed, header-only part of the production Step)
+#include "../src/mm/AirState.hpp"
 #include "../src/mm/MotionBlendStack.hpp"
 #include "TestFailFast.hpp"
+
+// the chooser mapping and the air state treat a PSM Fall on a step-down alike
+static_assert(utpp::mm::air::kStepDownPsmFallSeconds == utpp::mm::adapter::kGroundDropPsmFallS &&
+                  utpp::mm::air::kStepDownFallM == utpp::mm::adapter::kGroundDropFallM && utpp::mm::air::kPsmFallDetail == utpp::mm::adapter::kPsmFall,
+              "PSM Fall step-down grace: AirState and MotionAdapter must agree");
 
 namespace adapter = utpp::mm::adapter;
 namespace integ = utpp::mm::integ;
@@ -2089,6 +2095,91 @@ void StepDownReachChecks(Model& m, const std::vector<Section>& aSecs, const Vari
     Check(runDowns >= 2 && falls >= 2, "step-down reach fixture: run_down_* and fall_* sections (counts)", runDowns, falls);
 }
 
+// ---- PSM Fall on a contact loss (adapter::kGroundDropPsmFallS). Recorded feeds (tests/data/air_ground_flicker_feeds.txt): psm_drop_step, Male V
+// running down a 10 cm drop where the game reported its Fall detail on both airborne feeds (the game run showed a jump-off clip and two landing
+// clips in 0.05 s; mutation 41 = PSM Fall is InAir at once must FAIL here); psm_drop_fall, Female V dodging off a 0.5 m ledge with the Fall detail
+// from its first airborne feed: InAir at most kGroundDropPsmFallS plus one feed after the first PSM Fall feed, air clips still played.
+// Production floor rule (AirFloorStep), 60 and 30 Hz.
+void PsmFallDropChecks(Model& m, const std::vector<Section>& aSecs, const Variant& aProd)
+{
+    Variant prod = aProd;
+    prod.runtimeFloor = true;
+    int steps = 0, falls = 0;
+    for (const Section& s0 : aSecs)
+    {
+        const bool step = s0.name == "psm_drop_step", fall = s0.name == "psm_drop_fall";
+        if (!step && !fall)
+            continue;
+        steps += step;
+        falls += fall;
+        for (const Section& s : {s0, At30Hz(s0)})
+        {
+            const std::vector<Frame> on = Replay(m, s, prod);
+            const FlickerStats a = MeasureFlicker(on);
+            if (g_report)
+                for (const Frame& f : on)
+                    if (f.mode == 1 || f.onGround == 0 || IsAirDb(f.db))
+                        std::printf("  %s t=%.3f onGround %d detail %d mode %d vz %.0f cm/s %s %s\n", s.name.c_str(), f.t, f.onGround, f.detail, f.mode, double(f.vzCmS),
+                                    f.db.c_str(), f.clip.c_str());
+            std::printf("psm fall drop %s: jump / land frames %d, InAir frames %d, clip changes %d in %.2f s\n", s.name.c_str(), a.airFrames, a.inAirFrames,
+                        a.clipChanges, a.seconds);
+            char what[240];
+            if (step)
+            {
+                std::snprintf(what, sizeof what, "%s: a short PSM Fall on a small drop keeps the ground clips (jump / land frames, InAir frames)", s.name.c_str());
+                Check(a.airFrames == 0 && a.inAirFrames == 0, what, a.airFrames, a.inAirFrames);
+                // the ground selection of the same feeds (contact flag held, no PSM air detail): same clip on every frame, legs within 6 deg
+                Section ground = s;
+                for (Row& r : ground.rows)
+                {
+                    r.onGround = 1;
+                    if (adapter::PsmAir(adapter::DetailFromFeed(r.psm, r.loco)))
+                        r.psm &= ~integ::kPsmDetailFieldMask;
+                }
+                const std::vector<Frame> g = Replay(m, ground, prod);
+                int diff = g.size() != on.size() ? 1 : 0;
+                float drift = 0.0f;
+                for (size_t i = 0; i < g.size() && i < on.size(); ++i)
+                {
+                    diff += g[i].clip != on[i].clip;
+                    drift = std::fmax(drift, LegDiffDeg(g[i], on[i]));
+                }
+                std::snprintf(what, sizeof what, "%s: the clip sequence and legs follow the ground selection of the same feeds (frames, deg)", s.name.c_str());
+                Check(diff == 0 && drift <= 6.0f, what, diff, drift);
+            }
+            else
+            {
+                double firstPsmFall = -1.0, maxDt = 0.0;
+                bool firstRises = false;
+                for (const Row& r : s.rows)
+                {
+                    if (firstPsmFall < 0.0 && r.onGround == 0 && adapter::DetailFromFeed(r.psm, r.loco) == adapter::kPsmFall)
+                    {
+                        firstPsmFall = r.t;
+                        firstRises = r.vel[2] > 0.0f;
+                    }
+                    maxDt = std::fmax(maxDt, double(r.dt));
+                }
+                if (firstRises)
+                {
+                    // a dodge that leaves the ground rises on its first PSM Fall feed: InAir on that feed (mutation 42 must FAIL here)
+                    std::snprintf(what, sizeof what, "%s: a rising PSM Fall is InAir on its first feed (times)", s.name.c_str());
+                    Check(FirstInAir(on) > 0.0 && FirstInAir(on) <= firstPsmFall + 1.0e-6, what, FirstInAir(on), firstPsmFall);
+                }
+                const double inAir = FirstInAir(on);
+                std::printf("psm fall drop %s: first InAir t=%.3f, first PSM Fall feed %.3f: delay %.0f ms\n", s.name.c_str(), inAir, firstPsmFall,
+                            (inAir - firstPsmFall) * 1000.0);
+                std::snprintf(what, sizeof what, "%s: InAir at most kGroundDropPsmFallS plus one feed after the first PSM Fall feed (times)", s.name.c_str());
+                Check(inAir > 0.0 && firstPsmFall > 0.0 && inAir <= firstPsmFall + double(adapter::kGroundDropPsmFallS) + maxDt + 1.0e-6, what, inAir,
+                      firstPsmFall);
+                std::snprintf(what, sizeof what, "%s: the fall / landing clips are still played (frames)", s.name.c_str());
+                Check(a.airFrames > 0, what, a.airFrames);
+            }
+        }
+    }
+    Check(steps == 1 && falls == 1, "PSM Fall drop fixture: psm_drop_step and psm_drop_fall sections (counts)", steps, falls);
+}
+
 void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>& aJumpSecs, const Variant& aProd)
 {
     std::vector<Section> secs;
@@ -2182,8 +2273,8 @@ void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>
             std::printf("contact loss %s (runtime floor): jump / land frames %d, InAir frames %d\n", s.name.c_str(), a.airFrames, a.inAirFrames);
             if (s.name == "real_fall")
                 Check(a.inAirFrames > 0, "real fall (runtime floor): InAir (frames)", a.inAirFrames);
-            else if (s.name.rfind("fall_", 0) == 0)
-                continue; // StepDownReachChecks
+            else if (s.name.rfind("fall_", 0) == 0 || s.name.rfind("psm_drop_", 0) == 0)
+                continue; // StepDownReachChecks / PsmFallDropChecks
             else
                 Check(a.airFrames == 0 && a.inAirFrames == 0, "contact loss / step-down (runtime floor): the ground clips stay (jump / land frames, InAir frames)",
                       a.airFrames, a.inAirFrames);
@@ -2261,6 +2352,7 @@ void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>
     std::printf("recorded jumps: lead-foot changes in the air entry %d (airKeepLeadFootS off %d)\n", flipsOn, flipsOff);
     Check(flipsOn == flipsOff, "recorded jumps: the lead-foot rule leaves game jumps as they were (changes, off)", flipsOn, flipsOff);
     StepDownReachChecks(m, secs, aProd);
+    PsmFallDropChecks(m, secs, aProd);
 }
 
 int main(int argc, char** argv)
