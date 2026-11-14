@@ -32,6 +32,7 @@ struct Player
     bool stanceFade = false; // this layer's fade-in is a ground stance change (crouch <-> stand), see KeepFootHeight
     bool groundFade = false; // this layer's fade-in is a ground locomotion -> ground locomotion fade (BlendRequest::groundFade), see KeepFootHeight
     bool airFade = false;    // this layer was picked in the air movement mode (BlendRequest::toAir), see KeepAnklesAboveLayers
+    bool fullLegFade = false; // the leg bones of this layer fade over the whole blend time (BlendRequest::fullLegFade), see Alpha
 };
 struct GraphInputs
 {
@@ -88,6 +89,21 @@ class BlendStack
             for (int32_t b = m_footBones[side]; b >= 0; b = db.BoneParent(uint32_t(b)))
                 m_ankleChain[side].insert(m_ankleChain[side].begin(), b);
         }
+        // Leg bones = the bone below the Hips on each ankle chain (the thigh) and everything under it. A layer with fullLegFade fades them over
+        // the whole blend time (factor 1); every other bone keeps its factor.
+        m_fullLegFactors = m_factors;
+        int32_t thigh[2]{-1, -1};
+        for (uint32_t side = 0; side < 2; ++side)
+            for (size_t k = 0; k + 1 < m_ankleChain[side].size(); ++k)
+                if (m_ankleChain[side][k] == m_hipsBone)
+                    thigh[side] = m_ankleChain[side][k + 1];
+        for (uint32_t k = 0; k < m_n; ++k)
+            for (int32_t b = int32_t(k); b >= 0; b = db.BoneParent(uint32_t(b)))
+                if (b == thigh[0] || b == thigh[1])
+                {
+                    m_fullLegFactors[k] = 1.0f;
+                    break;
+                }
         return true;
     }
     void SetGraphInputs(const GraphInputs &input)
@@ -298,6 +314,9 @@ class BlendStack
 #endif
             p.groundFade = (selected.blend.groundFade && underGround) || (oldGround && selected.blend.toGround);
             p.airFade = selected.blend.toAir;
+#if UTPP_FOOTSINK_MUTATION != 12 // mutation 12: the leg bones keep their shorter fade on a flagged pick
+            p.fullLegFade = selected.blend.fullLegFade;
+#endif
             m_players[0] = p;
         }
         if (!selected.cancelledStartSupportAllowed) m_players[0].cancelStartSupport = -1;
@@ -689,9 +708,13 @@ class BlendStack
         const float z = (m_db->CurvePresence(j) & bit) ? m_db->CurveValue(j, uint32_t(curve)) : 0;
         return a + (z - a) * (ft - std::floor(ft));
     }
+    // Fade weight of a layer for one bone (-1 = the layer as a whole). The per-bone factors shorten the fade of some bones (the legs run
+    // faster than the Hips); a fullLegFade layer runs its leg bones over the whole blend time instead: two leg poses far apart (the two
+    // slide families) otherwise swing the thigh and shin through their difference in a third less time than the rest of the body.
     float Alpha(const Player &p, int32_t bone) const
     {
-        const float duration = p.duration * (bone < 0 ? 1 : m_factors[uint32_t(bone)]);
+        const float factor = bone < 0 ? 1.0f : p.fullLegFade ? m_fullLegFactors[uint32_t(bone)] : m_factors[uint32_t(bone)];
+        const float duration = p.duration * factor;
         if (duration <= 1e-8f)
             return 1;
         float t = std::clamp(p.clock / duration, 0.f, 1.f);
@@ -839,6 +862,7 @@ class BlendStack
     std::array<std::vector<BoneTransform>, kCapacity> m_pose;
     std::array<Signals, kCapacity> m_samples{};
     std::vector<float> m_factors;
+    std::vector<float> m_fullLegFactors; // m_factors with the leg bones at 1 (fullLegFade layers)
     std::vector<BoneTransform> m_out;
     Signals m_signals{};
     GraphInputs m_graph{};

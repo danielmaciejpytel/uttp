@@ -22,10 +22,21 @@ if(EXISTS "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide.utppmm"
                  "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261021_1213.txt"
                  "${_utpp_jp_data}/utpp_motion_man_knee_slide"
                  --rig man --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt")
-        # With --rig man two limits are looser (JumpPickTest.cpp): the slide family switch rotation <= 82.5 deg (77.1 measured with the
-        # ankle floor of the blend, 72.0 without it) and the JO1 control >= 8 frames (measured 9;
-        # the man bundle does not reproduce the woman log). The man jump
-        # data is still not retargeted with the twistfix clips.
+        # With --rig man one limit is looser (JumpPickTest.cpp): the JO1 control >= 8 frames (measured 9; the man bundle does not reproduce the
+        # woman log). The slide family switch rotation has the same bound on both bodies (<= 70 deg per 50 ms). The man jump data is still not
+        # retargeted with the twistfix clips.
+        # UTPP_FOOTSINK_MUTATION=12 (src/mm/MotionBlendStack.hpp): the leg bones of a FootOut <-> KneesOut fade keep their shorter fade; the man
+        # bundle must then break the family switch bound (the woman bundle stays under it, so this mutant runs on the man bundle).
+        add_executable(utpp_mm_jump_pick_man_footsink_mut12 tests/JumpPickTest.cpp src/mm/MotionBlendStack.hpp src/mm/MotionAdapter.hpp src/mm/ChooserMatcher.hpp)
+        target_compile_features(utpp_mm_jump_pick_man_footsink_mut12 PRIVATE cxx_std_20)
+        target_compile_options(utpp_mm_jump_pick_man_footsink_mut12 PRIVATE ${UTPP_WARNINGS} /EHsc)
+        target_compile_definitions(utpp_mm_jump_pick_man_footsink_mut12 PRIVATE UTPP_FOOTSINK_MUTATION=12)
+        target_link_libraries(utpp_mm_jump_pick_man_footsink_mut12 PRIVATE bcrypt)
+        add_test(NAME utpp_mm_jump_pick_man_footsink_mut12 COMMAND utpp_mm_jump_pick_man_footsink_mut12
+                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261021_1213.txt"
+                 "${_utpp_jp_data}/utpp_motion_man_knee_slide"
+                 --rig man --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt")
+        set_tests_properties(utpp_mm_jump_pick_man_footsink_mut12 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL slide family switch: worst rotation per 50 ms")
     endif()
     # Mutation builds MUST report an assertion failure: they pass only when the output contains a line starting "FAIL "
     # (PASS_REGULAR_EXPRESSION ignores the exit code, so a setup error - exit 2, missing data - cannot count as a killed mutant).

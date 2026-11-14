@@ -204,7 +204,8 @@ inline constexpr float kJumpOffPhaseEndS = 0.2f;
 // fix3/jump N3: cross-fade times of the quick slide combinations (MatcherConfig::blendSlideAir / blendTipAfterSlide / blendSlideFamily). The
 // value is where the peak pose change of the recorded transitions falls to the rate of the sprint legs themselves (~40 deg per 50 ms):
 // slide -> jump 86 -> 44 deg (Hips 35 -> 17 cm) per 50 ms at 0.3 s, turn-in-place out of the rising exit clip 96 -> 32 at 0.3 s,
-// FootOut <-> KneesOut 83 -> 65 at 0.25 s (tests/JumpPickTest.cpp, replay of tests/data/jump_feeds_20261021_1213.txt). The family fade is
+// FootOut <-> KneesOut at 0.25 s with the leg bones faded over the whole blend time (BlendRequest::fullLegFade) 45 (Female V) / 63 (Male V),
+// 63 / 77 with the shorter leg fade (tests/JumpPickTest.cpp, replay of tests/data/jump_feeds_20261021_1213.txt). The family fade is
 // capped by the slide EXIT (tests/SlideExitTest.cpp): the exit clip is matched against the family on display, so a longer mix of two
 // families that is still running at the exit pops it (0.3 s: Hips / Spine3 31 deg per 0.1 s of the synthetic KneesOut slides, bound 25).
 inline constexpr float kBlendSlideAirS = 0.3f;
@@ -608,6 +609,7 @@ struct BlendRequest
     bool groundFade = false;
     bool toGround = false; // the incoming clip alone is a ground locomotion clip in a ground movement mode (a replaced head inherits the fade only then)
     bool toAir = false;    // the incoming pick is made in the air movement mode (take-off / fall): BlendStack::KeepAnklesAboveLayers stays off under it
+    bool fullLegFade = false; // a FootOut <-> KneesOut switch inside a slide (blendSlideFamily): BlendStack fades the leg bones over the whole blend time
 };
 
 struct MatchResult
@@ -1823,7 +1825,10 @@ public:
                 if (UTPP_AND_NOT(JUMPPICK, 6) m_cfg.blendSlideFamily > 0.0f && m_cur.valid && m_cur.db >= 0 && m_dbSlide[static_cast<uint32_t>(m_cur.db)] &&
                     m_dbSlide[static_cast<uint32_t>(bestDb)] && m_clipSlideFamily[static_cast<uint32_t>(m_cur.clip)] && m_clipSlideFamily[en.clip] &&
                     m_clipSlideFamily[static_cast<uint32_t>(m_cur.clip)] != m_clipSlideFamily[en.clip])
+                {
                     res.blend.blendTime = std::fmax(res.blend.blendTime, m_cfg.blendSlideFamily);
+                    res.blend.fullLegFade = true;
+                }
                 res.blend.stanceChange = m_cur.valid && m_haveLastState && aState.movementMode == 0 && last.movementMode == 0 &&
                     (aState.stance != last.stance || std::abs(m_stanceTransitionDirection[en.clip]) == 1);
 #if UTPP_FOOTSINK_MUTATION == 4 // mutation 4: no ground fade is ever flagged (the KeepFootHeight permission stays the stance fades')

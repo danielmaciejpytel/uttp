@@ -174,6 +174,8 @@ struct Variant
     bool jumpOutFlag = true;
     // the host also hands the v2 step MapContext::vehicleExit (MotionDriver: the exit window + a 0.6 s tail) through a jump-out; the fixtures above left it off
     bool vehicleExit = false;
+    // false = the blend stack runs without its ankle floor (BlendStack::SetFootFloor(false)): shows the sink the floor removes
+    bool footFloor = true;
     Variant()
     {
         mc.slide = true;
@@ -269,6 +271,7 @@ struct Frame
     float rotMax = 0;  // max model-space rotation change over the next frame step (Hips / Spine3 / UpLeg / Leg), degrees per step
     float rotMax0 = 0; // ... normalised to deg / 0.05 s
     float hipsDz = 0;  // Hips model-space z change, cm per 0.05 s
+    float ankleSink = 0; // cm the lower-lying output ankle is below the lowest ankle of the live layers on its side (0 = none)
     bool jumpOutFall = false; // ChooserMatcher::JumpOutFall() after this update (fix/jumpout-cam)
     bool jumpOutBack = false; // ChooserMatcher::JumpOutNoBack() after this update
 };
@@ -374,6 +377,7 @@ std::vector<Frame> Replay(Model& m, const Section& s, const Variant& aVar)
     }
     motionstack::BlendStack stack;
     stack.Init(m.db, m.factors);
+    stack.SetFootFloor(aVar.footFloor);
     adapter::MapState map;
     std::vector<motion::TrajSample> traj(adapter::kQueryTrajMax);
     int32_t prevDb = -1;
@@ -493,6 +497,19 @@ std::vector<Frame> Replay(Model& m, const Section& s, const Variant& aVar)
         fr.hipsYawDeg = std::atan2(pUR.y - pUL.y, pUR.x - pUL.x) * 57.29577951f;
         fr.kneeL = KneeFlexDeg(pUL, pLL, pFL);
         fr.kneeR = KneeFlexDeg(pUR, pLR, pFR);
+        if (stack.Count() > 1)
+        {
+            float lowest[2] = {1.0e9f, 1.0e9f};
+            for (uint32_t li = 0; li < stack.Count(); ++li)
+            {
+                math::Vec3 lf, lr;
+                ModelXform(m.db, stack.LayerPose(li), m.boneFootL, qq, lf);
+                ModelXform(m.db, stack.LayerPose(li), m.boneFootR, qq, lr);
+                lowest[0] = std::fmin(lowest[0], lf.z);
+                lowest[1] = std::fmin(lowest[1], lr.z);
+            }
+            fr.ankleSink = std::fmax(0.0f, std::fmax(lowest[0] - pFL.z, lowest[1] - pFR.z)) * 100.0f;
+        }
         fr.standingRules = matcher.StandingJumpRules();
         fr.afterReset = resetDone;
         fr.flightJump = matcher.FlightJump();
@@ -701,7 +718,7 @@ void StandingJumpChecks(Model& m, const std::vector<Section>& aSecs, const Varia
 // of the blended base pose around a take-off out of a slide, a FootOut <-> KneesOut switch and a turn-in-place out of the rising exit clip
 struct Peak
 {
-    float rot = 0, dz = 0;
+    float rot = 0, dz = 0, sink = 0;
 };
 
 Peak PeakIn(const std::vector<Frame>& aFr, double aT0, double aT1)
@@ -712,6 +729,7 @@ Peak PeakIn(const std::vector<Frame>& aFr, double aT0, double aT1)
         {
             p.rot = std::fmax(p.rot, f.rotMax0);
             p.dz = std::fmax(p.dz, std::fabs(f.hipsDz));
+            p.sink = std::fmax(p.sink, f.ankleSink);
         }
     return p;
 }
@@ -719,7 +737,7 @@ Peak PeakIn(const std::vector<Frame>& aFr, double aT0, double aT1)
 struct EventStats
 {
     int events = 0;
-    float rot = 0, dz = 0;        // worst over the events
+    float rot = 0, dz = 0, sink = 0; // worst over the events (sink: Frame::ankleSink, cm)
     float blendMin = 1.0e9f, blendMax = 0.0f; // cross-fade time of the selections (seconds)
 };
 
@@ -728,6 +746,7 @@ void Add(EventStats& aS, const Peak& aP, float aBlend = 0.0f)
     ++aS.events;
     aS.rot = std::fmax(aS.rot, aP.rot);
     aS.dz = std::fmax(aS.dz, aP.dz);
+    aS.sink = std::fmax(aS.sink, aP.sink);
     aS.blendMin = std::fmin(aS.blendMin, aBlend);
     aS.blendMax = std::fmax(aS.blendMax, aBlend);
 }
@@ -792,11 +811,17 @@ void SlideComboChecks(Model& m, const std::vector<Section>& aSecs, const Variant
     const ComboStats onF = MeasureCombos(m, aSecs, famOn);
     const ComboStats preF = MeasureCombos(m, aSecs, famPre);
     Check(onF.family.events >= 1, "fixture: >= 1 FootOut <-> KneesOut switch inside a slide (251.6, slideIntoHandover off)", onF.family.events);
-    // Male V: 82.5 (77.1 measured; 72.0 without the ankle floor of the blend, MotionBlendStack KeepAnklesAboveLayers, which lifts a sinking
-    // ankle through the longer Male V leg during the 0.25 s family fade).
-    const float familyRotMax = g_rigIdentity == motion::kRigIdentityMan ? 82.5f : 70.0f;
-    Check(onF.family.rot <= familyRotMax, "slide family switch: worst rotation per 50 ms (deg)", onF.family.rot);
+    // One bound for both bodies. The family fade runs the leg bones over the whole blend time (BlendRequest::fullLegFade); with the shorter
+    // leg fade of the other picks the shin of the longer Male V leg swings ~77 deg per 50 ms at mid-fade (72 without the ankle floor).
+    Check(onF.family.rot <= 70.0f, "slide family switch: worst rotation per 50 ms (deg)", onF.family.rot);
     Check(preF.family.rot >= 75.0f, "pre-fix slide family switch pops (0.2 s fade): rotation per 50 ms (deg)", preF.family.rot);
+    // The two leg poses mixed in local space put an ankle far below both layers mid-fade; the ankle floor of the blend
+    // (BlendStack::KeepAnklesAboveLayers, 1 cm tolerance) must keep it on the lowest layer while the fade runs.
+    Variant famNoFloor = famOn;
+    famNoFloor.footFloor = false;
+    const ComboStats nfF = MeasureCombos(m, aSecs, famNoFloor);
+    Check(nfF.family.sink >= 8.0f, "fixture: without the ankle floor the family switch sinks an ankle below every layer (cm)", nfF.family.sink);
+    Check(onF.family.sink <= 1.2f, "slide family switch: no ankle more than the floor tolerance below the lowest layer (cm)", onF.family.sink);
 
     // the turn-in-place out of the rising exit clip needs the aim state, which the feed dump does not hold: synthetic RMB + a lagging root
     Variant aim = aProd;
