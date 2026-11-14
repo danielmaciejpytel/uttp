@@ -946,4 +946,125 @@ inline bool BorderStep(BorderState& aS, uint8_t* aBones, uint32_t aCount, const 
         *aInfo = info;
     return true;
 }
+
+// ------------------------------------------------------------------------------------------------ switch blend (option, default off)
+//
+// The game switches melee clips with a hard cut in places (a combo that wraps to its first strike, a click late in a strike): the arms
+// and the spine above the layer's bones jump by up to 180 deg in one frame. When the layer relocks on another clip or time and some of
+// these bones turn by at least kSwitchMinDeg in that frame, the switch blend cross-fades them from the pose this layer left on the
+// previous call into the playing clip over kSwitchBlendSeconds (per bone by angle). A switch during a running blend starts it again
+// from the pose shown on the previous call.
+
+inline constexpr int kUpperBones = 11;
+inline constexpr const char* kUpperNames[kUpperBones] = {"Spine1",       "Spine2",      "Spine3",        "LeftShoulder",
+                                                          "LeftArm",      "LeftForeArm", "LeftHand",      "RightShoulder",
+                                                          "RightArm",     "RightForeArm", "RightHand"};
+inline constexpr float kSwitchBlendSeconds = 0.1f;
+inline constexpr float kSwitchMinDeg = 30.0f; // a relock is a cut when some upper bone turns at least this much in its one frame
+
+struct UpperRig
+{
+    int32_t bone[kUpperBones];
+    uint32_t ok = 0;
+    UpperRig()
+    {
+        for (int32_t& b : bone)
+            b = -1;
+    }
+};
+
+// Resolves the upper bones by name (game CName hash). Fail closed: a missing name -> ok = 0.
+inline UpperRig ResolveUpperRig(std::span<const uint64_t> aHashes)
+{
+    UpperRig r;
+    for (int k = 0; k < kUpperBones; ++k)
+    {
+        const uint64_t h = integ::CNameHash(kUpperNames[k]);
+        for (size_t i = 0; i < aHashes.size(); ++i)
+            if (aHashes[i] == h)
+            {
+                r.bone[k] = int32_t(i);
+                break;
+            }
+        if (r.bone[k] < 0)
+            return UpperRig{};
+    }
+    r.ok = 1;
+    return r;
+}
+
+struct SwitchBlendState
+{
+    bool have = false;            // last holds the upper pose of the previous call
+    float progress = 1.0f;        // 1 = no blend running
+    Quat last[kUpperBones]{};     // upper locals this layer left on the previous call
+    Quat from[kUpperBones]{};     // the pose the running cross-fade starts from
+};
+
+// One call. aSwitch = the layer relocked on another clip or time this call (StepInfo::relocked with a clock already running). Returns
+// true when the records were changed. Fail closed (state reset, records untouched) for a bad rig / record.
+inline bool SwitchBlendStep(SwitchBlendState& aS, uint8_t* aBones, uint32_t aCount, const UpperRig& aRig, bool aSwitch, float aDt,
+                            float aSeconds = kSwitchBlendSeconds)
+{
+    if (!aRig.ok || !aBones)
+    {
+        aS = SwitchBlendState{};
+        return false;
+    }
+    Quat cur[kUpperBones];
+    for (int k = 0; k < kUpperBones; ++k)
+    {
+        if (aRig.bone[k] < 0 || uint32_t(aRig.bone[k]) >= aCount)
+        {
+            aS = SwitchBlendState{};
+            return false;
+        }
+        cur[k] = aim::ReadLocal(aBones, uint32_t(aRig.bone[k])).q;
+        if (!math::IsFinite(cur[k]))
+        {
+            aS = SwitchBlendState{};
+            return false;
+        }
+        cur[k] = math::QuatNormalize(cur[k]);
+    }
+    const float dt = (std::isfinite(aDt) && aDt > 0.0f) ? (aDt > kMaxDt ? kMaxDt : aDt) : 0.0f;
+    const float step = aSeconds > 0.0f ? dt / aSeconds : 1.0f;
+    bool started = false;
+    if (aSwitch && aS.have)
+    {
+        // a cut: some bone turns by at least kSwitchMinDeg in this one frame (a relock inside a smooth motion is left alone); a switch
+        // during a running blend always re-bases it on the pose shown last (no jump)
+        float maxDeg = 0.0f;
+        for (int k = 0; k < kUpperBones; ++k)
+        {
+            const float d = std::fabs(math::QuatDot(aS.last[k], cur[k]));
+            maxDeg = std::fmax(maxDeg, 2.0f * std::acos(d > 1.0f ? 1.0f : d) * meleebase::kRadToDeg);
+        }
+        if (aS.progress < 1.0f || maxDeg >= kSwitchMinDeg)
+        {
+            for (int k = 0; k < kUpperBones; ++k)
+                aS.from[k] = aS.last[k];
+            aS.progress = std::fmin(1.0f, step); // the switch frame already takes its share of the way
+            started = true;
+        }
+    }
+    if (!started && aS.progress < 1.0f)
+        aS.progress = std::fmin(1.0f, aS.progress + step);
+    bool wrote = false;
+    if (aS.progress < 1.0f)
+    {
+        // from the start pose toward the clip by the angle between them (an nlerp turns faster mid-way on the large angles of a cut)
+        for (int b = 0; b < kUpperBones; ++b)
+        {
+            const Quat d = math::QuatAbs(math::QuatNormalize(math::QuatMul(cur[b], math::QuatInv(aS.from[b]))));
+            cur[b] = math::QuatNormalize(math::QuatMul(math::QuatFromScaledAngleAxis(math::QuatToScaledAngleAxis(d) * aS.progress), aS.from[b]));
+            aim::WriteLocalRot(aBones, uint32_t(aRig.bone[b]), cur[b]);
+        }
+        wrote = true;
+    }
+    for (int k = 0; k < kUpperBones; ++k)
+        aS.last[k] = cur[k];
+    aS.have = true;
+    return wrote;
+}
 } // namespace utpp::mm::meleepose

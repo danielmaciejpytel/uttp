@@ -33,6 +33,7 @@ struct RigMsg
 {
     mm::meleebase::Rig keyRig;
     core::LowerRig lower;
+    core::UpperRig upper; // switch blend
     uint64_t rigPtr = 0;
 };
 
@@ -42,11 +43,13 @@ core::PoseTables g_tables[2];   // written once by Load (before any FK call), re
 std::atomic<bool> g_loaded[2] = {{false}, {false}};
 std::atomic<uint64_t> g_weapon{0};
 std::atomic<bool> g_enabled{true};
+std::atomic<bool> g_switchBlend{false}; // developer setting melee.switchBlend (default off)
 const uint64_t kFistsHash = integ::CNameHash("w_melee_fists");
 
 // detour-side state (single entrant via g_busy)
 std::atomic_flag g_busy = ATOMIC_FLAG_INIT;
 core::State g_state;
+core::SwitchBlendState g_upper; // switch blend of the arms and the spine above the layer (detour side, owned through g_busy)
 int32_t g_stateBody = -1;
 int64_t g_lastTicks = 0;
 
@@ -127,6 +130,7 @@ void HardReset()
     {
     }
     g_state = core::State{};
+    g_upper = core::SwitchBlendState{};
     g_stateBody = -1;
     g_lastTicks = 0;
     g_border = core::BorderState{};
@@ -168,6 +172,7 @@ void OnArmed(void* aRig, const std::vector<uint64_t>& aHashes, const std::vector
     RigMsg m;
     m.keyRig = mm::meleebase::ResolveRig(std::span<const uint64_t>(aHashes), std::span<const int16_t>(aParents));
     m.lower = core::ResolveLowerRig(std::span<const uint64_t>(aHashes), std::span<const int16_t>(aParents));
+    m.upper = core::ResolveUpperRig(std::span<const uint64_t>(aHashes));
     m.rigPtr = reinterpret_cast<uint64_t>(aRig);
     g_rig.Publish(m);
     g_rigOk.store(m.keyRig.ok != 0 && m.lower.ok != 0, std::memory_order_release);
@@ -263,6 +268,7 @@ void BorderTail(uint8_t* aBones, uint32_t aCount, void* aRig, int64_t aNowTicks)
 }
 } // namespace
 void SetEnabled(bool aOn) { g_enabled.store(aOn, std::memory_order_relaxed); }
+void SetSwitchBlend(bool aOn) { g_switchBlend.store(aOn, std::memory_order_relaxed); }
 
 void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int64_t aNowTicks)
 {
@@ -273,6 +279,7 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
         if (g_lastTicks != 0 && !g_busy.test_and_set(std::memory_order_acquire))
         {
             g_state = core::State{}; // the standing gate / switch closed: the next episode starts clean
+            g_upper = core::SwitchBlendState{};
             g_lastTicks = 0;
             g_busy.clear(std::memory_order_release);
         }
@@ -312,6 +319,7 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
     if (g_stateBody != body || (g_lastTicks != 0 && !(Age(aNowTicks, g_lastTicks) <= mm::meleebase::kMaxGapSeconds)))
     {
         g_state = core::State{};
+        g_upper = core::SwitchBlendState{};
         g_stateBody = body;
         g_lastTicks = 0;
     }
@@ -331,6 +339,7 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
     const bool haveKeys = utpp::meleebase::PeekEngineKeys(aRig, key) || mm::meleebase::ReadKeys(aBones, aCount, rm.keyRig, key);
     core::LowerPose pose;
     core::StepInfo si;
+    const int32_t clipBefore = g_state.clip; // a relock with a running clock is a clip switch
     const float w = core::Step(g_state, t, weapon, haveKeys ? key : nullptr, 1.0f, dt, pose, &si,
                                HoldState(g_meleeState.load(std::memory_order_relaxed)));
     // the full-body fade multiplies the write (the state keeps easing on its own timeline)
@@ -365,6 +374,11 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
         }
         g_borderActive.store(g_border.active, std::memory_order_relaxed);
     }
+    // switch blend (developer option): a hard cut of the game at a clip switch becomes a short blend of the arms and the spine above
+    if (g_switchBlend.load(std::memory_order_relaxed))
+        core::SwitchBlendStep(g_upper, aBones, aCount, rm.upper, si.relocked && clipBefore >= 0, dt);
+    else if (g_upper.have)
+        g_upper = core::SwitchBlendState{};
     if (si.frozen)
         g_frozen.fetch_add(1, std::memory_order_relaxed);
     if (si.toBase)

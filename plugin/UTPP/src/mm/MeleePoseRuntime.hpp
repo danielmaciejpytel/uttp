@@ -25,6 +25,9 @@ void SetMeleeState(int32_t aState, float aPlanarSpeed);
 bool FormatLogLine(char* aBuf, size_t aLen);
 // User setting melee.fullPose (default on): off = the chest correction alone, as before.
 void SetEnabled(bool aOn);
+// Developer setting melee.switchBlend (default off): at a clip switch the arms and the spine above the layer blend from the pose of
+// the previous call into the new clip over 0.1 s instead of the game's hard cut. Off: the upper body is left as the game plays it.
+void SetSwitchBlend(bool aOn);
 std::string Status();
 
 // FK detour, right after the MM blend (before the gun aim offset and the chest correction). aLowerScale = PoseSnapshot::lowerScale

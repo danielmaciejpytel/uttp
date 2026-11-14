@@ -2403,6 +2403,19 @@ void Native_SetHelperZeroWeightWriters(RED4ext::IScriptable*, RED4ext::CStackFra
         *aOut = true;
 }
 
+// ---- melee full pose: switch blend of the arms and the spine at a clip switch (utpp::meleepose::SetSwitchBlend; CET setting
+// melee.switchBlend, developer option, default off)
+void Native_SetMeleeSwitchBlend(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    utpp::meleepose::SetSwitchBlend(on);
+    LogInfo("UTPPSetMeleeSwitchBlend(%d)", on ? 1 : 0);
+    if (aOut)
+        *aOut = true;
+}
+
 // ---- v2 motion lean (motiondriver::SetLean / SetLeanHead / SetLeanParams; CET mm.lean, mm.leanHead, default off)
 void Native_SetMotionLean(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -3915,6 +3928,15 @@ void PostRegisterTypes()
         hz->AddParam("Bool", "on");
         hz->SetReturnType("Bool");
         rtti->RegisterFunction(hz);
+    }
+
+    // melee full pose: switch blend at a clip switch
+    {
+        auto* sb = RED4ext::CGlobalFunction::Create("UTPPSetMeleeSwitchBlend", "UTPPSetMeleeSwitchBlend", &Native_SetMeleeSwitchBlend);
+        sb->flags = flags;
+        sb->AddParam("Bool", "on");
+        sb->SetReturnType("Bool");
+        rtti->RegisterFunction(sb);
     }
 
     // v2 motion lean

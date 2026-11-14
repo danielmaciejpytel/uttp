@@ -4,11 +4,14 @@
 // Reference pose guard (mm/MeleePoseGuard.hpp): synthetic rigs and the recorded engine poses of <dir>/melee_pose_guard_female.bin.
 // usage: utpp_melee_pose_test <dir with utpp_melee_pose_female.bin / utpp_melee_pose_male.bin / melee_pose_guard_female.bin> [<fixture> ...]
 // (further fixtures by their magic: "MPG1" reference pose guard, "MPB1" borders and clip choice on recorded frames)
+#define _CRT_SECURE_NO_WARNINGS
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -565,6 +568,350 @@ void TestGuardRecorded(const std::string& aPath)
 //     preference (free clock) and with them (held clock); reported per window: clip changes, frames on _hit / _deflect clips, and the ground
 //     travel of the clip's own feet at full weight.
 
+// ------------------------------------------------------------------------------------------------ model of the runtime call
+//
+// One call of the runtime (mm/MeleePose.cpp Apply) on plain data: the clip clock and match (Step) on the key bones of the game pose, the write (WriteLower, weight x the full-body fade) and the borders (BorderStep) on the records.
+// With the fade closed the state starts over and only the borders' tail runs (BorderStep without a write).
+
+namespace layermodel
+{
+using namespace meleepose;
+struct LayerState
+{
+    State step;
+    BorderState border;
+    bool live = false; // the clip clock ran on the previous call (false: the next call is the first of an episode, dt = 0)
+};
+
+struct LayerCallInfo
+{
+    StepInfo step;
+    BorderInfo border;
+    LowerPose pose{};
+    float weight = 0.0f;    // Step's weight (before the fade)
+    float written = 0.0f;   // weight written into the records (0 = nothing written)
+    bool border0 = false;   // the borders ran this call
+};
+
+// aFade = 1 - lowerScale (0 = the standing gate is closed); aDt = seconds since the previous call; aKey may be null (no key bones).
+inline void LayerCall(LayerState& aS, const PoseTables& aT, const Weapon* aWeapon, const Quat* aKey, float aFade, float aDt, bool aHoldState,
+                      bool aCapsuleMoving, uint8_t* aBones, uint32_t aCount, const LowerRig& aRig, LayerCallInfo* aInfo = nullptr)
+{
+    LayerCallInfo info;
+    const float fade = std::isfinite(aFade) ? aim::Clampf(aFade, 0.0f, 1.0f) : 0.0f;
+    if (!(fade > 0.0f))
+    {
+        aS.step = State{};
+        aS.live = false;
+        if (aS.border.active)
+            info.border0 = BorderStep(aS.border, aBones, aCount, aRig, nullptr, false, 0.0f, aDt, &info.border, aCapsuleMoving);
+        if (aInfo)
+            *aInfo = info;
+        return;
+    }
+    const float dt = aS.live ? aDt : 0.0f;
+    aS.live = true;
+    info.weight = Step(aS.step, aT, aWeapon, aKey, 1.0f, dt, info.pose, &info.step, aHoldState);
+    const float wEff = info.weight * fade;
+    LowerModel pre;
+    const bool havePre = wEff > 0.0f && !aS.border.active && ComputeLowerModel(aBones, aCount, aRig, pre);
+    bool wrote = false;
+    if (wEff > 0.0f && WriteLower(aBones, aCount, aRig, info.pose, wEff))
+    {
+        wrote = true;
+        info.written = wEff;
+    }
+    info.border0 = BorderStep(aS.border, aBones, aCount, aRig, havePre ? &pre : nullptr, wrote, wEff, aDt, &info.border, aCapsuleMoving);
+    if (aInfo)
+        *aInfo = info;
+}
+} // namespace layermodel
+
+// ------------------------------------------------------------------------------------------------ switch blend (synthetic)
+
+// Upper bones 0..10 in kUpperNames order; RightArm (8) cuts by aCutDeg at frame 10 of 30 at 60 fps. Returns the largest single-frame
+// RightArm step and the frames the blend wrote.
+struct SwitchSynth
+{
+    float maxStep = 0.0f;
+    int written = 0, changedAfter = 0;
+};
+
+SwitchSynth RunSwitchSynth(float aCutDeg, float aSeconds, bool aSwitchFlag = true)
+{
+    std::vector<uint64_t> hashes;
+    for (const char* n : meleepose::kUpperNames)
+        hashes.push_back(integ::CNameHash(n));
+    const meleepose::UpperRig rig = meleepose::ResolveUpperRig(hashes);
+    meleepose::SwitchBlendState st;
+    SwitchSynth r;
+    math::Quat prev{0.0f, 0.0f, 0.0f, 1.0f};
+    const float dt = 1.0f / 60.0f;
+    for (int f = 0; f < 30; ++f)
+    {
+        std::vector<uint8_t> b(size_t(meleepose::kUpperBones) * integ::kGameBoneStride, 0);
+        // the clip turns the arm slowly (1 deg per frame), the cut adds aCutDeg from frame 10 on
+        const math::Quat in = AxisAngle(0, 0, 1, float(f) + (f >= 10 ? aCutDeg : 0.0f));
+        for (uint32_t k = 0; k < uint32_t(meleepose::kUpperBones); ++k)
+            SetRec(b, k, math::Vec3{}, k == 8 ? in : math::Quat{0.0f, 0.0f, 0.0f, 1.0f});
+        const std::vector<uint8_t> before = b;
+        const bool wrote = meleepose::SwitchBlendStep(st, b.data(), uint32_t(meleepose::kUpperBones), rig, aSwitchFlag && f == 10, dt, aSeconds);
+        r.written += wrote ? 1 : 0;
+        if (!wrote && b != before)
+            ++r.changedAfter;
+        const math::Quat out = aim::ReadLocal(b.data(), 8).q;
+        if (f > 0)
+        {
+            const float d = std::fabs(math::QuatDot(math::QuatNormalize(prev), math::QuatNormalize(out)));
+            r.maxStep = std::fmax(r.maxStep, 2.0f * std::acos(d > 1.0f ? 1.0f : d) * 57.2957795f);
+        }
+        prev = out;
+    }
+    return r;
+}
+
+void TestSwitchBlendSynthetic()
+{
+    const SwitchSynth cut = RunSwitchSynth(150.0f, meleepose::kSwitchBlendSeconds);
+    std::printf("switch blend synthetic: 150 deg cut -> largest step %.1f deg, %d frames written\n", cut.maxStep, cut.written);
+    // 0.1 s at 60 fps: the cut spread over 6 frames (150 / 6 = 25 deg) plus the clip's own 1 deg per frame
+    Check(cut.maxStep <= 150.0f / 6.0f + 2.0f, "switch blend: a 150 deg cut spread over 0.1 s (deg)", cut.maxStep);
+    Check(cut.written >= 5 && cut.written <= 6, "switch blend: written on the frames of 0.1 s only", cut.written);
+    Check(cut.changedAfter == 0, "switch blend: records untouched outside the blend", cut.changedAfter);
+    const SwitchSynth small = RunSwitchSynth(20.0f, meleepose::kSwitchBlendSeconds);
+    Check(small.written == 0, "switch blend: a relock below kSwitchMinDeg is left alone", small.written);
+    const SwitchSynth noFlag = RunSwitchSynth(150.0f, meleepose::kSwitchBlendSeconds, false);
+    Check(noFlag.written == 0 && noFlag.maxStep >= 150.0f, "switch blend: no relock, no blend (the cut stays)", noFlag.maxStep);
+    // mutation: a blend that never runs leaves the cut, the first check catches it
+    const SwitchSynth mut = RunSwitchSynth(150.0f, 0.0f);
+    Check(mut.maxStep > 150.0f / 6.0f + 2.0f, "switch blend: the step check catches a blend that never runs", mut.maxStep);
+    // fail closed: no rig
+    meleepose::SwitchBlendState st;
+    std::vector<uint8_t> b(size_t(meleepose::kUpperBones) * integ::kGameBoneStride, 0);
+    Check(!meleepose::SwitchBlendStep(st, b.data(), uint32_t(meleepose::kUpperBones), meleepose::UpperRig{}, true, 0.016f) && !st.have,
+          "switch blend: bad rig writes nothing");
+}
+
+// Clip switches of the upper body in one window (report, appended to aPath): the clip the layer's matcher follows on the engine keys of
+// stage 0 (free clock); at every frame its clip changes, the single-frame step of both hands (orientation and position in the Spine frame)
+// and of the Hips (position and orientation in the model frame), before the mod writes (stage 0) and as shown (stage 1).
+utpp::mm::BoneTransform ModelOf(const std::vector<uint8_t>& aRec, const std::vector<int16_t>& aPar, int32_t aBone)
+{
+    int32_t chain[64];
+    int n = 0;
+    for (int32_t b = aBone; b >= 0 && n < 64; b = aPar[size_t(b)])
+        chain[n++] = b;
+    utpp::mm::BoneTransform m{math::Vec3{}, math::Quat{0.0f, 0.0f, 0.0f, 1.0f}};
+    for (int i = n - 1; i >= 0; --i)
+    {
+        const aim::Xf l = aim::ReadLocal(aRec.data(), uint32_t(chain[i]));
+        m.p = m.p + math::QuatRotate(m.q, l.p);
+        m.q = math::QuatNormalize(math::QuatMul(m.q, l.q));
+    }
+    return m;
+}
+
+float AngleBetweenDeg(const math::Quat& aA, const math::Quat& aB)
+{
+    float d = std::fabs(math::QuatDot(math::QuatNormalize(aA), math::QuatNormalize(aB)));
+    d = d > 1.0f ? 1.0f : d;
+    return 2.0f * std::acos(d) * 57.2957795f;
+}
+
+struct SwitchPose
+{
+    utpp::mm::BoneTransform hand[2]; // in the Spine frame
+    utpp::mm::BoneTransform hips;    // model frame
+};
+
+SwitchPose SwitchPoseOf(const std::vector<uint8_t>& aRec, const std::vector<int16_t>& aPar, const int32_t* aBones)
+{
+    SwitchPose p;
+    const utpp::mm::BoneTransform spine = ModelOf(aRec, aPar, aBones[0]);
+    const math::Quat inv = math::QuatInv(spine.q);
+    for (int s = 0; s < 2; ++s)
+    {
+        const utpp::mm::BoneTransform h = ModelOf(aRec, aPar, aBones[1 + s]);
+        p.hand[s] = utpp::mm::BoneTransform{math::QuatRotate(inv, h.p - spine.p), math::QuatNormalize(math::QuatMul(inv, h.q))};
+    }
+    p.hips = ModelOf(aRec, aPar, aBones[3]);
+    return p;
+}
+
+void SwitchTable(const char* aPath, const char* aLabel, const PoseTables& aT, const meleepose::Weapon& aW, const std::vector<uint64_t>& aHashes,
+                 const std::vector<int16_t>& aPar, const meleebase::Rig& aKeyRig, const std::vector<std::vector<uint8_t>>& aS0,
+                 const std::vector<std::vector<uint8_t>>& aS1, const std::vector<float>& aDt, const std::vector<float>& aFade, bool aHold)
+{
+    int32_t bones[4] = {-1, -1, -1, -1};
+    const char* names[4] = {"Spine", "LeftHand", "RightHand", "Hips"};
+    for (int k = 0; k < 4; ++k)
+        for (size_t i = 0; i < aHashes.size(); ++i)
+            if (aHashes[i] == integ::CNameHash(names[k]))
+                bones[k] = int32_t(i);
+    if (bones[0] < 0 || bones[1] < 0 || bones[2] < 0 || bones[3] < 0)
+        return;
+    FILE* f = std::fopen(aPath, "a");
+    if (!f)
+        return;
+    const uint32_t nb = uint32_t(aHashes.size());
+    meleepose::State st;
+    int32_t lastClip = -1;
+    float lastRow = 0.0f, tm = 0.0f;
+    for (size_t i = 0; i < aS0.size(); ++i)
+    {
+        tm += i > 0 ? aDt[i] : 0.0f;
+        math::Quat key[meleebase::kKeyBones];
+        const bool haveKeys = meleebase::ReadKeys(aS0[i].data(), nb, aKeyRig, key);
+        LowerPose pose;
+        meleepose::StepInfo si;
+        meleepose::Step(st, aT, &aW, haveKeys ? key : nullptr, 1.0f, i > 0 ? aDt[i] : 0.0f, pose, &si, aHold, true);
+        if (si.matched && si.clip >= 0 && lastClip >= 0 && si.clip != lastClip && i > 0)
+        {
+            float step[2][2][2] = {}; // stage, hand, (deg, cm)
+            float hips[2][2] = {};    // stage, (cm, deg)
+            for (int s = 0; s < 2; ++s)
+            {
+                const std::vector<std::vector<uint8_t>>& st2 = s == 0 ? aS0 : aS1;
+                const SwitchPose a = SwitchPoseOf(st2[i - 1], aPar, bones), b = SwitchPoseOf(st2[i], aPar, bones);
+                for (int h = 0; h < 2; ++h)
+                {
+                    step[s][h][0] = AngleBetweenDeg(a.hand[h].q, b.hand[h].q);
+                    const math::Vec3 d = b.hand[h].p - a.hand[h].p;
+                    step[s][h][1] = std::sqrt(math::Dot(d, d)) * 100.0f;
+                }
+                const math::Vec3 dh = b.hips.p - a.hips.p;
+                hips[s][0] = std::sqrt(math::Dot(dh, dh)) * 100.0f;
+                hips[s][1] = AngleBetweenDeg(a.hips.q, b.hips.q);
+            }
+            std::fprintf(f, "%-22s t %5.2f s fade %.2f | %-28s fr %5.1f -> %-28s fr %5.1f | hands L/R deg cm s0 %5.1f %4.1f / %5.1f %4.1f  s1 %5.1f %4.1f / "
+                            "%5.1f %4.1f | hips cm deg s0 %4.1f %5.1f  s1 %4.1f %5.1f\n",
+                         aLabel, tm, aFade[i], aT.clipNames[size_t(lastClip)], lastRow - float(aT.clipFirstRow[size_t(lastClip)]),
+                         aT.clipNames[size_t(si.clip)], si.clockRow - float(aT.clipFirstRow[size_t(si.clip)]), step[0][0][0], step[0][0][1],
+                         step[0][1][0], step[0][1][1], step[1][0][0], step[1][0][1], step[1][1][0], step[1][1][1], hips[0][0], hips[0][1], hips[1][0],
+                         hips[1][1]);
+        }
+        if (si.clip >= 0)
+        {
+            lastClip = si.clip;
+            lastRow = si.clockRow;
+        }
+    }
+    std::fclose(f);
+}
+
+// Switch blend on a recorded window: the layer model on stage 0 with the blend off and on (aSeconds; 0 = a blend that never runs, the
+// mutation of the check). Per clip switch: the largest single-frame step of the hands (orientation in the Spine frame, deg) on the switch
+// frame with the blend off, and over the blend frames with it on; the frames outside the blends must be byte-identical.
+struct SwitchBlendReplay
+{
+    int switches = 0, bigCuts = 0, bigCutsHalved = 0, blendFrames = 0, changedOutside = 0;
+    float worstOff = 0.0f, worstOn = 0.0f;
+    float worstRise = 0.0f; // largest increase of the hand step by a blend on a switch below 90 deg (deg)
+};
+
+SwitchBlendReplay ReplaySwitchBlend(const char* aLabel, const PoseTables& aT, const meleepose::Weapon& aW, const std::vector<uint64_t>& aHashes,
+                                    const std::vector<int16_t>& aPar, const meleebase::Rig& aKeyRig, const meleepose::LowerRig& aLower,
+                                    const std::vector<std::vector<uint8_t>>& aS0, const std::vector<float>& aDt, const std::vector<float>& aFade,
+                                    bool aHold, float aSeconds, bool aPrint)
+{
+    SwitchBlendReplay r;
+    int32_t bones[4] = {-1, -1, -1, -1};
+    const char* names[4] = {"Spine", "LeftHand", "RightHand", "Hips"};
+    for (int k = 0; k < 4; ++k)
+        for (size_t i = 0; i < aHashes.size(); ++i)
+            if (aHashes[i] == integ::CNameHash(names[k]))
+                bones[k] = int32_t(i);
+    const meleepose::UpperRig upper = meleepose::ResolveUpperRig(aHashes);
+    if (bones[0] < 0 || bones[1] < 0 || bones[2] < 0 || bones[3] < 0 || !upper.ok)
+        return r;
+    const uint32_t nb = uint32_t(aHashes.size());
+    const size_t n = aS0.size();
+    std::vector<std::vector<uint8_t>> out[2];
+    std::vector<int32_t> switchAt, switchFrom, switchTo;
+    std::vector<uint8_t> blending(n, 0);
+    // the runtime's first melee step: the reference pose guard on the engine pose (the melee mask is on through the window)
+    const meleepose::GuardRig grig = meleepose::ResolveGuardRig(aHashes, aPar);
+    std::vector<double> tm(n, 0.0);
+    for (size_t f = 1; f < n; ++f)
+        tm[f] = tm[f - 1] + double(aDt[f]);
+    for (int v = 0; v < 2; ++v)
+    {
+        layermodel::LayerState ls;
+        meleepose::SwitchBlendState sb;
+        const std::unique_ptr<meleepose::GuardState> gs = std::make_unique<meleepose::GuardState>();
+        for (size_t f = 0; f < n; ++f)
+        {
+            std::vector<uint8_t> b = aS0[f];
+            const float age = gs->have ? float(tm[f] - tm[size_t(gs->ticks)]) : 1e9f;
+            meleepose::GuardStep(*gs, grig, b.data(), nb, true, int64_t(f), age);
+            math::Quat key[meleebase::kKeyBones];
+            const bool haveKeys = meleebase::ReadKeys(b.data(), nb, aKeyRig, key);
+            const int32_t clipBefore = ls.step.clip;
+            layermodel::LayerCallInfo li;
+            layermodel::LayerCall(ls, aT, &aW, haveKeys ? key : nullptr, aFade[f], aDt[f], aHold, false, b.data(), nb, aLower, &li);
+            const bool sw = li.step.relocked && clipBefore >= 0 && aFade[f] > 0.0f;
+            if (v == 0 && sw)
+            {
+                switchAt.push_back(int32_t(f));
+                switchFrom.push_back(clipBefore);
+                switchTo.push_back(li.step.clip);
+            }
+            if (v == 1)
+            {
+                if (aFade[f] > 0.0f)
+                    blending[f] = meleepose::SwitchBlendStep(sb, b.data(), nb, upper, sw, f > 0 ? aDt[f] : 0.0f, aSeconds) ? 1 : 0;
+                else
+                    sb = meleepose::SwitchBlendState{}; // the runtime resets with the layer
+            }
+            out[v].push_back(std::move(b));
+        }
+    }
+    auto handStep = [&](int aV, size_t aF) {
+        const SwitchPose a = SwitchPoseOf(out[aV][aF - 1], aPar, bones), b = SwitchPoseOf(out[aV][aF], aPar, bones);
+        return std::fmax(AngleBetweenDeg(a.hand[0].q, b.hand[0].q), AngleBetweenDeg(a.hand[1].q, b.hand[1].q));
+    };
+    if (const char* tr = std::getenv("UTPP_SWITCH_TRACE"); tr && aPrint && std::strcmp(tr, aLabel) == 0)
+        for (size_t f = 1; f < n; ++f)
+            std::printf("    sb f%3zu blend %d hand step off %6.1f on %6.1f\n", f, blending[f], handStep(0, f), handStep(1, f));
+    for (size_t f = 0; f < n; ++f)
+    {
+        if (blending[f])
+            ++r.blendFrames;
+        else if (out[0][f] != out[1][f])
+            ++r.changedOutside;
+    }
+    for (size_t i = 0; i < switchAt.size(); ++i)
+    {
+        const int32_t s = switchAt[i];
+        if (s <= 0)
+            continue;
+        ++r.switches;
+        // the switch frame and the blend frames after it, in both runs (the clip's own motion counts on both sides)
+        float off = handStep(0, size_t(s)), on = handStep(1, size_t(s));
+        int frames = 0;
+        for (size_t f = size_t(s); f < n && blending[f]; ++f, ++frames)
+            if (f + 1 < n)
+            {
+                off = std::fmax(off, handStep(0, f + 1));
+                on = std::fmax(on, handStep(1, f + 1));
+            }
+        r.worstOff = std::fmax(r.worstOff, off);
+        r.worstOn = std::fmax(r.worstOn, on);
+        if (off <= 90.0f && frames > 0)
+            r.worstRise = std::fmax(r.worstRise, on - off);
+        if (off > 90.0f)
+        {
+            ++r.bigCuts;
+            if (on <= 0.5f * off)
+                ++r.bigCutsHalved;
+        }
+        if (aPrint)
+            std::printf("  switch blend %-20s frame %3d %-26s -> %-26s hand step %5.1f -> %5.1f deg over %d blend frames\n", aLabel, s,
+                        aT.clipNames[size_t(switchFrom[i])], aT.clipNames[size_t(switchTo[i])], off, on, frames);
+    }
+    return r;
+}
+
 struct TravelMetrics
 {
     float entry = 0.0f, full = 0.0f, handback = 0.0f, hipsSpeed = 0.0f;
@@ -665,6 +1012,7 @@ void RunBorderFixture(const std::string& aPath, const PoseTables* aTables)
                                                       Q[size_t(i) * 4 + 2] / 32767.0f, Q[size_t(i) * 4 + 3] / 32767.0f}));
         };
         int judged = 0, beforeOver = 0;
+        SwitchBlendReplay sbTot, sbMut;
         float worstAfter = 0.0f, worstHipsAfter = 0.0f;
         std::printf("border fixture %s (body %d)\n", aPath.c_str(), body);
         std::printf("  window             capsule | ground travel cm entry / full / hand-back, Hips speed m/s: recorded -> borders | "
@@ -728,6 +1076,70 @@ void RunBorderFixture(const std::string& aPath, const PoseTables* aTables)
             for (size_t f = 0; f < frames; ++f)
                 fadeMask[f] = (phase[f] == 1 || phase[f] == 3) && weight[f] < 0.999f ? 1 : 0;
             const TravelMetrics before = MeasureTravel(l0, r0, h0, dt, phase, fadeMask), after = MeasureTravel(l1, r1, h1, dt, phase, fadeMask);
+            // the layer as the game runs it (LayerCall: match on the engine keys, write, borders) on the engine pose of stage 0 with the
+            // modelled fade; the state is carried across the windows of one fixture only through the window's own frames
+            std::vector<math::Vec3> lm, rm;
+            std::vector<float> hm, gm;
+            std::vector<uint8_t> modelMask(frames, 0);
+            if (wp)
+            {
+                layermodel::LayerState ls;
+                const char* trace = std::getenv("UTPP_BORDER_TRACE");
+                const bool tr = trace && std::strcmp(trace, label) == 0;
+                for (int32_t f = 0; f < nf; ++f)
+                {
+                    std::vector<uint8_t> b = s0[size_t(f)];
+                    math::Quat key[meleebase::kKeyBones];
+                    const bool haveKeys = meleebase::ReadKeys(b.data(), uint32_t(nb), keyRig, key);
+                    layermodel::LayerCallInfo li;
+                    layermodel::LayerCall(ls, t, wp, haveKeys ? key : nullptr, weight[size_t(f)], dt[size_t(f)], hold != 0, false, b.data(),
+                                         uint32_t(nb), lower, &li);
+                    meleepose::LowerModel m;
+                    meleepose::ComputeLowerModel(b.data(), uint32_t(nb), lower, m);
+                    lm.push_back(m.leg[0][2].p);
+                    rm.push_back(m.leg[1][2].p);
+                    hm.push_back(m.hipsLocalZ);
+                    gm.push_back(li.written);
+                    modelMask[size_t(f)] = (phase[size_t(f)] == 1 || phase[size_t(f)] == 3) && li.written < 0.999f ? 1 : 0;
+                    if (tr)
+                    {
+                        meleepose::LowerModel m0;
+                        meleepose::ComputeLowerModel(s0[size_t(f)].data(), uint32_t(nb), lower, m0);
+                        std::printf("    f%3d dt %.4f ph%d fade %.2f gate %.2f w %.2f rl%d m%d bact%d pl%d feet %d%d rel %.2f %.2f floor %.3f | hipsZ s0 %.3f s1 %.3f model %.3f | L s0 %6.3f %6.3f %6.3f "
+                                    "s1 %6.3f %6.3f %6.3f model %6.3f %6.3f %6.3f | R s0 %6.3f %6.3f %6.3f s1 %6.3f %6.3f %6.3f model %6.3f %6.3f %6.3f\n",
+                                    f, dt[size_t(f)], phase[size_t(f)], weight[size_t(f)], li.step.gate, li.written, li.step.relocked ? 1 : 0, li.step.matched ? 1 : 0,
+                                    ls.border.active ? 1 : 0, li.border.planted, int(ls.border.foot[0].mode), int(ls.border.foot[1].mode),
+                                    ls.border.foot[0].release, ls.border.foot[1].release, ls.border.floorZ, m0.hipsLocalZ, h0[size_t(f)], m.hipsLocalZ, m0.leg[0][2].p.x,
+                                    m0.leg[0][2].p.y, m0.leg[0][2].p.z, l0[size_t(f)].x, l0[size_t(f)].y, l0[size_t(f)].z, m.leg[0][2].p.x,
+                                    m.leg[0][2].p.y, m.leg[0][2].p.z, m0.leg[1][2].p.x, m0.leg[1][2].p.y, m0.leg[1][2].p.z, r0[size_t(f)].x,
+                                    r0[size_t(f)].y, r0[size_t(f)].z, m.leg[1][2].p.x, m.leg[1][2].p.y, m.leg[1][2].p.z);
+                    }
+                }
+            }
+            if (wp)
+            {
+                const SwitchBlendReplay a = ReplaySwitchBlend(label, t, *wp, hashes, par, keyRig, lower, s0, dt, weight, hold != 0,
+                                                              meleepose::kSwitchBlendSeconds, true);
+                const SwitchBlendReplay m = ReplaySwitchBlend(label, t, *wp, hashes, par, keyRig, lower, s0, dt, weight, hold != 0, 0.0f, false);
+                for (int v = 0; v < 2; ++v)
+                {
+                    SwitchBlendReplay& d = v == 0 ? sbTot : sbMut;
+                    const SwitchBlendReplay& s = v == 0 ? a : m;
+                    d.switches += s.switches;
+                    d.bigCuts += s.bigCuts;
+                    d.bigCutsHalved += s.bigCutsHalved;
+                    d.blendFrames += s.blendFrames;
+                    d.changedOutside += s.changedOutside;
+                    d.worstOff = std::fmax(d.worstOff, s.worstOff);
+                    d.worstOn = std::fmax(d.worstOn, s.worstOn);
+                    d.worstRise = std::fmax(d.worstRise, s.worstRise);
+                }
+            }
+            if (const char* sw = std::getenv("UTPP_SWITCH_TABLE"); sw && wp)
+                SwitchTable(sw, label, t, *wp, hashes, par, keyRig, s0, s1, dt, weight, hold != 0);
+            const TravelMetrics model = wp ? MeasureTravel(lm, rm, hm, dt, phase, modelMask) : TravelMetrics{};
+            std::printf("  %-16s model of the game on stage 0: %5.1f %5.1f %5.1f %4.2f\n", label, model.entry * 100.0f, model.full * 100.0f,
+                        model.handback * 100.0f, model.hipsSpeed);
             // clip choice: free clock (no held state, variants taken as matched) and held clock
             ChoiceMetrics cm[2];
             for (int v = 0; v < 2 && wp; ++v)
@@ -793,6 +1205,18 @@ void RunBorderFixture(const std::string& aPath, const PoseTables* aTables)
             }
         }
         std::printf("  (* capsule moved: reported only)\n");
+        std::printf("  switch blend: %d switches, %d cuts above 90 deg, %d halved, worst hand step %.1f -> %.1f deg, %d blend frames, %d other "
+                    "frames changed; blend that never runs: %d of %d halved\n",
+                    sbTot.switches, sbTot.bigCuts, sbTot.bigCutsHalved, sbTot.worstOff, sbTot.worstOn, sbTot.blendFrames, sbTot.changedOutside,
+                    sbMut.bigCutsHalved, sbMut.bigCuts);
+        Check(sbTot.changedOutside == 0, "switch blend: frames outside the blends unchanged", sbTot.changedOutside);
+        // a strike moves the hands by up to about 15 deg per frame: a blend on a smaller switch may shift that motion by less than this
+        Check(sbTot.worstRise <= 10.0f, "switch blend: switches below 90 deg, hand step raised by at most 10 deg", sbTot.worstRise);
+        if (sbTot.bigCuts > 0)
+        {
+            Check(sbTot.bigCutsHalved == sbTot.bigCuts, "switch blend: every hand cut above 90 deg at least halved", sbTot.bigCuts - sbTot.bigCutsHalved);
+            Check(sbMut.bigCutsHalved < sbMut.bigCuts, "switch blend: the check catches a blend that never runs", sbMut.bigCutsHalved);
+        }
         Check(judged > 0, "border fixture: windows with a standing capsule", judged);
         Check(beforeOver > 0, "border fixture: the recording shows the slides / Hips speed the borders remove", beforeOver);
         Check(worstAfter <= 0.03f, "borders: foot ground travel at entry, full weight and hand-back <= 3 cm (m)", worstAfter);
@@ -838,6 +1262,7 @@ int main(int aArgc, char** aArgv)
     // the lower body follows the clip (the old behaviour leaves the engine's base: tens of degrees, hips several cm off)
     Check(tot.strikes == 10, "weapon runs (5 weapons x 2 bodies)", tot.strikes);
     TestGuardSynthetic();
+    TestSwitchBlendSynthetic();
     TestGuardRecorded(dir + "/melee_pose_guard_female.bin");
     // further recordings by magic: guard fixtures (e.g. a whole run cut with --all; reported, judged only for frames that must not change)
     // and border / clip choice fixtures

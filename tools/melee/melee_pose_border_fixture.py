@@ -14,8 +14,8 @@ Layer timing model (the game's full-body fade): the fade rises over 0.2 s after 
 with why=state (0.15 s otherwise), smoothstep; the layer writes while the fade is above 0; the log line is 16 ms ahead of the recording.
 Output "MPB1" (little endian):
   "MPB1" | int32 nb | nb x { int16 parent, char name[32] } (parents before children) | int32 body (0 Female, 1 Male) | int32 nwin |
-  nwin x { char label[32] | char weapon[32] | int32 hold | float capsuleMove (m, largest capsule distance from its position at the start
-           of the episode, log POS lines) | float on | float off (s from the window start) | int32 nframes |
+  nwin x { char label[32] | char weapon[32] | int32 hold | float capsuleMove (m, largest planar capsule distance from its position before
+           the window, log POS lines over the window and one POS interval on each side) | float on | float off (s from the window start) | int32 nframes |
            nframes x { float dt (s since the previous frame; first = 1/60) | float weight (layer fade 0..1) | int32 writing |
                        int16 P0[nb*3], int16 Q0[nb*4] (stage 0: the engine pose before the mod) |
                        int16 P1[nb*3], int16 Q1[nb*4] (stage 1: the pose shown) } }   (P in 0.1 mm, Q xyzw x 32767)
@@ -41,6 +41,7 @@ FADE_OUT_STATE = 0.35
 FADE_OUT = 0.15
 BEFORE = 0.1
 AFTER = 0.7
+POS_MARGIN = 0.55  # s, a little more than the interval of the POS lines
 KEY_NAMES = ['Neck', 'Head', 'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand', 'LeftShoulder', 'LeftArm', 'LeftForeArm',
              'LeftHand', 'Spine1', 'Spine2', 'Spine3']
 LOWER_NAMES = ['Hips', 'Spine', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'RightUpLeg', 'RightLeg', 'RightFoot']
@@ -167,7 +168,9 @@ def main(argv=None):
                 continue
             cap = 0.0
             if len(pos):
-                sel = pos[(pos[:, 0] >= on - 0.5) & (pos[:, 0] <= off + 0.1)]
+                # the whole window and one POS interval on each side (the lines come every 0.5 s): a lunge or a drop after the end of the
+                # episode (the hand-back) counts as a moving capsule
+                sel = pos[(pos[:, 0] >= on - BEFORE - POS_MARGIN) & (pos[:, 0] <= off + AFTER + POS_MARGIN)]
                 if len(sel):
                     cap = float(np.max(np.linalg.norm(sel[:, 1:3] - sel[0, 1:3], axis=1)))
             wins.append(('%s%d' % (label, k), weapon, label in a.hold, cap, on, off, i))

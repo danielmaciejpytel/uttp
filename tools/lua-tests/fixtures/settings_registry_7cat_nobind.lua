@@ -98,6 +98,7 @@ return {
     ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
+    ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
@@ -193,6 +194,8 @@ return {
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "apply melee.fullPose(true,\"ok\")",
+    "native UTPPSetMeleeSwitchBlend(false)",
+    "apply melee.switchBlend(false,\"ok\")",
     "native UTPPSetHelperZeroWeightWriters(true)",
     "apply mm.helperZeroWeightWriters(true,\"ok\")",
     "mm setMotionGrip(true)",
@@ -393,6 +396,8 @@ return {
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "apply melee.fullPose(true,\"ok\")",
+    "native UTPPSetMeleeSwitchBlend(false)",
+    "apply melee.switchBlend(false,\"ok\")",
     "native UTPPSetHelperZeroWeightWriters(true)",
     "apply mm.helperZeroWeightWriters(true,\"ok\")",
     "mm setMotionGrip(true)",
@@ -1441,6 +1446,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["melee.switchBlend"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["mm.aimAtCrosshair"] = {
       ["default"] = "true",
       ["hasApply"] = true,
@@ -2215,6 +2228,7 @@ return {
     ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
+    ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
@@ -2357,6 +2371,7 @@ return {
     "melee.guardFullBody",
     "melee.guardAimTilt",
     "melee.fullPose",
+    "melee.switchBlend",
     "mm.helperZeroWeightWriters",
     "mm.grip",
     "mm.shootTransfer",
@@ -2533,6 +2548,7 @@ return {
     "melee.guardFullBody",
     "melee.guardAimTilt",
     "melee.fullPose",
+    "melee.switchBlend",
     "mm.helperZeroWeightWriters",
     "mm.grip",
     "mm.shootTransfer",
@@ -2705,6 +2721,7 @@ return {
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "apply melee.fullPose(true,\"ok\")",
+    "apply melee.switchBlend(false,\"ok\")",
     "apply mm.helperZeroWeightWriters(true,\"ok\")",
     "apply mm.grip(true,\"ok\")",
     "apply mm.shootTransfer(true,\"ok\")",
@@ -2874,6 +2891,7 @@ melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
 melee.fullPose=true\r\
+melee.switchBlend=false\r\
 mm.helperZeroWeightWriters=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
@@ -3032,6 +3050,7 @@ vehicle.jumpOutSidePush=true\r\
       "melee.guardFullBody",
       "melee.guardAimTilt",
       "melee.fullPose",
+      "melee.switchBlend",
       "mm.helperZeroWeightWriters",
       "mm.grip",
       "mm.shootTransfer",
@@ -3339,6 +3358,7 @@ vehicle.jumpOutSidePush=true\r\
     ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
+    ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
@@ -3449,6 +3469,7 @@ melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
 melee.fullPose=true\r\
+melee.switchBlend=false\r\
 mm.helperZeroWeightWriters=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
@@ -3625,6 +3646,7 @@ other.module=42\r\
     "/utpp/animation|switch|melee.guardFullBody",
     "/utpp/animation|switch|melee.guardAimTilt",
     "/utpp/animation|switch|melee.fullPose",
+    "/utpp/animation|switch|melee.switchBlend",
     "/utpp/animation|switch|mm.helperZeroWeightWriters",
     "/utpp/animation|switch|mm.grip",
     "/utpp/animation|switch|mm.shootTransfer",

@@ -521,7 +521,7 @@ local LAYOUT = {
   --   Melee guard (fists only; the shipped third-person melee_idlepose is the guard pose every fist clip starts and ends in):
   -- developer level switches (default on for the guard, off for its aim tilt and the legs), no release menu option yet
   { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt",
-                              "melee.fullPose", "bodyturn.meleeStrikeTurn" } },
+                              "melee.fullPose", "bodyturn.meleeStrikeTurn", "melee.switchBlend" } },
   -- Interactions
   { "player", "world", { "perspective.scene", "lootView.impl", "interactRange.impl", "headLook.impl",
                         "headLook.faceCamera" } },
@@ -2764,6 +2764,11 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
       .. "for every weapon with third-person melee animations. Off: the legs come from the game's base pose and only the chest is "
       .. "turned toward the animation.",
     apply = applyMeleeFullPose })
+  M.Register({ key = "melee.switchBlend", section = "animation", type = "bool", default = false,
+    label = "Melee clip switch blend",
+    desc = "With Melee full pose on: where the game cuts from one melee animation to the next in a single frame, the arms and the "
+      .. "spine blend into the new animation over 0.1 s. Off: the game's cut is shown as it is.",
+    apply = function(v) pcall(function() return Game.UTPPSetMeleeSwitchBlend(v == true) end) end })
   M.Register({ key = "mm.helperZeroWeightWriters", section = "animation", type = "bool", default = true,
     label = "Skin helpers: vehicle and vault frames",
     desc = "Recomputes the skin helper bones also on the frames that the vehicle mount / exit transition, the seat guards, the seated "
