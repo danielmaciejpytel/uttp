@@ -187,18 +187,23 @@ def pick_cmd(fam: dict, records) -> str:
 def give_cmd(fam: dict, rec: str, ammo: int = AMMO_GIVEN) -> str:
     """Give the record when the inventory has none (a copy the player owns is drawn as it is), raise the ammunition of the
     weapon's type to `ammo` and queue the draw request. Counted inside the command, so a repeated send gives nothing twice.
-    Echo `[night] RF_GIVE ok=.. <family> rec=<record> given|had n=<before>-><after> ammo=<before>-><after>`."""
+    A scope on the given copy is taken off (a preset can come with one, and aiming through a scope is shown in first person,
+    which would hide the body in the aimed phases); a weapon the player owned is left as it is.
+    Echo `[night] RF_GIVE ok=.. <family> rec=<record> given|had n=<before>-><after> ammo=<before>-><after> scope=<off|none|kept>`."""
     return ("local ok,e=pcall(function() local p=Game.GetPlayer() local ts=Game.GetTransactionSystem() " + _LUA_IDS
             + "local tdb=TweakDBID.new('" + rec + "') " + _AMMO.format(fallback=fam['ammo'])
             + "local have=ids(tdb) local n0=#have local how='had' "
             "if n0==0 then ts:GiveItem(p,ItemID.FromTDBID(tdb),1) how='given' have=ids(tdb) end "
             "if #have==0 then error('item not in the inventory after the give') end "
+            "local sc='kept' if how=='given' then sc='none' local okS,part=pcall(function() "
+            "return ts:RemovePart(p,have[1],TweakDBID.new('AttachmentSlots.Scope')) end) "
+            "if okS and part and ItemID.IsValid(part) then sc='off' end end "
             "local am=ItemID.FromTDBID(amid()) local a0=ts:GetItemQuantity(p,am) "
             "if a0<" + str(int(ammo)) + " then ts:GiveItem(p,am," + str(int(ammo)) + "-a0) end "
             "local a1=ts:GetItemQuantity(p,am) "
             "local r=DrawItemRequest.new() r.owner=p r.itemID=have[1] "
             "Game.GetScriptableSystemsContainer():Get('EquipmentSystem'):QueueRequest(r) "
-            "return 'rec=" + rec + " '..how..' n='..n0..'->'..#have..' ammo='..a0..'->'..a1 end) "
+            "return 'rec=" + rec + " '..how..' n='..n0..'->'..#have..' ammo='..a0..'->'..a1..' scope='..sc end) "
             + _echo('RF_GIVE', fam['tag']))
 
 
