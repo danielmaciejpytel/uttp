@@ -95,6 +95,7 @@ REGISTRY = {
     'analysis/test_pose_capture_to_csv.py': {
         'requires': ['Build/test-data/posecapture/utpp-bodytrace-slice.csv'],
         'note': 'compact pose capture -> CSV; the C++ writer cross-check runs in ctest (utpp_pose_capture_converter_test, UTPP_POSE_GOLDEN)'},
+    'analysis/test_melee_pose_log.py': {},
     'analysis/test_pose_clip_match.py': {},
     'analysis/test_pose_helper_report.py': {
         'note': 'helper-bone report of compact pose recordings; synthetic recording from the encoder of test_pose_capture_to_csv.py'},
