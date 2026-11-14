@@ -649,6 +649,12 @@ inline constexpr float kGroundDropGraceSeconds = 0.12f;
 inline constexpr int kGroundDropMinFeeds = 2;
 inline constexpr float kGroundDropFallM = 0.2f; // m of capsule drop that is a fall inside the grace (fast or long frames)
 inline constexpr float kGroundDropProbeM = 0.5f; // m: a floor probe farther below than this is a fall at once (step-downs probed <= 0.24 m)
+// Step-down reach of groundDropGraceS: a drop past the grace whose floor is known (probe hit, dead-reckoned) and whose whole depth (capsule drop so
+// far + floor distance) is at most kGroundDropStepM stays ground until kGroundDropStepMaxS. Recorded runs without a PSM air detail ran down steps of
+// up to 0.25 m in up to 0.152 s (predicted depth <= 0.28 m); the recorded drops of 0.30 m and more got the PSM Fall detail. A floor that is not
+// known or deeper keeps the plain grace (no added delay); the PSM Fall / Jump detail ends any grace at once.
+inline constexpr float kGroundDropStepM = 0.30f;
+inline constexpr float kGroundDropStepMaxS = 0.20f;
 inline constexpr float kStanceFilterSeconds = 0.15f;    // MapConfig::stanceFilterS the runtime uses (task bound: changes < ~0.15 s filtered)
 // P1 fix batch 2 (2026-10-21 12:15 recording, tests/P1StanceLatencyTest.cpp): the clean Stand <-> Crouch edge bypasses the filter
 // (MapConfig::stanceCleanEdge). The previous raw value must have held kStanceCleanHoldSeconds (= the filter time), a crouch ENTRY
@@ -859,6 +865,9 @@ struct MapConfig
     // (0.05-0.10 s, 3-10 cm) then keeps the ground clips; a real fall gets the PSM Fall detail within ~0.05 s or outlasts the grace,
     // a real jump rises (vz >= kExitAirRiseMs) or carries the PSM Jump detail and is never delayed. 0 = off (the previous mapping).
     float groundDropGraceS = 0.0f;
+    // groundDropStepM: step-down reach of groundDropGraceS (kGroundDropStepM / kGroundDropStepMaxS): past the grace, a known floor (probe hit,
+    // dead-reckoned) with drop so far + floor distance <= groundDropStepM keeps the ground until kGroundDropStepMaxS. 0 = off (the plain grace).
+    float groundDropStepM = 0.0f;
     // contactHoldS (fix/jumpout-cam, log 2026-11-03 17:34:36 jump-out B): inside the vehicle exit window / jump-out flight a ground-contact feed (onGround, no air
     // PSM detail) while the capsule still falls faster than kContactFallMs is no landing (it grazed the exiting car at 0.23 m, vz -11 m/s, for 2 feeds): the
     // chooser stays InAir for at most this many seconds of such feeds, so the heavy land database is not picked 0.1 s early. The real landing zeroes the vertical
@@ -1155,6 +1164,7 @@ struct MapState
     float groundDropAge = 0.0f; // seconds / feeds / metres of the current unconfirmed contact loss (MapConfig::groundDropGraceS)
     int groundDropFeeds = 0;
     float groundDropM = 0.0f;
+    bool groundDropFell = false; // the current contact loss was released to InAir (the step-down reach does not take it back)
     int stanceOut = -1;
     int stanceRawLast = -1; // last raw stance of a feed that was not a Dodge
     bool stanceProvisional = false; // stanceOut came from a pass-through feed (slide / first feed after it), not yet held for the filter time
@@ -1309,8 +1319,13 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             ++m.groundDropFeeds;
             if (velIn[2] < 0.0f)
                 m.groundDropM -= velIn[2] * dt;
-            const bool fall = m.groundDropFeeds >= kGroundDropMinFeeds &&
-                              (m.groundDropAge >= c.groundDropGraceS || m.groundDropM >= kGroundDropFallM);
+            bool fall = m.groundDropFeeds >= kGroundDropMinFeeds &&
+                        (m.groundDropAge >= c.groundDropGraceS || m.groundDropM >= kGroundDropFallM);
+            // step-down reach: the floor is known and close enough that the capsule runs down a step (mutation 40: no reach)
+            if (UTPP_AND_NOT(JUMPPICK, 40) fall && !m.groundDropFell && f.air.distanceToGround >= 0.0f &&
+                m.groundDropM + f.air.distanceToGround <= c.groundDropStepM && m.groundDropAge < kGroundDropStepMaxS)
+                fall = false;
+            m.groundDropFell = m.groundDropFell || fall;
             if (!fall && airFeed)
             {
                 airFeed = false;
@@ -1321,6 +1336,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         {
             m.groundDropAge = m.groundDropM = 0.0f;
             m.groundDropFeeds = 0;
+            m.groundDropFell = false;
         }
     }
     bool psmAir = PsmAir(f.psmDetailed);

@@ -2,6 +2,7 @@
 
 #include "MotionDriver.hpp"
 #include "CommonUtil.hpp"
+#include "mm/AirState.hpp" // step-down constants shared with the chooser mapping (static_assert at the MapConfig setup)
 #include "mm/AuthoredRecoil.hpp"
 #include "mm/MeleeBodyId.hpp"
 #include "mm/MotionRootFrame.hpp"
@@ -4660,6 +4661,10 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     mc.slideAirGraceS = mc.slide ? adapter::kSlideAirGraceSeconds : 0.0f;
     mc.exitAirGraceS = adapter::kExitAirGraceSeconds;
     mc.groundDropGraceS = adapter::kGroundDropGraceSeconds; // a short unconfirmed contact loss (ledge edge, step-down) stays ground
+    mc.groundDropStepM = adapter::kGroundDropStepM;         // ... and so does a run down a step onto a known floor close below
+    static_assert(utpp::mm::air::kStepDownSeconds == adapter::kGroundDropGraceSeconds && utpp::mm::air::kStepDownDepthM == adapter::kGroundDropStepM &&
+                      utpp::mm::air::kStepDownMaxSeconds == adapter::kGroundDropStepMaxS,
+                  "the runtime air state and the chooser mapping agree on a step-down");
     mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam
     // the exit window of the gate can close on the first open feed; the grace keeps its own short tail
     g_exitAirTail = aRaw.vehicleExitWindow ? 0.6f : std::fmax(0.0f, g_exitAirTail - std::fmax(aRaw.dt, 0.0f));

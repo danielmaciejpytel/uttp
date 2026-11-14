@@ -75,4 +75,13 @@ if(EXISTS "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide.utppmm"
                  --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt")
         set_tests_properties(utpp_mm_jump_pick_mut${_m} PROPERTIES PASS_REGULAR_EXPRESSION "FAIL " ENVIRONMENT "UTPP_MUTATION_JUMPPICK=${_m}")
     endforeach()
+    # 40 (src/mm/MotionAdapter.hpp) no step-down reach of the ground-drop grace (MapConfig::groundDropStepM): the 22 / 24 cm run-down drops of the
+    # --flicker fixture (run_down_c / run_down_d) turn InAir and pick the jump / land clips again.
+    add_test(NAME utpp_mm_jump_pick_mut40 COMMAND utpp_mm_jump_pick_rt
+             "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261021_1213.txt"
+             "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide"
+             --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt"
+             --flicker "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/air_ground_flicker_feeds.txt")
+    set_tests_properties(utpp_mm_jump_pick_mut40 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL run_down_c: running down the step keeps the ground clips"
+                         ENVIRONMENT "UTPP_MUTATION_JUMPPICK=40")
 endif()

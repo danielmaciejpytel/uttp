@@ -1402,12 +1402,14 @@ static Trace RunSteps(AirState& s, const std::vector<StepFeed>& aFeeds, int* aFi
     return tr;
 }
 
-static AirState MakeRuntime(bool aStepDown)
+static AirState MakeRuntime(bool aStepDown, bool aReach = true)
 {
     AirConfig c;
     c.heavyVz = 8.7f;
     c.physFall = c.touchGuard = true;
     c.stepDownS = aStepDown ? kStepDownSeconds : 0.0f;
+    c.stepDownDepthM = aStepDown && aReach ? kStepDownDepthM : 0.0f; // step-down reach (runtime values)
+    c.stepDownMaxS = kStepDownMaxSeconds;
     AirState s(c);
     s.SetMode(Mode::Clips);
     return s;
@@ -1471,6 +1473,52 @@ static void TestStepDown()
         RunSteps(base, jump, &firstBase);
         RunSteps(on, jump, &firstOn);
         CHECK(firstBase >= 0 && firstOn == firstBase, "jump: the take-off feed is unchanged by stepDownS (%d vs %d)", firstOn, firstBase);
+    }
+    // step-down reach (AirConfig::stepDownDepthM): Male V running down a 22 cm drop, 8 airborne feeds (0.139 s), floor probed 0.22 m below,
+    // no PSM air detail (game run: the machine went to LandApproach on the last airborne feed); and a 35 cm ledge whose PSM Fall detail
+    // arrives on the eleventh airborne feed (floor probed 0.31 m below): its episode must not start later than with stepDownS alone.
+    const std::vector<StepFeed> runDown = {{0.0185f, -0.368f, -2.0f, false, 0}, {0.0147f, -0.664f, 0.224f, false, 0}, {0.0163f, -0.900f, -2.0f, false, 0},
+                                           {0.0164f, -1.162f, 0.186f, false, 0}, {0.0176f, -1.425f, -2.0f, false, 0}, {0.0162f, -1.706f, 0.127f, false, 0},
+                                           {0.0176f, -1.966f, -2.0f, false, 0}, {0.0186f, -2.247f, 0.050f, false, 0}, {0.0134f, -2.545f, -2.0f, true, 0}};
+    const std::vector<StepFeed> ledge35 = {{0.0172f, -0.275f, -2.0f, false, 0}, {0.0162f, -0.550f, -2.0f, false, 0}, {0.0177f, -0.809f, 0.306f, false, 0},
+                                           {0.0164f, -1.093f, -2.0f, false, 0}, {0.0160f, -1.354f, 0.269f, false, 0}, {0.0181f, -1.611f, -2.0f, false, 0},
+                                           {0.0156f, -1.901f, 0.214f, false, 0}, {0.0177f, -2.150f, -2.0f, false, 0}, {0.0153f, -2.434f, 0.143f, false, 0},
+                                           {0.0174f, -2.678f, -2.0f, false, 14}, {0.0158f, -2.957f, 0.056f, false, 14}, {0.0182f, -3.474f, -2.0f, true, 0}};
+    // the same drop with the touchdown one feed later than the probed floor (dead-reckoned floor below 0), and at 30 Hz (feed pairs merged, the
+    // later feed's vz, the probe on every second airborne feed starting unprobed)
+    std::vector<StepFeed> runDownLate = runDown;
+    runDownLate.insert(runDownLate.end() - 1, StepFeed{0.0167f, -2.80f, -2.0f, false, 0});
+    std::vector<StepFeed> runDown30;
+    for (size_t i = 0; i + 1 < runDown.size(); i += 2)
+    {
+        StepFeed f = runDown[i + 1];
+        f.dt += runDown[i].dt;
+        if (f.dist < -1.5f && runDown[i].dist >= 0.0f)
+            f.dist = std::fmax(0.0f, runDown[i].dist + f.vz * runDown[i + 1].dt);
+        if (!f.onGround && runDown30.size() % 2 == 0)
+            f.dist = -2.0f;
+        runDown30.push_back(f);
+    }
+    runDown30.push_back(runDown.back());
+    const std::pair<const char*, const std::vector<StepFeed>*> runDowns[] = {{"run-down 22 cm", &runDown}, {"run-down 22 cm, touchdown a feed late", &runDownLate},
+                                                                            {"run-down 22 cm at 30 Hz", &runDown30}};
+    for (const auto& rd : runDowns)
+    {
+        AirState plain = MakeRuntime(true, false), on = MakeRuntime(true);
+        const Trace a = RunSteps(plain, *rd.second), b = RunSteps(on, *rd.second);
+        CHECK(plain.Stats().episodes >= 1, "%s: stepDownS alone starts an episode (%u) %s", rd.first, plain.Stats().episodes, a.Seq().c_str());
+        CHECK(on.Stats().episodes == 0 && b.plays[static_cast<int>(Action::PlayLand)] == 0 && b.plays[static_cast<int>(Action::PlayOff)] == 0 &&
+                  b.plays[static_cast<int>(Action::PlayFallLoop)] == 0,
+              "%s: no air episode and no air clip with the step-down reach (episodes %u) %s", rd.first, on.Stats().episodes, b.Seq().c_str());
+    }
+    {
+        int firstPlain = -1, firstOn = -1;
+        AirState plain = MakeRuntime(true, false), on = MakeRuntime(true);
+        RunSteps(plain, ledge35, &firstPlain);
+        const Trace b = RunSteps(on, ledge35, &firstOn);
+        CHECK(on.Stats().episodes == 1 && firstOn >= 0 && firstOn <= firstPlain && firstOn <= 9,
+              "ledge 35 cm: one episode, started no later than with stepDownS alone and than the PSM Fall feed (episodes %u, feed %d, alone %d) %s",
+              on.Stats().episodes, firstOn, firstPlain, b.Seq().c_str());
     }
 }
 

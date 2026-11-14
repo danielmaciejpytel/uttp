@@ -478,6 +478,8 @@ air::AirState g_air{[] {
     c.heavyVz = 8.7f;
     c.physFall = c.touchGuard = true; // BATCH 6 AIR stage: UTPPSetMMAirRobust default on (female v1 / male V air findings)
     c.stepDownS = air::kStepDownSeconds; // a short contact loss (ledge edge, step-down) is no fall
+    c.stepDownDepthM = air::kStepDownDepthM; // ... nor a run down a step onto a known floor close below
+    c.stepDownMaxS = air::kStepDownMaxSeconds;
     return c;
 }()};
 int32_t g_airSetting = 0;               // UTPPSetMMAir: 0 auto, 1 clips, 2 hold, 3 off

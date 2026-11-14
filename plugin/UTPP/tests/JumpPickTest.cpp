@@ -193,6 +193,7 @@ struct Variant
         mc.jumpTakeoffHoldS = 0.0f;
         mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam: production value (acts inside the exit window / a jump-out flight only)
         mc.groundDropGraceS = adapter::kGroundDropGraceSeconds; // production value: a short unconfirmed contact loss stays ground
+        mc.groundDropStepM = adapter::kGroundDropStepM;         // production value: the step-down reach of that grace
     }
 };
 
@@ -1983,6 +1984,111 @@ float LegDiffDeg(const Frame& a, const Frame& b)
     return std::fmax(std::fmax(AngleDeg(a.qUpLegL, b.qUpLegL), AngleDeg(a.qUpLegR, b.qUpLegR)), std::fmax(AngleDeg(a.qLegL, b.qLegL), AngleDeg(a.qLegR, b.qLegR)));
 }
 
+// The same feeds at 30 Hz: feed pairs merged (the later feed, the summed dt, a probe hit of either feed carried to the later one) and the floor
+// probed on every second airborne feed only, starting unprobed (the runtime probe cadence, its slowest case).
+Section At30Hz(const Section& aS)
+{
+    Section out;
+    out.name = aS.name + "@30Hz";
+    int airborne = 0;
+    for (size_t i = 0; i + 1 < aS.rows.size(); i += 2)
+    {
+        const Row& a = aS.rows[i];
+        Row r = aS.rows[i + 1];
+        r.dt = a.dt + r.dt;
+        if (r.onGround == 0)
+        {
+            if (r.dist < -1.5f && a.dist >= 0.0f)
+                r.dist = std::fmax(0.0f, a.dist + std::fmin(r.vel[2], 0.0f) * aS.rows[i + 1].dt);
+            if (airborne++ % 2 == 0)
+                r.dist = -2.0f;
+        }
+        else
+            airborne = 0;
+        out.rows.push_back(r);
+    }
+    return out;
+}
+
+double FirstInAir(const std::vector<Frame>& aFr)
+{
+    for (const Frame& f : aFr)
+        if (f.mode == 1)
+            return f.t;
+    return -1.0;
+}
+
+// ---- step-down reach of the ground-drop grace (MapConfig::groundDropStepM). Recorded feeds (tests/data/air_ground_flicker_feeds.txt): run_down_c / _d,
+// Male V running down 22 / 24 cm drops (8 / 9 airborne feeds, 0.139 / 0.152 s, floor probed 0.22 / 0.26 m below, no PSM air detail: the game run
+// showed Jump_F_Off_Run then Jump_F_Land_Run 10 ms later); fall_ledge (Male V, 35 cm, PSM Fall from 0.15 s) and fall_slope (Female V, 2.1 m down a
+// slope, PSM Fall from 0.12 s) must keep their air clips with no later InAir than the plain grace. Production floor rule (AirFloorStep), 60 and 30 Hz.
+void StepDownReachChecks(Model& m, const std::vector<Section>& aSecs, const Variant& aProd)
+{
+    Variant prod = aProd;
+    prod.runtimeFloor = true;
+    Variant noReach = prod;
+    noReach.mc.groundDropStepM = 0.0f; // the plain grace
+    int runDowns = 0, falls = 0;
+    for (const Section& s0 : aSecs)
+    {
+        const bool runDown = s0.name.rfind("run_down_", 0) == 0, fall = s0.name.rfind("fall_", 0) == 0;
+        if (!runDown && !fall)
+            continue;
+        runDowns += runDown;
+        falls += fall;
+        for (const Section& s : {s0, At30Hz(s0)})
+        {
+            const std::vector<Frame> on = Replay(m, s, prod), off = Replay(m, s, noReach);
+            const FlickerStats a = MeasureFlicker(on), b = MeasureFlicker(off);
+            if (g_report)
+                for (const Frame& f : on)
+                    if (f.mode == 1 || f.onGround == 0 || IsAirDb(f.db))
+                        std::printf("  %s t=%.3f onGround %d detail %d mode %d vz %.0f cm/s %s %s\n", s.name.c_str(), f.t, f.onGround, f.detail, f.mode, double(f.vzCmS),
+                                    f.db.c_str(), f.clip.c_str());
+            std::printf("step-down reach %s: jump / land frames %d (plain grace %d), InAir frames %d (%d), clip changes %d (%d)\n", s.name.c_str(), a.airFrames, b.airFrames,
+                        a.inAirFrames, b.inAirFrames, a.clipChanges, b.clipChanges);
+            char what[240];
+            if (runDown)
+            {
+                std::snprintf(what, sizeof what, "%s: the plain grace picks a jump / land clip (the game run, frames)", s.name.c_str());
+                Check(b.airFrames > 0, what, b.airFrames);
+                std::snprintf(what, sizeof what, "%s: running down the step keeps the ground clips (jump / land frames, InAir frames)", s.name.c_str());
+                Check(a.airFrames == 0 && a.inAirFrames == 0, what, a.airFrames, a.inAirFrames);
+                // the ground selection of the same feeds (contact flag held): same clip on every frame, legs within 6 deg (no pose break)
+                Section ground = s;
+                for (Row& r : ground.rows)
+                    r.onGround = 1;
+                const std::vector<Frame> g = Replay(m, ground, prod);
+                int diff = g.size() != on.size() ? 1 : 0;
+                float drift = 0.0f;
+                for (size_t i = 0; i < g.size() && i < on.size(); ++i)
+                {
+                    diff += g[i].clip != on[i].clip;
+                    drift = std::fmax(drift, LegDiffDeg(g[i], on[i]));
+                }
+                std::printf("step-down reach %s: frames with another clip than the ground selection %d, leg drift %.1f deg\n", s.name.c_str(), diff, double(drift));
+                std::snprintf(what, sizeof what, "%s: the clip sequence and legs follow the ground selection of the same feeds (frames, deg)", s.name.c_str());
+                Check(diff == 0 && drift <= 6.0f, what, diff, drift);
+            }
+            else
+            {
+                double firstPsmFall = -1.0;
+                for (const Row& r : s.rows)
+                    if (firstPsmFall < 0.0 && adapter::DetailFromFeed(r.psm, r.loco) == adapter::kPsmFall)
+                        firstPsmFall = r.t;
+                const double inAir = FirstInAir(on), inAirPlain = FirstInAir(off);
+                std::printf("step-down reach %s: first InAir t=%.3f (plain grace %.3f, first PSM Fall feed %.3f): added delay %.0f ms\n", s.name.c_str(), inAir, inAirPlain,
+                            firstPsmFall, (inAir - inAirPlain) * 1000.0);
+                std::snprintf(what, sizeof what, "%s: InAir no later than the first PSM Fall feed and than the plain grace (times)", s.name.c_str());
+                Check(inAir > 0.0 && firstPsmFall > 0.0 && inAir <= firstPsmFall + 1.0e-6 && inAir <= inAirPlain + 1.0e-6, what, inAir, firstPsmFall);
+                std::snprintf(what, sizeof what, "%s: the fall / landing clips are still played (frames)", s.name.c_str());
+                Check(a.airFrames > 0, what, a.airFrames);
+            }
+        }
+    }
+    Check(runDowns >= 2 && falls >= 2, "step-down reach fixture: run_down_* and fall_* sections (counts)", runDowns, falls);
+}
+
 void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>& aJumpSecs, const Variant& aProd)
 {
     std::vector<Section> secs;
@@ -2076,6 +2182,8 @@ void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>
             std::printf("contact loss %s (runtime floor): jump / land frames %d, InAir frames %d\n", s.name.c_str(), a.airFrames, a.inAirFrames);
             if (s.name == "real_fall")
                 Check(a.inAirFrames > 0, "real fall (runtime floor): InAir (frames)", a.inAirFrames);
+            else if (s.name.rfind("fall_", 0) == 0)
+                continue; // StepDownReachChecks
             else
                 Check(a.airFrames == 0 && a.inAirFrames == 0, "contact loss / step-down (runtime floor): the ground clips stay (jump / land frames, InAir frames)",
                       a.airFrames, a.inAirFrames);
@@ -2152,6 +2260,7 @@ void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>
     Check(jumps >= 20 && worst <= 1, "real jumps: the first InAir update is at most one update later than without the grace (flights, worst delay)", jumps, worst);
     std::printf("recorded jumps: lead-foot changes in the air entry %d (airKeepLeadFootS off %d)\n", flipsOn, flipsOff);
     Check(flipsOn == flipsOff, "recorded jumps: the lead-foot rule leaves game jumps as they were (changes, off)", flipsOn, flipsOff);
+    StepDownReachChecks(m, secs, aProd);
 }
 
 int main(int argc, char** argv)

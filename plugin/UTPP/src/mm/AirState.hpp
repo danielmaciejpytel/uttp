@@ -55,6 +55,9 @@ constexpr bool IsNoTriggerDetail(int d) noexcept { return integ::PsmIsNoTriggerD
 
 // AirConfig::stepDownS the runtime uses (= MapConfig::groundDropGraceS of the chooser mapping, so both sides agree on a step-down).
 inline constexpr float kStepDownSeconds = 0.12f;
+// AirConfig::stepDownDepthM / stepDownMaxS the runtime uses (= adapter::kGroundDropStepM / kGroundDropStepMaxS, the step-down reach of the chooser mapping).
+inline constexpr float kStepDownDepthM = 0.30f;
+inline constexpr float kStepDownMaxSeconds = 0.20f;
 
 enum class Mode : uint8_t { Off, Hold, Clips };
 enum class Phase : uint8_t { Ground, TakeOff, Descend, FallLoop, LandApproach, Recover };
@@ -158,6 +161,11 @@ struct AirConfig
     // ground clips. Not waited for: a PSM air detail, a rising capsule (vz > physFallVz), a probe farther than physFallDist, a vehicle exit.
     // 0 = off (minAir alone, the previous machine).
     float stepDownS = 0.0f;
+    // stepDownDepthM / stepDownMaxS: step-down reach. Past stepDownS, a capsule whose floor is known from a probe hit (dead-reckoned) and whose
+    // whole drop (fallen so far + floor distance) is at most stepDownDepthM still runs down a step: no fall until stepDownMaxS of air time.
+    // The other fall evidence (PSM air detail, far probe, vehicle exit) is not delayed. stepDownDepthM 0 = off.
+    float stepDownDepthM = 0.0f;
+    float stepDownMaxS = 0.0f;
 };
 
 struct AirInput
@@ -318,6 +326,7 @@ public:
         const bool wasAirborne = airTime_ > 0.0f;
         airTime_ = grounded ? 0.0f : airTime_ + in.dt;
         airFeeds_ = grounded ? 0 : airFeeds_ + 1;
+        airDropM_ = grounded ? 0.0f : airDropM_ + (in.vz < 0.0f ? -in.vz * in.dt : 0.0f);
         if (phase_ != Phase::Ground) episodeTime_ += in.dt;
         if (!grounded && wasAirborne && phase_ != Phase::Ground && in.dt > 1e-4f) LearnGravity(in.vz, in.dt);
         // Dead reckoning (trapezoid) and probe fusion.
@@ -377,7 +386,12 @@ public:
             const float fallTtl = hValid_ ? TimeToLand(h_, in.vz, gUp_, gDown_) : cfg_.noHitTtl;
             // stepDownS: only a capsule that keeps falling past a step-down counts; the other fall evidence starts at once
             const bool fallEvidence = IsAirDetail(in.psmDetail) || in.vehicleExit || in.distToGround > cfg_.physFallDist;
-            const bool stepDownOver = cfg_.stepDownS <= 0.0f || fallEvidence || (airTime_ >= cfg_.stepDownS && airFeeds_ >= 2); // one long frame is no fall
+            // step-down reach: a known floor within stepDownDepthM of the drop start keeps the step-down until stepDownMaxS
+            // (h_ dead-reckoned below 0 = the floor is reached, the touchdown is a feed late: clamped like the chooser floor, AirFloorStep)
+            const bool stepReach = cfg_.stepDownDepthM > 0.0f && hValid_ && probeAnchored_ && airDropM_ + std::fmax(h_, 0.0f) <= cfg_.stepDownDepthM &&
+                                   airTime_ < cfg_.stepDownMaxS;
+            const bool stepDownOver =
+                cfg_.stepDownS <= 0.0f || fallEvidence || (airTime_ >= cfg_.stepDownS && airFeeds_ >= 2 && !stepReach); // one long frame is no fall
             const bool physStepDownOver = stepDownOver || in.vz > cfg_.physFallVz;
             if (!noTrigger && !grounded && airTime_ >= cfg_.minAir && stepDownOver && in.vz <= cfg_.fallVz &&
                 (fallTtl >= cfg_.fallMinTtl || probeMiss))
@@ -885,6 +899,7 @@ private:
     bool lockoutHard_ = false, landAborted_ = false; // BATCH 6 AIR stage
     int physRun_ = 0, groundRun_ = 0;
     int airFeeds_ = 0; // consecutive not-grounded feeds (AirConfig::stepDownS)
+    float airDropM_ = 0.0f; // capsule drop over those feeds (m, AirConfig::stepDownDepthM)
     float lastAirVz_ = 0.0f;
     bool exitEpisode_ = false; // a feed of this episode carried AirInput::vehicleExit (false-touch take-back only)
 };
