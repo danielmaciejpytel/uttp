@@ -50,6 +50,7 @@
 #include "mm/MotionPose.hpp"
 #include "mm/TraversalFile.hpp"
 #include "mm/MotionTraversal.hpp" // UTPP-MOTION SEAM trav
+#include "mm/Dodge.hpp"           // ground dodge clips (sectors, clip clock, loader checks)
 #include "mm/RefaceStart.hpp"
 
 #include <optional>
@@ -99,6 +100,17 @@ struct Bundle
     utpp::ragdoll::GuClips guClips;
     bool getupOk = false;
     std::string getupErr = "missing";
+    // ground dodge clips (mm/Dodge.hpp): utpp_dodge_<body>.utpptrav (version 2 poses, montages Dodge_F/B/L/R). dodgeFile keeps the parsed
+    // poses (dodgeClips points into it; the bundle is never copied); dodgeOk false = missing or invalid: the playing clip is kept through a
+    // dodge (MatcherConfig::dodgeHold). dodgeRaw = per-frame scratch of the sampled pose; dodgeUpper = the bones above Spine3
+    // (dodge::UpperBodyMask), which keep dodgeHeld = the base pose shown on the frame before the clip.
+    traversal::TraversalFile dodgeFile;
+    dodge::DodgeClips dodgeClips;
+    std::vector<BoneTransform> dodgeRaw;
+    std::vector<uint8_t> dodgeUpper;
+    std::vector<BoneTransform> dodgeHeld;
+    bool dodgeOk = false;
+    std::string dodgeErr = "missing";
     motion::ChooserMatcher matcher;
     motionpose::PoseEvaluator eval;
     locosignal::Blend locomotion;
@@ -262,7 +274,23 @@ float g_barrelMuzzle = aim::Params{}.muzzleOffset;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
 BarrelProbe g_barrelProbe; // the last v2 evaluation (TestBarrelProbe)
 RootProbe g_rootProbe;     // the last root frame step (TestRootProbe)
+DodgeProbe g_dodgeProbe;   // the last dodge decision (TestDodgeProbe)
 #endif
+// Ground dodge clips (mm/Dodge.hpp): per v2 Step on the standing ground the player picks a clip on the dodge's impulse feed; its frames
+// replace the database pose of the motion layer (the matcher keeps running underneath, MatcherConfig::dodgeHold holds its clip) and
+// hand back to it over dodge::kBlendOutS. frame = this Step shows a clip; vel = the capsule velocity in character axes (the leg tail's
+// root motion on a clip frame); noContactLeft = s of the hand-back blend without foot contacts.
+struct DodgeState
+{
+    dodge::DodgePlayer player;
+    bool frame = false;
+    float vel[2] = {0.0f, 0.0f};
+    float noContactLeft = 0.0f;
+    uint32_t clips = 0;
+    bool held = false; // Bundle::dodgeHeld holds the upper body of the playing dodge
+};
+DodgeState g_dodgeSt;
+static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "dodge::SampleDodge writes 7 floats per bone");
 // Opt-in motion lean (CET mm.lean -> SetLean, default OFF): mm/LeanRuntime.hpp leans the v2 pose into the turn from the lateral
 // acceleration of the feed velocity (Step + Apply per v2 feed on b.pose in StepLocked, before the orientation warp and the leg tail).
 // The state lives in the Bundle. OFF and idle (weight 0): no code path touches the pose, it is bit-identical.
@@ -519,6 +547,11 @@ int AirMut() { return UTPP_MOTION_DRIVER_AIR_MUTATION; } // a call, not a consta
 // resumes on the re-entry (stale turn), 9 the handback turn also starts on a re-entry feed (the handback feed itself skipped)
 #ifndef UTPP_MOTION_DRIVER_TRAV_MUTATION
 #define UTPP_MOTION_DRIVER_TRAV_MUTATION 0
+#endif
+// Dodge clip mutation builds only (UTPP_DODGE_DRIVER_MUTATION=k); undefined / 0 = production. 1 = the clip is never shown,
+// 2 = the clip's own upper body is shown (no held upper body).
+#ifndef UTPP_DODGE_DRIVER_MUTATION
+#define UTPP_DODGE_DRIVER_MUTATION 0
 #endif
 // UTPP-MOTION SEAM motionfix: mutation builds only (UTPP_MOTION_DRIVER_FIX_MUTATION=k); undefined / 0 = production.
 // 1 the Locomotion world target is not forwarded to MotionFeed (pre-fix: mv rotated by the camera yaw), 2 the MOTION trace ignores
@@ -1021,6 +1054,9 @@ void TravResetLocked(bool aDropPending)
     g_trav.planned = g_trav.planOk = g_trav.episode = false;
     g_trav.active = g_trav.yielding = g_trav.first = g_trav.handbackNext = g_trav.frame = false;
     g_trav.noContactLeft = 0.0f;
+    g_dodgeSt.player.Reset(); // a dodge clip never outlives a disable / body switch / bundle swap
+    g_dodgeSt.held = false;
+    g_dodgeSt.noContactLeft = 0.0f;
     g_trav.player.reset();
     g_trav.plan = motiontrav::Plan{};
     g_trav.clip = -1;
@@ -1276,6 +1312,28 @@ std::unique_ptr<Bundle> LoadBundle(Body aBody, const Paths& aPaths)
         {
             b->getupOk = true;
             b->getupErr.clear();
+        }
+    }
+    // ground dodge clips: optional, own file. Any problem leaves dodgeOk false and the reason in dodgeErr (fail closed).
+    if (!aPaths.dodge.empty() && std::ifstream(aPaths.dodge, std::ios::binary).good())
+    {
+        std::string derr;
+        if (!traversal::LoadTraversalFile(aPaths.dodge, b->dodgeFile, derr))
+            b->dodgeErr = "bad:" + derr;
+        else if (!dodge::BuildDodgeClips(b->dodgeFile, aBody == Body::Man ? "player_man_skeleton" : "player_woman_skeleton", n,
+                                         [&](uint32_t i) { return b->db.BoneName(i); }, b->dodgeClips))
+            b->dodgeErr = "bad:" + b->dodgeClips.err;
+        else
+        {
+            b->dodgeRaw.assign(n, BoneTransform{});
+            b->dodgeHeld.assign(n, BoneTransform{});
+            int32_t spine3 = -1;
+            for (uint32_t i = 0; i < n; ++i)
+                if (b->db.BoneName(i) == "Spine3")
+                    spine3 = static_cast<int32_t>(i);
+            b->dodgeUpper = dodge::UpperBodyMask(n, spine3, [&](uint32_t i) { return b->db.BoneParent(i); });
+            b->dodgeOk = true;
+            b->dodgeErr.clear();
         }
     }
     return b;
@@ -1675,6 +1733,7 @@ Paths PathsForBody(Body aBody, const std::string& aDir)
         p.traversalTable = dir + "data\\utpp_traversal_table.json"; // UTPP-MOTION SEAM trav
         p.lean = dir + "data\\utpp_lean_" + BodyName(aBody) + ".bin";
         p.getup = dir + "data\\utpp_getup_" + BodyName(aBody) + ".utpptrav";
+        p.dodge = dir + "data\\utpp_dodge_" + BodyName(aBody) + ".utpptrav";
     }
     return p;
 }
@@ -2136,6 +2195,15 @@ RootProbe TestRootProbe()
 {
     std::lock_guard lock(g_m);
     return g_rootProbe;
+}
+
+DodgeProbe TestDodgeProbe()
+{
+    std::lock_guard lock(g_m);
+    DodgeProbe p = g_dodgeProbe;
+    p.loaded = g_bundle && g_bundle->dodgeOk;
+    p.clips = g_dodgeSt.clips;
+    return p;
 }
 #endif
 
@@ -4209,6 +4277,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_tailed = false;
     g_slideFrame = false;
     g_trav.frame = false; // UTPP-MOTION SEAM trav
+    g_dodgeSt.frame = false;
     if (g_bundle)
         g_bundle->rootFrameValid = false;
     // air: the air feed belongs to this Step only (consumed even when v2
@@ -4772,6 +4841,46 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     }
     else if (g_trav.noContactLeft > 0.0f)
         g_trav.noContactLeft = std::fmax(0.0f, g_trav.noContactLeft - dt);
+    // Ground dodge clip: standing stance on the ground only (a crouch dodge, slide, air or traversal keeps the playing clip). A forward
+    // dodge entered above the walk band keeps the run / sprint clip. The facing is the drawn (visual) heading the clip is shown in.
+    dodge::Frame dodgeFr{};
+    if (b.dodgeOk)
+    {
+        if (reentry)
+        {
+            g_dodgeSt.player.Reset(); // the clip clock never resumes over a gap in v2 ownership
+            g_dodgeSt.held = false;
+        }
+        dodge::Input di;
+        di.dt = dt;
+        di.dodgeDetail = cs.dodge;
+        di.standingGround = rootWanted && cs.movementMode == 0 && cs.stance == 0 && !b.map.slideActive && !travDetail && !travHandback &&
+                            !g_trav.active;
+        di.velX = std::isfinite(aRaw.velWorld[0]) ? aRaw.velWorld[0] : 0.0f;
+        di.velY = std::isfinite(aRaw.velWorld[1]) ? aRaw.velWorld[1] : 0.0f;
+        di.facingYawDeg = rootWanted ? b.root.PreviousVisualWorldYaw() / integ::kDegToRad : aRaw.playerYawDeg;
+        // the game's standing walk / run speeds (m/s): faster than halfway between them is a run
+        di.forwardClipMaxEntryMps = 0.5f * (mc.gameStandPoints[0] + mc.gameStandPoints[1]);
+        dodgeFr = g_dodgeSt.player.Tick(di, b.dodgeClips.length);
+        if (dodgeFr.handback) // back to the motion search like a traversal handback: new timeline, inertialized, no foot contacts
+        {
+            r.jumped = true;
+            r.blend.valid = true;
+            r.blend.blendTime = dodge::kBlendOutS;
+            g_dodgeSt.noContactLeft = dodge::kBlendOutS;
+        }
+        else if (g_dodgeSt.noContactLeft > 0.0f)
+            g_dodgeSt.noContactLeft = std::fmax(0.0f, g_dodgeSt.noContactLeft - dt);
+        g_dodgeSt.clips += dodgeFr.active && dodgeFr.start ? 1u : 0u;
+        g_dodgeSt.held = g_dodgeSt.held && dodgeFr.active; // the next dodge takes its own upper body
+    }
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    g_dodgeProbe.active = dodgeFr.active;
+    g_dodgeProbe.start = dodgeFr.start;
+    g_dodgeProbe.handback = dodgeFr.handback;
+    g_dodgeProbe.sector = static_cast<int32_t>(dodgeFr.sector);
+    g_dodgeProbe.clipTime = dodgeFr.clipTime;
+#endif
     g_last = r;
     g_selDiag.gait = cs.gait;
     g_selDiag.movementState = cs.movementState;
@@ -4902,7 +5011,69 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_airPrevLanded = landed;
     const bool bypassArmed = b.eval.IgnoreDeficitArmed();
     motionpose::FrameInfo info;
-    const bool ok = b.eval.Evaluate(dt, r, in, b.pose.data(), static_cast<uint32_t>(b.pose.size()), &info);
+    bool ok = false;
+#if UTPP_DODGE_DRIVER_MUTATION != 1 // mutation 1: the dodge clip is never shown (the playing clip is kept)
+    if (dodgeFr.active && dodge::SampleDodge(b.dodgeClips, dodgeFr.sector, dodgeFr.clipTime, reinterpret_cast<float*>(b.dodgeRaw.data())))
+    {
+        // The clip pose is external: the evaluator does not run the root hook on it, so the root frame is prepared here. The clip is in
+        // place and the capsule carries the body, so the animation delta handed to the root frame is the capsule's own displacement in
+        // the drawn (visual) axes: the visual - capsule offset does not grow through the dodge and its damping pulls it in.
+        g_dodgeSt.frame = true;
+        // the bones above Spine3 keep the base pose shown on the frame before the clip (taken once per dodge): the entry blend moves
+        // the hips, spine and legs only; before the clip end they move to the motion pose underneath (the hand-back target)
+        if (!g_dodgeSt.held)
+        {
+            const std::span<const BoneTransform> shown = b.eval.BasePose();
+            g_dodgeSt.held = shown.size() == b.dodgeHeld.size();
+            if (g_dodgeSt.held)
+                std::copy(shown.begin(), shown.end(), b.dodgeHeld.begin());
+        }
+#if UTPP_DODGE_DRIVER_MUTATION != 2
+        if (g_dodgeSt.held)
+        {
+            const bool live = r.clip >= 0 && r.frame < b.db.NumFrames();
+            dodge::KeepUpperBody(b.dodgeUpper, reinterpret_cast<const float*>(b.dodgeHeld.data()), reinterpret_cast<float*>(b.dodgeRaw.data()),
+                                 live ? reinterpret_cast<const float*>(b.db.Pose(r.frame)) : nullptr,
+                                 dodge::UpperBodyRelease(dodgeFr.clipTime, b.dodgeClips.length[static_cast<int>(dodgeFr.sector)]));
+        }
+#endif
+        motion::MatchResult mr = r;
+        mr.cost = 0.0f;
+        mr.jumped = dodgeFr.start; // new timeline on the entry (and a sector change) only
+        mr.blend = {};
+        if (dodgeFr.start)
+        {
+            mr.blend.valid = true;
+            mr.blend.blendTime = dodge::kBlendInS;
+            mr.blend.fromClip = r.clip;
+        }
+        if (rootWanted)
+        {
+            const float capDt = dt > 0.0f ? dt : 1.0f;
+            const visualroot::Frame cur = b.root.Frame();
+            float ax = 0.0f, ay = 0.0f;
+            math::Rot2(aRaw.capsuleYawDelta - cur.yaw, aRaw.capsuleDeltaCurrent[0], aRaw.capsuleDeltaCurrent[1], ax, ay);
+            motionstack::Signals sig;
+            sig.rootX = ax / capDt;
+            sig.rootY = ay / capDt;
+            sig.rootYaw = 0.0f;
+            const motionpose::BaseFrameView view{std::span<const BoneTransform>(b.dodgeRaw.data(), b.dodgeRaw.size()), sig, dt, true, 0.0f};
+            in.preOverlay = nullptr;
+            if (!PrepareRootOverlay(&rootEvaluation, view, in))
+            {
+                Skip(g_evalFail, "root-prepare");
+                return false;
+            }
+        }
+        ok = b.eval.EvaluateWithPose(dt, mr, b.dodgeRaw.data(), in, b.pose.data(), static_cast<uint32_t>(b.pose.size()), &info);
+        integ::WorldToCharacter(std::isfinite(aRaw.velWorld[0]) ? aRaw.velWorld[0] : 0.0f,
+                                std::isfinite(aRaw.velWorld[1]) ? aRaw.velWorld[1] : 0.0f,
+                                (std::isfinite(aRaw.playerYawDeg) ? aRaw.playerYawDeg : 0.0f) * integ::kDegToRad, g_dodgeSt.vel[0],
+                                g_dodgeSt.vel[1]);
+    }
+    else
+#endif
+        ok = b.eval.Evaluate(dt, r, in, b.pose.data(), static_cast<uint32_t>(b.pose.size()), &info);
     g_ovArmsNow = ok && OverlayArmsOf(b, info);
     RecordGripInfoLocked(info);
     RecordBarrelProbeLocked(in, info, rootWanted ? &rootEvaluation : nullptr);
@@ -4964,7 +5135,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         target.contact[0] = base.left; target.contact[1] = base.right;
         b.locomotion.Reset(); // no second snapshot blend after the live stack
     }
-    const bool noContact = (g_airDiag.movementMode == 1 && AirMut() != 4) || g_trav.noContactLeft > 0.0f;
+    const bool noContact = (g_airDiag.movementMode == 1 && AirMut() != 4) || g_trav.noContactLeft > 0.0f || g_dodgeSt.frame ||
+                           g_dodgeSt.noContactLeft > 0.0f;
     if (noContact)
     {
         b.locomotion.ClearContacts();
@@ -5071,6 +5243,16 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     aOut.cancelStartSupport = b.eval.CancelledStartSupport();
     if (g_trav.noContactLeft > 0.0f)
         aOut.contact[0] = aOut.contact[1] = 0.0f;
+    // dodge clip frames and their hand-back blend: no foot contacts; on a clip frame the root motion is the capsule's (the clip is in place)
+    const bool dodgeNoContact = g_dodgeSt.frame || g_dodgeSt.noContactLeft > 0.0f;
+    if (dodgeNoContact)
+        aOut.contact[0] = aOut.contact[1] = 0.0f;
+    if (g_dodgeSt.frame)
+    {
+        aOut.rootVel[0] = g_dodgeSt.vel[0];
+        aOut.rootVel[1] = g_dodgeSt.vel[1];
+        aOut.rootYawRate = 0.0f;
+    }
     // air (report 3.15: foot placement off in air): no foot contact while the chooser is InAir (the runtime AirState
     // also sets contactScale 0 there); the leg tail then never locks a foot mid-jump
     const bool airNoContact = g_airDiag.movementMode == 1 && AirMut() != 4;
@@ -5080,7 +5262,7 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     // hold off; the pose keeps the animated feet). g_slideFrame is false unless mm.slide is on with a slide bundle.
     if (g_slideFrame)
         aOut.contact[0] = aOut.contact[1] = 0.0f;
-    if (airNoContact || g_slideFrame || g_trav.noContactLeft > 0.0f)
+    if (airNoContact || g_slideFrame || g_trav.noContactLeft > 0.0f || dodgeNoContact)
         aOut.cancelStartSupport = -1;
     else if (r.clip >= 0 && static_cast<uint32_t>(r.clip) < b.db.NumClips())
         aOut.clipClass = steer::ClassifyClip(b.db.ClipName(static_cast<uint32_t>(r.clip)));

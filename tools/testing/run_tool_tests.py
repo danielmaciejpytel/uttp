@@ -131,6 +131,7 @@ REGISTRY = {
     'mmbake/test_extra_assets.py': {'note': 'pure functions only without --off/--on'},
     'mmbake/test_motion_chooser_ref.py': {'markers': {'data'}},
     'mmbake/test_getupbake.py': {'markers': {'data'}},
+    'mmbake/test_dodgebake.py': {'markers': {'data'}},
     'mmbake/test_leanbake.py': {
         'markers': {'data'}, 'requires': ['Research/logs/sourcepack-lean-data-2026-10.json'],
         'note': 'leanbake.LEAN_DATA; the file was not found in the project folders (2026-11-09)'},

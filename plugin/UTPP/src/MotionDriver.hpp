@@ -85,6 +85,7 @@ struct Paths
     std::string traversalTable; // UTPP-MOTION SEAM trav: CHT_TraversalAnims decision table (both bodies)
     std::string lean;           // optional motion lean pack utpp_lean_<body>.bin (mm.lean); missing / invalid = lean unavailable
     std::string getup;          // optional native get-up clips utpp_getup_<body>.utpptrav; missing / invalid = get-up unavailable (vanilla path)
+    std::string dodge;          // optional ground dodge clips utpp_dodge_<body>.utpptrav; missing / invalid = the playing clip is kept through a dodge
 };
 Paths PathsForBody(adapter::Body aBody, const std::string& aDir);
 
@@ -228,6 +229,17 @@ struct RootProbe
     float before[3] = {0, 0, 0}, after[3] = {0, 0, 0}; // x, y (m), yaw (rad): visual minus capsule, capsule axes
 };
 RootProbe TestRootProbe();
+// test targets only: the ground dodge clip of the last v2 Step (mm/Dodge.hpp).
+struct DodgeProbe
+{
+    bool loaded = false;   // the body's dodge clips are loaded
+    bool active = false;   // the Step showed a dodge clip
+    bool start = false, handback = false;
+    int32_t sector = -1;   // mm::dodge::Sector of the clip shown
+    float clipTime = 0.0f; // clip time sampled (s)
+    uint32_t clips = 0;    // dodge clips started since the bundle was installed
+};
+DodgeProbe TestDodgeProbe();
 #endif
 // Orientation warp (CET mm.orientWarp, default OFF; mm/OrientWarp.hpp): while V runs a circle the pelvis (extra visual root yaw on
 // the provided root frame of the leg tail) and the torso (twist over Spine .. Spine3) are brought onto the path of motion instead of
