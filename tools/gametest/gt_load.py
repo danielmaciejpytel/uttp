@@ -143,6 +143,91 @@ class LoadSampler:
         return res
 
 
+# --idle-others: build, test and tool processes that do not belong to the run
+OTHER_WORK_NAMES = COMPILER_NAMES + ('ctest.exe', 'lib.exe', 'mspdbsrv.exe', 'python.exe', 'pythonw.exe', 'blender.exe', 'ffmpeg.exe')
+OTHER_WORK_PREFIXES = ('utpp_',)     # the project's test executables
+
+
+def process_tree(ps, roots) -> set:
+    """Process ids of `roots` and of all their descendants (ps = the psutil module or a stand-in). A root that ended is skipped."""
+    out = set()
+    for r in roots:
+        try:
+            p = ps.Process(r)
+            out.add(p.pid)
+            out.update(c.pid for c in p.children(recursive=True))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def idle_others(ps, own: set) -> int:
+    """Sets build, test and tool processes outside the run's own process tree to idle priority, so they take no processor time
+    from the game under test (Windows priority class; a process that ended or cannot be changed is skipped). -> number changed."""
+    idle = getattr(ps, 'IDLE_PRIORITY_CLASS', None)
+    if idle is None:
+        return 0
+    n = 0
+    for p in ps.process_iter(['pid', 'name']):
+        try:
+            name = (p.info.get('name') or '').lower()
+            if p.info['pid'] in own or not (name in OTHER_WORK_NAMES or name.startswith(OTHER_WORK_PREFIXES)):
+                continue
+            if p.nice() != idle:
+                p.nice(idle)
+                n += 1
+        except Exception:  # noqa: BLE001
+            continue
+    return n
+
+
+class OthersIdler:
+    """--idle-others: from start() to stop(), every `period` s, the build / test / tool processes outside the run's process tree
+    are set to idle priority. own_roots() -> process ids whose trees belong to the run (the runner, the game). The priority is not
+    restored: such processes are short-lived, and a parent at idle priority hands it to the children it starts."""
+
+    def __init__(self, own_roots, period: float = PERIOD_S, ps=None):
+        self.own_roots = own_roots
+        self.period = period
+        if ps is None and _have_psutil():
+            import psutil
+            ps = psutil
+        self.ps = ps
+        self.changed = 0
+        self.ticks = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def tick(self) -> int:
+        if self.ps is None:
+            return 0
+        n = idle_others(self.ps, process_tree(self.ps, list(self.own_roots())))
+        self.changed += n
+        self.ticks += 1
+        return n
+
+    def start(self) -> 'OthersIdler':
+        self._stop.clear()
+
+        def loop():
+            while True:
+                try:
+                    self.tick()
+                except Exception:  # noqa: BLE001 - never touches the run
+                    pass
+                if self._stop.wait(self.period):
+                    return
+        self._thread = threading.Thread(target=loop, name='others-idler', daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self) -> dict:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5.0)
+        return {'available': self.ps is not None, 'ticks': self.ticks, 'processes_set_idle': self.changed}
+
+
 def format_load(res: dict) -> str:
     if not res or not res.get('samples'):
         return 'machine load: no samples'

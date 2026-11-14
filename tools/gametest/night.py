@@ -73,6 +73,8 @@ Speed (gt_flow.py, gt_post.py, gt_budget.py):
  - early stop (--early-stop N, 2): the first N walking scenarios invalid for one cause (V cannot move although the stick is
    pushed, no "UTPP MOTION" lines; the checks run.py applies afterwards) end the cycle with that cause in one line; the rest is
    listed as not played, the game is still quit and everything collected.
+ - --idle-others: other build / test / tool processes run at idle priority while the cycle runs (gt_load.OthersIdler), so the
+   mod's frame budget is not exceeded only because the machine is busy with other work.
  - at the end of a cycle a time budget table (per scenario: total, play, probe, retries, waits, copy, probes skipped; per phase:
    launch, arm, scenarios, recorder stop, quit, collect and its post-processing parts) goes to the log, time_budget.txt and
    summary.json.
@@ -455,6 +457,7 @@ class Night:
         self.settings = gs.Ledger(os.path.join(args.out_root, 'pending_restore.json'), log=self.log)
         self.collector = None                  # gt_collect.SessionCollector of the running cycle
         self.load_sampler = None               # gt_load.LoadSampler over the scenario phase
+        self.idler = None                      # gt_load.OthersIdler from the launch to the end of the cycle (--idle-others)
         self.meter_job = None                  # gt_posemeter.MeterJob (worker processes)
         self.budget = gb.Budget()              # where the wall time of the cycle went (printed at the end)
         self.probe_cache = gt_flow.ProbeCache()   # look-ahead probes of this cycle that came back clear
@@ -805,6 +808,28 @@ class Night:
         res = (self.cycle or {}).get('machine_load')
         if res is not None:
             self.log('[load] ' + gt_load.format_load(res))
+
+    def start_idler(self) -> None:
+        """--idle-others: other build / test / tool processes run at idle priority from the launch to the end of the cycle."""
+        if not getattr(self.args, 'idle_others', False):
+            return
+        try:
+            self.idler = gt_load.OthersIdler(lambda: [os.getpid()] + list(self.pids())).start()
+        except Exception as e:  # noqa: BLE001
+            self.idler = None
+            self.log(f'[load] --idle-others not started: {e!r}')
+
+    def stop_idler(self) -> None:
+        idler, self.idler = getattr(self, 'idler', None), None
+        if idler is None:
+            return
+        try:
+            res = idler.stop()
+            self.note_cycle('idle_others', res)
+            self.log('[load] --idle-others: ' + (f'{res["processes_set_idle"]} other build / test processes set to idle priority'
+                                                 if res['available'] else 'psutil is not available, nothing changed'))
+        except Exception as e:  # noqa: BLE001
+            self.log(f'[load] --idle-others failed: {e!r}')
 
     # -- 1/7: quit --
     def ensure_closed(self, label: str) -> dict:
@@ -3844,6 +3869,7 @@ class Night:
             self.stop_padd()
             self.apply_graphics()
             self.install()
+            self.start_idler()
             log = self.launch()
             self.arm(log)
             rec = self.start_recording()
@@ -3897,6 +3923,7 @@ class Night:
             if self.cycle['result'] is None:                              # an unexpected exception: copy and restore what we can
                 self.secure_session_files('unexpected error', final=True)
                 self.restore_settings_leave('unexpected error')
+            self.stop_idler()
         self.bg_input(False, 'end of cycle')
         if rec:
             self.stop_recording(rec, check=False)      # the check (and the full decode) wait until the game is closed
@@ -4403,6 +4430,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--early-stop', type=int, default=2,
                    help='stop the cycle when each of its first N walking scenarios is invalid for the same cause (V cannot '
                         'move, no motion lines ...); 0 = always play everything')
+    p.add_argument('--idle-others', action='store_true',
+                   help='from the launch to the end of the cycle set other build, test and tool processes (compilers, test '
+                        'executables, Python tools outside this run) to idle priority, so a busy machine does not take processor '
+                        'time from the game; the priority is not restored')
     p.add_argument('--pause-between', type=float, default=30.0, help='seconds between cycles')
     p.add_argument('--cmd-channel', default='console', choices=['console', 'file', 'auto'], action=_ExplicitChannel,
                    help='how commands reach the game: console = typed into the CET overlay; file = cmd.txt of the test '

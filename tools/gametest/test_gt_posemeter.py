@@ -239,6 +239,56 @@ class LoadTests(unittest.TestCase):
         s.sample(1)
         self.assertIsNotNone(s.result()['method'])
 
+    def test_idle_others_touches_only_other_build_and_test_processes(self):
+        class P:
+            def __init__(self, pid, name, kids=(), nice=32, fail=False):
+                self.pid, self.info, self.kids, self._nice, self.fail = pid, {'pid': pid, 'name': name}, list(kids), nice, fail
+
+            def children(self, recursive=False):
+                out = list(self.kids)
+                for k in self.kids:
+                    out += k.children(True)
+                return out
+
+            def nice(self, v=None):
+                if self.fail:
+                    raise PermissionError('denied')
+                if v is None:
+                    return self._nice
+                self._nice = v
+
+        class Ps:
+            IDLE_PRIORITY_CLASS = 64
+
+            def __init__(self, procs):
+                self.procs = {p.pid: p for p in procs}
+
+            def Process(self, pid):
+                return self.procs[pid]              # KeyError for a process that ended
+
+            def process_iter(self, attrs):
+                return list(self.procs.values())
+
+        rec = P(12, 'ffmpeg.exe')                                            # the run's own recorder
+        meter = P(13, 'python.exe')                                          # the run's own pose meter worker
+        runner = P(10, 'python.exe', kids=[rec, meter])
+        game = P(20, 'Cyberpunk2077.exe')
+        others = [P(30, 'cl.exe'), P(31, 'Ninja.exe'), P(32, 'utpp_mm_loco_test.exe'), P(33, 'python.exe'), P(34, 'ctest.exe'),
+                  P(35, 'link.exe', nice=64), P(36, 'cl.exe', fail=True)]
+        bystanders = [P(40, 'explorer.exe'), P(41, 'steam.exe'), P(42, 'chrome.exe')]
+        ps = Ps([runner, rec, meter, game] + others + bystanders)
+        own = gt_load.process_tree(ps, [10, 20, 999])                        # 999 ended meanwhile
+        self.assertEqual(own, {10, 12, 13, 20})
+        self.assertEqual(gt_load.idle_others(ps, own), 5)                    # 30-34; 35 is idle already, 36 cannot be changed
+        self.assertEqual([p._nice for p in others], [64, 64, 64, 64, 64, 64, 32])
+        self.assertTrue(all(p._nice == 32 for p in [runner, rec, meter, game] + bystanders))
+        self.assertEqual(gt_load.idle_others(ps, own), 0)                    # nothing left to change
+        idler = gt_load.OthersIdler(lambda: [10, 20], period=0.01, ps=Ps([runner, rec, meter, game, P(50, 'cl.exe')]))
+        self.assertEqual(idler.tick(), 1)
+        idler.start()
+        self.assertEqual(idler.stop(), {'available': True, 'ticks': idler.ticks, 'processes_set_idle': 1})
+        self.assertEqual(gt_load.OthersIdler(lambda: [], ps=type('NoClass', (), {})()).tick(), 0)   # no priority class: nothing
+
     def test_typeperf_fallback_parser(self):
         class R:
             stdout = '"(PDH-CSV 4.0)","\\\\PC\\Processor(_Total)\\% Processor Time"\n"11/14/2026 02:00:00.000","37.250000"\n'
