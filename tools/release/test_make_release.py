@@ -47,7 +47,7 @@ class GeneratedTexts(unittest.TestCase):
 
     def test_readme_content(self):
         r, _, _ = self.texts()
-        for s in ("utpp_interactrange.disable", "utpp_locomotion.disable", "Input Loader", "fists only", "2.50"):
+        for s in ("utpp_interactrange.disable", "utpp_locomotion.disable", "Input Loader", "two-handed blunt weapons", "2.50"):
             self.assertIn(s, r)
         self.assertNotIn("free-look", r.lower())
         self.assertNotIn("{", r)
@@ -100,9 +100,9 @@ class ReadmeRequirements(unittest.TestCase):
             self.assertNotIn(old, r)
 
     def test_melee_line_follows_decision(self):
-        self.assertIn("fists only", mr.gen_readme(True).decode())
+        self.assertIn("two-handed blunt weapons", mr.gen_readme(True).decode())
         off = mr.gen_readme(False).decode()
-        self.assertNotIn("fists only", off)
+        self.assertNotIn("two-handed blunt weapons", off)
         self.assertIn("not part of this version", off)
         self.assertNotIn("{", off)
 

@@ -247,9 +247,9 @@ CODE_EXPECT = {
 # scripts of a group are self-contained: no other shipped script references them).
 # group -> (title, what to check in game on the day of the build)
 DAYOF_GROUPS = {
-    "melee": ("Third-person melee: fists, knife, katana, one-handed blunt, baton",
+    "melee": ("Third-person melee: fists, knife, katana, one-handed blunt, baton, two-handed blunt",
               "fist combat in third person (idle, punches, movement, equip/unequip, guard) with the UTPP body; knife, katana, "
-              "one-handed blunt and baton: combo, heavy, block (not knife), parried from left / right; "
+              "one-handed blunt, baton and two-handed blunt: combo, heavy, block (not knife), parried from left / right; "
               "Male V only in the single short pre-release test"),
     "car": ("Third-person car entry/exit",
             "entering and leaving cars as driver and passenger (door, approach, exit clips, camera transitions), "
@@ -832,8 +832,8 @@ def gen_notices(errors, graph=False):
 
 
 MELEE_LINE = {
-    True: "Melee in third person: fists only (built from the game's own NPC combat animations); other melee weapons keep the\n"
-          "game's animations.",
+    True: "Melee in third person: fists, knives, katanas, one-handed blunt weapons, batons and two-handed blunt weapons (built\n"
+          "from the game's own NPC combat animations); other melee weapons keep the game's animations.",
     False: "Melee in third person: not part of this version; melee keeps the game's animations.",
 }
 
