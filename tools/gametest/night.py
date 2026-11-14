@@ -3790,7 +3790,7 @@ class Night:
             if self.left_vehicle_this_cycle and not any(n in ('vehicle_mount_exit', gtv.SET_NAME) for n in self.names):
                 try:
                     guard.wait(1.2)        # the newest position line is then from after the exit
-                    self.leave_car(pad, guard, plan, seconds=2.5, blind=True)
+                    self.leave_car(pad, guard, plan, seconds=1.2, blind=True)   # about 7 m: out of reach of the mount prompt
                     self.level_camera(pad, guard, plan)
                 except NeedsKeyboard as e:
                     self.log(f'[scenarios] walking away from the vehicle skipped: {e}')
