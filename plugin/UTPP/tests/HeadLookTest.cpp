@@ -450,9 +450,12 @@ static void TestLimits()
     in.chestAllowed = false;
     const Output o = Run(layer, rig, base, in, 3.0f, 60.0f, out);
     const float chain = HeadYawDeg(out) - HeadYawDeg(base);
-    Expect("limits: gaze 100 deg left without a chest share -> the neck chain stops at 75 deg, kFlagChain, the eyes take the rest (about 22 deg: the clip head starts 3 deg to the left)",
-           chain > 74.0f && chain < 76.0f && (o.flags & kFlagChain) && std::fabs(o.eyeYaw * kR2D - 22.0f) < 2.0f,
-           Fmt("chain %g eyes %g flags %g", chain, o.eyeYaw * kR2D, o.flags));
+    const float twist = HeadYawDeg(out) - BoneYawDeg(out, kSpine3);
+    Expect("limits: gaze 100 deg left without a chest share -> the neck stops at the twist limit (60 deg against the chest; the clip head "
+           "starts untwisted), kFlagChain, the eyes take the rest up to their 30 deg limit (kFlagEyes)",
+           chain > 59.0f && chain < 61.0f && twist > 59.0f && twist <= kNeckTwistMaxDeg + 0.5f && (o.flags & kFlagChain) &&
+               (o.flags & kFlagEyes) && std::fabs(o.eyeYaw * kR2D - 30.0f) < 0.1f,
+           Fmt("chain %g twist %g eyes %g flags %g", chain, twist, o.eyeYaw * kR2D, o.flags));
     Layer l2;
     Pose out2;
     Input in2 = MakeInput(base, 0, 40, 1.0f / 60.0f);
@@ -847,6 +850,133 @@ static void TestHeadLeadComposition()
     Expect("composition: gaze straight ahead on a led head (+20 deg) -> head ends forward", std::fabs(HeadYawDeg(oc)) < 1.5f, Fmt("yaw %g", HeadYawDeg(oc)));
 }
 
+static float WrapDeg(float a)
+{
+    while (a > 180.0f)
+        a -= 360.0f;
+    while (a < -180.0f)
+        a += 360.0f;
+    return a;
+}
+
+// The calm pose with the whole body turned by aBodyYawDeg about the vertical (Hips) and the head led by aHeadLeadDeg (model vertical).
+static Pose MakeBodyPose(float aBodyYawDeg, float aHeadLeadDeg)
+{
+    Pose p = MakePose(aHeadLeadDeg);
+    SetLocal(p, kHips, Vec3{0, 0, 1.0f}, Axis(kZ, 180.0f + aBodyYawDeg));
+    return p;
+}
+
+// Twist of the neck as yaw of the Head forward against the Spine3 forward (deg; the test poses are upright and the gaze level).
+static float NeckTwistDeg(const Pose& aPose) { return WrapDeg(BoneYawDeg(aPose, kHead) - BoneYawDeg(aPose, kSpine3)); }
+
+static void TestNeckTwist()
+{
+    const Rig rig = RealRig();
+    // the measure of the layer agrees with the yaw difference on an upright pose
+    {
+        const Pose p = MakePose(35.0f);
+        aim::Xf m[kN];
+        Model(p, m);
+        float tw = 0.0f;
+        const bool have = NeckTwist(m, rig, tw);
+        Expect("neck twist: the layer's twist of a 35 deg head lead matches the yaw of the head against the chest",
+               have && std::fabs(tw * kR2D - NeckTwistDeg(p)) < 0.5f && std::fabs(tw * kR2D - 35.0f) < 3.5f,
+               Fmt("twist %g yaw diff %g", tw * kR2D, NeckTwistDeg(p)));
+    }
+    // a clip head that already leads by 30 deg plus a gaze 90 deg to the same side: the chain limit alone (75 deg on top of the received
+    // head) would end at about 105 deg of neck twist; the twist limit stops it at 60
+    {
+        const Pose base = MakePose(30.0f);
+        Layer layer;
+        Pose out;
+        Input in = MakeInput(base, 90, 0, 1.0f / 60.0f);
+        in.chestAllowed = false;
+        const Output o = Run(layer, rig, base, in, 3.0f, 60.0f, out);
+        const float tw = NeckTwistDeg(out);
+        Expect("neck twist: head lead 30 deg + gaze 90 deg to the same side -> neck twist ends at the 60 deg limit, kFlagChain",
+               tw > 59.0f && tw <= kNeckTwistMaxDeg + 0.5f && (o.flags & kFlagChain), Fmt("twist %g flags %g", tw, o.flags));
+    }
+    // a received pose already past the limit (70 deg): the layer never adds twist on that side, and it may turn the head back
+    {
+        const Pose base = MakePose(70.0f);
+        const float tw0 = NeckTwistDeg(base);
+        Layer l1, l2;
+        Pose o1, o2;
+        Input in = MakeInput(base, 100, 0, 1.0f / 60.0f);
+        in.chestAllowed = false;
+        Run(l1, rig, base, in, 3.0f, 60.0f, o1);
+        Input back = MakeInput(base, 0, 0, 1.0f / 60.0f);
+        back.chestAllowed = false;
+        Run(l2, rig, base, back, 3.0f, 60.0f, o2);
+        Expect("neck twist: a pose already twisted 70 deg keeps its own twist under a gaze further out (no added twist), a gaze ahead turns it back",
+               tw0 > 65.0f && NeckTwistDeg(o1) <= tw0 + 0.5f && NeckTwistDeg(o1) > tw0 - 1.0f && std::fabs(HeadYawDeg(o2)) < 1.5f,
+               Fmt("in %g held %g ahead %g", tw0, NeckTwistDeg(o1), HeadYawDeg(o2)));
+    }
+    // the body turns away under a held gaze (start of a run toward the other side): gaze 70 deg left (model space), the body turns 60 deg
+    // to the right in 0.24 s (250 deg/s; the target ends 130 deg left of the body, in front of the behind fade) and the clip leads the head
+    // 25 deg into the turn. Every frame: the neck twist within the limit, and the head moves no faster than the body and the clip's own
+    // head lead do (no snap).
+    {
+        const float fps = 60.0f, dt = 1.0f / fps, turnS = 0.24f, bodyEnd = -60.0f, leadEnd = -25.0f;
+        Layer layer;
+        Output o;
+        Pose start = MakeBodyPose(0.0f, 0.0f), p;
+        Input in = MakeInput(start, 70, 0, dt);
+        in.chestAllowed = true;
+        for (int i = 0; i < int(1.5f * fps); ++i)
+        {
+            p = start;
+            layer.Run(p.bytes.data(), kN, rig, in, o);
+        }
+        float worstTwist = std::fabs(NeckTwistDeg(p)), worstStep = 0.0f;
+        float prevTurn = WrapDeg(BoneYawDeg(p, kHead) - BoneYawDeg(start, kHead));
+        for (int i = 1; i <= int(1.0f * fps); ++i)
+        {
+            const float u = std::fmin(1.0f, float(i) * dt / turnS);
+            const Pose base = MakeBodyPose(bodyEnd * u, leadEnd * u);
+            p = base;
+            layer.Run(p.bytes.data(), kN, rig, in, o);
+            worstTwist = std::fmax(worstTwist, std::fabs(NeckTwistDeg(p)));
+            // the layer's own turn of the head (written head against the received head) changes smoothly
+            const float turn = WrapDeg(BoneYawDeg(p, kHead) - BoneYawDeg(base, kHead));
+            worstStep = std::fmax(worstStep, std::fabs(turn - prevTurn));
+            prevTurn = turn;
+        }
+        Expect("neck twist: body turning away at 250 deg/s under a held gaze -> neck twist within 60 deg on every frame",
+               worstTwist <= kNeckTwistMaxDeg + 0.5f, Fmt("worst twist %g", worstTwist));
+        Expect("neck twist: ... and the layer's own head turn changes by at most 1.5 deg per frame (90 deg/s at 60 fps): no snap",
+               worstStep <= 1.5f, Fmt("worst step %g deg/frame", worstStep));
+    }
+    // no wind-up: after 3 s against the limit (gaze 100 deg left) the gaze comes back ahead; the head answers within 3 frames and eases back
+    // without a jump (largest step <= 3.5 deg per frame at 60 fps, the spring's own rate from 60 deg)
+    {
+        const Pose base = MakePose(0.0f);
+        Layer layer;
+        Pose p;
+        Input in = MakeInput(base, 100, 0, 1.0f / 60.0f);
+        in.chestAllowed = false;
+        Run(layer, rig, base, in, 3.0f, 60.0f, p);
+        const float held = HeadYawDeg(p);
+        in = MakeInput(base, 0, 0, 1.0f / 60.0f);
+        in.chestAllowed = false;
+        Output o;
+        float prev = held, worstStep = 0.0f, after3 = held;
+        for (int i = 0; i < 60; ++i)
+        {
+            p = base;
+            layer.Run(p.bytes.data(), kN, rig, in, o);
+            const float y = HeadYawDeg(p);
+            worstStep = std::fmax(worstStep, std::fabs(y - prev));
+            prev = y;
+            if (i == 2)
+                after3 = y;
+        }
+        Expect("neck twist: released after a long hold at the limit -> the head starts back within 3 frames (>= 2 deg), largest step <= 3.5 deg",
+               held - after3 >= 2.0f && worstStep <= 3.5f, Fmt("held %g after3 %g step %g", held, after3, worstStep));
+    }
+}
+
 static void TestGate()
 {
     Expect("gate: full MM ownership, no melee -> 1", std::fabs(LayerGate(1.0f, 1.0f, 0.0f) - 1.0f) < 1e-6f);
@@ -1000,6 +1130,7 @@ int main()
     TestGateStep();
     TestUnevenDt();
     TestHeadLeadComposition();
+    TestNeckTwist();
     TestGate();
     TestReapply();
     TestFailClosed();

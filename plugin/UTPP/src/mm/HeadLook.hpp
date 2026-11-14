@@ -20,6 +20,9 @@
 //   distribution of the delta: the chest (Spine3) takes chest * kChestShareMax of the yaw (not at all while a weapon is held: the
 //            arms, WeaponRight and the hand helpers sit under Spine3), Neck / Neck1 / Head take the rest 0.25 / 0.25 / 0.5 about ONE
 //            axis (they compose to the demanded rotation), limited to kChainMaxYawDeg / +30 / -35 deg;
+//   neck twist: the twist of Head against Spine3 after the turn stays within kNeckTwistMaxDeg. The spring target is limited to what the
+//            received pose allows (no wind-up: the head answers at once when the gaze comes back), and the chain yaw written is bounded
+//            exactly on every call (a body that turns away faster than the spring takes the head along instead of twisting the neck);
 //   eyes   = what is left between the head after the turn and the gaze, within +-30 deg yaw / +-20 deg pitch, from a faster spring.
 //            Eye bones (LeftEye / RightEye, children of Head, local rotation identity in the written pose) ARE part of the snapshot the
 //            mod writes (database bones 31 / 32), so the engine's eye turn is overwritten and the eyes are driven here.
@@ -57,6 +60,11 @@ inline constexpr float kBehindFadeMinStartDeg = 150.0f;
 inline constexpr float kMinTargetDist = 0.3f;      // m horizontal head -> target: closer has no usable heading
 // What the body can do (applied delta relative to the pose the layer receives).
 inline constexpr float kChainMaxYawDeg = 75.0f;    // Neck + Neck1 + Head together
+// Twist of the Head against Spine3 (the whole neck) after the turn: never beyond this angle (a pose that already has more keeps its own
+// twist, the turn only reduces it). The chain limit above is relative to the pose the layer receives, so a clip that already turns the head
+// (head lead, a body that turns away under a held gaze) could otherwise end far past what a neck can do.
+inline constexpr float kNeckTwistMaxDeg = 60.0f;
+inline constexpr int kNeckTwistIterations = 16;    // bisection steps of the bound (chain yaw resolution: |yaw| / 65536)
 inline constexpr float kChainUpDeg = 30.0f;
 inline constexpr float kChainDownDeg = 35.0f;
 inline constexpr float kChestShareMax = 0.30f;     // chest = 1 -> Spine3 takes 30 % of the yaw ...
@@ -251,6 +259,74 @@ inline bool HeadDirection(const Xf* aModel, const Rig& aRig, float& aYaw, float&
     return aim::YawPitchOf(f, aYaw, aPitch);
 }
 
+// ------------------------------------------------------------------------------------------------ neck twist
+
+// Twist axis of the neck in the Head frame: the Head-local axis (X or Z, never the forward axis Y) closest to the bone direction
+// Neck1 -> Head, pointing from the neck to the head. False when the two joints coincide.
+inline bool NeckTwistAxis(const Xf* aModel, const Rig& aRig, Vec3& aAxis)
+{
+    const Vec3 d = math::QuatRotate(math::QuatInv(aModel[aRig.head].q), aModel[aRig.head].p - aModel[aRig.neck1].p);
+    if (!math::IsFinite(d) || !(std::fabs(d.x) + std::fabs(d.z) > 1e-6f))
+        return false;
+    aAxis = std::fabs(d.x) >= std::fabs(d.z) ? Vec3{d.x > 0.0f ? 1.0f : -1.0f, 0.0f, 0.0f} : Vec3{0.0f, 0.0f, d.z > 0.0f ? 1.0f : -1.0f};
+    return true;
+}
+
+// Signed twist (rad, (-pi, pi]) about aAxis (Head frame) of the Head orientation aHead against Spine3: positive = the head turned to the
+// left of the chest (aAxis points up the neck).
+inline float NeckTwistOf(const Xf* aModel, const Rig& aRig, const Quat& aHead, Vec3 aAxis)
+{
+    const Quat r = math::QuatMul(math::QuatInv(aModel[aRig.spine3].q), aHead);
+    const float s = r.w < 0.0f ? -1.0f : 1.0f;
+    return 2.0f * std::atan2(s * math::Dot(Vec3{r.x, r.y, r.z}, aAxis), s * r.w);
+}
+
+// Twist of the Head against Spine3 of the pose in aModel (rad). False when the axis cannot be found.
+inline bool NeckTwist(const Xf* aModel, const Rig& aRig, float& aTwist)
+{
+    Vec3 axis;
+    if (!NeckTwistAxis(aModel, aRig, axis))
+        return false;
+    aTwist = NeckTwistOf(aModel, aRig, aModel[aRig.head].q, axis);
+    return std::isfinite(aTwist);
+}
+
+// The chain yaw (rad, same sign as aYaw, |result| <= |aYaw|) that keeps the neck twist after the chain rotation (yaw aYaw, pitch aPitch
+// about the head direction aFwd, as ApplyHead writes it) within max(kNeckTwistMaxDeg, the twist the pose already has). aModel is the pose
+// before the chain rotation. aBound tells whether the yaw was reduced.
+inline float BoundChainYaw(const Xf* aModel, const Rig& aRig, Vec3 aFwd, float aYaw, float aPitch, bool& aBound)
+{
+    aBound = false;
+    Vec3 axis;
+    if (aYaw == 0.0f || !NeckTwistAxis(aModel, aRig, axis))
+        return aYaw;
+    auto twistAt = [&](float aY, float& aOut) -> bool {
+        Quat q;
+        if (!aim::YawPitchRotation(aFwd, aY, aPitch, q))
+            return false;
+        aOut = NeckTwistOf(aModel, aRig, math::QuatMul(q, aModel[aRig.head].q), axis);
+        return std::isfinite(aOut);
+    };
+    float t0 = 0.0f, t1 = 0.0f;
+    if (!twistAt(0.0f, t0) || !twistAt(aYaw, t1))
+        return aYaw;
+    const float bound = std::fmax(kNeckTwistMaxDeg * kDegF, std::fabs(t0));
+    if (std::fabs(t1) <= bound)
+        return aYaw;
+    float lo = 0.0f, hi = 1.0f; // fraction of aYaw: lo keeps the twist within the bound, hi does not
+    for (int k = 0; k < kNeckTwistIterations; ++k)
+    {
+        const float mid = 0.5f * (lo + hi);
+        float t = 0.0f;
+        if (twistAt(aYaw * mid, t) && std::fabs(t) <= bound)
+            lo = mid;
+        else
+            hi = mid;
+    }
+    aBound = true;
+    return aYaw * lo;
+}
+
 // ------------------------------------------------------------------------------------------------ smoothing
 
 // Critically damped spring, exact solution for a constant target (frame-rate independent: the same state at the same time for any
@@ -280,14 +356,17 @@ struct Spring
 
 // Rotates the chest (Spine3) about the model vertical by aChestYaw, then Neck / Neck1 / Head by kShare of ONE rotation (yaw about
 // the vertical, pitch about the head's right axis, as aim::YawPitchRotation; they compose to the demanded rotation). The chain part
-// is limited to kChainMaxYawDeg / kChainUpDeg / kChainDownDeg. aChainYaw / aChainPitch in radians (up > 0, left > 0). On success
-// the model transforms of the result are in aModel (the head direction can be read) and aCapped tells whether a limit was hit.
+// is limited to kChainMaxYawDeg / kChainUpDeg / kChainDownDeg, and its yaw so that the neck twist stays within kNeckTwistMaxDeg
+// (BoundChainYaw). aChainYaw / aChainPitch in radians (up > 0, left > 0). On success the model transforms of the result are in aModel
+// (the head direction can be read), aCapped tells whether a limit was hit and aAppliedYaw (optional) is the chain yaw written.
 // False (records untouched or partly written: fault only) when the pose cannot be solved.
 inline bool ApplyHead(uint8_t* aBones, uint32_t aCount, const Rig& aRig, float aChestYaw, float aChainYaw, float aChainPitch, Xf* aModel,
-                      bool* aCapped = nullptr)
+                      bool* aCapped = nullptr, float* aAppliedYaw = nullptr)
 {
     if (aCapped)
         *aCapped = false;
+    if (aAppliedYaw)
+        *aAppliedYaw = 0.0f;
     if (!aRig.ok || !aBones || !aModel || aRig.fkCount == 0 || aRig.fkCount > aCount || aRig.fkCount > aim::kMaxFkBones ||
         !std::isfinite(aChestYaw) || !std::isfinite(aChainYaw) || !std::isfinite(aChainPitch))
         return false;
@@ -304,7 +383,7 @@ inline bool ApplyHead(uint8_t* aBones, uint32_t aCount, const Rig& aRig, float a
             return false;
     }
     const float yawCap = kChainMaxYawDeg * kDegF;
-    const float cy = Clampf(aChainYaw, -yawCap, yawCap);
+    float cy = Clampf(aChainYaw, -yawCap, yawCap);
     const float cp = Clampf(aChainPitch, -kChainDownDeg * kDegF, kChainUpDeg * kDegF);
     if ((cy != aChainYaw || cp != aChainPitch) && aCapped)
         *aCapped = true;
@@ -312,8 +391,16 @@ inline bool ApplyHead(uint8_t* aBones, uint32_t aCount, const Rig& aRig, float a
         return true;
     Vec3 fwd;
     Quat q;
-    if (!aim::NormalizeTo(math::QuatRotate(aModel[aRig.head].q, kLocalForward), fwd) || !aim::YawPitchRotation(fwd, cy, cp, q))
+    if (!aim::NormalizeTo(math::QuatRotate(aModel[aRig.head].q, kLocalForward), fwd))
         return true; // vertical head direction: nothing sensible to turn (cannot happen with the +-35 / 40 deg limits)
+    bool bound = false;
+    cy = BoundChainYaw(aModel, aRig, fwd, cy, cp, bound);
+    if (bound && aCapped)
+        *aCapped = true;
+    if (aAppliedYaw)
+        *aAppliedYaw = cy;
+    if ((cy == 0.0f && cp == 0.0f) || !aim::YawPitchRotation(fwd, cy, cp, q))
+        return true;
     const float s = q.w < 0.0f ? -1.0f : 1.0f;
     const Vec3 v{q.x * s, q.y * s, q.z * s};
     const float vn = aim::Length(v);
@@ -445,8 +532,17 @@ public:
             aOut.flags |= gaze.flags;
         }
         // head + chest: the delta between the gaze and the head the pose already has (0 = release)
-        const float dY = gaze.valid ? WrapPi(gaze.yaw - hy) * weight : 0.0f;
+        float dY = gaze.valid ? WrapPi(gaze.yaw - hy) * weight : 0.0f;
         const float dP = gaze.valid ? (gaze.pitch - hp) * weight : 0.0f;
+        // the spring follows no more yaw than the neck twist of the received pose leaves (the chest share turns the neck with it):
+        // a gaze far to the side does not wind the spring up past what can be written
+        float twistIn = 0.0f;
+        if (dY != 0.0f && NeckTwist(model, aRig, twistIn))
+        {
+            const float bound = std::fmax(kNeckTwistMaxDeg * kDegF, std::fabs(twistIn));
+            const float chainShare = 1.0f - Clampf(m_chest, 0.0f, kChestShareMax);
+            dY = Clampf(dY, (-bound - twistIn) / chainShare, (bound - twistIn) / chainShare);
+        }
         m_yaw.Step(dY, kHeadOmega, dt);
         m_pitch.Step(dP, kHeadOmega, dt);
         const float chestTarget = (gaze.valid && aIn.chestAllowed) ? Clampf(aIn.chest, 0.0f, 1.0f) * kChestShareMax : 0.0f;
@@ -462,12 +558,13 @@ public:
         bool ok = true;
         if (headWrite)
         {
-            ok = ApplyHead(aBones, aCount, aRig, chestYaw, chainYaw, pitch, model, &capped);
+            float appliedYaw = 0.0f;
+            ok = ApplyHead(aBones, aCount, aRig, chestYaw, chainYaw, pitch, model, &capped, &appliedYaw);
             if (ok)
             {
                 aOut.wrote = true;
                 aOut.chestYaw = chestYaw;
-                aOut.yaw = chainYaw;
+                aOut.yaw = appliedYaw;
                 aOut.pitch = pitch;
             }
             if (capped)

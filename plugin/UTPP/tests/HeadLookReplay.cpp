@@ -409,6 +409,74 @@ int main(int argc, char** argv)
            "before the edge in one step",
            gWorstRel <= 0.30 && gWorstRelChest <= 0.30,
            Fmt("head %.2f chest %.2f, peak %.0f deg/s, largest step %.2f deg", gWorstRel, gWorstRelChest, gWorstSpeed, gWorstStep));
+
+    // Neck twist pass: on every 5th recorded pose a fresh layer holds a gaze 100 deg to the left / right for 1.5 s (60 fps, chest share on
+    // and off). The twist of Head against Spine3 about the Head-local X axis (the bone axis of this rig) stays within kNeckTwistMaxDeg
+    // (+0.5 deg) unless the recorded pose already has more; the layer's own axis choice is X on this rig.
+    {
+        double worstOver = -1e9, worstTwist = 0;
+        int poses = 0, axisNotX = 0, nearLimit = 0;
+        for (size_t f = 0; f < fx.frames.size(); f += 5)
+        {
+            const Frame& fr = fx.frames[f];
+            for (uint32_t b = 0; b < n; ++b)
+            {
+                float* r = reinterpret_cast<float*>(base.data() + size_t(b) * integ::kGameBoneStride);
+                r[0] = r[1] = r[2] = r[3] = 0.0f;
+                r[4] = r[5] = r[6] = 0.0f;
+                r[7] = 1.0f;
+                r[8] = r[9] = r[10] = r[11] = 1.0f;
+            }
+            for (size_t k = 0; k < fx.recorded.size(); ++k)
+            {
+                float* r = reinterpret_cast<float*>(base.data() + size_t(fx.recorded[k]) * integ::kGameBoneStride);
+                const float* v = &fr.rec[k * 7];
+                r[0] = v[0], r[1] = v[1], r[2] = v[2];
+                r[4] = v[3], r[5] = v[4], r[6] = v[5], r[7] = v[6];
+            }
+            aim::Xf mIn[aim::kMaxFkBones], mOut[aim::kMaxFkBones];
+            aim::ComputeModel(base.data(), n, rig.parents, n, mIn);
+            auto twistX = [&](const aim::Xf* aM) {
+                const math::Quat q = math::QuatMul(math::QuatInv(aM[rig.spine3].q), aM[rig.head].q);
+                const float s = q.w < 0.0f ? -1.0f : 1.0f;
+                return 2.0f * std::atan2(s * q.x, s * q.w) * kR2D;
+            };
+            Vec3 axis{};
+            if (!NeckTwistAxis(mIn, rig, axis) || !(axis.x > 0.5f))
+                ++axisNotX;
+            const float twIn = std::fabs(twistX(mIn));
+            for (int side = -1; side <= 1; side += 2)
+                for (int chestOn = 0; chestOn < 2; ++chestOn)
+                {
+                    Layer l;
+                    Input in;
+                    in.targetValid = true;
+                    const float y = side * 100.0f / kR2D;
+                    in.target = mIn[rig.head].p + Vec3{-std::sin(y) * 5.0f, std::cos(y) * 5.0f, 0.0f};
+                    in.weight = 1.0f;
+                    in.chest = 0.5f;
+                    in.gate = 1.0f;
+                    in.chestAllowed = chestOn != 0;
+                    in.dt = 1.0f / 60.0f;
+                    for (int i = 0; i < 90; ++i)
+                    {
+                        work = base;
+                        l.Run(work.data(), n, rig, in, out);
+                    }
+                    aim::ComputeModel(work.data(), n, rig.parents, n, mOut);
+                    const float tw = std::fabs(twistX(mOut));
+                    worstTwist = std::fmax(worstTwist, tw);
+                    worstOver = std::fmax(worstOver, tw - std::fmax(kNeckTwistMaxDeg, twIn));
+                    if (tw > kNeckTwistMaxDeg - 2.0f)
+                        ++nearLimit;
+                }
+            ++poses;
+        }
+        Expect("replay, neck twist pass: gaze 100 deg to either side held on recorded poses -> Head-vs-Spine3 twist within the 60 deg limit "
+               "(+0.5) or the pose's own twist; the twist axis is the bone axis X of this rig; the limit is reached",
+               poses > 10 && axisNotX == 0 && worstOver <= 0.5 && nearLimit > 0,
+               Fmt("poses %g, worst twist %.2f deg, worst over the limit %.2f, at the limit %g", poses, worstTwist, worstOver, nearLimit));
+    }
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
