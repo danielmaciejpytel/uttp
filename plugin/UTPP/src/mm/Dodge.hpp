@@ -60,7 +60,7 @@ inline constexpr float kRate = UTPP_DODGE_RATE;
 #define UTPP_DODGE_BLEND_IN 0.20f
 #endif
 inline constexpr float kBlendInS = UTPP_DODGE_BLEND_IN;
-inline constexpr float kBlendOutS = 0.20f;     // inertialized hand-back to the motion search
+inline constexpr float kBlendOutS = 0.30f;     // inertialized hand-back to the motion search
 inline constexpr float kHysteresisDeg = 10.0f; // a sector border must be crossed by this much to change the sector
 inline constexpr float kImpulseRiseMps = 1.5f; // the impulse feed: speed above the first feed's speed by this much
 inline constexpr float kImpulseWaitS = 0.06f;  // without a rise the direction is read after this much dodge time
@@ -231,6 +231,8 @@ inline std::vector<uint8_t> UpperBodyMask(uint32_t aN, int32_t aTop, ParentFn&& 
 
 // feed seconds before the clip end over which the upper body moves from the held pose to the motion pose underneath
 inline constexpr float kUpperReleaseS = 0.15f;
+// feed seconds over which the release target fades to a new clip / time of the motion pose underneath (no cut in the target)
+inline constexpr float kTargetFadeS = 0.10f;
 
 // Weight of the motion pose underneath for the upper body at clip time aClipTime of a clip aLength long (clip seconds):
 // 0 until kUpperReleaseS (feed time) before the end, then a smoothstep to 1 at the end.

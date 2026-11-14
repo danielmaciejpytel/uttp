@@ -186,6 +186,7 @@ struct Frame
     motiondriver::DodgeProbe probe;
     float offset[3] = {}; // visual - capsule (x, y m, yaw rad), capsule axes
     int32_t shown = -1;   // db clip, or -(sector + 2) on a dodge clip frame
+    int32_t under = -1;   // db clip of the motion search (also under a dodge clip)
     std::vector<float> pose;
 };
 
@@ -288,7 +289,8 @@ std::vector<Frame> Replay(const std::vector<Row>& aRows, const Db& aDb)
         mm::integ::PoseSnapshot s = BaseLikeSnapshot(kRigPtr, aDb.bones);
         fr.applied = motiondriver::ApplyToSnapshot(s);
         fr.pose.assign(s.pose, s.pose + size_t(aDb.bones) * 7);
-        fr.shown = fr.probe.active ? -(fr.probe.sector + 2) : PickClip(motiondriver::Status());
+        fr.under = PickClip(motiondriver::Status());
+        fr.shown = fr.probe.active ? -(fr.probe.sector + 2) : fr.under;
         out.push_back(std::move(fr));
     }
     return out;
@@ -364,6 +366,9 @@ struct Metrics
     float offsetEnd = 0, offsetEndBase = 0; // visual - capsule at the end of the hand-back blend (largest over the dodges)
     float legMaxDeg = 0, hipsExcess = -1e9f, endsExcess = -1e9f, hipsEntry = 0, hipsExit = 0, endsEntry = 0, endsExit = 0;
     float hipsHeightEntry = 0, hipsHeightExit = 0; // largest single-frame hips height step (m)
+    float hipsHeightExcess = -1e9f;                // largest height step above the shown clip's / motion pose's own (m)
+    // hands (model, deg): largest single-frame step over the release + hand-back / the entry window, the same without the clips, excess
+    float releaseHands = 0, releaseHandsBase = 0, releaseHandsExcess = -1e9f, entryHands = 0, entryHandsBase = 0, entryHandsExcess = -1e9f;
     uint32_t sectorBits = 0;                       // bit s: a clip of sector s was shown
     float upperMaxDeg = 0;                         // arms / head vs the frame before the clip, clip frames before the release
     int upperFrames = 0;                           // clip frames measured for upperMaxDeg
@@ -491,25 +496,122 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
                 Model(aWith[i].pose.data(), aDb, q1, p1);
                 h = std::fmax(h, Dist(p0[aB.hips], p1[aB.hips]));
                 hz = std::fmax(hz, std::fabs(p1[aB.hips].z - p0[aB.hips].z));
-                float e1 = 0.0f;
-                for (int x : aB.ends)
-                    e1 = std::fmax(e1, AngleDeg(q0[x], q1[x]));
+                float e1 = 0.0f, ek[4] = {};
+                for (int k = 0; k < 4; ++k)
+                {
+                    ek[k] = AngleDeg(q0[aB.ends[k]], q1[aB.ends[k]]);
+                    e1 = std::fmax(e1, ek[k]);
+                }
                 en = std::fmax(en, e1);
                 if (aPrint && std::getenv("UTPP_DODGE_TRACE"))
-                    std::printf("STEP %s t=%.3f active %d start %d handback %d clipT %.3f hips (%.3f %.3f %.3f) step %.1f cm ends %.1f deg\n",
-                                aTag.c_str(), aWith[i].t, aWith[i].probe.active, aWith[i].probe.start, aWith[i].probe.handback,
-                                aWith[i].probe.clipTime, p1[aB.hips].x, p1[aB.hips].y, p1[aB.hips].z,
-                                Dist(p0[aB.hips], p1[aB.hips]) * 100.0f, e1);
+                {
+                    float eb = -1.0f; // the same step without the clips
+                    if (i < aBase.size())
+                    {
+                        Model(aBase[i - 1].pose.data(), aDb, qs, ps);
+                        Model(aBase[i].pose.data(), aDb, qc, pc);
+                        for (int x : aB.ends)
+                            eb = std::fmax(eb, AngleDeg(qs[x], qc[x]));
+                    }
+                    std::printf("STEP %s t=%.3f dt %.4f active %d start %d handback %d clipT %.3f shown %d under %d hips (%.3f %.3f %.3f) step %.1f cm ends %.1f deg "
+                                "(feet %.1f %.1f hands %.1f %.1f) without clips: shown %d ends %.1f deg\n",
+                                aTag.c_str(), aWith[i].t, aWith[i].dt, aWith[i].probe.active, aWith[i].probe.start, aWith[i].probe.handback,
+                                aWith[i].probe.clipTime, aWith[i].shown, aWith[i].under, p1[aB.hips].x, p1[aB.hips].y, p1[aB.hips].z,
+                                Dist(p0[aB.hips], p1[aB.hips]) * 100.0f, e1, ek[0], ek[1], ek[2], ek[3], i < aBase.size() ? aBase[i].shown : -9, eb);
+                }
             }
         };
         float hIn, eIn, hOut, eOut, zIn, zOut;
-        steps(e.start, e.start + 6, hIn, eIn, zIn);
         size_t exitEnd = e.end;
         while (exitEnd + 1 < aWith.size() && aWith[exitEnd + 1].t - aWith[e.end].t <= dodge::kBlendOutS + 0.05f)
             ++exitEnd;
+        if (aPrint && std::getenv("UTPP_DODGE_TRACE")) // the whole episode, frame by frame
+            steps(e.start, exitEnd, hIn, eIn, zIn);
+        const bool print = aPrint;
+        aPrint = false;
+        steps(e.start, e.start + 6, hIn, eIn, zIn);
         steps(e.end, exitEnd, hOut, eOut, zOut);
+        aPrint = print;
         m.hipsHeightEntry = std::fmax(m.hipsHeightEntry, zIn);
         m.hipsHeightExit = std::fmax(m.hipsHeightExit, zOut);
+        // hips height step added by the entry / hand-back: each frame's height step minus the larger of the shown clip's own (both
+        // frames on the clip) and the motion pose's own (the replay without the clips, same frames)
+        auto heightExcess = [&](size_t a0, size_t a1) {
+            float x = -1e9f;
+            std::vector<float> ca(size_t(aDb.bones) * 7), cb(ca.size());
+            for (size_t i = std::max<size_t>(a0, 1); i <= a1 && i < aWith.size(); ++i)
+            {
+                Model(aWith[i - 1].pose.data(), aDb, q0, p0);
+                Model(aWith[i].pose.data(), aDb, q1, p1);
+                const float dz = std::fabs(p1[aB.hips].z - p0[aB.hips].z);
+                float own = 0.0f;
+                const Frame &f0 = aWith[i - 1], &f1 = aWith[i];
+                if (f0.probe.active && f1.probe.active && f0.probe.sector == f1.probe.sector && !f1.probe.start)
+                {
+                    dodge::SampleDodge(aC, static_cast<dodge::Sector>(f0.probe.sector), f0.probe.clipTime, ca.data());
+                    dodge::SampleDodge(aC, static_cast<dodge::Sector>(f1.probe.sector), f1.probe.clipTime, cb.data());
+                    Model(ca.data(), aDb, qs, ps);
+                    Model(cb.data(), aDb, qc, pc);
+                    own = std::fabs(pc[aB.hips].z - ps[aB.hips].z);
+                }
+                if (i < aBase.size())
+                {
+                    Model(aBase[i - 1].pose.data(), aDb, qs, ps);
+                    Model(aBase[i].pose.data(), aDb, qc, pc);
+                    own = std::fmax(own, std::fabs(pc[aB.hips].z - ps[aB.hips].z));
+                }
+                x = std::fmax(x, dz - own);
+            }
+            return x;
+        };
+        m.hipsHeightExcess = std::fmax(m.hipsHeightExcess, std::fmax(heightExcess(e.start, e.start + 6), heightExcess(e.end, exitEnd)));
+        // hands (model) over the upper-body release and the hand-back: largest single-frame step with the clips against the largest of
+        // the replay without the clips over the same frames
+        {
+            const float len = aC.length[static_cast<int>(e.sector < 0 ? 0 : e.sector)];
+            float with = 0.0f, base = 0.0f;
+            for (size_t i = e.start + 1; i <= exitEnd && i < aWith.size(); ++i)
+            {
+                const Frame& f = aWith[i];
+                if (f.probe.active && f.probe.clipTime <= len - dodge::kUpperReleaseS * dodge::kRate)
+                    continue;
+                Model(aWith[i - 1].pose.data(), aDb, q0, p0);
+                Model(f.pose.data(), aDb, q1, p1);
+                for (int k = 2; k < 4; ++k)
+                    with = std::fmax(with, AngleDeg(q0[aB.ends[k]], q1[aB.ends[k]]));
+                if (i < aBase.size())
+                {
+                    Model(aBase[i - 1].pose.data(), aDb, qs, ps);
+                    Model(aBase[i].pose.data(), aDb, qc, pc);
+                    for (int k = 2; k < 4; ++k)
+                        base = std::fmax(base, AngleDeg(qs[aB.ends[k]], qc[aB.ends[k]]));
+                }
+            }
+            m.releaseHands = std::fmax(m.releaseHands, with);
+            m.releaseHandsBase = std::fmax(m.releaseHandsBase, base);
+            m.releaseHandsExcess = std::fmax(m.releaseHandsExcess, with - base);
+        }
+        // hands (model) on the entry window: the same against the replay without the clips
+        {
+            float with = 0.0f, base = 0.0f;
+            for (size_t i = e.start + 1; i <= e.start + 6 && i < aWith.size(); ++i)
+            {
+                Model(aWith[i - 1].pose.data(), aDb, q0, p0);
+                Model(aWith[i].pose.data(), aDb, q1, p1);
+                for (int k = 2; k < 4; ++k)
+                    with = std::fmax(with, AngleDeg(q0[aB.ends[k]], q1[aB.ends[k]]));
+                if (i < aBase.size())
+                {
+                    Model(aBase[i - 1].pose.data(), aDb, qs, ps);
+                    Model(aBase[i].pose.data(), aDb, qc, pc);
+                    for (int k = 2; k < 4; ++k)
+                        base = std::fmax(base, AngleDeg(qs[aB.ends[k]], qc[aB.ends[k]]));
+                }
+            }
+            m.entryHands = std::fmax(m.entryHands, with);
+            m.entryHandsBase = std::fmax(m.entryHandsBase, base);
+            m.entryHandsExcess = std::fmax(m.entryHandsExcess, with - base);
+        }
         m.hipsEntry = std::fmax(m.hipsEntry, hIn);
         m.hipsExit = std::fmax(m.hipsExit, hOut);
         m.endsEntry = std::fmax(m.endsEntry, eIn);
@@ -762,7 +864,8 @@ int main(int argc, char** argv)
         Check(m.endsExcess <= 6.0f, tag + ": feet / hands single-frame step at entry / hand-back within 6 deg of the clip's own",
               F("entry %.1f exit %.1f deg, excess %.1f deg", m.endsEntry, m.endsExit, m.endsExcess));
         Check(m.changesMax <= 3.0f, tag + ": shown clip changes per second over each dodge <= 3.0", F("%.2f (without the clips %.2f)", m.changesMax, m.changesMaxBase));
-        std::printf("INFO %s hips height step entry %.1f exit %.1f cm\n", tag.c_str(), m.hipsHeightEntry * 100.0f, m.hipsHeightExit * 100.0f);
+        Check(m.hipsHeightExcess <= 0.03f, tag + ": hips height step at entry / hand-back within 3 cm of the shown clip's / motion pose's own",
+              F("entry %.1f exit %.1f cm, excess %.1f cm", m.hipsHeightEntry * 100.0f, m.hipsHeightExit * 100.0f, m.hipsHeightExcess * 100.0f));
         std::printf("INFO %s visual - capsule offset over the dodges: max %.1f cm with the clips, %.1f cm without; at the end of the hand-back "
                     "%.1f cm with, %.1f cm without; planted-foot slide %.1f cm; hand-back vs capsule stop max %.3f s\n",
                     tag.c_str(), m.offsetMax * 100.0f, m.offsetMaxBase * 100.0f, m.offsetEnd * 100.0f, m.offsetEndBase * 100.0f, m.slideCm,
@@ -780,27 +883,89 @@ int main(int argc, char** argv)
                   std::to_string(r.outcomeOk) + " / " + std::to_string(r.dodges) + " dodges, sectors " + std::to_string(r.sectorOk) + " / " +
                       std::to_string(r.clips));
             Check(r.legMaxDeg < 3.0f, t + ": legs follow the picked clip", F("max %.2f deg", r.legMaxDeg));
-            // a blend moves the pose at a speed, so its single-frame step grows with the frame time (measured: 2.0 / 5.1 / 9.4 cm and
-            // 14 / 25 / 44 deg at 120 / 60 / 30 Hz): below 60 Hz the limits are per 1/60 s of frame time; a step that does not shrink
-            // with the frame time (a cut) still fails at 60 and 120 Hz
+            // a blend moves the pose at a speed, so its single-frame step grows with the frame time: below 60 Hz the limits are per
+            // 1/60 s of frame time; a step that does not shrink with the frame time (a cut) still fails at 60 and 120 Hz
             const float perFrame = std::fmax(1.0f, 60.0f / hz);
             Check(r.hipsExcess <= 0.03f * perFrame, t + ": hips entry / hand-back steps within 3 cm per 1/60 s of the clip's own",
                   F("entry %.1f exit %.1f cm (excess %.1f)", r.hipsEntry * 100, r.hipsExit * 100, r.hipsExcess * 100));
-            // OPEN at 30 Hz: the feet / hands step of the hand-back grows faster than the frame time there (excess 16.8 deg on two of the
-            // three recordings against 12); it is printed, not checked, until the hand-back is fixed. 60 and 120 Hz are checked.
-            if (hz >= 60.0f)
-                Check(r.endsExcess <= 6.0f * perFrame, t + ": feet / hands entry / hand-back steps within 6 deg per 1/60 s of the clip's own",
-                      F("entry %.1f exit %.1f deg (excess %.1f)", r.endsEntry, r.endsExit, r.endsExcess));
-            else
-                std::printf("INFO %s OPEN feet / hands entry %.1f exit %.1f deg, excess %.1f deg (%.0f deg per frame at this rate not met when above)\n",
-                            t.c_str(), r.endsEntry, r.endsExit, r.endsExcess, 6.0f * perFrame);
+            Check(r.endsExcess <= 6.0f * perFrame, t + ": feet / hands entry / hand-back steps within 6 deg per 1/60 s of the clip's own",
+                  F("entry %.1f exit %.1f deg (excess %.1f)", r.endsEntry, r.endsExit, r.endsExcess));
+            std::printf("INFO %s hands over the release and hand-back: largest step %.1f deg (without the clips %.1f)\n", t.c_str(), r.releaseHands,
+                        r.releaseHandsBase);
             // the resampled feed can change clips more often than 3.0 / s without any dodge clip; the dodge must not add to that
             Check(r.changesMax <= std::fmax(3.0f, r.changesMaxBase), t + ": shown clip changes per second <= 3.0, or no more than without the clips",
                   F("%.2f (without the clips %.2f)", r.changesMax, r.changesMaxBase));
-            std::printf("INFO %s hips height step entry %.1f exit %.1f cm\n", t.c_str(), r.hipsHeightEntry * 100.0f, r.hipsHeightExit * 100.0f);
+            Check(r.hipsHeightExcess <= 0.03f * perFrame, t + ": hips height step at entry / hand-back within 3 cm per 1/60 s of the shown clip's / motion pose's own",
+                  F("entry %.1f exit %.1f cm, excess %.1f cm", r.hipsHeightEntry * 100.0f, r.hipsHeightExit * 100.0f, r.hipsHeightExcess * 100.0f));
             std::printf("INFO %s offset max %.1f cm (without %.1f), end %.1f cm (without %.1f), slide %.1f cm, hand-back vs stop %.3f s\n",
                         t.c_str(), r.offsetMax * 100.0f, r.offsetMaxBase * 100.0f, r.offsetEnd * 100.0f, r.offsetEndBase * 100.0f, r.slideCm,
                         r.stopLagMax);
+        }
+        // a drawn weapon / aiming: the weapon layers act on top of the dodge pose (the held upper body is the base under them); the hands
+        // at the entry, over the release and the hand-back step no more than 6 deg beyond the same replay without the clips
+        struct Ov
+        {
+            int32_t pose, aim;
+            const char* name;
+        };
+        for (const Ov& o : {Ov{1, 1, "rifle ready"}, Ov{1, 2, "rifle aiming"}, Ov{3, 2, "pistol two-handed aiming"}})
+        {
+            const std::string t = tag + " " + o.name;
+            Check(Session(rec.index, missing, db), t + ": session without the file");
+            motiondriver::SetOverlayInputs(o.pose, o.aim, false, false);
+            const std::vector<Frame> b = Replay(rows, db);
+            Check(Session(rec.index, with, db), t + ": session with the file");
+            motiondriver::SetOverlayInputs(o.pose, o.aim, false, false);
+            const std::vector<Frame> w = Replay(rows, db);
+            motiondriver::SetOverlayInputs(0, 0, false, false);
+            const Metrics r = Analyse(t, w, b, clips, db, bn, std::getenv("UTPP_DODGE_TRACE") != nullptr);
+            Check(r.dodges == 4 && r.outcomeOk == r.dodges && r.sectorOk == r.clips, t + ": the same clips and sectors as without the weapon",
+                  F("%.0f / %.0f dodges, sectors %.0f / %.0f", r.outcomeOk, r.dodges, r.sectorOk, r.clips));
+            // the weapon stance also moves the legs away from the clip (printed: rifle 15 - 19.5 deg, two-handed pistol 4.6 - 5.1 deg)
+            std::printf("INFO %s legs vs the clip after the entry blend: max %.2f deg\n", t.c_str(), r.legMaxDeg);
+            Check(r.entryHandsExcess <= 6.0f && r.releaseHandsExcess <= 6.0f,
+                  t + ": hands at the entry / over the release and hand-back within 6 deg of the replay without the clips",
+                  F("entry %.1f (without %.1f) release + hand-back %.1f (without %.1f) deg", r.entryHands, r.entryHandsBase, r.releaseHands,
+                    r.releaseHandsBase));
+        }
+        // outside the gate nothing is written: the same feed with every dodge crouched (Crouch 3 for 0.6 s around each dodge, the dodge
+        // feeds stay Dodge 7: the stance holds through them) or in the air (the dodge feeds are DodgeAir 22) shows no clip and the output
+        // is byte-identical with and without the clip file
+        for (int kind = 0; kind < 2; ++kind)
+        {
+            std::vector<Row> v = rows;
+            auto setDetail = [](Row& aRow, int aDetail) {
+                aRow.psm = (aRow.psm & ~(0xFFu << 16)) | (static_cast<uint32_t>(aDetail + 1) << 16);
+            };
+            for (size_t i = 0; i < v.size(); ++i)
+            {
+                if (rows[i].detail != 7)
+                {
+                    bool near = false;
+                    for (size_t k = 0; k < rows.size() && !near; ++k)
+                        near = rows[k].detail == 7 && std::fabs(rows[k].t - rows[i].t) <= 0.6f;
+                    if (kind == 0 && near)
+                        setDetail(v[i], 3);
+                }
+                else if (kind == 1)
+                    setDetail(v[i], 22);
+            }
+            const std::string t = tag + (kind == 0 ? " crouched" : " in the air");
+            Check(Session(rec.index, missing, db), t + ": session without the file");
+            const std::vector<Frame> b = Replay(v, db);
+            Check(Session(rec.index, with, db), t + ": session with the file");
+            const uint32_t clips0 = motiondriver::TestDodgeProbe().clips;
+            const std::vector<Frame> w = Replay(v, db);
+            int shown = 0, applied = 0;
+            for (const Frame& f : w)
+            {
+                shown += f.probe.active ? 1 : 0;
+                applied += f.applied ? 1 : 0;
+            }
+            Check(shown == 0 && motiondriver::TestDodgeProbe().clips == clips0, t + ": no dodge clip is shown",
+                  F("%.0f clip frames, %.0f clips started", shown, motiondriver::TestDodgeProbe().clips - clips0));
+            Check(applied > static_cast<int>(w.size()) * 9 / 10 && SamePoses(w, b, w.size()),
+                  t + ": the output is byte-identical with and without the clip file", F("%.0f / %.0f frames applied", applied, w.size()));
         }
         // side dodges: the recorded back dodge with its impulse turned 90 degrees against the body (left / right), recorded rate
         for (float turnDeg : {90.0f, -90.0f})
@@ -826,6 +991,8 @@ int main(int argc, char** argv)
                   F("max %.2f deg over %.0f frames", r.upperMaxDeg, r.upperFrames));
             Check(r.hipsExcess <= 0.03f && r.endsExcess <= 6.0f, t + ": entry / hand-back steps within 3 cm / 6 deg of the clip's own",
                   F("hips entry %.1f exit %.1f cm, ends entry %.1f exit %.1f deg", r.hipsEntry * 100, r.hipsExit * 100, r.endsEntry, r.endsExit));
+            Check(r.hipsHeightExcess <= 0.03f, t + ": hips height step at entry / hand-back within 3 cm of the shown clip's / motion pose's own",
+                  F("entry %.1f exit %.1f cm, excess %.1f cm", r.hipsHeightEntry * 100.0f, r.hipsHeightExit * 100.0f, r.hipsHeightExcess * 100.0f));
             Check(r.changesMax <= 3.0f, t + ": shown clip changes per second <= 3.0", F("%.2f (without the clips %.2f)", r.changesMax, r.changesMaxBase));
             Dump(t, "without", b, db);
             Dump(t, "with", w, db);

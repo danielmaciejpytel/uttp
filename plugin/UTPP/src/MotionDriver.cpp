@@ -109,6 +109,7 @@ struct Bundle
     std::vector<BoneTransform> dodgeRaw;
     std::vector<uint8_t> dodgeUpper;
     std::vector<BoneTransform> dodgeHeld;
+    std::vector<BoneTransform> dodgeRelease, dodgeReleasePrev; // per-frame scratch: the upper-body release target (DodgeState::releaseClip)
     bool dodgeOk = false;
     std::string dodgeErr = "missing";
     motion::ChooserMatcher matcher;
@@ -288,6 +289,10 @@ struct DodgeState
     float noContactLeft = 0.0f;
     uint32_t clips = 0;
     bool held = false; // Bundle::dodgeHeld holds the upper body of the playing dodge
+    // the upper-body release target follows the motion pose under the dodge (clip, clip time); when the motion search moves to another
+    // clip or time, the previous timeline plays on (prevClip / prevTime) and the target fades to the new one over dodge::kTargetFadeS
+    int32_t releaseClip = -1, prevClip = -1;
+    float releaseTime = 0.0f, prevTime = 0.0f, targetFade = 1.0f;
 };
 DodgeState g_dodgeSt;
 static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "dodge::SampleDodge writes 7 floats per bone");
@@ -1056,6 +1061,7 @@ void TravResetLocked(bool aDropPending)
     g_trav.noContactLeft = 0.0f;
     g_dodgeSt.player.Reset(); // a dodge clip never outlives a disable / body switch / bundle swap
     g_dodgeSt.held = false;
+    g_dodgeSt.releaseClip = -1;
     g_dodgeSt.noContactLeft = 0.0f;
     g_trav.player.reset();
     g_trav.plan = motiontrav::Plan{};
@@ -1327,6 +1333,8 @@ std::unique_ptr<Bundle> LoadBundle(Body aBody, const Paths& aPaths)
         {
             b->dodgeRaw.assign(n, BoneTransform{});
             b->dodgeHeld.assign(n, BoneTransform{});
+            b->dodgeRelease.assign(n, BoneTransform{});
+            b->dodgeReleasePrev.assign(n, BoneTransform{});
             int32_t spine3 = -1;
             for (uint32_t i = 0; i < n; ++i)
                 if (b->db.BoneName(i) == "Spine3")
@@ -4850,6 +4858,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         {
             g_dodgeSt.player.Reset(); // the clip clock never resumes over a gap in v2 ownership
             g_dodgeSt.held = false;
+            g_dodgeSt.releaseClip = -1;
         }
         dodge::Input di;
         di.dt = dt;
@@ -5020,7 +5029,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         // the drawn (visual) axes: the visual - capsule offset does not grow through the dodge and its damping pulls it in.
         g_dodgeSt.frame = true;
         // the bones above Spine3 keep the base pose shown on the frame before the clip (taken once per dodge): the entry blend moves
-        // the hips, spine and legs only; before the clip end they move to the motion pose underneath (the hand-back target)
+        // the hips, spine and legs only; before the clip end they move to the motion pose underneath (the hand-back target), which fades
+        // over dodge::kTargetFadeS when the motion search moves to another clip or time (DodgeState::releaseClip)
         if (!g_dodgeSt.held)
         {
             const std::span<const BoneTransform> shown = b.eval.BasePose();
@@ -5031,10 +5041,38 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 #if UTPP_DODGE_DRIVER_MUTATION != 2
         if (g_dodgeSt.held)
         {
-            const bool live = r.clip >= 0 && r.frame < b.db.NumFrames();
+            const float release = dodge::UpperBodyRelease(dodgeFr.clipTime, b.dodgeClips.length[static_cast<int>(dodgeFr.sector)]);
+            DodgeState& ds = g_dodgeSt;
+            if (dodgeFr.start || !(release > 0.0f) || r.clip < 0)
+                ds.releaseClip = ds.prevClip = -1;
+            else
+            {
+                if (ds.releaseClip >= 0 && (r.clip != ds.releaseClip || std::fabs(r.clipTime - (ds.releaseTime + dt)) > 1.5f * dt + 1e-4f))
+                {
+                    // the motion search moved: the old timeline plays on and the target fades to the new one
+                    ds.prevClip = ds.releaseClip;
+                    ds.prevTime = ds.releaseTime;
+                    ds.targetFade = 0.0f;
+                }
+                ds.releaseClip = r.clip;
+                ds.releaseTime = r.clipTime;
+                ds.prevTime += dt;
+                ds.targetFade = std::fmin(1.0f, ds.targetFade + (dodge::kTargetFadeS > 0.0f ? dt / dodge::kTargetFadeS : 1.0f));
+            }
+            const uint32_t nb = static_cast<uint32_t>(b.dodgeRelease.size());
+            const bool live = ds.releaseClip >= 0 && adapter::SamplePose(b.db, ds.releaseClip, ds.releaseTime, b.dodgeRelease.data(), nb);
+            float* target = reinterpret_cast<float*>(b.dodgeRelease.data());
+            if (live && ds.prevClip >= 0 && ds.targetFade < 1.0f &&
+                adapter::SamplePose(b.db, ds.prevClip, ds.prevTime, b.dodgeReleasePrev.data(), nb))
+            {
+                // in place: the masked bones of the old timeline's pose move towards the new target
+                const float u = ds.targetFade;
+                float* prev = reinterpret_cast<float*>(b.dodgeReleasePrev.data());
+                dodge::KeepUpperBody(b.dodgeUpper, prev, prev, target, u * u * (3.0f - 2.0f * u));
+                target = prev;
+            }
             dodge::KeepUpperBody(b.dodgeUpper, reinterpret_cast<const float*>(b.dodgeHeld.data()), reinterpret_cast<float*>(b.dodgeRaw.data()),
-                                 live ? reinterpret_cast<const float*>(b.db.Pose(r.frame)) : nullptr,
-                                 dodge::UpperBodyRelease(dodgeFr.clipTime, b.dodgeClips.length[static_cast<int>(dodgeFr.sector)]));
+                                 live ? target : nullptr, release);
         }
 #endif
         motion::MatchResult mr = r;
