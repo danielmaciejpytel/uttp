@@ -792,6 +792,8 @@ uint64_t g_vtBase[12] = {}; // vehtrans counters at the mount cut: the ride line
 // Fill of a third-person exit (vehtrans::ExitWantsFill), counter snapshot at the mount cut (EXITDIAG end line: this ride's deltas)
 bool g_vtLastRideTpp = false;
 bool g_vtExitFillPending = false;
+// that exit waits for the live capture of the shown pose (vehtrans::BeginLiveExitFrom): MM stays at weight 0 until it is handed in
+bool g_vtExitFillLive = false;
 uint64_t g_vtExitsFilledNoCapture = 0;
 uint64_t g_vtNoCapBase = 0, g_vtFillBase = 0;
 vehtrans::CounterSnap g_vtExitBase{};
@@ -2574,7 +2576,7 @@ void ResetSessionStateLocked()
     vehtrans::Abort(); // vehicle batch W1 P2
     g_vtMounted = g_vtExitPending = g_vtWorldOk = g_vtPrevPosOk = g_vtRide = false;
     g_vtMounts = g_vtExitsHanded = g_vtExitsNoCapture = g_vtAborts = g_vtRearmsKept = 0;
-    g_vtLastRideTpp = g_vtExitFillPending = false;
+    g_vtLastRideTpp = g_vtExitFillPending = g_vtExitFillLive = false;
     g_vtExitSeedFeed = 0;
     g_vtExitsFilledNoCapture = g_vtNoCapBase = g_vtFillBase = 0;
     g_vtExitBase = vehtrans::SnapCounters();
@@ -3557,7 +3559,7 @@ void VtAbortLocked()
     if (g_vtMounted || g_vtExitPending || vehtrans::HandInActive() || vehtrans::Wanted())
         ++g_vtAborts;
     vehtrans::Abort();
-    g_vtMounted = g_vtExitPending = false;
+    g_vtMounted = g_vtExitPending = g_vtExitFillLive = false;
 }
 
 // CAR-1 EXITDIAG (vehicle batch; always on, not per frame): from the vehicle-bit falling edge for kExitDiagSeconds or until MM
@@ -3971,6 +3973,7 @@ void Feed(const FeedInput& aRawIn)
             g_exitDiagT = 0.0f;
             g_exitDiagLines = 0;
             g_exitDiagKey[0] = '\0';
+            g_vtExitFillLive = false;
             // vehicle batch W1 P2 (MOTO-6 / CAR-1 step 5): a fresh capture of the game's exit pose -> MM at full weight at once
             // (after the hold decision below), handed in from the captured pose by HandInBlend in PublishLocked
             if (g_vtRide) // review fix: also after an abort earlier in the ride (the capture ran again from the next feed)
@@ -4217,14 +4220,24 @@ void Feed(const FeedInput& aRawIn)
         g_vtExitFillPending = false;
         if (g_effGate == 0 && aIn.tppActive)
         {
-            g_weight.Fill();
-            ++g_vtExitsFilledNoCapture;
+            // no ride capture: the pose the player sees here is the game's post-vehicle pose (MM at weight 0). MM takes over from a live
+            // capture of that pose (hand-in), never at weight 1 over it in one frame (game log 2026-11-14 02:21:45: the hands stepped 72 deg,
+            // the pelvis 65 cm). The current snapshot supplies the capture map (the ride's map may match no animation frame).
+            static PoseSnapshot map; // game thread, g_mutex held (large: not on the stack)
+            map = g_snap;
+            for (uint32_t b = 0; b < map.firstBone && b < kMaxMMBones; ++b)
+                if (map.gameIndex[b] < 0 && g_readMap.ok)
+                    map.gameIndex[b] = g_readMap.gameIndex[b];
+            g_vtExitFillLive = vehtrans::BeginLiveExitFrom(map, now);
+            if (g_vtExitFillLive)
+                g_weight.Cut(); // weight 0 (the shown pose) until the capture is handed in; without a capture: the normal reopen
         }
     }
     else if (vehtrans::LiveExitPending())
     {
         // the live exit capture (BeginLiveExit): MM stays on the weight ramp (game pose visible) until the animation thread delivered the
-        // game pose of a post-edge frame; then MM at weight 1 + the inertialized offset game pose -> MM (the ordinary hand-in)
+        // game pose of a post-edge frame; then MM at weight 1 + the inertialized offset game pose -> MM (the ordinary hand-in). The exit
+        // without a ride capture (g_vtExitFillLive) keeps the weight at 0 while it waits.
         const int live = vehtrans::PromoteLiveExit(now);
         if (live < 0)
             vehtrans::EndRearmHold(); // no capture within kLiveExitWaitSeconds: MM again (no-op without a re-arm hold)
@@ -4236,12 +4249,21 @@ void Feed(const FeedInput& aRawIn)
             {
                 g_weight.Fill();
                 ++g_vtExitsHanded;
-                ++g_jumpOutFills;
+                if (g_vtExitFillLive)
+                    ++g_vtExitsFilledNoCapture;
+                else
+                    ++g_jumpOutFills;
             }
             else
                 VtAbortLocked();
         }
+        else if (live == 0 && g_vtExitFillLive)
+            g_weight.Cut();
+        if (live != 0)
+            g_vtExitFillLive = false;
     }
+    else
+        g_vtExitFillLive = false;
     UpdateAirLocked(aIn, psmDetail, dt, cx, cy, strafeS); // AIR HOLD stage (H1): after the hold block, before the matcher block
     // B2 strafe: AimWalk (unsupported locomotion state 0) is a standing aim - the legs query the stand clip set, not the last
     // stance (after a crouch the 0.6.2 mask path kept the crouch set while standing; crouch aim keeps locoState 2)

@@ -124,6 +124,14 @@ int64_t Publish(const Body& b,bool tpp,int bodyType,float weight,int64_t offset)
     g_mmPose.Publish(snap);
     return now.QuadPart;
 }
+// The same on the test's running clock: the snapshot stamp and the camera stamp are exactly the given ticks (no second clock read
+// between the caller's time and the stamp, so a descheduled test thread cannot move the stamp past the call time).
+void PublishAt(const Body& b,bool tpp,int bodyType,float weight,int64_t publishTicks,int64_t cameraTicks)
+{
+    mm::integ::PoseSnapshot snap;snap.rig=b.rig;snap.weight=weight;snap.bodyType=bodyType;snap.publishTicks=publishTicks;
+    g_mmPose.Publish(snap);
+    g_hot.perspectiveWrite.Publish(tpp,cameraTicks);
+}
 mm::mappingcycle::Receipt ReceiptAt(int64_t now,bool complete)
 {
     mm::mappingcycle::Receipt r;r.status=mm::mappingcycle::ConsumeStatus::Complete;r.complete=complete;
@@ -686,8 +694,7 @@ void ZeroWeightWriters(Body& man,Body& woman,const fs::path& work)
             for(uint32_t w=0;w<cw::kWriterCount;++w)if(writers&(1u<<w))cw::Mark(cw::Writer(w));
             if(window)cw::MarkZeroWindow(vehicle);
             g_hot.mmActive.store(false);
-            LARGE_INTEGER q{};QueryPerformanceCounter(&q);
-            Publish(R,tpp,R.bodyType,0.f,now-q.QuadPart-1);g_hot.perspectiveWrite.Publish(tpp,now);
+            PublishAt(R,tpp,R.bodyType,0.f,now-1,now);
             const bool ok=Call(R,bones,R.count,ReceiptAt(now,true),now);
             g_hot.mmActive.store(true);
             return ok;
@@ -768,7 +775,7 @@ void ZeroWeightWriters(Body& man,Body& woman,const fs::path& work)
         {
             bones=writtenIn0;cw::Begin();cw::MarkPlayerCall();cw::Mark(cw::kDriver);
             const int64_t now=advance(hz/10);
-            {LARGE_INTEGER q{};QueryPerformanceCounter(&q);Publish(R,true,R.bodyType,1.f,now-q.QuadPart-1);g_hot.perspectiveWrite.Publish(true,now);}
+            PublishAt(R,true,R.bodyType,1.f,now-1,now);
             check(Call(R,bones,R.count,ReceiptAt(now,true),now)&&bones==written0,L+"published call on the same pose: writes the graph");
             const std::vector<float> g=bones;
             check(zcall(writtenIn0,vt,true,true,false,advance(hz/10))&&bones==g,L+"after a published commit: the written call writes exactly the graph records");

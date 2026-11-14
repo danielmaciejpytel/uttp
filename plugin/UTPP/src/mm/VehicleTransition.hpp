@@ -1530,6 +1530,26 @@ inline void BeginLiveExit(int64_t aNow)
     g_captureOn.store(true, std::memory_order_release);
 }
 inline bool LiveExitPending() { return g_game.livePending; }
+// Vehicle-bit edge without a ride capture under the vehicle hold (ExitWantsFill): the bone map of the mount may match no animation frame (a
+// mount cut before the first mapped snapshot leaves the ride without captures and pop filter). aMap (the snapshot MM publishes now: rig and
+// bone map) becomes the capture map, then the live exit capture of the next allowed animation frame - the pose the player sees at weight 0 -
+// is the hand-in source (PromoteLiveExit), so MM takes over from that pose instead of replacing it in one frame. false = no usable map.
+inline bool BeginLiveExitFrom(const integ::PoseSnapshot& aMap, int64_t aNow)
+{
+    const uint32_t nb = aMap.numBones <= integ::kMaxMMBones ? aMap.numBones : integ::kMaxMMBones;
+    if (!aMap.rig || nb == 0 || aMap.firstBone >= nb || aNow <= 0 || g_activeEpoch.load(std::memory_order_acquire) != 0)
+        return false;
+    static Control c; // game thread only (large: not on the stack)
+    c = Control{};
+    c.rig = aMap.rig;
+    c.tps = TicksPerSecond();
+    c.frozen = aMap;
+    c.frozen.numBones = nb;
+    g_control.Publish(c); // epoch 0: no mount transition, guard or root offset runs from it, only the capture reads the map
+    g_captureRig.store(aMap.rig, std::memory_order_relaxed);
+    BeginLiveExit(aNow);
+    return true;
+}
 // Same-rig re-arm in the jump-out flight (recording 2026-10-28 11-49-37: the game replaced the animated object; until the re-arm the
 // visible body showed the game pose, not MM): a live capture of the new object becomes the hand-in source as at the launch, and the
 // animation threads keep the game pose (no MM blend) until the hand-in snapshot is published - MM stays at its weight (no fade).

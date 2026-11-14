@@ -3551,6 +3551,166 @@ JumpOutDeniedRes RunJumpOutDenied(uint64_t aRig, uint32_t aCount, bool aNormal =
     r.ok = aNormal ? r.edgeFrame >= 0 : launched;
     return r;
 }
+// Vehicle exit without a ride capture (game log 2026-11-14 02:21:45, the bike ride a session starts with): the ride ran under the vehicle hold
+// (every animation frame denied) and no ride capture reached the edge (captures 0, the pop filter skipped every frame on the rig). The game
+// swapped its seated pose for its post-vehicle pose on the last vehicle feed (recorded local steps: hands 74.8 deg, legs 69.8 deg, pelvis
+// -66.1 cm, MM at weight 0); the edge feed came two frames later, the permission one frame after the edge. Recorded: MM at weight 1 on the edge
+// feed with nothing handed in, the first allowed frame stepped the hands 72.3 deg, the legs 48.0 deg and the pelvis 65.1 cm. Here the same rows
+// (upper body = the hands' values, the rest = the legs' values); the visible pose of a frame is the records FkSide left, or on an allowed frame
+// the published snapshot blended onto them by its weight. aMapAfterEdge false: the animation thread's rig matches no map after the edge either.
+struct ExitFillRes
+{
+    bool ok = false, late = false;
+    int reopenFrame = -1, frames = 0;
+    float flipDeg = 0.0f;           // the game's own largest bone step at the swap
+    float reopenExcessDeg = -1.0f;  // reopen frame (first visible MM weight > 0): largest visible bone step beyond the game's own step
+    float reopenPelvisCm = -1.0f;   // reopen frame: visible pelvis height step beyond the game's own step
+    float afterMaxStepDeg = 0.0f;   // the frames after the reopen (0.3 s): largest visible bone step
+    float afterMaxPelvisCm = 0.0f;
+    float wEnd = -1.0f;             // published weight 0.3 s after the reopen
+    float handed = -1.0f;
+    std::string Line() const
+    {
+        char b[360];
+        std::snprintf(b, sizeof b, "ok %d late %d frames %d game swap %.1f deg, reopen frame %d: step beyond the game's %.2f deg, pelvis %.2f cm; "
+                      "next 0.3 s: step max %.2f deg, pelvis %.2f cm, w %.2f, vehTrans handed %.0f",
+                      ok ? 1 : 0, late ? 1 : 0, frames, flipDeg, reopenFrame, reopenExcessDeg, reopenPelvisCm, afterMaxStepDeg, afterMaxPelvisCm, wEnd, handed);
+        return b;
+    }
+};
+constexpr float kExitSwapUpperDeg = 74.8f, kExitSwapLowerDeg = 69.8f, kExitSwapPelvisM = -0.661f; // the game's own swap step (recorded)
+constexpr float kExitOffUpperDeg = 72.3f, kExitOffLowerDeg = 48.0f, kExitOffPelvisM = -0.651f;    // post-vehicle game pose vs the MM pose (recorded)
+ExitFillRes RunExitFillReopen(uint64_t aRig, uint32_t aCount, bool aMapAfterEdge)
+{
+    ExitFillRes r;
+    SetWeaponUpper(false);
+    struct Restore
+    {
+        ~Restore() { SetWeaponUpper(true); }
+    } restore;
+    FeedInput in = MountFeed();
+    for (int i = 0; i < 120; ++i)
+        Feed(in);
+    static vti::PoseSnapshot a, s;
+    if (!ReadSnap(a) || a.weight < 0.99f || !a.numBones || a.gameIndex[a.firstBone] < 0)
+        return r;
+    const uint32_t hips = a.firstBone;
+    const uint64_t rideRig = aRig ^ 0x10u; // the ride's frames match no capture map: no ride capture, no pop filter
+    Recs game(aCount), prevGame(aCount);
+    const auto seated = [&] {
+        FillRecs(game, a, [&](uint32_t b) { return vti::SnapshotUpperBone(a, b) ? kExitOffUpperDeg - kExitSwapUpperDeg : kExitOffLowerDeg - kExitSwapLowerDeg; },
+                 [&](uint32_t b) { return b == hips ? kExitOffPelvisM - kExitSwapPelvisM : 0.0f; });
+    };
+    const auto post = [&] {
+        FillRecs(game, a, [&](uint32_t b) { return vti::SnapshotUpperBone(a, b) ? kExitOffUpperDeg : kExitOffLowerDeg; },
+                 [&](uint32_t b) { return b == hips ? kExitOffPelvisM : 0.0f; });
+    };
+    const int64_t frame = FrameTicks();
+    int64_t next = QpcNow(), lastNow = 0;
+    std::vector<std::array<float, 4>> prevVis(vti::kMaxMMBones);
+    float prevZ = 0.0f;
+    bool have = false;
+    int sinceReopen = -1;
+    const auto animFrame = [&](bool aAllows, uint64_t aFrameRig, bool aMeasure) {
+        const int64_t now = QpcNow();
+        const bool frameLate = lastNow != 0 && QpcSeconds(now - lastNow) > 0.025f; // a descheduled frame: not a 60 Hz step
+        if (aMeasure && frameLate && (r.reopenFrame < 0 || sinceReopen <= 2))
+            r.late = true;
+        lastNow = now;
+        const uint32_t n = vtr::FkSide(game.buf.data(), aCount, aFrameRig, now, aAllows);
+        const bool blend = aAllows && n == 0 && ReadSnap(s) && utpp::g_hot.mmActive.load();
+        const float w = blend ? s.weight : 0.0f;
+        std::vector<std::array<float, 4>> vis(vti::kMaxMMBones);
+        float gameStep = 0.0f, visStepMax = 0.0f, excess = 0.0f;
+        for (uint32_t b = a.firstBone; b < a.numBones && b < vti::kMaxMMBones; ++b)
+        {
+            const int32_t gi = a.gameIndex[b];
+            if (gi < 0 || uint32_t(gi) >= aCount)
+                continue;
+            const float* rq = game.At(uint32_t(gi)) + vti::kGameRotOffsetFloats;
+            std::array<float, 4> v{rq[0], rq[1], rq[2], rq[3]};
+            if (w > 0.0f)
+            {
+                const float* sq = &s.pose[size_t(b) * 7 + 3];
+                const float sg = (rq[0] * sq[0] + rq[1] * sq[1] + rq[2] * sq[2] + rq[3] * sq[3]) < 0.0f ? -1.0f : 1.0f;
+                for (int k = 0; k < 4; ++k)
+                    v[size_t(k)] = rq[k] * (1.0f - w) + sg * sq[k] * w;
+                float n2 = 0.0f;
+                for (float x : v)
+                    n2 += x * x;
+                for (float& x : v)
+                    x /= std::sqrt(std::fmax(n2, 1e-12f));
+            }
+            if (have)
+            {
+                const float gs = RecAngleDeg(prevGame.At(uint32_t(gi)), game.At(uint32_t(gi)));
+                const float vs = vtr::detail::QAngle(prevVis[b].data(), v.data()) / kDegT;
+                gameStep = std::max(gameStep, gs);
+                visStepMax = std::max(visStepMax, vs);
+                excess = std::max(excess, vs - gs);
+            }
+            vis[b] = v;
+        }
+        const float gz = game.At(uint32_t(a.gameIndex[hips]))[2];
+        const float z = w > 0.0f ? gz + (s.pose[size_t(hips) * 7 + 2] - gz) * w : gz;
+        if (aMeasure && have)
+        {
+            const float gzStep = std::fabs(gz - prevGame.At(uint32_t(a.gameIndex[hips]))[2]);
+            r.flipDeg = std::max(r.flipDeg, gameStep);
+            if (r.reopenFrame < 0 && w > 0.0f)
+            {
+                r.reopenFrame = r.frames;
+                sinceReopen = 0;
+                r.reopenExcessDeg = excess;
+                r.reopenPelvisCm = std::fmax(0.0f, std::fabs(z - prevZ) - gzStep) * 100.0f;
+            }
+            else if (sinceReopen > 0)
+            {
+                if (!frameLate) // (the hand-in decays in wall time: a late frame carries several frames' worth of it)
+                {
+                    r.afterMaxStepDeg = std::max(r.afterMaxStepDeg, visStepMax);
+                    r.afterMaxPelvisCm = std::max(r.afterMaxPelvisCm, std::fabs(z - prevZ) * 100.0f);
+                }
+                r.wEnd = w;
+            }
+        }
+        prevVis = vis;
+        prevZ = z;
+        prevGame.buf = game.buf;
+        have = true;
+        if (aMeasure)
+        {
+            ++r.frames;
+            if (sinceReopen >= 0)
+                ++sinceReopen;
+        }
+    };
+    for (int i = 0; i < 130; ++i) // the denied ride (2.2 s: the mount transition is over), seated
+    {
+        SpinUntil(next);
+        next += frame;
+        in.psmBlock = kVeh;
+        in.locoState = 1;
+        Feed(in);
+        seated();
+        animFrame(false, rideRig, false);
+    }
+    // the recorded rows: the swap on a vehicle feed, one more vehicle feed, the edge (still denied), then allowed frames
+    for (int i = 0; i < 60 && sinceReopen < 19; ++i)
+    {
+        SpinUntil(next);
+        next += frame;
+        in.psmBlock = i < 2 ? kVeh : 0u;
+        in.locoState = 1;
+        in.velWorld[2] = 0.0f;
+        Feed(in);
+        post();
+        animFrame(i >= 3, (i >= 2 && aMapAfterEdge) ? aRig : rideRig, true);
+    }
+    r.handed = VtCounts()[1];
+    r.ok = r.reopenFrame >= 0 && sinceReopen >= 19;
+    return r;
+}
 // 2026-10-28 11-49-37 mounted pop filter: the game's seated / exit pose jumps in single frames while MM is at weight 0 (48.596 arms 86 deg,
 // 48.707 back 71 deg). Ride with the vehicle bit in TPP, the animation thread (FkSide) every frame at 60 Hz with the given permission
 // (false = utpp_camera's vehicle hold), the game pose S, from frame 30 the upper body +86 / legs +45 deg in one frame, from frame 37 the
@@ -4386,6 +4546,20 @@ void SectionVehExit(int argc, char** argv, const std::vector<uint64_t>& aHashes,
         std::printf("[INFO] vehexit [%s] normal unmount, denied ride: %s\n", name.c_str(), jnorm.Line().c_str());
         Check("vehexit [" + name + "] JUMPOUT launch control: an ordinary unmount of the same seated ride pins nothing (0 pins, 0 hold frames, 0 hold ends)",
               loaded && jnorm.ok && jnorm.pins == 0.0f && jnorm.holdFrames == 0.0f && jnorm.holdEnds == 0.0f, jnorm.Line());
+        // exit without a ride capture under the vehicle hold (game log 2026-11-14 02:21:45): the reopen continues the pose the player saw
+        for (const bool mapAfterEdge : {true, false})
+        {
+            loaded = fresh() && loaded;
+            const ExitFillRes ef = RunExitFillReopen(reinterpret_cast<uint64_t>(aRig), uint32_t(aHashes.size()), mapAfterEdge);
+            std::printf("[INFO] vehexit [%s] exit without a ride capture (map after the edge %d): %s\n", name.c_str(), mapAfterEdge ? 1 : 0, ef.Line().c_str());
+            Check("vehexit [" + name + "] exit without a ride capture (recording 2026-11-14 02:21:45, map after the edge " + std::to_string(mapAfterEdge ? 1 : 0) +
+                      "): the game's 70-75 deg / 66 cm swap before the edge is its own; the reopen frame steps no bone more than 6 deg beyond the game's step "
+                      "and the pelvis no more than 3 cm, then no bone more than 15 deg per frame, MM at weight >= 0.99 0.3 s after the reopen (the order of "
+                      "feeds and frames decides the result, not their spacing: 'late' is information only)",
+                  loaded && ef.ok && ef.flipDeg >= 60.0f && ef.reopenExcessDeg >= 0.0f && ef.reopenExcessDeg <= 6.0f && ef.reopenPelvisCm <= 3.0f &&
+                      ef.afterMaxStepDeg <= 15.0f && ef.wEnd >= 0.99f,
+                  ef.Line());
+        }
         // mounted pop filter, with the vehicle hold's denial (the game) and with the permission
         for (const bool allows : {false, true})
         {
