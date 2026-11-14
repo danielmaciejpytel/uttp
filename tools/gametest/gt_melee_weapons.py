@@ -40,7 +40,7 @@ SCENARIO_FILE = os.path.join(HERE, 'scenarios.json')
 ALLOW_CYBERWARE_ENV = 'UTPP_NIGHT_ALLOW_CYBERWARE'
 
 # pad parts (scenarios.json): melee_block, melee_punch_walk and melee_holster are shared with the fists macro
-PARTS = ['mw_light_combo', 'mw_guard_idle', 'mw_strong_attack', 'melee_block', 'melee_punch_walk', 'mw_sprint_attack',
+PARTS = ['mw_light_combo', 'mw_light_combo_fast', 'mw_guard_idle', 'mw_strong_attack', 'melee_block', 'melee_punch_walk', 'mw_sprint_attack',
          'melee_holster']
 
 # pad parts with the crouch button (R3 tap) are built here: scenarios.json keeps the crouch button to the crouch scenario
@@ -100,7 +100,7 @@ WEAPON_SETS = {w['set']: [t] for t, w in WEAPONS.items()}
 WEAPON_SETS['melee_weapons'] = list(PACK_WEAPONS)
 # registered as scenario sets (gt_night.SETS); 'melee_weapons' = the pack weapons in one launch
 SET_MEMBERS = {name: [name] for name in WEAPON_SETS}
-SECONDS_PER_WEAPON = 150.0
+SECONDS_PER_WEAPON = 160.0
 
 # PSM.MeleeWeapon states (bit = 1 << state)
 STATE_NAMES = {0: 'NotReady', 1: 'Equipping', 2: 'Idle', 3: 'Safe', 4: 'PublicSafe', 5: 'Parried', 6: 'Hold', 7: 'ChargedHold',
@@ -392,6 +392,8 @@ def state_names(states) -> list[str]:
 # while masked is a warning instead of a failure (stances outside the standing fists check).
 PHASES = (
     {'name': 'light_combo', 'part': 'mw_light_combo', 'kind': 'pad', 'strike': True, 'expect_full': 'on'},
+    # the same combo with clicks 0.30 s apart: each click is buffered during the strike and the game switches at its recover start
+    {'name': 'light_combo_fast', 'part': 'mw_light_combo_fast', 'kind': 'pad', 'strike': True, 'expect_full': 'on'},
     {'name': 'guard_idle', 'part': 'mw_guard_idle', 'kind': 'pad', 'strike': False, 'expect_full': None},
     {'name': 'strong_attack', 'part': 'mw_strong_attack', 'kind': 'pad', 'strike': True, 'expect_full': 'on'},
     {'name': 'block', 'part': 'melee_block', 'kind': 'pad', 'strike': False, 'expect_full': 'block', 'needs_block': True},

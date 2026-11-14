@@ -1844,7 +1844,9 @@ class Night:
         ep['events'].append({'arrival_timeout': mode, 'last': st})
         return None
 
-    def weapon_macro(self, pad, guard, plan: dict) -> dict:
+    def weapon_macro(self, pad, guard, plan: dict, fire: bool = False) -> dict:
+        """Draw, aim, holster (fire=False) or draw, aimed shots, reload, holster (fire=True; parts weapon_fire,
+        weapon_reload). Both verify draw and holster by NightPos / log."""
         res = {'checks': []}
 
         def verify(expect_drawn: bool, off: int) -> tuple:
@@ -1869,7 +1871,15 @@ class Night:
         off = file_size(self.utpp_log)
         self.play(pad, guard, 'weapon_draw', plan)
         drawn, why_d = verify(True, off)
-        self.play_walking(pad, guard, plan, 'weapon_aim')
+        if not fire:
+            self.play_walking(pad, guard, plan, 'weapon_aim')
+        elif drawn is not False:   # shots without a drawn weapon would be punches
+            self.play(pad, guard, 'weapon_fire', plan)
+            off_r = file_size(self.utpp_log)
+            self.play(pad, guard, 'weapon_reload', plan)
+            guard.wait(0.5)
+            eps = gn.reload_episodes(read_since(self.utpp_log, off_r))
+            res['checks'].append({'reload_episode_s': eps or None})   # report only: needs the reload diagnostics
         off = file_size(self.utpp_log)
         self.play(pad, guard, 'weapon_holster', plan)
         holstered, why_h = verify(False, off)
@@ -3424,8 +3434,8 @@ class Night:
                             if name == 'vehicle_mount_exit':
                                 rec.update(self.vehicle_macro(pad, guard, plan))
                                 self.leave_car(pad, guard, plan)
-                            elif name == 'weapon_draw_aim_holster':
-                                rec.update(self.weapon_macro(pad, guard, plan))
+                            elif name == 'weapon_draw_aim_holster' or name in gn.FIRING_MACROS:
+                                rec.update(self.weapon_macro(pad, guard, plan, fire=name in gn.FIRING_MACROS))
                             elif name == 'melee_fists':
                                 rec.update(self.melee_macro(pad, guard, plan))
                             elif name in gw.WEAPON_SETS:

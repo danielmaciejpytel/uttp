@@ -208,10 +208,11 @@ class ScenarioTests(unittest.TestCase):
         self.assertTrue(sc.steps[-1].metrics)
 
     def test_other_scenarios_have_no_crouch_button(self):
-        # crouch = R3 only in crouch_walk_turns; B on purpose: sprint_dash = dodge taps (< 0.12 s), veh_exit = mounted exit
+        # crouch = R3 only in crouch_walk_turns; B on purpose: sprint_dash = dodge taps (< 0.12 s), veh_exit = mounted exit;
+        # slide_sprint presses R3 while sprinting (a slide) and once to stand up (its steps: test_gt_states)
         intentional = {'sprint_dash', 'veh_exit'}
         for n, sc in self.all.items():
-            if n in ('crouch_walk_turns', 'shoulder_swap_input'):
+            if n in ('crouch_walk_turns', 'shoulder_swap_input', 'slide_sprint'):
                 continue
             for st in sc.steps:
                 self.assertFalse([b for b in st.buttons if b.button in ('R3', 'RS')], f'{n}.{st.name}')

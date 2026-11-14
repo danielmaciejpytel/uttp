@@ -386,6 +386,60 @@
         {"name": "attack", "duration": 1.6, "ls": [[0, 0, 1]], "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0]], "interp": "step"}, "metrics": false},
         {"name": "stop", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1], [0.2, 0, 0]], "rt": [[0, 0]], "metrics": false}
       ]
+    },
+    "mw_light_combo_fast": {
+      "description": "melee weapon macro part (gt_melee_weapons.py): standing, 8 RT taps 0.12 s, 0.30 s apart (start to start) = clicks early enough to be buffered during each strike (the game switches to the next strike at the recover start), so the combo runs to its last strike whichever strike length the weapon has; then 1.6 s idle. The slower cadence is mw_light_combo",
+      "steps": [
+        {"name": "settle", "duration": 0.6, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "combo", "duration": 4.2, "ls": [[0, 0, 0]], "lt": [[0, 0]], "rt": {"keys": [[0, 0], [0.2, 1], [0.32, 0], [0.5, 1], [0.62, 0], [0.8, 1], [0.92, 0], [1.1, 1], [1.22, 0], [1.4, 1], [1.52, 0], [1.7, 1], [1.82, 0], [2.0, 1], [2.12, 0], [2.3, 1], [2.42, 0]], "interp": "step"}, "metrics": false}
+      ]
+    },
+    "jump_in_place": {
+      "description": "state scenario (set states): stand 2 s, one A tap (Jump_Button IK_Pad_A_CROSS) = a jump in place, 1.5 s air phase (not scored), 3 s landing and standing (scored with the default limits); the stick is never touched",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "stand", "duration": 2.0},
+        {"name": "jump", "duration": 1.5, "buttons": [{"t": 0.3, "button": "A", "hold": 0.12}], "metrics": false},
+        {"name": "land", "duration": 3.0}
+      ]
+    },
+    "jump_running": {
+      "description": "state scenario (set states): full-stick run 2 s, one A tap while running = a running jump, 1.6 s air phase (not scored), 2 s run on after the landing, stop 2.5 s (scored with the default limits); no sprint (no L3)",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "run", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 0], [0.4, 0, 1]]},
+        {"name": "jump", "duration": 1.6, "interp": "linear", "ls": [[0, 0, 1]], "buttons": [{"t": 0.2, "button": "A", "hold": 0.12}], "metrics": false},
+        {"name": "land", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1]]},
+        {"name": "stop", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.2, 0, 0]]}
+      ]
+    },
+    "slide_sprint": {
+      "description": "state scenario (set states): sprint 3 s (full stick + L3 tap), R3 tap while sprinting = slide (Alternative scheme: ToggleCrouch / Dive = R3; the game needs >= 4.5 m/s, stick within 45 deg of the facing) with the stick held 2.6 s (slide, exit into the crouch; not scored), stick released and 1.5 s crouched (not scored), R3 tap = stand up (not scored; the steps named pad_* keep their R3 press as a pad press: never replaced by the keyboard crouch key, never skipped with --background), 2.5 s stand check: FAILs with 'stand not reached after the slide' when MMTRACE loco is not 1 (an R3 toggle parity error: the slide did not leave V crouched)",
+      "thresholds": {
+        "stand_check.stand_fraction": {"min": 0.8, "msg": "stand not reached after the slide"}
+      },
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "sprint", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}]},
+        {"name": "pad_slide", "duration": 2.6, "interp": "linear", "ls": [[0, 0, 1]], "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "crouched_idle", "duration": 1.5, "interp": "linear", "ls": [[0, 0, 1], [0.2, 0, 0]], "metrics": false},
+        {"name": "pad_stand_up", "duration": 1.5, "ls": [[0, 0, 0]], "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "stand_check", "duration": 2.5, "ls": [[0, 0, 0]]}
+      ]
+    },
+    "weapon_fire": {
+      "description": "weapon macro part (night.py weapon_macro fire=True; set states): standing, aim (LT = RangedADS_Button IK_Pad_LeftTrigger) held 1.2 s, three single shots (RT = RangedAttack_Button IK_Pad_RightTrigger, 0.1 s taps, 1.2 s apart), aim released; the weapon must be drawn (weapon_draw) and hold ammo; no stick",
+      "steps": [
+        {"name": "aim", "duration": 1.2, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0], [0.1, 1]], "rt": [[0, 0]]},
+        {"name": "shots", "duration": 4.0, "lt": [[0, 1]], "rt": {"keys": [[0, 0], [0.4, 1], [0.5, 0], [1.6, 1], [1.7, 0], [2.8, 1], [2.9, 0]], "interp": "step"}},
+        {"name": "lower", "duration": 1.5, "lt": [[0, 1], [0.1, 0]], "rt": [[0, 0]]}
+      ]
+    },
+    "weapon_reload": {
+      "description": "weapon macro part (night.py weapon_macro fire=True; set states): standing, X tap 0.12 s = Reload_Button IK_Pad_X_SQUARE (X is also the interaction button: not next to a car or a door), then 6.7 s of waiting so a slow reload has ended; the magazine must not be full (weapon_fire spent shots)",
+      "steps": [
+        {"name": "reload", "duration": 7.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "buttons": [{"t": 0.3, "button": "X", "hold": 0.12}], "metrics": false}
+      ]
     }
   }
 }

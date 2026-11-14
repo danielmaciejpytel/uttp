@@ -116,7 +116,7 @@ def good_script(tag='katana', fn=None, how='given', states=None, remove='removed
             return [f'CET [night] MW_GIVE ok=true {tag} rec={w["records"][0]} {how} n={0 if how == "given" else 1}->1']
         if event == 'MW_INHAND':
             return [f'CET [night] MW_INHAND ok=true {fn if held["now"] else "none"} | meleefull flag=1 states=0x{states:X}']
-        if event == 'play:mw_light_combo':
+        if event in ('play:mw_light_combo', 'play:mw_light_combo_fast'):
             out = [MASK_ON.format(why='flag' if not full_on_standing else 'melee')]
             if full_on_standing:
                 out.append(FULL.format(onoff='on', why='on', speed='0.00', state=11, states=states))
@@ -219,7 +219,7 @@ class Registration(unittest.TestCase):
         self.assertLess(gw.time_limit_s('melee_knife'), gw.time_limit_s('melee_weapons'))
 
     def test_phase_plan(self):
-        self.assertEqual(gw.phase_plan('katana'), ['equip', 'draw', 'light_combo', 'guard_idle', 'strong_attack', 'block',
+        self.assertEqual(gw.phase_plan('katana'), ['equip', 'draw', 'light_combo', 'light_combo_fast', 'guard_idle', 'strong_attack', 'block',
                                                    'walk_strikes', 'sprint_attack', 'crouch_attack', 'holster', 'remove'])
         self.assertNotIn('block', gw.phase_plan('knife'))
         self.assertNotIn('LT', json.dumps(gw.dry_run_lines('knife')[:2]))
@@ -429,7 +429,7 @@ class Macro(unittest.TestCase):
         self.assertEqual(res['verdict'], 'PASS', res['fails'])
         self.assertEqual(n.calls, [
             ('cmd', 'MW_COUNT'), ('cmd', 'MW_GIVE'), ('cmd', 'MW_INHAND'),
-            ('play', 'mw_light_combo'), ('play', 'mw_guard_idle'), ('play', 'mw_strong_attack'), ('play', 'melee_block'),
+            ('play', 'mw_light_combo'), ('play', 'mw_light_combo_fast'), ('play', 'mw_guard_idle'), ('play', 'mw_strong_attack'), ('play', 'melee_block'),
             ('walk', 'melee_punch_walk', True),
             ('cmd', 'MW_INHAND'), ('walk', 'mw_sprint_attack', True),
             ('cmd', 'MW_INHAND'), ('play', 'mw_crouch_attack'),

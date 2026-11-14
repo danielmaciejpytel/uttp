@@ -954,6 +954,25 @@ class MacroTests(unittest.TestCase):
         self.assertEqual(self.played.count('weapon_holster'), 2)              # one retry
         self.assertIn('holster not confirmed', r['fails'][0])
 
+    def test_weapon_fire_macro_fires_and_reloads_between_draw_and_holster(self):
+        polls = iter([{'weapon': True}, {'weapon': False}])
+        self.n.poll_pos = lambda g, pad=None, timeout=None: next(polls)
+        self.n.play = lambda pad, g, name, plan, sc=None: self.played.append(name) or {'steps': []}
+        self.n.clear_path = lambda pad, g, plan, where: self.played.append('clear:' + where) or {'result': 'clear'}
+        r = self.n.weapon_macro(_Pad(), _G(), {'runs': []}, fire=True)
+        self.assertEqual(r['verdict'], 'PASS', r)
+        self.assertEqual(self.played, ['weapon_draw', 'weapon_fire', 'weapon_reload', 'weapon_holster',
+                                       'clear:weapon_walk', 'weapon_walk'])
+        self.assertEqual(self.played[1:3] + self.played[3:4], gn.WEAPON_FIRE_PARTS[1:4])
+        self.assertIn({'reload_episode_s': None}, r['checks'])        # no reload diagnostics in the log: report only
+        # a draw that is not there (w=0) is a failure and nothing is fired
+        self.played.clear()
+        polls = iter([{'weapon': False}] * 3 + [{'weapon': False}])
+        self.n.poll_pos = lambda g, pad=None, timeout=None: next(polls)
+        r = self.n.weapon_macro(_Pad(), _G(), {'runs': []}, fire=True)
+        self.assertNotIn('weapon_fire', self.played)
+        self.assertIn('draw not confirmed', r['fails'][0])
+
     def test_clear_path_turns_away_from_an_obstacle(self):
         # probe 1: V moves 0.05 m (bush, Female V 17:37) -> camera +90 deg; probe 2: 1.2 m -> clear
         pts = iter([{'p': (0, 0, 0), 'cf': (0, 1)}, {'p': (0, 0.05, 0), 'cf': (0, 1)},

@@ -22,12 +22,19 @@ LOCO_SET = ['slow_walk_half_stick', 'run_arc_left', 'run_arc_right', 'slalom_sti
             'idle_then_start_sideways']
 VEHICLE_PARTS = ['veh_call', 'veh_enter', 'veh_drive', 'veh_exit']
 WEAPON_PARTS = ['weapon_draw', 'weapon_aim', 'weapon_holster', 'weapon_walk']
+# draw, aimed single shots, reload, holster: the weapon macro that fires (night.py weapon_macro(fire=True))
+WEAPON_FIRE_PARTS = ['weapon_draw', 'weapon_fire', 'weapon_reload', 'weapon_holster', 'weapon_walk']
+FIRING_MACROS = ('weapon_fire_reload',)
+# pad-only state scenarios: a jump in place, a running jump, a slide (plain scenarios of scenarios.json)
+# the running jump first: its walking part clears open ground, the jump in place has no stick input and would start next to the car
+STATE_SCENARIOS = ['jump_running', 'jump_in_place', 'slide_sprint']
 MELEE_PARTS = ['melee_draw', 'melee_punch', 'melee_punch_walk', 'melee_block', 'melee_holster']
 ENEMY_PARTS = ['melee_draw', 'melee_punch', 'melee_block', 'melee_holster']   # fist fight on a real target
 RECOVERY_PARTS = ['wheel_probe']
 # executed by night.py (CET + pad + log waits); parts are plain pad scenarios in scenarios.json
 AIM_PARTS = ['aim_probe_hold', 'weapon_draw']
 MACROS = {'vehicle_mount_exit': VEHICLE_PARTS + RECOVERY_PARTS, 'weapon_draw_aim_holster': WEAPON_PARTS + RECOVERY_PARTS,
+          'weapon_fire_reload': WEAPON_FIRE_PARTS + RECOVERY_PARTS,
           'melee_fists': MELEE_PARTS, 'melee_fists_target': ENEMY_PARTS, 'aim_probe': AIM_PARTS, 'shoulder_key': []}
 SETS = {
     'loco': LOCO_SET,
@@ -44,6 +51,9 @@ SETS = {
     # the background input probe: pad-only walks (no key, no click) - with --background they show whether the game takes the
     # pad while its window is behind other windows (V moves = it does); not in 'all'
     'bg_probe': ['slow_walk_half_stick', 'run_arc_left', 'run_arc_right'],
+    # jumps, slide and weapon fire / reload, pad only (works with --background); not in 'all'. The weapon macro is last:
+    # it needs a ranged weapon with ammo and the shots can draw attention
+    'states': STATE_SCENARIOS + ['weapon_fire_reload'],
 }
 # The car scenario runs FIRST: both test saves start at (or in) the car, so V is next to it. At the end of the set
 # the walking scenarios had taken V 50-80 m away and the summoned car parked wherever the game chose (2026-11-12
@@ -576,6 +586,15 @@ def mount_ts(text: str) -> datetime | None:
             if m:
                 return datetime.strptime(m.group(1)[:23], '%Y-%m-%d %H:%M:%S.%f')
     return None
+
+
+_RELOAD_EPISODE_RE = re.compile(r'UTPPMotion RELOAD episode .*?\bdur=(\d+(?:\.\d+)?)')
+
+
+def reload_episodes(log_text: str) -> list[float]:
+    """Durations (s) of the reload episodes a log window holds ('UTPPMotion RELOAD episode ... dur=', written when a
+    reload ends; only present with the reload diagnostics on). Empty = none seen (no proof either way)."""
+    return [float(m.group(1)) for m in _RELOAD_EPISODE_RE.finditer(log_text)]
 
 
 def weapon_state(pos: dict | None, log_text: str, expect_drawn: bool) -> tuple[bool | None, str]:
@@ -1129,15 +1148,18 @@ def wheel_suspect(sc, run_steps: list, lines: list, min_stick: float = 0.7, min_
     return False if seen else None
 
 
+PAD_STEP_PREFIX = 'pad_'   # step names that keep their R3 press as a pad press (crouch_toggle_steps)
 CROUCH_PAD_BUTTONS = ('R3', 'RS')   # InputSchemesMode=Alternative crouch toggle = R3 tap (verified 2026-10-23)
 
 
 def crouch_toggle_steps(sc, min_hold: float = 0.3) -> list[int]:
     """Indices of pad crouch-toggle steps: metrics off, only crouch-toggle button events: R3/RS (Alternative scheme
-    tap, current scenarios) or the legacy default-scheme B held >= min_hold."""
+    tap, current scenarios) or the legacy default-scheme B held >= min_hold. A step whose name starts with PAD_STEP_PREFIX
+    is never a toggle step: its R3 press belongs to the scenario (a slide while sprinting) and stays a pad press, also
+    with --background."""
     idx = []
     for i, st in enumerate(sc.steps):
-        if st.buttons and not st.metrics and all(b.button in CROUCH_PAD_BUTTONS or (b.button == 'B' and b.hold >= min_hold)
+        if st.buttons and not st.metrics and not st.name.startswith(PAD_STEP_PREFIX) and all(b.button in CROUCH_PAD_BUTTONS or (b.button == 'B' and b.hold >= min_hold)
                                                  for b in st.buttons):
             idx.append(i)
     return idx

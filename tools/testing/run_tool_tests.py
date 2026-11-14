@@ -81,6 +81,7 @@ REGISTRY = {
     'anim/melee-export/test_melee_export.py': {},
     'anim/melee-export/test_simd_roundtrip.ps1': {
         'markers': {'needs-args'}, 'reason': 'needs -Out <new dir under Build\\work> and WolvenKit.CLI / WkitBridge'},
+    'films/test_run_compare_film.py': {'note': 'one case cuts two generated clips with the project ffmpeg and SKIPs without it'},
     'install/test_stage_melee_npc.ps1': {
         'note': 'offline dry-run self-check of stage_melee_npc.ps1; exit 3 = inputs missing under Build\\work'},
     'release/test_make_release.py': {},
@@ -112,6 +113,7 @@ REGISTRY = {
     'gametest/test_gt_collect.py': {},
     'gametest/test_gt_flow.py': {},
     'gametest/test_gt_melee_weapons.py': {},
+    'gametest/test_gt_states.py': {},
     'gametest/test_gt_post.py': {'note': 'one case cuts an 8 s test video with the project ffmpeg and SKIPs without it'},
     'gametest/test_gt_posemeter.py': {'note': 'runs the pose meter worker processes on the small slice in testdata (a few seconds)'},
     'gametest/test_gt_session.py': {},
