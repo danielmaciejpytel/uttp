@@ -15,3 +15,9 @@ target_link_libraries(utpp_replay_pose_stages PRIVATE bcrypt)
 target_compile_options(utpp_replay_pose_stages PRIVATE ${UTPP_WARNINGS} /EHsc)
 target_compile_definitions(utpp_replay_pose_stages PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
 target_compile_features(utpp_replay_pose_stages PRIVATE cxx_std_20)
+# Reload contact stage of the pose hook replayed on recorded text pose recordings (tools/analysis/replay_reload_contacts.cpp; scored by
+# tools/analysis/reload_contacts_proof.py). Tool only, no ctest entry.
+add_executable(utpp_replay_reload_contacts EXCLUDE_FROM_ALL ../../tools/analysis/replay_reload_contacts.cpp)
+target_compile_options(utpp_replay_reload_contacts PRIVATE /EHsc)
+target_compile_definitions(utpp_replay_reload_contacts PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_features(utpp_replay_reload_contacts PRIVATE cxx_std_20)

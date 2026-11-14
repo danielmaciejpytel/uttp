@@ -166,3 +166,14 @@ if(DEFINED _utpp_pmotion_wov)
   endforeach()
 endif()
 # removed 2026-11-05 (review R5), which cheaper test kills the same site: utpp_reload_rifle_contacts_mut1, _mut3, _mut4
+# Reload contact admission per pose hook owner (reload_contacts_runtime::Admit): the default build and the build with the Rifle overlay
+# listed for the FK owner (UTPP_RELOAD_FK_OWNER_RIFLE=1). No data files.
+add_executable(utpp_reload_owner_admit_test tests/ReloadOwnerAdmitTest.cpp)
+target_compile_options(utpp_reload_owner_admit_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_reload_owner_admit_test PRIVATE cxx_std_20)
+add_test(NAME utpp_reload_owner_admit_test COMMAND utpp_reload_owner_admit_test)
+add_executable(utpp_reload_owner_admit_rifle_test tests/ReloadOwnerAdmitTest.cpp)
+target_compile_options(utpp_reload_owner_admit_rifle_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_reload_owner_admit_rifle_test PRIVATE cxx_std_20)
+target_compile_definitions(utpp_reload_owner_admit_rifle_test PRIVATE UTPP_RELOAD_FK_OWNER_RIFLE=1)
+add_test(NAME utpp_reload_owner_admit_rifle_test COMMAND utpp_reload_owner_admit_rifle_test)

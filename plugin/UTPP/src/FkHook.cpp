@@ -85,18 +85,18 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
     mm::integ::CaptureGamePoseSample(bones, aCount, aMergedRig, aNow);
     mm::reload_contacts_runtime::Prepared reloadConfig;
     mm::reload_contacts_runtime::Cycle reloadCycle;
-    // Pistol1H / Pistol2H, and Rifle (mm::reload_contacts_runtime::kReloadContactsRifle). Only under the Mapping owner, which is the
-    // opt-in experiment (early-pose.txt, Main.cpp LoadEarlyPoseExperiment); the default owner, and the release's, is FK, so this stays false.
-    const bool reloadEligible = snap.reloadContactsEligible &&
-        mm::reload_contacts_runtime::ReloadContactsOverlay(snap.traceOverlay) &&
-        earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping;
+    // Admission (mm::reload_contacts_runtime::Admit): the Mapping owner (opt-in, early-pose.txt) corrects every reload overlay; the default
+    // FK owner corrects only the overlays listed in FkOwnerOverlay and never a purpose-built (authored) reload.
+    const auto reloadOwner = earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping ?
+        mm::reload_contacts_runtime::HookOwner::Mapping : mm::reload_contacts_runtime::HookOwner::FK;
+    const bool reloadEligible = mm::reload_contacts_runtime::Admit(snap, reloadOwner);
     if (snap.reloadContactsEligible)
     {
         g_hot.rcSnapEligible.value.fetch_add(1, std::memory_order_relaxed);
         if (mm::reload_contacts_runtime::ReloadContactsOverlay(snap.traceOverlay))
         {
             g_hot.rcOverlayOk.value.fetch_add(1, std::memory_order_relaxed);
-            if (earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping)
+            if (reloadEligible)
                 g_hot.rcOwnerOk.value.fetch_add(1, std::memory_order_relaxed);
         }
     }
@@ -193,9 +193,7 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
                 mm::reload_contacts_runtime::g_continuity, int64_t(holdNow.QuadPart), holdFrequency);
         }
     }
-    else if (!reloadEligible && mm::reload_contacts_runtime::kReloadContactsRifle &&
-        snap.traceOverlay == static_cast<int32_t>(mm::ov::PoseOverlay::Rifle) &&
-        earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping &&
+    else if (!reloadEligible && mm::reload_contacts_runtime::ObservesRifle(snap.traceOverlay, reloadOwner) &&
         mm::reload_contacts_runtime::g_config.Read(reloadConfig))
     {
         // Rifle out, no correction this frame: remember the published weapon / left hand (read-only) so that the first frames of the

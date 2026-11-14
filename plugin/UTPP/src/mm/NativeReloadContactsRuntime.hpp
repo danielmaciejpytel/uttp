@@ -72,6 +72,40 @@ inline constexpr bool ReloadContactsOverlay(int32_t overlay)
     return overlay==static_cast<int32_t>(ov::PoseOverlay::Pistol1H) || overlay==static_cast<int32_t>(ov::PoseOverlay::Pistol2H) ||
            (kReloadContactsRifle && overlay==static_cast<int32_t>(ov::PoseOverlay::Rifle));
 }
+// Pose hook that writes the player's pose this session (EarlyPoseRuntime Owner): the FK hook (default) or the early mapping job.
+enum class HookOwner : uint8_t { FK, Mapping };
+// Overlays whose game-clip reloads get the contact correction under the default FK owner. A family is listed only when its offline
+// replay keeps the reload under the anatomy limits on both bodies; every other overlay keeps the game's reload arms. Build switch
+// UTPP_RELOAD_FK_OWNER_RIFLE=1 lists the Rifle overlay. Off by default: on recorded rifle reloads the correction adds single-frame
+// arm steps at some entries and exits (one cause: a shot right after the reload leaves the reload domain and the correction fade
+// resets to zero within one frame), and the male body has not been measured.
+#if defined(UTPP_RELOAD_FK_OWNER_RIFLE) && UTPP_RELOAD_FK_OWNER_RIFLE==1
+inline constexpr bool kFkOwnerRifle=true;
+#else
+inline constexpr bool kFkOwnerRifle=false;
+#endif
+inline constexpr bool kFkOwnerPistol=false;
+inline constexpr bool FkOwnerOverlay(int32_t overlay)
+{
+    return (kFkOwnerRifle && kReloadContactsRifle && overlay==static_cast<int32_t>(ov::PoseOverlay::Rifle)) ||
+           (kFkOwnerPistol && (overlay==static_cast<int32_t>(ov::PoseOverlay::Pistol1H) ||
+                               overlay==static_cast<int32_t>(ov::PoseOverlay::Pistol2H)));
+}
+// Admission of the contact solve for one hook call (FkHook ApplyPoseSnapshot). The mapping owner keeps its rule (every reload overlay,
+// authored clips included); the FK owner corrects only the listed overlays and never a purpose-built (authored) reload.
+inline bool Admit(const integ::PoseSnapshot& s,HookOwner owner)
+{
+    if(!s.reloadContactsEligible || !ReloadContactsOverlay(s.traceOverlay))return false;
+    if(owner==HookOwner::Mapping)return true;
+    return !s.reloadAuthoredClip && FkOwnerOverlay(s.traceOverlay);
+}
+// Rifle out without a correction this frame: the published weapon / left hand is remembered for the start of the next episode
+// (ObservePublished) by the owners that correct rifle reloads.
+inline bool ObservesRifle(int32_t overlay,HookOwner owner)
+{
+    return kReloadContactsRifle && overlay==static_cast<int32_t>(ov::PoseOverlay::Rifle) &&
+           (owner==HookOwner::Mapping || FkOwnerOverlay(overlay));
+}
 struct Prepared
 {
     uint64_t rig=0;
