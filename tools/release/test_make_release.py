@@ -411,6 +411,60 @@ class CodePins(unittest.TestCase):
             self.assertTrue((tree / sub).is_file(), sub)
 
 
+class MeleeRegistration(unittest.TestCase):
+    """The pinned melee registration file of the code tree (archive/utpp_melee_tpp.archive.xl)."""
+
+    @staticmethod
+    def entries(text):
+        out, cur, key = [], None, None
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].rstrip()
+            if not line.strip():
+                continue
+            if line.startswith("  - entity:"):
+                cur = {"entity": []}
+                out.append(cur)
+                key = "entity"
+            elif line.startswith("      - ") and key == "entity":
+                cur["entity"].append(line.strip()[2:])
+            elif line.startswith("    ") and ":" in line:
+                k, v = (s.strip() for s in line.split(":", 1))
+                key = k
+                cur[k] = [x.strip() for x in v.strip("[]").split(",")] if k == "vars" else (int(v) if k == "priority" else v)
+        return out
+
+    def setUp(self):
+        p = mr.ROOT / "Source" / "plugin" / "UTPP" / "archive" / "utpp_melee_tpp.archive.xl"
+        if not p.is_file():
+            self.skipTest("no code tree")
+        self.all = self.entries(p.read_text(encoding="utf-8"))
+
+    def test_strong_arms_play_the_fist_sets(self):
+        wa = ["base\\characters\\entities\\player\\player_wa_fpp.ent", "ep1\\characters\\entities\\player\\player_wa_fpp_ep1.ent"]
+        ma = ["base\\characters\\entities\\player\\player_ma_fpp.ent", "ep1\\characters\\entities\\player\\player_ma_fpp_ep1.ent"]
+        sa = [(e["set"], e["component"], e["priority"], e["entity"]) for e in self.all if "w_strong_arms" in e["vars"]]
+        self.assertEqual(sorted(sa), sorted([
+            ("utpp\\melee\\utpp_default_melee_weapon.anims", "root", 199, wa),
+            ("utpp\\melee\\utpp_pma_default_melee_weapon.anims", "root", 199, ma),
+            ("utpp\\melee\\utpp_pwa_fists.anims", "root", 127, wa),
+            ("utpp\\melee\\utpp_pma_fists.anims", "root", 127, ma)]))
+        for e in self.all:
+            if "w_strong_arms" in e["vars"]:
+                self.assertEqual(e["vars"], ["w_strong_arms", "utpp_melee_tpp"])
+        # each strong arms entry registers exactly the set of the matching fists entry, same entities, component and priority
+        fists = {(e["set"], e["component"], e["priority"], tuple(e["entity"])) for e in self.all if e["vars"][0] == "w_melee_fists"}
+        self.assertEqual({(s, c, p, tuple(en)) for s, c, p, en in sa}, fists)
+
+    def test_modifier_paths_and_cyberware_clip_unchanged(self):
+        # the StrongArms modifier gates only the cyberware's own set on the extension component, never the root fists path
+        sm = [(e["set"], e["component"], e["priority"], e["vars"]) for e in self.all if "StrongArms" in e["vars"]]
+        self.assertEqual(sorted(sm), [
+            ("utpp\\melee\\utpp_pma_strongarms_melee_fists.anims", "EP1 animsets", 127, ["StrongArms", "utpp_melee_tpp"]),
+            ("utpp\\melee\\utpp_pwa_strongarms_melee_fists.anims", "EP1 animsets", 127, ["StrongArms", "utpp_melee_tpp"])])
+        for e in self.all:
+            self.assertIn("utpp_melee_tpp", e["vars"], e["set"])      # every entry stays behind the wrapper variable
+
+
 class ReleaseTexts(unittest.TestCase):
     def test_menu_and_report_sections_in_the_readme(self):
         r = mr.gen_readme().decode()

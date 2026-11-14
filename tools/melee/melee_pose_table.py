@@ -24,7 +24,9 @@ LOWER = ['Hips', 'Spine', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'RightUpLeg', 'Rig
 # clips that the game plays on bases the mod owns (sprint / crouch / slide / air) or that move the character away from a standing
 # stance; matched as substrings of the clip name
 EXCLUDE = ('crouch', 'slide', 'sprint', 'air_', 'groundslam', 'offscreen', 'throw', 'jump', 'land', 'fall', 'dodge')
-# weapon key in the file name -> anim variable of the weapon
+# weapon key in the file name -> anim variable of the weapon. One section per variable: the DLL reads the sections back to back
+# (contiguous clip and row ranges, no shared ranges), so an in-hand variable that plays another weapon's clips has no section of its
+# own; the script sends the variable whose clips play (UTPPMeleeClipVariable in utpp_melee.reds: w_strong_arms -> w_melee_fists).
 VARIABLES = {
     'fists': 'w_melee_fists',
     'knife': 'w_melee_knife',

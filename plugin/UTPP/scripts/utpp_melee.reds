@@ -10,14 +10,14 @@
 //         registered behind the same anim wrapper variable; without it the game plays its first-person melee set (static,
 //         crouched legs) and the legs must stay on motion matching;
 //       - the UTPP third-person body is active (UTPPIsTppActive) and V is not mounted;
-//       - the weapon in AttachmentSlots.WeaponRight is no arm cyberware (Gorilla Arms inherit the fists anim variable
-//         w_melee_fists: StrongArms : Base_Fists has no friendlyName of its own) and its anim variable (item record
-//         friendlyName) is covered by the UTPP clips (UTPPMeleeFullBodyCoveredName);
+//       - the weapon in AttachmentSlots.WeaponRight is no excluded arm cyberware (mantis blades, monowire, projectile launcher)
+//         and its clip variable (UTPPMeleeClipVariable of the item record friendlyName) is covered by the UTPP clips
+//         (UTPPMeleeFullBodyCoveredName); the strong arms (in-hand variable w_strong_arms) play the UTPP fist clips;
 //   * the full-body STATE MASK (UTPPSetMeleeFullBodyStates): PSM.MeleeWeapon states whose third-person clips exist, from the
-//     per-weapon table UTPPMeleeFullBodyStates (key = anim variable of the drawn weapon; default = the attacks without
+//     per-weapon table UTPPMeleeFullBodyStates (key = clip variable of the drawn weapon; default = the attacks without
 //     ThrowAttack), also sent when the drawn weapon changes;
 //   * the GUARD flag (UTPPSetMeleeGuard): the same conditions with the guard list (UTPPMeleeGuardCoveredName: the weapon's own
-//     third-person melee_idlepose must be installed; fists only for now);
+//     third-person melee_idlepose must be installed; fists only for now, the strong arms through their clip variable);
 // and, at most 20 Hz while a melee weapon is drawn in third person, the game's melee target (UTPPSetMeleeAimTarget: the
 // vanilla melee target query DefaultTransition.GetTargetObject, hostile / neutral active NPC within 5 m, its feet).
 // The DLL adds its own conditions (melee mask reason, standing, stick released and no sustained capsule speed, on the ground,
@@ -56,10 +56,11 @@ public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
 
 // PSM.MeleeWeapon states (gamePSMMeleeWeapon, bit = 1 << state) that may take the full body, per weapon: a table keyed by the
 // weapon's anim variable (the friendlyName key the game uses to pick the animation set, as UTPPMeleeFullBodyCoveredName; the item
-// type is too coarse: batons share Wea_OneHandedClub with w_melee_one_hand_blunt but use their own set). Arm cyberware never reaches
-// the table (UTPPMeleeFullBodyTick passes n"" for it: Gorilla Arms inherit w_melee_fists) and n"" / any other variable gets the
-// default. Default = the attack states ComboAttack 11 .. EquipAttack 21 without ThrowAttack 19 (the throw clips were rejected by
-// the export and stay vanilla) = 0x37F800 = 3667968 (UTPPMeleeStatesDefault).
+// type is too coarse: batons share Wea_OneHandedClub with w_melee_one_hand_blunt but use their own set). The key is the clip
+// variable (UTPPMeleeClipVariable: the strong arms use the fists line); excluded arm cyberware never reaches the table
+// (UTPPMeleeFullBodyTick passes n"" for it) and n"" / any other variable gets the default. Default = the attack states
+// ComboAttack 11 .. EquipAttack 21 without ThrowAttack 19 (the throw clips were rejected by the export and stay vanilla) =
+// 0x37F800 = 3667968 (UTPPMeleeStatesDefault).
 // Add a state's bit to a variable's line only when the INSTALLED pack has third-person clips for it (coverage of that pack): Hold 6
 // (64: hold_start_*, hold_loop_*), ChargedHold 7 (128), Block 8 (256: block_start, block, block_end), Parried 5 (32: parried_*),
 // Deflect 10 (1024: block_deflect_*). The melee mask (upper body from the game) covers Parried 5 .. Deflect 10, the attacks and
@@ -96,7 +97,7 @@ public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
   return UTPPMeleeStatesDefault();
 }
 
-// Guard: the anim variables whose own third-person melee_idlepose (the graph's Ready / Idle pose) is installed. Fists only for
+// Guard: the clip variables whose own third-person melee_idlepose (the graph's Ready / Idle pose) is installed. Fists only for
 // now (the pose is being built; the user setting melee.guard stays off until it is accepted). Separate from the full-body list:
 // every weapon set needs its own guard pose.
 public func UTPPMeleeGuardCoveredName(n: CName) -> Bool {
@@ -120,14 +121,28 @@ public func UTPPMeleeWeaponAnimVariable(weapon: ref<WeaponObject>) -> CName {
   return StringToName(friendly);
 }
 
-// Arm cyberware weapons (Gorilla Arms, Mantis Blades, Monowire, Projectile Launch System): never the UTPP fists / blade clips.
-// Gorilla Arms inherit the fists friendlyName (StrongArms : Base_Fists) - so the item type and the weapon tag decide, robust to
-// the record variants (vanilla checks the type the same way: aiHitReactionTasks.script:393, meleeTransitions.script:1982).
+// Clip variable: the anim variable whose UTPP clips play for a weapon's in-hand variable. The strong arms (w_strong_arms) play
+// the UTPP fist sets (archive\utpp_melee_tpp.archive.xl registers them behind w_strong_arms), so they use the fists entries of
+// every table here and the fists section of the melee full pose tables. Every other variable is its own clip variable.
+public func UTPPMeleeClipVariable(n: CName) -> CName {
+  if Equals(n, n"w_strong_arms") { return n"w_melee_fists"; }
+  return n;
+}
+
+// Clip variable of a weapon (n"" = no record / no friendlyName).
+public func UTPPMeleeWeaponClipVariable(weapon: ref<WeaponObject>) -> CName {
+  return UTPPMeleeClipVariable(UTPPMeleeWeaponAnimVariable(weapon));
+}
+
+// Arm cyberware weapons without UTPP clips (Mantis Blades, Monowire, Projectile Launch System): never the UTPP fists / blade
+// clips. The item type and the weapon tag decide, robust to the record variants (vanilla checks the type the same way:
+// aiHitReactionTasks.script:393, meleeTransitions.script:1982). The strong arms are not in this group: they play the UTPP fist
+// clips (UTPPMeleeClipVariable).
 public func UTPPMeleeIsArmCyberware(weapon: ref<WeaponObject>) -> Bool {
   if !IsDefined(weapon) {
     return false;
   }
-  if weapon.WeaponHasTag(n"StrongArms") || weapon.WeaponHasTag(n"MantisBlades") {
+  if weapon.WeaponHasTag(n"MantisBlades") {
     return true;
   }
   let rec: ref<WeaponItem_Record> = TweakDBInterface.GetWeaponItemRecord(ItemID.GetTDBID(weapon.GetItemID()));
@@ -135,8 +150,8 @@ public func UTPPMeleeIsArmCyberware(weapon: ref<WeaponObject>) -> Bool {
     return false;
   }
   let t: gamedataItemType = rec.ItemType().Type();
-  return Equals(t, gamedataItemType.Cyb_StrongArms) || Equals(t, gamedataItemType.Cyb_MantisBlades)
-    || Equals(t, gamedataItemType.Cyb_NanoWires) || Equals(t, gamedataItemType.Cyb_Launcher);
+  return Equals(t, gamedataItemType.Cyb_MantisBlades) || Equals(t, gamedataItemType.Cyb_NanoWires)
+    || Equals(t, gamedataItemType.Cyb_Launcher);
 }
 
 // The weapon in WeaponRight while V is on foot in UTPP third person (null otherwise).
@@ -168,7 +183,7 @@ public func UTPPMeleeFullBodyWanted(player: ref<PlayerPuppet>) -> Bool {
   if !IsDefined(weapon) || UTPPMeleeIsArmCyberware(weapon) {
     return false;
   }
-  let variable: CName = UTPPMeleeWeaponAnimVariable(weapon);
+  let variable: CName = UTPPMeleeWeaponClipVariable(weapon);
   if Equals(variable, n"") {
     return false;
   }
@@ -183,7 +198,7 @@ public func UTPPMeleeGuardWanted(player: ref<PlayerPuppet>) -> Bool {
   if !IsDefined(weapon) || UTPPMeleeIsArmCyberware(weapon) {
     return false;
   }
-  let variable: CName = UTPPMeleeWeaponAnimVariable(weapon);
+  let variable: CName = UTPPMeleeWeaponClipVariable(weapon);
   if Equals(variable, n"") {
     return false;
   }
@@ -230,12 +245,13 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
   if guard {
     guardCode = 2;
   }
-  // per-weapon state mask: table key = anim variable of the drawn weapon (n"" without a weapon / for arm cyberware -> default);
+  // per-weapon state mask: table key = clip variable of the drawn weapon (n"" without a weapon / for excluded arm cyberware ->
+  // default); the same key picks the section of the melee full pose tables;
   // sent when the weapon (key) or the mask changes, and with the periodic send
   let variable: CName = n"";
   let weapon: ref<WeaponObject> = UTPPMeleeTppWeapon(player);
   if IsDefined(weapon) && !UTPPMeleeIsArmCyberware(weapon) {
-    variable = UTPPMeleeWeaponAnimVariable(weapon);
+    variable = UTPPMeleeWeaponClipVariable(weapon);
   }
   let states: Int32 = UTPPMeleeFullBodyStates(variable);
   let now: Float = EngineTime.ToFloat(GameInstance.GetSimTime(player.GetGame()));
@@ -262,9 +278,10 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
 // camera while a strike runs) the fist can point elsewhere.
 // Returns the world yaw in degrees (the UTPPYawDegFromForward convention, as the body yaw) from the FPP camera component to the
 // tracked target while a UTPP third-person fists strike state runs (PSM.MeleeWeapon attack states 11..21 without ThrowAttack 19);
-// 1000.0 = no signal: other weapons and arm cyberware, no UTPP third-person fists pack, first person, mounted, no tracked target,
-// target farther than 5 m (vanilla melee target range) or closer than 0.3 m. The weapon check uses the guard list
-// (UTPPMeleeGuardWanted, fists only), not the full-body list, which also covers weapons with their own strike directions.
+// 1000.0 = no signal: other weapons and excluded arm cyberware, no UTPP third-person fists pack, first person, mounted, no tracked
+// target, target farther than 5 m (vanilla melee target range) or closer than 0.3 m. The weapon check uses the guard list
+// (UTPPMeleeGuardWanted: fists and strong arms), not the full-body list, which also covers weapons with their own strike
+// directions.
 public func UTPPMeleeStrikeYawOf(player: ref<PlayerPuppet>) -> Float {
   if !IsDefined(player) || !UTPPMeleeGuardWanted(player) {
     return 1000.0;

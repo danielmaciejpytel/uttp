@@ -302,11 +302,19 @@ DAYOF_DATA = [
 # Re-pinned 2026-11-14 (two-handed blunt sets):
 #   utpp_melee.reds           9018f613... -> e18d48f0...  FUNCTIONAL: one covered name and one state line added (w_two_hand_blunt)
 #   utpp_melee_tpp.archive.xl 31a76cca... -> b3340155...  FUNCTIONAL: two entries added; the existing entries are unchanged
+# Re-pinned 2026-11-14 (strong arms play the third-person fist clips):
+#   utpp_melee.reds           e18d48f0... -> a1aec221...  FUNCTIONAL: the strong arms leave the excluded arm cyberware group and map
+#                                                           to the fists clip variable (UTPPMeleeClipVariable: covered list, state
+#                                                           mask, guard and full pose section of w_melee_fists); the
+#                                                           UTPP_STATES_TABLE lines are unchanged
+#   utpp_melee_tpp.archive.xl b3340155... -> 1e696565...  FUNCTIONAL: four entries added (fists and default sets of both bodies
+#                                                           behind [w_strong_arms, utpp_melee_tpp]); the existing entries are
+#                                                           unchanged
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "e18d48f062b9c73bc351925f29c35db4f0a9b9af2e725c45e7b7054ff2b6c7da"),
+     "a1aec221ff9a87c78a885bd8d9ac4efad58fdaae44f738c32e02e0fb965ca339"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
-     "b334015537bc013eb17d925f607306442c4a5edd3f4de256028584cf214b4de9"),
+     "1e6965658dea413426f6b40b2ff8b2a515c6fbae192bb9ef15570d245f70a996"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",
      "2dd3b9017b668236a21e6e7cb2b604fbf2a3f199a57f413856fecbae8f0f905e"),
     ("car", P_REDS + "utpp_vehicle_approach_table.reds", "scripts/utpp_vehicle_approach_table.reds",

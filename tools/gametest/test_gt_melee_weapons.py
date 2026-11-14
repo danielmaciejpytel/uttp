@@ -152,9 +152,16 @@ class ScriptTables(unittest.TestCase):
         self.assertFalse(gw.is_covered(t, 'mantis_blade'))
         sa = gw.WEAPONS['strong_arms']
         self.assertEqual(sa['anim_var'], 'w_strong_arms')           # its own variable in the hand, not the fists one
-        self.assertFalse(gw.is_covered(t, sa['anim_var']))
-        self.assertFalse(gw.weapon_covered(sa, t))                  # the script excludes arm cyberware
-        self.assertEqual(gw.weapon_states(sa, t), t['default_states'])
+        self.assertEqual(t['clip_vars'], {'w_strong_arms': 'w_melee_fists'})  # the script plays the fist clips for it
+        self.assertNotIn('covered', sa)                             # coverage and mask come from the script
+        self.assertNotIn('states_default', sa)
+        self.assertTrue(gw.is_covered(t, sa['anim_var']))
+        self.assertTrue(gw.weapon_covered(sa, t))
+        self.assertEqual(gw.weapon_states(sa, t), t['states']['w_melee_fists'])
+        self.assertEqual(gw.weapon_states(sa, t), 3669472)
+        self.assertNotIn('w_strong_arms', t['states'])              # no line of its own: the fists line
+        self.assertEqual(gw.clip_var(t, 'w_melee_katana'), 'w_melee_katana')
+        self.assertEqual(gw.clip_var(None, 'w_strong_arms'), 'w_strong_arms')
         self.assertEqual(gw.weapon_covered(gw.WEAPONS['katana'], t), True)
         for tag in gw.PACK_WEAPONS:
             self.assertTrue(gw.is_covered(t, gw.WEAPONS[tag]['anim_var']), tag)
@@ -176,14 +183,19 @@ public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
 public func UTPPMeleeGuardCoveredName(n: CName) -> Bool {
   return Equals(n, n"w_melee_a");
 }
+public func UTPPMeleeClipVariable(n: CName) -> CName {
+  if Equals(n, n"w_melee_c") { return n"w_melee_a"; }
+  return n;
+}
 '''
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, 'x.reds')
             with open(p, 'w') as f:
                 f.write(text)
             t = gw.load_script_tables(p)
-        self.assertEqual((t['covered'], t['default_states'], t['states'], t['guard']),
-                         ({'w_melee_a', 'w_melee_b'}, 111, {'w_melee_a': 222}, {'w_melee_a'}))
+        self.assertEqual((t['covered'], t['default_states'], t['states'], t['guard'], t['clip_vars']),
+                         ({'w_melee_a', 'w_melee_b'}, 111, {'w_melee_a': 222}, {'w_melee_a'}, {'w_melee_c': 'w_melee_a'}))
+        self.assertEqual((gw.is_covered(t, 'w_melee_c'), gw.expected_states(t, 'w_melee_c')), (True, 222))
         self.assertIsNone(gw.load_script_tables(os.path.join(tempfile.gettempdir(), 'no_such_file.reds')))
 
 
@@ -649,7 +661,7 @@ class Macro(unittest.TestCase):
 
     def strong_arms_script(self, full_on=False, prev=0):
         held = {'now': False}
-        states = gw.load_script_tables()['default_states']
+        states = gw.expected_states(gw.load_script_tables(), 'w_strong_arms')
 
         def script(event, cmd):
             if event == 'MW_CW_EQUIP':
@@ -658,7 +670,7 @@ class Macro(unittest.TestCase):
                 held['now'] = True
                 return ['CET [night] MW_CW_DRAW ok=true eqsystem']
             if event == 'MW_INHAND':
-                return [f'CET [night] MW_INHAND ok=true {"w_strong_arms" if held["now"] else "none"} | meleefull flag=0']
+                return [f'CET [night] MW_INHAND ok=true {"w_strong_arms" if held["now"] else "none"} | meleefull flag={int(full_on)}']
             if event in ('play:mw_light_combo', 'play:mw_strong_attack', 'play:melee_block'):
                 out = [MASK_ON.format(why='flag')] if event == 'play:mw_light_combo' else []
                 out.append(FULL.format(onoff='on' if full_on else 'off', why='on' if full_on else 'flag', speed='0.00', state=11,
@@ -672,14 +684,14 @@ class Macro(unittest.TestCase):
             return []
         return script
 
-    def test_strong_arms_runs_the_standing_phases_with_the_full_body_off(self):
+    def test_strong_arms_runs_the_standing_phases_with_the_full_body_on(self):
         os.environ[gw.ALLOW_CYBERWARE_ENV] = '1'
         self.addCleanup(os.environ.pop, gw.ALLOW_CYBERWARE_ENV, None)
-        n, res = self.run_macro(self.strong_arms_script(prev=1234), 'melee_strong_arms')
+        n, res = self.run_macro(self.strong_arms_script(full_on=True, prev=1234), 'melee_strong_arms')
         r = res['weapons']['strong_arms']
         self.assertEqual(res['verdict'], 'PASS', res['fails'])
-        self.assertFalse(r['covered'])                              # the fists variable is covered, the cyberware is not
-        self.assertEqual(r['expected_states'], gw.load_script_tables()['default_states'])
+        self.assertTrue(r['covered'])                               # covered through the fists clip variable
+        self.assertEqual(r['expected_states'], gw.load_script_tables()['states']['w_melee_fists'])
         self.assertEqual([p['phase'] for p in r['phases']], gw.phase_plan('strong_arms'))
         self.assertEqual([c for c in n.calls if c[0] in ('play', 'walk')],
                          [('play', 'mw_light_combo'), ('play', 'mw_strong_attack'), ('play', 'melee_block')])
@@ -688,12 +700,13 @@ class Macro(unittest.TestCase):
         self.assertEqual(r['removed'], 'removed')
         self.assertEqual(res['own_clip_phases'], [])
 
-    def test_strong_arms_with_the_full_body_on_fails(self):
+    def test_strong_arms_with_the_full_body_off_fails(self):
         os.environ[gw.ALLOW_CYBERWARE_ENV] = '1'
         self.addCleanup(os.environ.pop, gw.ALLOW_CYBERWARE_ENV, None)
-        n, res = self.run_macro(self.strong_arms_script(full_on=True), 'melee_strong_arms')
+        n, res = self.run_macro(self.strong_arms_script(full_on=False), 'melee_strong_arms')
         self.assertEqual(res['verdict'], 'FAIL')
-        self.assertTrue(any('does not cover' in f for f in res['fails']), res['fails'])
+        self.assertTrue(any('full body never switched on' in f for f in res['fails']), res['fails'])
+        self.assertTrue(any('block state is in the table' in f for f in res['fails']), res['fails'])
         self.assertIn(('cmd', 'MW_CW_RESTORE'), n.calls)            # the loadout is restored on a failure too
 
     def test_strong_arms_warns_when_the_pose_recording_is_off(self):
@@ -706,7 +719,7 @@ class Macro(unittest.TestCase):
             self_.args = types.SimpleNamespace(diag='off')
         FakeNight.__init__ = init
         self.addCleanup(setattr, FakeNight, '__init__', orig)
-        n, res = self.run_macro(self.strong_arms_script(), 'melee_strong_arms')
+        n, res = self.run_macro(self.strong_arms_script(full_on=True), 'melee_strong_arms')
         self.assertEqual(res['verdict'], 'PASS', res['fails'])
         self.assertTrue(any('pose recording' in x for x in res['warnings']), res['warnings'])
 
@@ -738,7 +751,7 @@ class DryRun(unittest.TestCase):
         self.assertIn('Items.StrongArms', text)
         self.assertIn('pose    : needs the pose recording', text)
         self.assertIn('walk_strikes  : not run for this weapon', text)
-        self.assertIn('script covers it: False', text)
+        self.assertIn('script covers it: True', text)
         self.assertIn('phases  : equip -> draw -> light_combo -> strong_attack -> block -> holster -> remove', text)
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(gw.main(['--dry-run', '--weapons', 'knife,katana,blunt,baton']), 0)

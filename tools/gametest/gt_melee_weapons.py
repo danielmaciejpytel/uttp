@@ -89,13 +89,12 @@ WEAPONS = {
     # arm cyberware: needs the cyberware loadout change, see cyberware_equip_cmd
     'mantis': {'label': 'mantis blades', 'anim_var': 'mantis_blade', 'block': True, 'kind': 'cyberware',
                'records': ('Items.MantisBlades',)},
-    # strong arms: arm cyberware with its own anim variable in the hand (w_strong_arms, read in game 2.5); the pack registers
-    # third-person fist sets for it behind the StrongArms variable. The script never switches the full body (nor the full pose
-    # layer) on for arm cyberware, so 'covered' is False and the state mask is the default one.
+    # strong arms: arm cyberware with its own anim variable in the hand (w_strong_arms, read in game 2.5); the pack registers the
+    # third-person fist sets behind w_strong_arms and the script maps it to the fists clip variable (UTPPMeleeClipVariable), so
+    # coverage and the state mask are those of w_melee_fists (read from the script, not set here).
     # 'phases' = the standing phases only; 'pose' = the run needs the pose recording (diagnostic logs on) to measure the body.
     'strong_arms': {'label': 'strong arms (fists cyberware)', 'anim_var': 'w_strong_arms', 'block': True, 'kind': 'cyberware',
-                    'records': ('Items.StrongArms',), 'covered': False, 'states_default': True,
-                    'phases': ('light_combo', 'strong_attack', 'block'), 'pose': True},
+                    'records': ('Items.StrongArms',), 'phases': ('light_combo', 'strong_attack', 'block'), 'pose': True},
 }
 for _tag, _w in WEAPONS.items():
     _w['tag'] = _tag
@@ -127,7 +126,8 @@ def default_reds_path() -> str:
 
 
 def load_script_tables(path: str | None = None) -> dict | None:
-    """Covered anim variables, state masks and the default mask the melee script sends; None = file not readable."""
+    """Covered anim variables, state masks, the default mask and the clip-variable aliases (in-hand variable -> the variable
+    whose clips and table lines it uses, UTPPMeleeClipVariable) of the melee script; None = file not readable."""
     path = path or default_reds_path()
     try:
         with open(path, encoding='utf-8') as f:
@@ -143,19 +143,26 @@ def load_script_tables(path: str | None = None) -> dict | None:
     dm = re.search(r'return (\d+);', body('UTPPMeleeStatesDefault'))
     section = re.search(r'UTPP_STATES_TABLE begin(.*?)UTPP_STATES_TABLE end', text, re.S)
     states = {k: int(v) for k, v in re.findall(r'n"([A-Za-z0-9_]+)"\) \{ return (\d+); \}', section.group(1))} if section else {}
+    clip_vars = dict(re.findall(r'Equals\(n, n"([A-Za-z0-9_]+)"\) \{ return n"([A-Za-z0-9_]+)"; \}',
+                                body('UTPPMeleeClipVariable')))
     if not covered or not dm:
         return None
-    return {'covered': covered, 'guard': guard, 'default_states': int(dm.group(1)), 'states': states}
+    return {'covered': covered, 'guard': guard, 'default_states': int(dm.group(1)), 'states': states, 'clip_vars': clip_vars}
+
+
+def clip_var(tables: dict | None, anim_var: str) -> str:
+    """The variable whose clips and table lines an in-hand variable uses (itself unless the script maps it)."""
+    return (tables or {}).get('clip_vars', {}).get(anim_var, anim_var)
 
 
 def expected_states(tables: dict | None, anim_var: str) -> int | None:
     if not tables:
         return None
-    return tables['states'].get(anim_var, tables['default_states'])
+    return tables['states'].get(clip_var(tables, anim_var), tables['default_states'])
 
 
 def is_covered(tables: dict | None, anim_var: str) -> bool | None:
-    return None if not tables else anim_var in tables['covered']
+    return None if not tables else clip_var(tables, anim_var) in tables['covered']
 
 
 # ---------------------------------------------------------------------------------------------- script commands
