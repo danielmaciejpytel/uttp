@@ -29,6 +29,7 @@
 #include "mm/AimOffsetRuntime.hpp"
 #include "mm/MeleeAimRuntime.hpp"
 #include "mm/MeleeBaseRuntime.hpp"
+#include "mm/MeleePoseRuntime.hpp"
 #include "mm/HeadLookRuntime.hpp"
 #include "mm/GamePoseCapture.hpp"
 #include "mm/PoseTrace.hpp"
@@ -117,6 +118,10 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
     utpp::meleebase::CaptureEngineKeys(bones, aCount, reinterpret_cast<void*>(aMergedRig), snap.meleeAimWeight);
     const uint32_t n = mm::integ::BlendIntoRecords(bones, aCount, snap, snap.weight, keepLowerOnMM);
     if (captured) captured = mm::posetrace::Capture(trace, 1, bones, aCount);
+    // Melee full pose (mm/MeleePose.hpp): while the melee full body hands the lower body over (standing strikes), the matched clip's
+    // own Hips / Spine / legs, time-synchronised with it. After the blend (it replaces the engine base and the kept MM legs alike),
+    // before the chest correction, which it scales down by its share.
+    utpp::meleepose::Apply(bones, aCount, reinterpret_cast<void*>(aMergedRig), snap.lowerScale, aNow);
     if (n)
     {
         g_hot.mmAppliedCalls.value.fetch_add(1, std::memory_order_relaxed);

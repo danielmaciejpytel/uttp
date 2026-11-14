@@ -47,6 +47,7 @@
 #include "mm/AimOffsetRuntime.hpp"
 #include "mm/MeleeAimRuntime.hpp" // melee aim tilt (2026-11-09)
 #include "mm/MeleeBaseRuntime.hpp" // melee chest base correction (2026-11-13)
+#include "mm/MeleePoseRuntime.hpp" // melee full pose
 #include "mm/HeadLookRuntime.hpp" // head look layer
 #include "mm/VaultTorso.hpp" // vault torso limiter (2026-11-10)
 #include "mm/BodyDeformerTrace.hpp"
@@ -753,6 +754,7 @@ void DisarmLocked()
     aimofs::OnDisarmed(); // 0.6.3
     utpp::meleeaim::OnDisarmed(); // melee aim tilt (2026-11-09)
     utpp::meleebase::OnDisarmed(); // melee chest base correction (2026-11-13)
+    utpp::meleepose::OnDisarmed(); // melee full pose
     utpp::headlook::OnDisarmed(); // head look layer
 }
 
@@ -824,6 +826,7 @@ int32_t ArmLocked(bool aLogAlways)
         aimofs::OnArmed(info.metaRig, hashes, parents); // 0.6.3 aim offset bones (fail closed)
         utpp::meleeaim::OnArmed(info.metaRig, hashes, parents); // melee aim tilt: Spine1..Neck (fail closed)
         utpp::meleebase::OnArmed(info.metaRig, hashes, parents); // melee chest base correction: Hips..Spine3 + key bones (fail closed)
+        utpp::meleepose::OnArmed(info.metaRig, hashes, parents); // melee full pose: key bones + Hips, Spine, legs (fail closed)
         utpp::headlook::OnArmed(info.metaRig, hashes, parents); // head look: Spine3, Neck, Neck1, Head, eyes (fail closed)
         utpp::mm::vaulttorso::rt::OnArmed(info.metaRig, hashes, parents); // vault torso limiter: Hips, Spine..Spine3 (fail closed)
         g_hot.armed.store(true, std::memory_order_release);
@@ -1756,6 +1759,26 @@ void Native_SetMeleeFullBodySetting(RED4ext::IScriptable*, RED4ext::CStackFrame*
 {
     Native_SetBool057<&motionhost::SetMeleeFullBodySetting>(aFrame, "UTPPSetMeleeFullBodySetting");
 }
+// UTPPSetMeleeFullPoseSetting(on): user setting melee.fullPose (default on). Off = the chest correction alone.
+void Native_SetMeleeFullPoseSetting(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    Native_SetBool057<&utpp::meleepose::SetEnabled>(aFrame, "UTPPSetMeleeFullPoseSetting");
+}
+// UTPPSetMeleePoseWeapon(variable): the anim variable of the drawn melee weapon (n"" = none); picks the clip section of the melee
+// full pose tables. Repeated by the script; only changes are logged.
+void Native_SetMeleePoseWeapon(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    RED4ext::CName variable;
+    RED4ext::GetParameter(aFrame, &variable);
+    aFrame->code++;
+    utpp::meleepose::SetWeapon(variable.hash);
+    static uint64_t s_logged = ~0ull; // game thread
+    if (s_logged != variable.hash)
+    {
+        s_logged = variable.hash;
+        LogInfo("UTPPSetMeleePoseWeapon(%s)", variable.ToString());
+    }
+}
 void Native_SetMeleeAimParams(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     float maxUp = 0.0f, maxDown = 0.0f, smoothHz = 10.0f;
@@ -1906,7 +1929,7 @@ void Native_MeleeStatus(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED
 {
     aFrame->code++;
     if (aOut)
-        *aOut = RED4ext::CString((motionhost::MeleeFullBodyStatus() + " | " + utpp::meleeaim::Status() + " | " + utpp::meleebase::Status()).c_str());
+        *aOut = RED4ext::CString((motionhost::MeleeFullBodyStatus() + " | " + utpp::meleeaim::Status() + " | " + utpp::meleebase::Status() + " | " + utpp::meleepose::Status()).c_str());
 }
 
 void Native_SetAimOffsetParams(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
@@ -3416,6 +3439,15 @@ void PostRegisterTypes()
         mfs->flags = flags;
         mfs->AddParam("Bool", "on");
         rtti->RegisterFunction(mfs);
+        auto* mfp = RED4ext::CGlobalFunction::Create("UTPPSetMeleeFullPoseSetting", "UTPPSetMeleeFullPoseSetting",
+                                                     &Native_SetMeleeFullPoseSetting);
+        mfp->flags = flags;
+        mfp->AddParam("Bool", "on");
+        rtti->RegisterFunction(mfp);
+        auto* mpw = RED4ext::CGlobalFunction::Create("UTPPSetMeleePoseWeapon", "UTPPSetMeleePoseWeapon", &Native_SetMeleePoseWeapon);
+        mpw->flags = flags;
+        mpw->AddParam("CName", "variable");
+        rtti->RegisterFunction(mpw);
         auto* map = RED4ext::CGlobalFunction::Create("UTPPSetMeleeAimParams", "UTPPSetMeleeAimParams", &Native_SetMeleeAimParams);
         map->flags = flags;
         map->AddParam("Float", "maxUpDeg");
@@ -4219,6 +4251,8 @@ void OnLoad()
             LoadEarlyPoseExperiment(dir);
             const bool helperLoaded = bodyhelperruntime::Load(dir);
             LogInfo("UTPP skin helpers load: %d %s", helperLoaded ? 1 : 0, bodyhelperruntime::Status().c_str());
+            utpp::meleepose::Load(dir + L"data\\"); // melee full pose tables: <dll dir>\data\utpp_melee_pose_female.bin / _male.bin (fail closed)
+            LogInfo("UTPP melee full pose: %s", utpp::meleepose::Status().c_str());
             utpp::motiondriver::Install(dir); // UTPP-MOTION SEAM: <dll dir>\data\ data, hooks (mm.motionDriver stays off until UTPPSetMotionEnabled)
             utpp::motiondriver::SetLocomotionReasonsProbe(&utpp::locomotion::CurrentReasons); // H2 safeguard: why the native body turn is off (read only)
             utpp::motiondriver::SetLogger(&MMTraceLog); // UTPP-MOTION SEAM: v2 fallback reasons / fault cause, once each

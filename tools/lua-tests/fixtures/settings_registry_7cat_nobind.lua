@@ -94,6 +94,7 @@ return {
     ["lootView.zoom"] = "0.90000000000000002",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
+    ["melee.fullPose"] = "true",
     ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
@@ -190,6 +191,7 @@ return {
     "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
+    "apply melee.fullPose(true,\"ok\")",
     "mm setMotionGrip(true)",
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
@@ -387,6 +389,7 @@ return {
     "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
+    "apply melee.fullPose(true,\"ok\")",
     "mm setMotionGrip(true)",
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
@@ -1401,6 +1404,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["melee.fullPose"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["melee.guard"] = {
       ["default"] = "true",
       ["hasApply"] = true,
@@ -2187,6 +2198,7 @@ return {
     ["lootView.zoom"] = "0.90000000000000002",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
+    ["melee.fullPose"] = "true",
     ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
@@ -2330,6 +2342,7 @@ return {
     "melee.guard",
     "melee.guardFullBody",
     "melee.guardAimTilt",
+    "melee.fullPose",
     "mm.grip",
     "mm.shootTransfer",
     "mm.shinobiBonusReload",
@@ -2504,6 +2517,7 @@ return {
     "melee.guard",
     "melee.guardFullBody",
     "melee.guardAimTilt",
+    "melee.fullPose",
     "mm.grip",
     "mm.shootTransfer",
     "mm.shinobiBonusReload",
@@ -2674,6 +2688,7 @@ return {
     "apply melee.guard(true,\"ok\")",
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
+    "apply melee.fullPose(true,\"ok\")",
     "apply mm.grip(true,\"ok\")",
     "apply mm.shootTransfer(true,\"ok\")",
     "apply mm.shinobiBonusReload(false,\"ok\")",
@@ -2840,6 +2855,7 @@ melee.aimTilt=true\r\
 melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
+melee.fullPose=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
 mm.shinobiBonusReload=false\r\
@@ -2996,6 +3012,7 @@ vehicle.jumpOutSidePush=true\r\
       "melee.guard",
       "melee.guardFullBody",
       "melee.guardAimTilt",
+      "melee.fullPose",
       "mm.grip",
       "mm.shootTransfer",
       "mm.shinobiBonusReload",
@@ -3298,6 +3315,7 @@ vehicle.jumpOutSidePush=true\r\
     ["lootView.zoom"] = "1.3999999999999999",
     ["melee.aimTilt"] = "true",
     ["melee.fullBody"] = "true",
+    ["melee.fullPose"] = "true",
     ["melee.guard"] = "true",
     ["melee.guardAimTilt"] = "false",
     ["melee.guardFullBody"] = "false",
@@ -3408,6 +3426,7 @@ melee.aimTilt=true\r\
 melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
+melee.fullPose=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
 mm.shinobiBonusReload=false\r\
@@ -3582,6 +3601,7 @@ other.module=42\r\
     "/utpp/animation|switch|melee.guard",
     "/utpp/animation|switch|melee.guardFullBody",
     "/utpp/animation|switch|melee.guardAimTilt",
+    "/utpp/animation|switch|melee.fullPose",
     "/utpp/animation|switch|mm.grip",
     "/utpp/animation|switch|mm.shootTransfer",
     "/utpp/animation|switch|mm.shinobiBonusReload",

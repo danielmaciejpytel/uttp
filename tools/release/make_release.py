@@ -264,6 +264,10 @@ DAYOF_DATA = [
     # Re-pinned 2026-11-14 (was 844d00f6..., 4534272 bytes): knife, katana, one-handed blunt and baton sets for both bodies added; the
     # six fists / default / StrongArms sets are byte-identical to 844d00f6...
     ("melee", P_ARC + "utpp_melee.archive", 22454272, "770bb02a4c952ff55bbcee589d410c9e81f03ae550e115d9d472dcf373a75c6d"),
+    # Melee full pose tables (hips, spine and legs of every packed melee clip, one file per body; generated from the clip inputs of
+    # the archive above by tools\melee\melee_pose_table.py): fists, knife, katana, one-handed blunt and baton, 312 clips each.
+    ("melee", P_DATA + "utpp_melee_pose_female.bin", 1830568, "38c014b0fdf73ea4d4d494433997d0511e38028089d1f4c8e5041b786d743505"),
+    ("melee", P_DATA + "utpp_melee_pose_male.bin", 1830568, "a3c6e5c47ed426de35375df4f27ad7c339a74ac4f655ab02c6cf9c6e834a368a"),
     # stage Build\stages\vehexit6-20261109 (game copy of 2026-11-09 15:30 is identical)
     ("car", P_ARC + "utpp_vehicle_car.archive", 7102464, "3843163c100787fc0669c6f5091e58597e83a312cc1f21da1542fc09771119d5"),
 ]
@@ -284,9 +288,13 @@ DAYOF_DATA = [
 #   utpp_melee.reds           411d1dbe... -> 6c0dd8f3...  FUNCTIONAL: four covered names and state lines added; the strike-turn signal
 #                                                           keys on the guard list (fists only, unchanged behaviour for fists)
 #   utpp_melee_tpp.archive.xl c30ed152... -> 31a76cca...  FUNCTIONAL: eight entries added; the six existing entries are unchanged
+# Re-pinned 2026-11-14 (melee full pose):
+#   utpp_melee.reds           6c0dd8f3... -> 9018f613...  FUNCTIONAL: two native declarations and one call that sends the drawn
+#                                                           weapon's anim variable with the state mask; the UTPP_STATES_TABLE lines
+#                                                           are unchanged
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "6c0dd8f3d7a474fedbbbb98cd8fa806011460e0a0429261e3f3ca0bc06ed9c37"),
+     "9018f61332b5b912418c1e3a25f6e737e357ad84ebf2e7b755294d085be9f303"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
      "31a76cca00cf288af9c9a2d107dc7f95e6f0991706a6ce2e855b0ea0b4a9251b"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",

@@ -68,6 +68,8 @@ struct EngineKeys
     core::Quat key[core::kKeyBones];
 };
 thread_local EngineKeys t_engine;
+// share of the melee full pose in this FK call (SetFullPoseShare; consumed by Apply)
+thread_local float t_fullPoseShare = 0.0f;
 
 // lower body guard: the latched decision (hysteresis) and its eased weight (one episode of the melee full body)
 std::atomic<bool> g_keepLatch{false};
@@ -164,9 +166,23 @@ void CaptureEngineKeys(const uint8_t* aBones, uint32_t aCount, void* aRig, float
     t_engine.valid = 1;
 }
 
+bool PeekEngineKeys(void* aRig, mm::math::Quat* aOut)
+{
+    if (!aOut || t_engine.valid == 0 || t_engine.rigPtr != reinterpret_cast<uint64_t>(aRig))
+        return false;
+    for (int i = 0; i < core::kKeyBones; ++i)
+        aOut[i] = t_engine.key[i];
+    return true;
+}
+
+void SetFullPoseShare(float aShare) { t_fullPoseShare = std::isfinite(aShare) ? aim::Clampf(aShare, 0.0f, 1.0f) : 0.0f; }
+
 void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aMMWeight, float aUpperScale, float aMeleeWeight, uint32_t aEnabled,
            int64_t aNowTicks)
 {
+    // the melee full pose already wrote the clip's lower body with this share: the chest correction acts on the rest only
+    const float fullPoseShare = t_fullPoseShare;
+    t_fullPoseShare = 0.0f;
     // the game pose's key bones of this call, when CaptureEngineKeys ran for it (taken once: a stale capture is never used twice)
     const bool haveEngineKeys = t_engine.valid != 0 && t_engine.rigPtr == reinterpret_cast<uint64_t>(aRig);
     t_engine.valid = 0;
@@ -222,7 +238,7 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aMMWeight, float 
             g_enableW = target > g_enableW ? std::fmin(target, g_enableW + step) : std::fmax(target, g_enableW - step);
         }
     }
-    const float wEff = weight * g_enableW;
+    const float wEff = weight * g_enableW * (1.0f - fullPoseShare);
     if (!(wEff > 0.0f) && aEnabled == 0)
     {
         // eased all the way out: nothing to apply, but the state stays (gate, smoothed rotation, row hint, dirty) so that the flag coming

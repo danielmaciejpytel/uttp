@@ -36,6 +36,10 @@ public native func UTPPSetMeleeGuardSetting(on: Bool) -> Void
 public native func UTPPSetMeleeGuardFullSetting(on: Bool) -> Void
 public native func UTPPSetMeleeGuardAimTiltSetting(on: Bool) -> Void
 public native func UTPPSetMeleeAimTarget(feet: Vector4, valid: Bool) -> Void
+// Melee full pose (standing strikes play the clip's hips, spine and legs): the drawn weapon's anim variable picks the clip
+// section of the pose tables (n"" = none); the setting melee.fullPose switches the layer.
+public native func UTPPSetMeleePoseWeapon(variable: CName) -> Void
+public native func UTPPSetMeleeFullPoseSetting(on: Bool) -> Void
 
 // ---- coverage table: weapon anim variables with UTPP melee clips ----
 // The game selects a weapon's animation set by its anim wrapper variable = the friendlyName of the weapon's TweakDB item record
@@ -244,6 +248,7 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
     player.utppMeleeStatesInit = true;
     player.utppMeleeFullSentAt = now;
     UTPPSetMeleeFullBodyStates(states);
+    UTPPSetMeleePoseWeapon(variable);
     UTPPSetMeleeFullBody(want);
     UTPPSetMeleeGuard(guard);
   }

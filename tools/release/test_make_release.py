@@ -117,7 +117,8 @@ class DayOfBuild(unittest.TestCase):
         for p, (g, h) in code.items():
             self.assertEqual(len(h), 64)
         want = {
-            "melee": {mr.P_ARC + "utpp_melee.archive", mr.P_REDS + "utpp_melee.reds", mr.P_ARC + "utpp_melee_tpp.archive.xl"},
+            "melee": {mr.P_ARC + "utpp_melee.archive", mr.P_REDS + "utpp_melee.reds", mr.P_ARC + "utpp_melee_tpp.archive.xl",
+                      mr.P_DATA + "utpp_melee_pose_female.bin", mr.P_DATA + "utpp_melee_pose_male.bin"},
             "car": {mr.P_ARC + "utpp_vehicle_car.archive"} | {mr.P_REDS + n + ".reds" for n in (
                 "utpp_vehicle_approach", "utpp_vehicle_approach_table", "utpp_vehicle_door", "utpp_vehicle_door_timing")},
         }
@@ -215,7 +216,7 @@ class ParriedGraph(unittest.TestCase):
         self.assertEqual(mr.GRAPH_SHA, "D5786BB159CEC4AD8A334B15B6762785A5B587E1DF0664A79DE91F0CFDC87449".lower())
         self.assertEqual(mr.GRAPH_REL, mr.P_ARC + "utpp_melee_parried_graph.archive")
         self.assertEqual(mr.GRAPH_SIZE, 53248)
-        self.assertNotIn(mr.GRAPH_REL, [p for _, p, _, _ in mr.DAYOF_DATA])  # optional: the melee group file list stays 3 files
+        self.assertNotIn(mr.GRAPH_REL, [p for _, p, _, _ in mr.DAYOF_DATA])  # optional: not one of the melee group's pinned files
 
     def test_rule(self):
         t = lambda *l: states_text(*[state_line(v, m) for v, m in l])

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "GameIntegration.hpp"
+#include "MMMath.hpp"
 
 namespace utpp::meleebase
 {
@@ -25,6 +26,13 @@ int64_t TicksPerSecond(); // the unit of the aNowTicks arguments below (QueryPer
 // upper-body mask blend-in they are 0..100 % MM pose and match no clip row, so the correction used to start late). aMeleeWeight =
 // PoseSnapshot::meleeAimWeight (0 = melee not active: nothing is read). Cheap: a seqlock read and 13 quaternions.
 void CaptureEngineKeys(const uint8_t* aBones, uint32_t aCount, void* aRig, float aMeleeWeight);
+
+// FK detour, same call, between CaptureEngineKeys and Apply: copies the captured key bones of the game pose (kKeyBones quaternions,
+// kKeyNames order) without consuming them. False when none were captured for this call / rig.
+bool PeekEngineKeys(void* aRig, mm::math::Quat* aOut);
+// FK detour, same call, before Apply: the share (0..1) with which the melee full pose (mm/MeleePoseRuntime.hpp) wrote the clip's lower
+// body. Apply scales the chest correction by (1 - share), so the two never stack; reset by Apply.
+void SetFullPoseShare(float aShare);
 
 // FK detour (animation thread), after the MM blend and the gun aim offset, BEFORE the aim tilt. aMeleeWeight = PoseSnapshot::meleeAimWeight,
 // aMMWeight / aUpperScale from the same snapshot, aEnabled = PoseSnapshot::meleeBase (fists drawn, standing on the ground): a TARGET weight

@@ -428,7 +428,7 @@ local LAYOUT = {
   --   Melee guard (fists only; the shipped third-person melee_idlepose is the guard pose every fist clip starts and ends in):
   -- developer level switches (default on for the guard, off for its aim tilt and the legs), no release menu option yet
   { "developer", "combat", { "bodyturn.aimJog", "melee.guard", "melee.guardFullBody", "melee.guardAimTilt",
-                              "bodyturn.meleeStrikeTurn" } },
+                              "melee.fullPose", "bodyturn.meleeStrikeTurn" } },
   -- Interactions
   { "player", "world", { "perspective.scene", "lootView.impl", "interactRange.impl", "headLook.impl",
                         "headLook.faceCamera" } },
@@ -2429,6 +2429,9 @@ local applyMeleeGuardFullBody = applyMeleeGuardBool("melee.guardFullBody", "mele
   "melee guard full body")
 local applyMeleeGuardAimTilt = applyMeleeGuardBool("melee.guardAimTilt", "meleeGuardAimTilt", "setMeleeGuardAimTilt",
   "melee guard aim tilt")
+-- melee full pose (DLL mm/MeleePose.hpp): standing strikes play the clip's own hips, spine and legs (default on); off = the chest
+-- correction alone
+local applyMeleeFullPose = applyMeleeGuardBool("melee.fullPose", "meleeFullPose", "setMeleeFullPose", "melee full pose")
 
 local function applyAimUpperFade(v)
   local on = v == true
@@ -2662,6 +2665,12 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
     desc = "With Melee guard and Melee aim tilt on: the guard leans toward where you aim as well, so the lean does not fade in "
       .. "and out at every strike.",
     apply = applyMeleeGuardAimTilt })
+  M.Register({ key = "melee.fullPose", section = "animation", type = "bool", default = true,
+    label = "Melee full pose",
+    desc = "With Melee full body on: standing strikes play the hips, spine and legs of the melee animation itself, in step with it, "
+      .. "for every weapon with third-person melee animations. Off: the legs come from the game's base pose and only the chest is "
+      .. "turned toward the animation.",
+    apply = applyMeleeFullPose })
   M.Register({ key = "mm.grip", section = "animation", type = "bool", default = true,
     label = "motion: left-hand weapon grip",
     desc = "Keeps the left hand on the captured weapon grip for two-handed pistols and rifles while motion owns the upper body. Off disables this correction.",
@@ -3138,6 +3147,7 @@ if type(registerForEvent) == "function" then
         setMeleeGuard = function(on) return Game.UTPPSetMeleeGuardSetting(on) end,
         setMeleeGuardFullBody = function(on) return Game.UTPPSetMeleeGuardFullSetting(on) end,
         setMeleeGuardAimTilt = function(on) return Game.UTPPSetMeleeGuardAimTiltSetting(on) end,
+        setMeleeFullPose = function(on) return Game.UTPPSetMeleeFullPoseSetting(on) end,
         setMotionGrip = function(on) return Game.UTPPSetMotionGrip(on) end,
         setMotionShootTransfer = function(on) return Game.UTPPSetMotionShootTransfer(on) end,
         setMotionMagTap = function(on) return Game.UTPPSetMotionMagTap(on) end,

@@ -947,6 +947,21 @@ add_executable(utpp_melee_base_offline EXCLUDE_FROM_ALL tests/MeleeBaseOffline.c
                src/mm/MeleeBaseData.cpp src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp src/mm/MeleeBodyId.hpp src/mm/MeleeBaseRuntime.hpp
                src/mm/MeleeAim.hpp src/mm/AimOffset.hpp src/mm/GameIntegration.hpp src/mm/MMMath.hpp)
 target_compile_options(utpp_melee_base_offline PRIVATE ${UTPP_WARNINGS} /EHsc)
+# ---- melee full pose: the clip's lower body while standing strikes run (self-contained block) ----
+# MeleePose.hpp: data file (tools/melee/melee_pose_table.py), clip clock, seam hold, lower body write (header-only core).
+target_sources(UTPP PRIVATE src/mm/MeleePose.cpp src/mm/MeleePose.hpp src/mm/MeleePoseRuntime.hpp)
+add_executable(utpp_melee_pose_test tests/MeleePoseTest.cpp src/mm/MeleePose.hpp src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp
+               src/mm/AimOffset.hpp src/mm/GameIntegration.hpp src/mm/MMMath.hpp)
+target_compile_options(utpp_melee_pose_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_melee_pose_test COMMAND utpp_melee_pose_test "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose")
+# recorded fists sequences through the production glue (MeleeBaseReplay.hpp with the full pose step)
+add_executable(utpp_melee_pose_replay_test tests/MeleePoseReplayTest.cpp tests/MeleeBaseReplay.hpp src/mm/MeleePose.cpp src/mm/MeleeBase.cpp
+               src/mm/MeleeBaseData.cpp src/mm/MeleePose.hpp src/mm/MeleePoseRuntime.hpp src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp
+               src/mm/MeleeBodyId.hpp src/mm/MeleeBaseRuntime.hpp src/mm/MeleeAim.hpp src/mm/AimOffset.hpp src/mm/GameIntegration.hpp src/mm/MMMath.hpp)
+target_compile_definitions(utpp_melee_pose_replay_test PRIVATE UTPP_REPLAY_FULL_POSE)
+target_compile_options(utpp_melee_pose_replay_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_melee_pose_replay_test COMMAND utpp_melee_pose_replay_test "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose"
+         "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/melee_base_male.bin" "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/melee_base_blend_male.bin")
 # ---- head look layer: Spine3 / Neck / Neck1 / Head and the eyes toward the target of utpp_core (self-contained block) ----
 # HeadLook.hpp: gaze, spring, distribution, limits, eyes (header-only core); HeadLook.cpp: FK detour glue (after the melee tilt).
 target_sources(UTPP PRIVATE src/mm/HeadLook.cpp src/mm/HeadLook.hpp src/mm/HeadLookRuntime.hpp)

@@ -28,6 +28,9 @@
 
 #include "../src/mm/MeleeBase.hpp"
 #include "../src/mm/MeleeBaseRuntime.hpp"
+#ifdef UTPP_REPLAY_FULL_POSE
+#include "../src/mm/MeleePoseRuntime.hpp"
+#endif
 
 namespace utpp::replay
 {
@@ -177,6 +180,9 @@ public:
         for (int i = 0; i < nb; ++i)
             hashes[size_t(i)] = integ::CNameHash(names[size_t(i)]);
         utpp::meleebase::OnArmed(&rigToken, hashes, parents);
+#ifdef UTPP_REPLAY_FULL_POSE
+        utpp::meleepose::OnArmed(&rigToken, hashes, parents);
+#endif
         ticks = 1000 * utpp::meleebase::TicksPerSecond();
     }
 
@@ -236,6 +242,10 @@ public:
         lastKeep = keep;
         utpp::meleebase::CaptureEngineKeys(bones, uint32_t(nb), rig, s.meleeAimWeight); // before the blend, as FkHook.cpp
         integ::BlendIntoRecords(bones, uint32_t(nb), s, s.weight, keep);
+#ifdef UTPP_REPLAY_FULL_POSE
+        // melee full pose (mm/MeleePose.cpp), after the blend and before the chest correction, as FkHook.cpp
+        utpp::meleepose::Apply(bones, uint32_t(nb), rig, s.lowerScale, ticks);
+#endif
         utpp::meleebase::Apply(bones, uint32_t(nb), rig, s.weight, s.upperScale, s.meleeAimWeight, s.meleeBase, ticks);
     }
 
