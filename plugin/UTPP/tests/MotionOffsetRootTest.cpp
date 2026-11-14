@@ -1,8 +1,12 @@
 #include "../src/mm/MotionOffsetRoot.hpp"
+#include "MotionOffsetRootRecorded.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <string>
+#include <vector>
 using namespace utpp::mm;
 static int pass = 0, fail = 0;
 static void C(const char *n, bool v)
@@ -21,6 +25,85 @@ struct XY
 static XY R(double a, XY v)
 {
     return {std::cos(a) * v.x - std::sin(a) * v.y, std::sin(a) * v.x + std::cos(a) * v.y};
+}
+// Policy 3 helpers. The pop measure of the pose analysis: the offset's speed as the pose frame sees it (raw difference of consecutive
+// offsets / dt) above the median speed of its +-6 neighbours, times the frame's dt. Frames longer than 1.5x the median dt (hitches)
+// are reported apart. The acceleration is the change of that velocity per second.
+struct ContinuityRun
+{
+    float worstExcess = 0, worstAccel = 0, maxRadius = 0, recordedError = 0, worstHitchExcess = 0;
+    bool correctionBounded = true, valid = true;
+};
+static float MedianOf(std::vector<float> v)
+{
+    std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+    return v[v.size() / 2];
+}
+static ContinuityRun ReplayRecorded(const RecordedRow *rows, int n, RecordedRoot seed, float accel)
+{
+    motionRoot::OffsetRoot r;
+    r.Seed(seed.x, seed.y, seed.yaw);
+    ContinuityRun out;
+    std::vector<float> velX, velY, speed, dts;
+    float px = seed.x, py = seed.y;
+    for (int i = 0; i < n; ++i)
+    {
+        const RecordedRow &w = rows[i];
+        motionRoot::Step s;
+        s.dt = w.dt;
+        s.capsuleDeltaCurrent = {w.capX, w.capY, 0};
+        s.capsuleYawDelta = w.capYaw;
+        s.animationDeltaVisual = {w.animX, w.animY, 0};
+        s.animationYawDelta = w.animYaw;
+        s.movingGround = w.moving != 0;
+        s.montage = w.montage != 0;
+        s.offsetAccel = accel;
+        out.valid = r.Update(s) && out.valid;
+        velX.push_back((r.X() - px) / w.dt);
+        velY.push_back((r.Y() - py) / w.dt);
+        speed.push_back(std::hypot(velX.back(), velY.back()));
+        dts.push_back(w.dt);
+        px = r.X();
+        py = r.Y();
+        out.maxRadius = std::fmax(out.maxRadius, std::hypot(r.X(), r.Y()));
+        out.correctionBounded = out.correctionBounded && r.Output().correction <= r.Output().maxCorrection + 1e-7f;
+        out.recordedError = std::fmax(out.recordedError, std::hypot(r.X() - w.recX, r.Y() - w.recY));
+        if (i > 0)
+            out.worstAccel = std::fmax(out.worstAccel, std::hypot(velX[i] - velX[i - 1], velY[i] - velY[i - 1]) / w.dt);
+    }
+    const float medianDt = MedianOf(dts);
+    for (int i = 0; i < n; ++i)
+    {
+        std::vector<float> around;
+        for (int k = std::max(0, i - 6); k <= std::min(n - 1, i + 6); ++k)
+            if (k != i)
+                around.push_back(speed[k]);
+        const float excess = (speed[i] - MedianOf(around)) * dts[i];
+        float &worst = dts[i] > 1.5f * medianDt ? out.worstHitchExcess : out.worstExcess;
+        worst = std::fmax(worst, excess);
+    }
+    return out;
+}
+// A continuous play sampled at hz: anim speed animSpeed (visual +y), capsule speed capsuleSpeed(t) (+y), no rotation. Offset at t.
+template <class F> static XY SampleContinuous(int hz, float accel, float animSpeed, F capsuleSpeed, double tEnd, std::vector<XY> *every30 = nullptr)
+{
+    motionRoot::OffsetRoot r;
+    const int frames = int(std::lround(tEnd * hz));
+    for (int i = 0; i < frames; ++i)
+    {
+        const double t0 = double(i) / hz, t1 = double(i + 1) / hz;
+        motionRoot::Step s;
+        s.dt = float(t1 - t0);
+        s.movingGround = true;
+        // displacement = integral of the speed over the frame (midpoint), so every rate sees the same continuous motion
+        s.capsuleDeltaCurrent = {0, float(capsuleSpeed(0.5 * (t0 + t1)) * (t1 - t0)), 0};
+        s.animationDeltaVisual = {0, float(animSpeed * (t1 - t0)), 0};
+        s.offsetAccel = accel;
+        r.Update(s);
+        if (every30 && (i + 1) % (hz / 30) == 0)
+            every30->push_back({r.X(), r.Y()});
+    }
+    return {r.X(), r.Y()};
 }
 int main()
 {
@@ -585,6 +668,109 @@ int main()
                 r.Seed(0, 0, 2.f);
                 C("rest recentering: Seed clears the speed, the wait and the authored hold", r.Output().restSpeed == 0 && r.Output().restIdle == 0 && r.Output().restHold == 0);
             }
+        }
+    }
+    // UTPP policy 3: translation continuity (Step::offsetAccel, opt-in). Recorded windows of a 60 fps play: with the unbounded law the
+    // offset jumps by 8-17 cm in one frame (a dash, a reversal) and the release after a stop starts at ~3 cm per frame from rest (each
+    // an acceleration of 100+ m/s^2); with kOffsetAccel no frame steps more than 3 cm above its neighbours and the acceleration stays
+    // near the bound. The radius (0.30 m) and the correction cap (half the animation delta) are unchanged.
+    // -DUTPP_ROOT_CONTINUITY_MUTATION=1 (bound ignored) MUST fail.
+    {
+        struct Window
+        {
+            const char *name;
+            const RecordedRow *rows;
+            int n;
+            RecordedRoot seed;
+        };
+        const Window windows[] = {{"dash", kDash, int(std::size(kDash)), kSeedDash},
+                                  {"reversal", kReversal, int(std::size(kReversal)), kSeedReversal},
+                                  {"stop", kStop, int(std::size(kStop)), kSeedStop}};
+        const float accel = motionRoot::kOffsetAccel;
+        for (const Window &w : windows)
+        {
+            const ContinuityRun before = ReplayRecorded(w.rows, w.n, w.seed, 0.f);
+            const ContinuityRun after = ReplayRecorded(w.rows, w.n, w.seed, accel);
+            std::printf("continuity %s: unbounded worst excess %.1f cm (hitch %.1f), acceleration %.0f m/s^2 (replay error %.2f mm) | bounded %.1f cm "
+                        "(hitch %.1f), %.0f m/s^2, radius %.1f cm\n",
+                        w.name, before.worstExcess * 100, before.worstHitchExcess * 100, before.worstAccel, before.recordedError * 1000,
+                        after.worstExcess * 100, after.worstHitchExcess * 100, after.worstAccel, after.maxRadius * 100);
+            C((std::string("continuity ") + w.name + ": the default (unbounded) law reproduces the recorded offsets").c_str(),
+              before.valid && before.recordedError < .001f);
+            C((std::string("continuity ") + w.name + ": the recorded window holds the jump (unbounded acceleration >= 5x the bound)").c_str(),
+              before.worstAccel >= 5.f * accel);
+            C((std::string("continuity ") + w.name + ": bounded, no frame steps more than 3 cm above its neighbours").c_str(),
+              after.valid && after.worstExcess <= .03f);
+            // the brake at the radius (and a frame after a 45 ms hitch) may decelerate faster than the bound; still < 1/3 of the jump
+            C((std::string("continuity ") + w.name + ": bounded, the worst acceleration is below a third of the unbounded law's").c_str(),
+              after.worstAccel <= before.worstAccel / 3.f);
+            C((std::string("continuity ") + w.name + ": radius 0.30 m and correction cap kept").c_str(),
+              after.maxRadius <= motionRoot::kMaxOffset + 1e-6f && after.correctionBounded);
+        }
+        // Frame-rate independence: the same continuous play (run at 3.85 m/s, a one-frame reversal to -3.85 m/s at 0.5 s, the clip keeps
+        // 5 m/s) sampled at 30 / 60 / 120 Hz gives the offset of 240 Hz at the same times, as closely as the unbounded law does.
+        auto reversal = [](double t) { return t < .5 ? 3.85 : -3.85; };
+        for (int hz : {30, 60, 120})
+        {
+            double worst[2] = {0, 0};
+            for (int k = 0; k < 2; ++k)
+            {
+                std::vector<XY> ref, cur;
+                const float bound = k ? accel : 0.f;
+                SampleContinuous(240, bound, 5.f, reversal, 1.5, &ref);
+                SampleContinuous(hz, bound, 5.f, reversal, 1.5, &cur);
+                for (size_t i = 0; i < std::min(cur.size(), ref.size()); ++i)
+                    worst[k] = std::fmax(worst[k], std::hypot(cur[i].x - ref[i].x, cur[i].y - ref[i].y));
+            }
+            std::printf("continuity frame rate: %d Hz against 240 Hz, worst offset difference bounded %.2f cm, unbounded %.2f cm\n", hz,
+                        worst[1] * 100, worst[0] * 100);
+            C("continuity: the bounded offset is frame-rate independent (30..120 Hz within 1.5 cm of 240 Hz)", worst[1] < .015);
+        }
+        // No delay at a start: a smooth start (clip 0 -> 5 m/s in 0.5 s, capsule 0 -> 3.85 m/s in 0.4 s from 0.1 s) is untouched for the
+        // first 0.3 s at every rate.
+        for (int hz : {30, 60, 144})
+        {
+            auto clipSpeed = [](double t) { return std::fmin(t / .5, 1.) * 5.; };
+            auto capsule = [](double t) { return std::clamp((t - .1) / .4, 0., 1.) * 3.85; };
+            motionRoot::OffsetRoot bounded, unbounded;
+            double worst = 0;
+            const int frames = int(std::lround(.3 * hz));
+            for (int i = 0; i < frames; ++i)
+            {
+                const double t0 = double(i) / hz, t1 = double(i + 1) / hz, mid = .5 * (t0 + t1);
+                motionRoot::Step frame;
+                frame.dt = float(t1 - t0);
+                frame.movingGround = true;
+                frame.capsuleDeltaCurrent = {0, float(capsule(mid) * (t1 - t0)), 0};
+                frame.animationDeltaVisual = {0, float(clipSpeed(mid) * (t1 - t0)), 0};
+                unbounded.Update(frame);
+                frame.offsetAccel = motionRoot::kOffsetAccel;
+                bounded.Update(frame);
+                worst = std::fmax(worst, std::hypot(bounded.X() - unbounded.X(), bounded.Y() - unbounded.Y()));
+            }
+            C("continuity: a smooth start is not delayed (first 0.3 s identical within 1 mm)", worst < .001);
+        }
+        // Off by default, exact no-op at dt 0, Seed clears the velocity.
+        {
+            motionRoot::OffsetRoot p, q;
+            motionRoot::Step frame;
+            frame.dt = 1.f / 60;
+            frame.movingGround = true;
+            frame.capsuleDeltaCurrent = {0, .19f, 0};
+            frame.animationDeltaVisual = {0, .08f, 0};
+            p.Update(frame);
+            frame.offsetAccel = 0;
+            q.Update(frame);
+            C("continuity: offsetAccel = 0 is the unbounded law", p.X() == q.X() && p.Y() == q.Y());
+            frame.offsetAccel = motionRoot::kOffsetAccel;
+            p.Update(frame);
+            const auto snapshot = p.Output();
+            motionRoot::Step none = frame;
+            none.dt = 0;
+            p.Update(none);
+            C("continuity: dt0 is an exact no-op", std::memcmp(&snapshot, &p.Output(), sizeof snapshot) == 0);
+            p.Seed(.1f, 0, 0);
+            C("continuity: Seed clears the offset velocity", p.Output().vx == 0 && p.Output().vy == 0);
         }
     }
     std::printf("%d PASS %d FAIL\n", pass, fail);

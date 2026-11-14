@@ -278,6 +278,13 @@ target_compile_features(utpp_MotionOffsetRoot_rest_mut1 PRIVATE cxx_std_20)
 target_compile_definitions(utpp_MotionOffsetRoot_rest_mut1 PRIVATE UTPP_ROOT_REST_MUTATION=1)
 add_test(NAME utpp_MotionOffsetRoot_rest_mut1 COMMAND utpp_MotionOffsetRoot_rest_mut1)
 set_tests_properties(utpp_MotionOffsetRoot_rest_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
+# Translation continuity (MotionOffsetRoot Step::offsetAccel): the mutant ignores the bound and MUST fail.
+add_executable(utpp_MotionOffsetRoot_continuity_mut1 tests/MotionOffsetRootTest.cpp)
+target_compile_options(utpp_MotionOffsetRoot_continuity_mut1 PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_MotionOffsetRoot_continuity_mut1 PRIVATE cxx_std_20)
+target_compile_definitions(utpp_MotionOffsetRoot_continuity_mut1 PRIVATE UTPP_ROOT_CONTINUITY_MUTATION=1)
+add_test(NAME utpp_MotionOffsetRoot_continuity_mut1 COMMAND utpp_MotionOffsetRoot_continuity_mut1)
+set_tests_properties(utpp_MotionOffsetRoot_continuity_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
 
 # P5 FIX C: the stationary shot-turn goal is dropped once the camera left the shot by > 45 deg (recording 2026-10-21 12:15).
 # The mutant never abandons the goal and MUST fail.

@@ -20,6 +20,7 @@ struct Inputs
     float lockMaxRate = 0;        // rad/s bound of the moving-aim lock (0 = 540 deg/s, MotionOffsetRoot.hpp Step::lockMaxRate)
     bool airFollow = false;       // Shooter mode in the air: bounded follow of the actor at lockMaxRate (MotionOffsetRoot.hpp Step::airFollow)
     bool holdOnGap = false;       // Shooter mode, standing: a frame gap (dt > 0.25 s) keeps the held visual heading instead of reseeding onto the actor
+    float offsetAccel = 0;        // m/s^2 translation continuity bound (MotionOffsetRoot.hpp Step::offsetAccel), 0 = off
 };
 enum class Reseed
 {
@@ -177,6 +178,7 @@ class Processor
             step.turnPlaying = in.restTurnPlaying;
             step.lockMaxRate = in.lockMaxRate;
             step.airFollow = in.airFollow;
+            step.offsetAccel = in.offsetAccel;
             if (!p.m_native.Update(step))
                 return false;
             p.m_visual = Wrap(double(p.m_actor) + p.m_native.Yaw());

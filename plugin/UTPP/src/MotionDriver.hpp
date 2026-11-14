@@ -218,6 +218,15 @@ struct BarrelProbe
     uint32_t excluded = 0;
 };
 BarrelProbe TestBarrelProbe();
+// test targets only: the root frame step of the last v2 Step (inputs of the native offset root and its offset before / after).
+struct RootProbe
+{
+    bool prepared = false;
+    float dt = 0, capsuleDelta[2] = {0, 0}, capsuleYawDelta = 0, animDelta[2] = {0, 0}, animYawDelta = 0;
+    bool movingGround = false, montage = false, aimFacing = false;
+    float before[3] = {0, 0, 0}, after[3] = {0, 0, 0}; // x, y (m), yaw (rad): visual minus capsule, capsule axes
+};
+RootProbe TestRootProbe();
 #endif
 // Orientation warp (CET mm.orientWarp, default OFF; mm/OrientWarp.hpp): while V runs a circle the pelvis (extra visual root yaw on
 // the provided root frame of the leg tail) and the torso (twist over Spine .. Spine3) are brought onto the path of motion instead of

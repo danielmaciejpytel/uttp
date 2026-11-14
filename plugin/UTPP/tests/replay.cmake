@@ -7,3 +7,11 @@ add_executable(utpp_motion_replay EXCLUDE_FROM_ALL tests/FeedReplayMotion.cpp sr
                src/mm/OverlayFile.hpp src/mm/GripIK.hpp src/mm/IdleBreaks.hpp)
 target_compile_options(utpp_motion_replay PRIVATE ${UTPP_WARNINGS} /EHsc)
 target_compile_features(utpp_motion_replay PRIVATE cxx_std_20)
+
+# Stage replay of a recorded game feed dump through the real driver and leg tail (tools/analysis/replay_pose_stages.cpp): the local pose
+# of every database bone per feed, before and after the leg tail. A tool, no ctest entry; used by tools/analysis/pose_stage_pops.py.
+add_executable(utpp_replay_pose_stages EXCLUDE_FROM_ALL ../../tools/analysis/replay_pose_stages.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+target_link_libraries(utpp_replay_pose_stages PRIVATE bcrypt)
+target_compile_options(utpp_replay_pose_stages PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_definitions(utpp_replay_pose_stages PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
+target_compile_features(utpp_replay_pose_stages PRIVATE cxx_std_20)

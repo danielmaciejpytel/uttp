@@ -261,6 +261,7 @@ int32_t g_barrelAxis = aim::kDefaultBarrelAxis;
 float g_barrelMuzzle = aim::Params{}.muzzleOffset;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
 BarrelProbe g_barrelProbe; // the last v2 evaluation (TestBarrelProbe)
+RootProbe g_rootProbe;     // the last root frame step (TestRootProbe)
 #endif
 // Opt-in motion lean (CET mm.lean -> SetLean, default OFF): mm/LeanRuntime.hpp leans the v2 pose into the turn from the lateral
 // acceleration of the feed velocity (Step + Apply per v2 feed on b.pose in StepLocked, before the orientation warp and the leg tail).
@@ -2070,6 +2071,12 @@ BarrelProbe TestBarrelProbe()
 {
     std::lock_guard lock(g_m);
     return g_barrelProbe;
+}
+
+RootProbe TestRootProbe()
+{
+    std::lock_guard lock(g_m);
+    return g_rootProbe;
 }
 #endif
 
@@ -4649,6 +4656,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     graph.velocityWorldY = b.lastVelocityWorld[1];
     b.eval.SetGraphInputs(graph);
     RootEvaluation rootEvaluation;
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    g_rootProbe = RootProbe{};
+#endif
     if (rootWanted)
     {
         rootEvaluation.processor = &b.root;
@@ -4656,6 +4666,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         rootEvaluation.input.actorYaw = graph.actorWorldYaw;
         rootEvaluation.input.capsuleDeltaCurrent = {aRaw.capsuleDeltaCurrent[0], aRaw.capsuleDeltaCurrent[1], 0};
         rootEvaluation.input.capsuleYawDelta = aRaw.capsuleYawDelta;
+        // The offset seen by the pose frame changes its velocity at a bounded rate: a capsule that jumps in speed or direction carries the
+        // body with it instead of moving it inside the frame (MotionOffsetRoot.hpp item 3).
+        rootEvaluation.input.offsetAccel = motionRoot::kOffsetAccel;
         rootEvaluation.input.movingGround = b.map.st.isMoving && (cs.movementMode == 0 || b.map.slideActive);
         // A native idle upper mask does not own the MM legs or their root motion.
         // Only explicit native ADS/reload ownership uses the adapted Release policy.
@@ -4753,6 +4766,23 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     }
     if (rootEvaluation.prepared)
     {
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        {
+            const auto& ri = rootEvaluation.input;
+            RootProbe p;
+            p.prepared = true;
+            p.dt = ri.dt;
+            p.capsuleDelta[0] = ri.capsuleDeltaCurrent.x, p.capsuleDelta[1] = ri.capsuleDeltaCurrent.y;
+            p.capsuleYawDelta = ri.capsuleYawDelta;
+            p.animDelta[0] = ri.animationDeltaPreviousVisual.x, p.animDelta[1] = ri.animationDeltaPreviousVisual.y;
+            p.animYawDelta = ri.animationYawDelta;
+            p.movingGround = ri.movingGround, p.montage = ri.montage, p.aimFacing = ri.aimFacing;
+            const auto before = b.root.Frame(), after = rootEvaluation.proposal.Frame();
+            p.before[0] = before.x, p.before[1] = before.y, p.before[2] = before.yaw;
+            p.after[0] = after.x, p.after[1] = after.y, p.after[2] = after.yaw;
+            g_rootProbe = p;
+        }
+#endif
         if (!b.root.Commit(rootEvaluation.proposal))
         {
             Skip(g_evalFail, "root-commit");
