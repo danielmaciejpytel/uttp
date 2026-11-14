@@ -1553,6 +1553,7 @@ LEG_TURN_DEG = 30.0          # a heading change above this starts a new straight
 STALL_STICK_MIN = 0.2        # stick pushed (same as gt_log.PUSHED_STICK)
 STALL_SPEED_MAX = 0.3        # m/s between two POS samples (same as run.BLOCKED_SPEED_MAX)
 BLOCK_MIN_S = 1.5            # scenario: pushed and slower than STALL_SPEED_MAX for this long = blocked
+AIM_HELD_MIN = 0.5           # left trigger at or above this = aiming: V walks slowly by design, no stall check
 STALL_ACCEL_S = 0.5          # the first seconds after a push starts are acceleration, not a stall
 _L3_MASK = 0x0040
 
@@ -1641,7 +1642,8 @@ def pos_samples(text: str) -> list:
 
 def pushed_intervals(sc, steps: list, min_stick: float = STALL_STICK_MIN, dt: float = 1.0 / 30,
                      max_gap_s: float = 0.25) -> list:
-    """[(start, end)] wall-clock windows in which the left stick of the played scenario was >= min_stick. Each step
+    """[(start, end)] wall-clock windows in which the left stick of the played scenario was >= min_stick and the aim
+    trigger was not held (aiming slows V below STALL_SPEED_MAX at part stick: that is no stall). Each step
     maps through its own recorded 'start' (steps[i], aligned with sc.steps; the key-crouch path inserts real-time
     toggle steps), so a gap between steps splits a window; steps that never started are skipped."""
     bounds = [b[1] for b in sc.step_bounds()]
@@ -1653,7 +1655,7 @@ def pushed_intervals(sc, steps: list, min_stick: float = STALL_STICK_MIN, dt: fl
             cur = None
             continue
         t = st['start'] + timedelta(seconds=fr.t - bounds[i])
-        if math.hypot(*fr.ls) >= min_stick - 1e-9:
+        if math.hypot(*fr.ls) >= min_stick - 1e-9 and fr.lt < AIM_HELD_MIN:
             if cur is not None and (t - cur[1]).total_seconds() <= max_gap_s:
                 cur[1] = t
             else:

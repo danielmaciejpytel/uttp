@@ -2669,6 +2669,19 @@ class RouteEstimateTests(unittest.TestCase):
                            'cf=0.0000,1.0000 v=nil src=auto w=0 m=0' for s in range(3)) + chr(10) + 'noise' + chr(10)
         self.assertEqual([p for _, p in gn.pos_samples(txt)], [(0.5, 2.0), (1.5, 2.0), (2.5, 2.0)])
 
+    def test_aiming_is_no_pushed_window_for_the_stall_check(self):
+        # the aim walk of the weapon macro moves at about 0.3 m/s at part stick: slow by design, not a stall
+        sc = load_scenarios(SCEN)['weapon_aim']
+        t0 = datetime(2026, 11, 14, 8, 0, 0)
+        bounds = sc.step_bounds()                                                # (name, start, end)
+        starts = [{'start': t0 + timedelta(seconds=b[1])} for b in bounds]
+        aim0 = t0 + timedelta(seconds=next(b[1] for b in bounds if b[0] == 'aim_walk'))
+        iv = gn.pushed_intervals(sc, starts)
+        self.assertTrue(iv)                                                      # the armed walk before the aim is checked
+        held = [(a, b) for a, b in iv if b > aim0 + timedelta(seconds=0.3) and a < aim0 + timedelta(seconds=2.0)]
+        self.assertEqual(held, [], iv)                                           # nothing inside the held trigger
+        self.assertLess(gn.AIM_HELD_MIN, 1.0)
+
 
 class LookAheadTests(unittest.TestCase):
     """clear_path look-ahead and play_walking repeat on a stub world (no game, no input)."""
