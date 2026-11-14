@@ -3778,6 +3778,14 @@ class Night:
             except NeedsKeyboard as e:
                 self.log(f'[scenarios] vehicle exit before the scenarios skipped: {e}')
             self.level_camera(pad, guard, plan)
+            # next to the vehicle the save began in the reload button is the mount button: the on-foot sets start a few
+            # metres away from it, and that place becomes the start point (the car and traversal sets need V at the car)
+            if self.left_vehicle_this_cycle and not any(n in ('vehicle_mount_exit', gtv.SET_NAME) for n in self.names):
+                try:
+                    self.leave_car(pad, guard, plan, seconds=2.5)
+                    self.level_camera(pad, guard, plan)
+                except NeedsKeyboard as e:
+                    self.log(f'[scenarios] walking away from the vehicle skipped: {e}')
             self.note_home(pad, guard)
             with TimerResolution():
                 for name in self.names:

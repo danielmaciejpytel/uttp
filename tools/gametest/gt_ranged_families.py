@@ -997,6 +997,10 @@ def _reload_phase(run: _Run) -> dict:
 _RERAISE =('ScenarioTimeout', 'StopNight', 'CycleError', 'EarlyStop', 'GuardError')
 
 
+EXIT_RECHECKS = 4          # position reads after a vehicle exit before V counts as still seated
+EXIT_RECHECK_S = 0.5       # pause between them (the position lines come about twice a second)
+
+
 def _mount_state(run: _Run) -> tuple[bool | None, dict | None]:
     """(V in a vehicle: True | False | None = unknown, the position record) from a position read."""
     poll = getattr(run.night, 'poll_pos', None)
@@ -1023,6 +1027,11 @@ def _leave_vehicle(run: _Run, pos: dict | None, why: str) -> bool:
             raise
         run.warns.append(f'{why}: leaving the vehicle failed: {type(e).__name__}: {str(e)[:100]}')
     state, _ = _mount_state(run)
+    for _ in range(EXIT_RECHECKS):               # the newest position line can be older than the exit that just ended
+        if state is not True:
+            break
+        run.guard.wait(EXIT_RECHECK_S)
+        state, _ = _mount_state(run)
     run.seated = state is True
     if run.seated:
         run.warns.append(f'{why}: V is still in the vehicle after the exit procedure')
