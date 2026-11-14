@@ -131,8 +131,6 @@
     },
     "sprint_dash": {
       "description": "sprint (full stick + L3), then dodge/dash taps of B while moving (forward, left, right, back) and a sprint stop; pad dodge = Dodge_Button IK_Pad_B_CIRCLE (inputUserMappings.xml), fired by IsActionJustTapped(n\"Dodge\") with move input (locomotionTransitions.script:286); B is Dodge under the Alternative input scheme too (crouch = R3 tap since 2026-10-23)",
-      "_note_thresholds": "The motion data has no dash clips yet, so a dash is played with start and turn clips: up to 3.75 transitions/s accepted until dash clips exist",
-      "thresholds": {"motion_transitions_per_s": {"max": 3.75}},
       "steps": [
         {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
         {"name": "sprint", "duration": 3.5, "ls": [[0, 0, 0], [0.3, 0, 1]], "buttons": [{"t": 0.4, "button": "LS", "hold": 0.12}]},
