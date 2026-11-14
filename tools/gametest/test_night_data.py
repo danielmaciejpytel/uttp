@@ -210,6 +210,63 @@ class DiagTests(Base):
         self.assertTrue(os.path.isfile(n3.settings.pending_path))
 
 
+class CycleErrorPathTests(Base):
+    """A cycle that fails mid-scenario never leaves the game running: the quit, the collection and the record follow every error."""
+
+    def cycle(self, exc):
+        n = self.make()
+        calls = []
+
+        def rec(name, ret=None):
+            def f(*a, **k):
+                calls.append((name, a[0]) if a and isinstance(a[0], str) else name)
+                return ret
+            return f
+        for name in ('check_user_idle', 'check_continue', 'stop_padd', 'apply_graphics', 'install', 'start_idler', 'stop_idler',
+                     'arm', 'marker', 'perf_status', 'report_load', 'stop_recording', 'collect', 'report_budget', 'save',
+                     'secure_session_files', 'restore_settings_leave'):
+            setattr(n, name, rec(name))
+        n.ensure_closed = rec('ensure_closed', {'path': 'cet_exitgame'})
+        n.launch = rec('launch', self.log)
+        n.start_recording = rec('start_recording', {'path': 'x'})
+        n.bg_input = rec('bg_input', {})
+
+        def scenarios(plan):
+            raise exc
+        n.run_scenarios = scenarios
+        return n, calls
+
+    def test_pad_daemon_that_stops_answering_fails_the_cycle_and_the_game_is_quit(self):
+        n, calls = self.cycle(night.PaddError('padd did not answer: TimeoutError()'))
+        cyc = n.run_cycle(1)
+        self.assertTrue(cyc['result'].startswith('failed: padd did not answer'), cyc['result'])
+        self.assertEqual([c for c in calls if isinstance(c, tuple) and c[0] == 'ensure_closed'],
+                         [('ensure_closed', 'ensure_closed'), ('ensure_closed', 'quit')])
+        self.assertLess(calls.index(('ensure_closed', 'quit')), calls.index('collect'))
+        self.assertIn('save', calls)
+
+    def test_unexpected_error_still_quits_the_game_collects_and_is_then_raised(self):
+        n, calls = self.cycle(RuntimeError('boom'))
+        with self.assertRaises(RuntimeError):
+            n.run_cycle(1)
+        self.assertIn('unexpected error', n.cycle['result'])
+        self.assertIn(('ensure_closed', 'quit'), calls)
+        self.assertLess(calls.index(('ensure_closed', 'quit')), calls.index('collect'))
+        self.assertLess(calls.index('collect'), calls.index('save'))
+        self.assertIn('stop_idler', calls)
+
+    def test_pad_client_reports_a_timeout_as_its_own_error(self):
+        import gt_input
+
+        class Sock:
+            def sendall(self, b):
+                raise TimeoutError('timed out')
+        c = gt_input.PaddClient.__new__(gt_input.PaddClient)
+        c.sock, c.rfile = Sock(), None
+        with self.assertRaises(gt_input.PaddError):
+            c.call({'op': 'state'})
+
+
 class RecordingSafetyTests(Base):
     def ring(self, minute, data):
         self.put(f'utpp-pose-ring-2026-11-14-01-{minute:02d}-37.utpppose', data)

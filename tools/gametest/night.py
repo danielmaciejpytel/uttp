@@ -153,7 +153,7 @@ import gt_session  # noqa: E402
 import select_save  # noqa: E402
 import gt_settings as gs  # noqa: E402
 import video_sheets  # noqa: E402
-from gt_input import CET_DIR, SCAN_ENTER, TESTCMD_FILE, BackgroundGuard, FileCommandChannel, NeedsKeyboard, file_size, \
+from gt_input import CET_DIR, SCAN_ENTER, TESTCMD_FILE, BackgroundGuard, FileCommandChannel, NeedsKeyboard, PaddError, file_size, \
     padd_ping, read_cet_overlay_key, read_since, testcmd_ready, wait_for_log  # noqa: E402
 from gt_scenario import BUTTONS, Scenario, load_scenarios, parse_scenario  # noqa: E402
 from gt_win32 import GAME_EXE, IS_WINDOWS, ForegroundGuard, GuardError, TimerResolution  # noqa: E402
@@ -3862,6 +3862,7 @@ class Night:
         rec = None
         plan = {'runs': [], 'created': start}
         quit_game = True
+        unexpected = None
         try:
             self.check_user_idle()
             self.check_continue()
@@ -3913,10 +3914,15 @@ class Night:
             self.secure_session_files('graceful stop', final=True)
             if not quit_game:
                 self.restore_settings_leave('run stopped, the game stays open')
-        except (CycleError, NeedsKeyboard) as e:
+        except (CycleError, NeedsKeyboard, PaddError) as e:
             self.cycle['result'] = f'failed: {e}'
             self.log(f'[night] cycle failed: {e}')
             self.secure_session_files('cycle failed', final=True)
+        except Exception as e:  # noqa: BLE001 - a defect of the runner: the game is still quit and everything collected, then it is raised
+            unexpected = e
+            self.cycle['result'] = f'failed: unexpected error: {e!r}'
+            self.log(f'[night] cycle failed on an unexpected error: {e!r} -> quitting the game, collecting, then raising it')
+            self.secure_session_files('unexpected error', final=True)
         finally:
             if self.bg_input_active and self.cycle['result'] is None:   # any other exception leaves run_cycle here
                 self.bg_input(False, 'error')
@@ -3941,6 +3947,8 @@ class Night:
         self.cycle['end'] = datetime.now()
         self.report_budget()
         self.save()
+        if unexpected is not None:
+            raise unexpected
         return self.cycle
 
     def apply_graphics(self) -> None:

@@ -8,6 +8,7 @@ record carries a warning, it is printed with the result and never changes a verd
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
@@ -146,6 +147,7 @@ class LoadSampler:
 # --idle-others: build, test and tool processes that do not belong to the run
 OTHER_WORK_NAMES = COMPILER_NAMES + ('ctest.exe', 'lib.exe', 'mspdbsrv.exe', 'python.exe', 'pythonw.exe', 'blender.exe', 'ffmpeg.exe')
 OTHER_WORK_PREFIXES = ('utpp_',)     # the project's test executables
+OWN_TOOLS_DIR = os.path.dirname(os.path.abspath(__file__)).lower()   # Python scripts of this folder are the run's own helpers
 
 
 def process_tree(ps, roots) -> set:
@@ -172,6 +174,9 @@ def idle_others(ps, own: set) -> int:
         try:
             name = (p.info.get('name') or '').lower()
             if p.info['pid'] in own or not (name in OTHER_WORK_NAMES or name.startswith(OTHER_WORK_PREFIXES)):
+                continue
+            # a helper of the test tools that outlived its parent (the pad daemon stays up between runs) is never touched
+            if name.startswith('python') and OWN_TOOLS_DIR in ' '.join(p.cmdline()).lower().replace('/', '\\'):
                 continue
             if p.nice() != idle:
                 p.nice(idle)

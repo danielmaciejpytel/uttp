@@ -241,8 +241,12 @@ class LoadTests(unittest.TestCase):
 
     def test_idle_others_touches_only_other_build_and_test_processes(self):
         class P:
-            def __init__(self, pid, name, kids=(), nice=32, fail=False):
+            def __init__(self, pid, name, kids=(), nice=32, fail=False, cmd=()):
                 self.pid, self.info, self.kids, self._nice, self.fail = pid, {'pid': pid, 'name': name}, list(kids), nice, fail
+                self.cmd = list(cmd)
+
+            def cmdline(self):
+                return self.cmd
 
             def children(self, recursive=False):
                 out = list(self.kids)
@@ -275,7 +279,9 @@ class LoadTests(unittest.TestCase):
         game = P(20, 'Cyberpunk2077.exe')
         others = [P(30, 'cl.exe'), P(31, 'Ninja.exe'), P(32, 'utpp_mm_loco_test.exe'), P(33, 'python.exe'), P(34, 'ctest.exe'),
                   P(35, 'link.exe', nice=64), P(36, 'cl.exe', fail=True)]
-        bystanders = [P(40, 'explorer.exe'), P(41, 'steam.exe'), P(42, 'chrome.exe')]
+        # the pad daemon of an earlier run: no longer in the runner's tree, but a script of the test tools' folder
+        padd = P(43, 'python.exe', cmd=['python.exe', '-I', os.path.join(os.path.dirname(os.path.abspath(gt_load.__file__)), 'padd.py')])
+        bystanders = [P(40, 'explorer.exe'), P(41, 'steam.exe'), P(42, 'chrome.exe'), padd]
         ps = Ps([runner, rec, meter, game] + others + bystanders)
         own = gt_load.process_tree(ps, [10, 20, 999])                        # 999 ended meanwhile
         self.assertEqual(own, {10, 12, 13, 20})

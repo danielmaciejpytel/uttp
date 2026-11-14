@@ -139,8 +139,11 @@ class PaddClient:
         self.rfile = self.sock.makefile('r', encoding='utf-8', newline='\n')
 
     def call(self, msg: dict) -> dict:
-        self.sock.sendall((json.dumps(msg) + '\n').encode('utf-8'))
-        line = self.rfile.readline()
+        try:
+            self.sock.sendall((json.dumps(msg) + '\n').encode('utf-8'))
+            line = self.rfile.readline()
+        except OSError as e:     # a timeout included: the daemon did not answer (starved of processor time, or gone)
+            raise PaddError(f'padd did not answer: {e!r}') from e
         if not line:
             raise PaddError('padd closed the connection')
         return json.loads(line)
