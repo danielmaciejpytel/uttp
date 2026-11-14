@@ -354,6 +354,34 @@
         {"name": "exit", "duration": 2.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "buttons": [{"t": 0.2, "button": "B", "hold": 1.0}], "metrics": false}
       ]
     },
-    "shoulder_swap_input": {"description": "Pad R3 held 0.7 s swaps the UTPP camera shoulder (UTPP log 'shoulder -> left (pad)' then 'shoulder -> right (pad)'); R3 tapped 0.08 s keeps the game's R3 action (Alternative scheme: crouch toggle) and adds no 'shoulder ->' line", "steps": [{"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false}, {"name": "r3_hold_swap_left", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.7}], "metrics": false}, {"name": "r3_hold_swap_right", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.7}], "metrics": false}, {"name": "r3_tap_crouch", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false}, {"name": "r3_tap_stand", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false}]}
+    "shoulder_swap_input": {"description": "Pad R3 held 0.7 s swaps the UTPP camera shoulder (UTPP log 'shoulder -> left (pad)' then 'shoulder -> right (pad)'); R3 tapped 0.08 s keeps the game's R3 action (Alternative scheme: crouch toggle) and adds no 'shoulder ->' line", "steps": [{"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false}, {"name": "r3_hold_swap_left", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.7}], "metrics": false}, {"name": "r3_hold_swap_right", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.7}], "metrics": false}, {"name": "r3_tap_crouch", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false}, {"name": "r3_tap_stand", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false}]},
+    "mw_light_combo": {
+      "description": "melee weapon macro part (gt_melee_weapons.py): standing, 5 RT taps 0.15 s, 0.65 s apart (start to start) = the light combo to its last strike, then 0.7 s idle",
+      "steps": [
+        {"name": "settle", "duration": 0.6, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "combo", "duration": 4.2, "ls": [[0, 0, 0]], "lt": [[0, 0]], "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0], [0.85, 1], [1.0, 0], [1.5, 1], [1.65, 0], [2.15, 1], [2.3, 0], [2.8, 1], [2.95, 0]], "interp": "step"}, "metrics": false}
+      ]
+    },
+    "mw_guard_idle": {
+      "description": "melee weapon macro part (gt_melee_weapons.py): standing, no input for 2.5 s (the weapon rests in its guard / idle pose)",
+      "steps": [
+        {"name": "idle", "duration": 2.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false}
+      ]
+    },
+    "mw_strong_attack": {
+      "description": "melee weapon macro part (gt_melee_weapons.py): standing, RT held 1.2 s (strong / charged attack), released, 1.8 s idle",
+      "steps": [
+        {"name": "settle", "duration": 0.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "strong", "duration": 3.2, "ls": [[0, 0, 0]], "lt": [[0, 0]], "rt": {"keys": [[0, 0], [0.2, 1], [1.4, 0]], "interp": "step"}, "metrics": false}
+      ]
+    },
+    "mw_sprint_attack": {
+      "description": "melee weapon macro part (gt_melee_weapons.py): sprint (full stick + L3 tap), one RT tap while sprinting, then stop",
+      "steps": [
+        {"name": "sprint", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "rt": [[0, 0]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}], "metrics": false},
+        {"name": "attack", "duration": 1.6, "ls": [[0, 0, 1]], "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0]], "interp": "step"}, "metrics": false},
+        {"name": "stop", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1], [0.2, 0, 0]], "rt": [[0, 0]], "metrics": false}
+      ]
+    }
   }
 }

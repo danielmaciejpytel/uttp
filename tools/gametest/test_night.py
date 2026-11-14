@@ -2390,13 +2390,15 @@ class SheetJobsTests(unittest.TestCase):
 
     def test_all_run_errors_kept_order_stable(self):
         import threading
-        import time as _t
-        done, lock = [], threading.Lock()
+        done, lock, others_done = [], threading.Lock(), threading.Event()
 
         def fn(name, extra):
-            _t.sleep(0.05 if name == 'full' else 0.0)     # the first job finishes last
+            if name == 'full':                             # the first job finishes last: it waits for all the others
+                others_done.wait(10.0)
             with lock:
                 done.append(name)
+                if len(done) == len(self.JOBS) - 1 and 'full' not in done:
+                    others_done.set()
             self.fn(name, extra)
         res = night.run_sheet_jobs(self.JOBS, fn, 4)
         self.assertEqual(sorted(done), sorted(n for n, _ in self.JOBS))   # every job ran

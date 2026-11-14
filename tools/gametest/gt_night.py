@@ -46,6 +46,11 @@ SETS = {
 # the walking scenarios had taken V 50-80 m away and the summoned car parked wherever the game chose (2026-11-12
 # 13:09: 80 m away, V stuck on the way, time limit). night.py then walks V away from the car (leave_car).
 SETS['all'] = ['vehicle_mount_exit'] + SETS['loco'] + ['sprint_dash', 'weapon_draw_aim_holster', 'melee_fists']
+# melee weapon macros (gt_melee_weapons.py; not in 'all'): melee_knife / _katana / _blunt / _baton / _bat / _mantis and
+# melee_weapons = the four pack weapons in one launch
+import gt_melee_weapons as _gw  # noqa: E402
+MACROS.update({_name: list(_gw.PARTS) for _name in _gw.WEAPON_SETS})
+SETS.update(_gw.SET_MEMBERS)
 
 
 def resolve_sets(spec: str) -> list[str]:

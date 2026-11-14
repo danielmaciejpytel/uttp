@@ -1,6 +1,7 @@
 """Unattended overnight runner: quit -> (install) -> launch -> arm MM -> record -> scenarios -> quit -> collect.
 
   python Source\\tools\\gametest\\night.py --dry-run [--set loco,sprint_dash,weapon_draw_aim_holster,vehicle_mount_exit]   (also: --set aim_probe and --set melee_fists_target, not in 'all')
+  python Source\\tools\\gametest\\night.py --dry-run --set melee_weapons   (melee_knife, melee_katana, melee_blunt, melee_baton, melee_bat, melee_mantis; see gt_melee_weapons.py; not in 'all')
   python Source\\tools\\gametest\\night.py --go --cycles 3 --set all --db utpp_base
          [--install 0.5.8 "note" --cet-mods utpp_core,utpp_body] [--cet "Game.UTPPSetMMTurnCommit(true)"]
 
@@ -83,6 +84,7 @@ sys.path.insert(0, HERE)
 
 import gt_capture  # noqa: E402
 import gt_log  # noqa: E402
+import gt_melee_weapons as gw  # noqa: E402
 import gt_night as gn  # noqa: E402
 import run as gt_run  # noqa: E402
 import failure_clips  # noqa: E402
@@ -2921,6 +2923,8 @@ class Night:
                             limit = max(limit, self.scenarios[name].duration * 2 + 30)
                         if name == 'melee_fists_target':     # ~2 min: spawn polls, 4 phases, console commands
                             limit = max(limit, 300.0)
+                        if name in gw.WEAPON_SETS:
+                            limit = max(limit, gw.time_limit_s(name))
                         self.scenario_deadline = time.monotonic() + limit
                         self.log(f'[scenarios] {name} run {r}')
                         rec = {'name': name, 'run': r, 'start': t0}
@@ -2934,6 +2938,8 @@ class Night:
                                 rec.update(self.weapon_macro(pad, guard, plan))
                             elif name == 'melee_fists':
                                 rec.update(self.melee_macro(pad, guard, plan))
+                            elif name in gw.WEAPON_SETS:
+                                gw.run_weapon_macro(self, pad, guard, plan, name, rec)   # fills rec while it runs
                             elif name == 'melee_fists_target':
                                 rec.update(self.enemy_macro(pad, guard, plan))
                             elif name == 'shoulder_key':
@@ -3295,6 +3301,11 @@ def dry_run(args) -> int:
           'MELEEAIM src=lock, health drop at 1.2 m; target deleted and god mode removed in a finally; pad and commands '
           'only (also with --background)'
           + (' ; --punch-report: tools\\analysis\\punch_direction_report.py on the log' if args.punch_report else ''))
+    for n in names:
+        if n in gw.WEAPON_SETS:
+            print(f'     {n}: weapon macros (gt_melee_weapons.py), commands per weapon:')
+            for tag in gw.WEAPON_SETS[n]:
+                print('\n'.join('       ' + ln for ln in gw.dry_run_lines(tag, scenarios)))
     if 'melee_fists_target' in names:
         rec0 = args.enemy_record.split(',')[0]
         print(f'       place (Codeware, tag {gn.ENEMY_TAG}; the first one defines UTPPENEMY, {len(gn.ENEMY_DEFINE)} chars): '

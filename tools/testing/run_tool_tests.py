@@ -100,6 +100,7 @@ REGISTRY = {
     'gametest/test_gametest.py': {},
     'gametest/test_graphics_profile.py': {},
     'gametest/test_gt_capture.py': {},
+    'gametest/test_gt_melee_weapons.py': {},
     'gametest/test_log_rotation.py': {},
     'gametest/test_night.py': {'note': 'test_real_frames_cycle5 SKIPs: the night cycle-5 frame PNGs are gone'},
     'gametest/test_pose_metrics.py': {'note': 'the helper mismatch case SKIPs without the extracted deformer graph'},
