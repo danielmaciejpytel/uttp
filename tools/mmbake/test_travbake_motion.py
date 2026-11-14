@@ -38,6 +38,11 @@ SHIPPED = {rig: (v[0], v[1] + "_knee", v[2] + "_knee_twistfix") for rig, v in tb
 GENERATIONS = {"base": [("base", BASE), ("shipped", SHIPPED)], "knee": [("knee", KNEE)]}
 
 
+# (rig, file suffix, sequence) of shipped montages whose clip in the motion database differs from the clip the
+# traversal file was baked from (female vault from standing, left foot: LeftUpLeg rotation differs by up to ~6e-2).
+KNOWN_DB_MISMATCH = {("woman", "", "M_Neutral_Traversal_Vault_1_0_stand_F_Lfoot")}
+
+
 def read_trav_format2(path):
     raw = open(path, "rb").read()
     raw.decode("ascii")
@@ -198,12 +203,20 @@ def check_vs_db(root, rig, data, suffix):
         first, n = clips[m["seq"]]
         tb.check(n >= m["frames"], "%s %s db clip frames %d >= %d" % (rig, m["name"], n, m["frames"]))
         n_in += 1
+        mworst = 0.0
         for k in range(min(n, m["frames"])):
             row = m["pose"][k]
             for bi, pi in enumerate(idx):
                 d = pose(first + k, bi)
                 x = row[7 * pi:7 * pi + 7]
-                worst = max(worst, max(abs(x[j] - d[j]) for j in range(7)))
+                mworst = max(mworst, max(abs(x[j] - d[j]) for j in range(7)))
+        if (rig, suffix, m["seq"]) in KNOWN_DB_MISMATCH:
+            # a clip that differs between the two shipped files: it must still differ (remove the entry once the
+            # database clip is rebuilt from the traversal clip), and it does not count towards the match check
+            tb.check(mworst > 2e-6, "%s %s: known database / traversal clip mismatch still present (max %.2e)" % (
+                rig, m["name"], mworst))
+            continue
+        worst = max(worst, mworst)
     tb.check(n_in >= 10 and worst <= 2e-6, "%s P lines = database POSE of the %d montages that are db clips (max %.2e)" % (
         rig, n_in, worst))
     print("%s: %d of %d montages are clips of %s, max |P - POSE| %.2e" % (

@@ -241,7 +241,7 @@ RE_START = re.compile(r"\[utpp_ragdoll\] start seq=(\d+)")
 RE_RELEASE = re.compile(r"\[utpp_ragdoll\] release seq=(\d+) why=(.*?) t=([\d.]+)(.*)$")
 RE_END = re.compile(r"\[utpp_ragdoll\] end seq=(\d+) why=(.*?) dt=([\d.]+)")
 RE_ABORT = re.compile(r"\[utpp_ragdoll\] abort seq=(\d+)")
-RE_MMV2 = re.compile(r"\bMotion\b[^\n]*?\bdb=(\d+):(\S+)\s+clip=(\d+):(\S+)")
+RE_MMV2 = re.compile(r"\b(?:MOTION|MMV2)\b[^\n]*?\bdb=(\d+):(\S+)\s+clip=(\d+):(\S+)")
 RE_POS = re.compile(r"\[night\] POS p=(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)")
 RE_GETUP = re.compile(r"getup=(\w+)(?: clip=(\d+))?(?: rms=([\d.]+))?(?: why=(\S+))?")
 _NUM = r"(-?[\d.]+)"

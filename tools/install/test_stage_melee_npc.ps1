@@ -54,25 +54,36 @@ foreach ($bad in @('archive\pc\mod\utpp_melee_parried_graph.archive.xl', 'archiv
 }
 Check ('archive\pc\mod\utpp_melee.archive' -match $rxInstall) 'allow-list still accepts utpp_melee.archive'
 
-# ---- fists-only stage: unchanged behaviour (generic parried clips only: no graph needed, no graph mention)
-$r = RunStage @('-PackDir', $fistsPack, '-MeleeReds', $srcReds)
-Check ($r.rc -eq 0 -and $r.out -match 'DRYRUN_OK files=2 ') 'fists pack + shipped script: DRYRUN_OK, 2 files (archive + xl)'
-Check ($r.out -notmatch 'graph') 'fists-only run mentions no parried graph'
-Check ($r.out -notmatch 'parried graph') 'fists-only run has no parried-graph finding'
-$r = RunStage @('-PackDir', $fistsPack, '-MeleeReds', $srcReds, '-GraphArchive', $graph)
-Check ($r.rc -eq 0 -and $r.out -match 'graph archive staged but no state line needs it' -and $r.out -match 'files=3 ') 'fists + graph given: WARN not needed, graph is the 3rd staged file'
-
-# ---- knife cases: scratch copy of utpp_melee.reds with the knife line instead of the fists line
+# ---- scratch copies of utpp_melee.reds (one covered weapon each)
 if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $text = Get-Content -Raw -LiteralPath $srcReds
-function KnifeReds([string]$name, [string]$maskLine) {
-    $t = $text -replace 'return\s+Equals\(n,\s*n"w_melee_fists"\);\s*\n\}', "return Equals(n, n`"w_melee_knife`");`n}"   # first = UTPPMeleeFullBodyCoveredName
-    $t = $t -replace 'if Equals\(n, n"w_melee_fists"\) \{ return \d+; \}', $maskLine
+# Scratch copy of the shipped script that covers exactly one weapon variable: the coverage function lists only that
+# variable and the state table holds only the given line(s), so the result does not depend on how many weapons the
+# shipped script covers.
+function ScratchReds([string]$name, [string]$variable, [string]$tableLines) {
+    $t = [regex]::Replace($text, '(?s)(func\s+UTPPMeleeFullBodyCoveredName\(n:\s*CName\)\s*->\s*Bool\s*\{).*?(\n\})',
+        { param($m) $m.Groups[1].Value + "`n  return Equals(n, n`"$variable`");" + $m.Groups[2].Value })
+    $t = [regex]::Replace($t, '(?s)(// UTPP_STATES_TABLE begin).*?(// UTPP_STATES_TABLE end)',
+        { param($m) $m.Groups[1].Value + "`n  " + $tableLines + "`n  " + $m.Groups[2].Value })
     $p = Join-Path $tmp $name
     Set-Content -LiteralPath $p -Value $t -Encoding UTF8
     return $p
 }
+function KnifeReds([string]$name, [string]$maskLine) { return ScratchReds $name 'w_melee_knife' $maskLine }
+$fistsLine = [regex]::Match($text, 'if Equals\(n, n"w_melee_fists"\) \{ return \d+; \}').Value
+$fistsReds = ScratchReds 'fists_only.reds' 'w_melee_fists' $fistsLine
+
+# ---- fists-only stage: generic parried clips only: no graph needed, no graph mention
+$r = RunStage @('-PackDir', $fistsPack, '-MeleeReds', $fistsReds)
+Check ($r.rc -eq 0 -and $r.out -match 'DRYRUN_OK files=2 ') 'fists pack + fists-only script: DRYRUN_OK, 2 files (archive + xl)'
+$findings = (($r.out -split "`n") | Where-Object { $_ -notmatch '^WARN\s+-MeleeReds' }) -join "`n"   # that line echoes the scratch path
+Check ($findings -notmatch 'graph') 'fists-only run mentions no parried graph'
+Check ($findings -notmatch 'parried graph') 'fists-only run has no parried-graph finding'
+$r = RunStage @('-PackDir', $fistsPack, '-MeleeReds', $fistsReds, '-GraphArchive', $graph)
+Check ($r.rc -eq 0 -and $r.out -match 'graph archive staged but no state line needs it' -and $r.out -match 'files=3 ') 'fists + graph given: WARN not needed, graph is the 3rd staged file'
+
+# ---- knife cases: scratch copy with the knife line only
 $knifeOn = KnifeReds 'knife_on.reds' 'if Equals(n, n"w_melee_knife") { return 3668192; }'
 $knifeOff = KnifeReds 'knife_off.reds' 'if Equals(n, n"w_melee_knife") { return 3668160; }'
 $badLine = KnifeReds 'knife_bad.reds' ('if Equals(n, n"w_melee_knife") { return 3668192; }' + "`n  if (Equals(n, n`"w_melee_katana`")) { return 3669472; }")
