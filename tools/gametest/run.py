@@ -260,8 +260,11 @@ def write_outputs(out_dir: str, plan: dict, rows: list, lines: list, log_path: s
     for r in rows:
         total[r['verdict']] = total.get(r['verdict'], 0) + 1
     aborted_runs = [f'{x["scenario"]}#{x["run"]}: {x["aborted"]}' for x in plan['runs'] if x.get('aborted')]
-    overall = 'FAIL' if total['FAIL'] or total.get(INVALID_VERDICT) or aborted_runs or not rows else 'PASS'
+    macro_fail, macro_inv = plan.get('macro_failures') or [], plan.get('macro_invalid') or []
+    overall = ('FAIL' if total['FAIL'] or total.get(INVALID_VERDICT) or aborted_runs or not rows or macro_fail or macro_inv
+               else 'PASS')
     summary = {'overall': overall, 'counts': total, 'aborted_runs': aborted_runs, 'log': log_path,
+               'macro_failures': macro_fail, 'macro_invalid': macro_inv,
                'mm_precondition': plan.get('mm_precondition'),
                # True when at least one scored step had no selection threshold applied (see the per-step field)
                'selection_unscored': any(r.get('selection_unscored') for r in rows),
@@ -306,7 +309,20 @@ def print_table(rows: list, summary: dict) -> None:
               + ','.join(m['clip_classes_played']) + (f'  !! {"; ".join(r["fails"])}' if r['fails'] else '')
               + (f'  ~ {"; ".join(r["info"])}' if r.get('info') else ''))
     print(f'OVERALL {summary["overall"]} {summary["counts"]}' +
-          (f'  aborted: {summary["aborted_runs"]}' if summary['aborted_runs'] else ''))
+          (f'  aborted: {summary["aborted_runs"]}' if summary['aborted_runs'] else '') +
+          macro_text(summary))
+
+
+def macro_text(summary: dict) -> str:
+    """'  macro FAIL: melee_weapons#1 (katana, blunt)  macro INVALID: ...' for the macro verdicts counted in OVERALL."""
+    def names(items):
+        return '; '.join(i['scenario'] + (f' ({", ".join(i["macros"])})' if i.get('macros') else '') for i in items)
+    out = ''
+    if summary.get('macro_failures'):
+        out += f'  macro FAIL: {names(summary["macro_failures"])}'
+    if summary.get('macro_invalid'):
+        out += f'  macro INVALID (weapon blocked by the game): {names(summary["macro_invalid"])}'
+    return out
 
 
 def load_thresholds(path: str) -> dict:

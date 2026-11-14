@@ -753,6 +753,26 @@ class MotionLogTests(unittest.TestCase):
         # the other limits of the window still apply
         self.assertEqual(gt_log.evaluate({**short, 'motion_transitions_per_s': 3.3}, thr), ['motion_transitions_per_s=3.3 > 3.0'])
 
+    def test_one_second_step_between_two_trace_lines_is_judged_from_the_motion_lines(self):
+        # slow_walk_half_stick / ramp_in (1.0 s) of a real run: the trace lines came at 42.396 and 43.413, the step ran
+        # 42.3975 .. 43.3973 and had four motion lines; "samples=0 < 1" failed it
+        thr = gt_log.DEFAULT_THRESHOLDS
+        with open(os.path.join(HERE, 'testdata', 'utpp-ramp-in-20261114-175211.txt'), encoding='utf-8') as f:
+            lines = gt_log.parse_text(f.read())
+        t0 = datetime(2026, 11, 14, 18, 5, 42, 397537)
+        m = gt_log.compute_metrics(lines, t0, t0 + timedelta(seconds=0.999798))
+        self.assertEqual((m['samples'], m['motion_samples']), (0, 4))
+        self.assertTrue(gt_log.trace_gap(m))
+        self.assertNotIn('samples=0 < 1', gt_log.evaluate(m, thr, 'ramp_in', slow=True))
+        # the limit itself is unchanged and a long window without a trace line still fails
+        self.assertEqual(thr['samples'], {'min': 1})
+        self.assertEqual(gt_log.evaluate({'duration_s': 2.0, 'samples': 0, 'motion_samples': 9}, thr), ['samples=0 < 1'])
+        # a step of one period needs three motion lines, two are not enough; a window past period + jitter needs a sample
+        self.assertEqual(gt_log.evaluate({'duration_s': 1.0, 'samples': 0, 'motion_samples': 2}, thr), ['samples=0 < 1'])
+        self.assertEqual(gt_log.evaluate({'duration_s': 1.0, 'samples': 0, 'motion_samples': 3}, thr), [])
+        self.assertEqual(gt_log.evaluate({'duration_s': 1.3, 'samples': 0, 'motion_samples': 5}, thr), ['samples=0 < 1'])
+        self.assertEqual(gt_log.evaluate({'duration_s': 1.2, 'samples': 0, 'motion_samples': 5}, thr), [])
+
     def test_frozen_tick_without_motion_is_never_base(self):
         # review L1: in a v2 log, a step whose window (and lookback) has no MOTION line but a frozen v1 tick is scored as v2
         # (motion_samples=0 fails) instead of silently as v1

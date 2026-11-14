@@ -270,7 +270,7 @@ class MeterJob:
         log_file = self.log_file
         if not log_file:
             import gt_collect
-            log_file = gt_collect.first_with(pose_dir, 'utpp-2*.log')
+            log_file = gt_collect.session_log(pose_dir)
         for kind in HELPER_REPORTS:
             script = helper_script(kind)
             if not script or (kind == 'helper_coverage' and not log_file):
@@ -556,7 +556,7 @@ def run_main(argv) -> int:
     logs = os.path.join(out_dir, 'logs')
     recordings = None
     if a.collect_from:
-        log0 = gt_collect.first_with(a.collect_from, 'utpp-2*.log')
+        log0 = gt_collect.session_log(a.collect_from)
         coll = gt_collect.SessionCollector(a.collect_from, logs, gt_collect.session_since(log0),
                                            (lambda: [log0] if log0 else []))
         coll.collect('replay', final=True)

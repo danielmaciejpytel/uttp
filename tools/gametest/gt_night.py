@@ -69,6 +69,10 @@ SETS.update(_gw.SET_MEMBERS)
 import gt_ranged_families as _rf  # noqa: E402
 MACROS.update({_name: list(_rf.PARTS) for _name in _rf.SET_MEMBERS})
 SETS.update(_rf.SET_MEMBERS)
+# traversal set (gt_traversal.py; not in 'all'): vault and climb at the summoned car; its pad parts are in scenarios.json
+import gt_traversal as _gtv  # noqa: E402
+MACROS[_gtv.SET_NAME] = list(_gtv.PARTS)
+SETS[_gtv.SET_NAME] = [_gtv.SET_NAME]
 
 
 def resolve_sets(spec: str) -> list[str]:
@@ -1243,6 +1247,219 @@ def split_failures(harness_steps: list, scenario_records: list) -> tuple[list, l
         for f in r.get('fails') or []:
             mech.append(f'{r["name"]}#{r["run"]}: {f}')
     return mech, metr
+
+
+# ---------------------------------------------------------------------------------------------- macro verdicts
+
+FAIL_VERDICTS = ('FAIL', 'TIMEOUT')
+INVALID_VERDICT = 'INVALID'      # not scored: the game blocked the weapon (see blocked_weapon_events), not a failure of the mod
+# a verdict reason that says V had no weapon in the hand: the only kind of failure a weapon block can cause
+WEAPON_LOST_RE = re.compile(r'nothing in the weapon slot|could not be put back in the hand|draw not confirmed|not in the hand')
+# macros without per-weapon parts whose failures can be caused by the game forcing empty hands
+WEAPON_MACRO_NAMES = ('weapon_draw_aim_holster', 'weapon_fire_reload', 'melee_fists', 'melee_fists_target')
+FORCE_EMPTY_RE = re.compile(r'^\[(?P<t>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?)\].*?\[utpp_weapon_restriction\] '
+                            r'ForceEmptyHands enter(?P<kv>[;=\w.\-]*)')
+PLUGIN_TS = '%Y-%m-%d %H:%M:%S.%f'
+
+
+def parts_of(rec: dict) -> dict:
+    """The per-weapon / per-family views of a macro record ({} for a record without parts)."""
+    for key in ('weapons', 'families'):
+        v = rec.get(key)
+        if isinstance(v, dict) and v:
+            return v
+    return {}
+
+
+def macro_failures(records, not_judged=()) -> list[dict]:
+    """The records that failed (verdict FAIL or TIMEOUT) with the names of their failing parts: [{'scenario': 'melee_weapons#1',
+    'verdict': 'FAIL', 'macros': ['katana', 'blunt'], 'fails': [...]}]. Scenarios of a frozen game (`not_judged`) are left out,
+    INVALID parts do not count (macro_invalid lists them). Pure."""
+    skip = set(not_judged or ())
+    out = []
+    for r in records or []:
+        key = f'{r.get("name")}#{r.get("run")}'
+        if key in skip or r.get('verdict') not in FAIL_VERDICTS:
+            continue
+        out.append({'scenario': key, 'verdict': r['verdict'],
+                    'macros': [t for t, v in parts_of(r).items() if isinstance(v, dict) and v.get('verdict') in FAIL_VERDICTS],
+                    'fails': [str(f) for f in r.get('fails') or []]})
+    return out
+
+
+def macro_invalid(records, not_judged=()) -> list[dict]:
+    """Like macro_failures for the INVALID records / parts: [{'scenario', 'macros', 'cause'}]. Pure."""
+    skip = set(not_judged or ())
+    out = []
+    for r in records or []:
+        key = f'{r.get("name")}#{r.get("run")}'
+        if key in skip:
+            continue
+        names = [t for t, v in parts_of(r).items() if isinstance(v, dict) and v.get('verdict') == INVALID_VERDICT]
+        if r.get('verdict') == INVALID_VERDICT or names:
+            out.append({'scenario': key, 'macros': names, 'cause': r.get('invalid_cause') or ''})
+    return out
+
+
+def _names_text(items: list[dict]) -> str:
+    return '; '.join(i['scenario'] + (f' ({", ".join(i["macros"])})' if i['macros'] else '') for i in items)
+
+
+def macro_result_text(failures: list[dict], invalid: list[dict]) -> str:
+    """'' when everything passed, else the text that replaces 'ok' in the body result line: 'macro FAIL: melee_weapons#1 (katana,
+    blunt); weapon_fire_reload#1', plus 'INVALID (...): ...' for runs the game blocked."""
+    parts = []
+    if failures:
+        parts.append('macro FAIL: ' + _names_text(failures))
+    if invalid:
+        parts.append('INVALID (weapon blocked by the game, not scored): ' + _names_text(invalid))
+    return '; '.join(parts)
+
+
+def overall_with_macros(overall: str | None, failures: list[dict], invalid: list[dict]) -> str:
+    """The OVERALL verdict of the harness steps combined with the macro verdicts: any macro FAIL / TIMEOUT / INVALID makes it FAIL."""
+    return 'FAIL' if (failures or invalid or overall != 'PASS') else 'PASS'
+
+
+# ---------------------------------------------------------------------------------------------- game blocks the weapon
+
+def blocked_weapon_events(text: str) -> list[dict]:
+    """The "[utpp_weapon_restriction] ForceEmptyHands enter;..." lines of a plugin log text (the game's own forced holstering:
+    the weapon slot stays empty until the state ends; the plugin logs only the entry). -> [{'t': datetime, 'cause': 'vehicle
+    scene' | 'no combat' | ..., 'fields': {key: value}}]. Pure."""
+    out = []
+    for line in text.splitlines():
+        m = FORCE_EMPTY_RE.match(line)
+        if not m:
+            continue
+        try:
+            t = datetime.strptime(m.group('t').ljust(23, '0'), PLUGIN_TS)
+        except ValueError:
+            continue
+        fields = dict(kv.split('=', 1) for kv in m.group('kv').split(';') if '=' in kv)
+        causes = [name for key, name in (('vehicleScene', 'vehicle scene'), ('noCombat', 'no combat'),
+                                         ('fastForward', 'fast forward'), ('forceParam', 'forced by the state machine'),
+                                         ('zoneParam', 'restricted zone')) if fields.get(key) == 'true']
+        if fields.get('forceFact', '0') not in ('0', ''):
+            causes.append('quest fact')
+        out.append({'t': t, 'cause': ' + '.join(causes) or 'unknown', 'fields': fields})
+    return out
+
+
+def _stamp_of(value):
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.strptime(str(value)[:23].ljust(23, '0'), PLUGIN_TS)
+    except ValueError:
+        return None
+
+
+def _part_span(view: dict):
+    """(first start, last end) of a part's phase windows, or None."""
+    ws = [(_stamp_of(w.get('start')), _stamp_of(w.get('end')))
+          for w in list(view.get('phases') or []) + list(view.get('phase_windows') or [])]
+    ws = [(a, b) for a, b in ws if a and b]
+    return (min(a for a, _ in ws), max(b for _, b in ws)) if ws else None
+
+
+def mark_blocked(records: list, events: list[dict]) -> list[dict]:
+    """Change FAIL to INVALID where the game blocked the weapon. Walks the records and their parts in the order they ran: a block
+    event starts a blocked state, the first PASS of a weapon part or weapon macro ends it. A FAIL while blocked becomes INVALID
+    when every failure text says V had no weapon in the hand (anything else stays a FAIL). Sets 'invalid_cause' on the part and
+    the record, recomputes the record verdict, returns [{'scenario', 'macros', 'cause', 'at'}]. Pure apart from the records."""
+    evs = sorted(events, key=lambda e: e['t'])
+    out = []
+    state = {'blocked': None, 'pos': 0}
+    never = datetime.max
+
+    def advance(until):
+        while state['pos'] < len(evs) and evs[state['pos']]['t'] <= until:
+            state['blocked'] = evs[state['pos']]
+            state['pos'] += 1
+
+    def lost_only(fails) -> bool:
+        return bool(fails) and all(WEAPON_LOST_RE.search(str(f)) for f in fails)
+
+    for r in sorted(records or [], key=lambda x: _stamp_of(x.get('start')) or datetime.min):
+        name = r.get('name')
+        parts = parts_of(r)
+        r_end = _stamp_of(r.get('end')) or never
+        if parts:
+            items = [(t, v) for t, v in parts.items() if isinstance(v, dict)]
+            items.sort(key=lambda kv: (_part_span(kv[1]) or (never, None))[0])
+            changed = []
+            for tag, v in items:
+                span = _part_span(v)
+                advance(span[1] if span else r_end)
+                if v.get('verdict') == 'PASS':
+                    state['blocked'] = None
+                elif v.get('verdict') in FAIL_VERDICTS and state['blocked'] is not None and lost_only(v.get('fails')):
+                    v['verdict'] = INVALID_VERDICT
+                    v['invalid_cause'] = state['blocked']['cause']
+                    v['invalid_at'] = state['blocked']['t'].strftime(PLUGIN_TS)[:23]
+                    changed.append(tag)
+            if changed:
+                if not any(v.get('verdict') in FAIL_VERDICTS for _, v in items):
+                    r['verdict'] = INVALID_VERDICT
+                r['invalid_cause'] = state['blocked']['cause']
+                _split_invalid_fails(r)
+                out.append({'scenario': f'{name}#{r.get("run")}', 'macros': changed, 'cause': r['invalid_cause'],
+                            'at': state['blocked']['t']})
+        elif name in WEAPON_MACRO_NAMES:
+            advance(r_end)
+            if r.get('verdict') == 'PASS':
+                state['blocked'] = None
+            elif r.get('verdict') in FAIL_VERDICTS and state['blocked'] is not None and lost_only(r.get('fails')):
+                r['verdict'] = INVALID_VERDICT
+                r['invalid_cause'] = state['blocked']['cause']
+                r['invalid_fails'], r['fails'] = list(r.get('fails') or []), []
+                out.append({'scenario': f'{name}#{r.get("run")}', 'macros': [], 'cause': r['invalid_cause'],
+                            'at': state['blocked']['t']})
+    return out
+
+
+def _split_invalid_fails(rec: dict) -> None:
+    """The failure texts of INVALID parts move from rec['fails'] to rec['invalid_fails'] (they are not failures of the mod)."""
+    inval = [f'{tag}: {f}' for tag, v in parts_of(rec).items() if isinstance(v, dict) and v.get('verdict') == INVALID_VERDICT
+             for f in v.get('fails') or []]
+    rec['invalid_fails'] = inval
+    rec['fails'] = [f for f in rec.get('fails') or [] if f not in inval]
+
+
+def recompute_verdict(rec: dict) -> str | None:
+    """After a retry replaced parts: FAIL when a part failed, else INVALID when one is still invalid, else SKIP when all were
+    skipped, else PASS. A record without parts keeps its verdict. The failure texts follow the parts."""
+    vs = [v.get('verdict') for v in parts_of(rec).values() if isinstance(v, dict)]
+    if not vs:
+        return rec.get('verdict')
+    if any(x in FAIL_VERDICTS for x in vs):
+        rec['verdict'] = 'FAIL'
+    elif INVALID_VERDICT in vs:
+        rec['verdict'] = INVALID_VERDICT
+    elif all(x == 'SKIP' for x in vs):
+        rec['verdict'] = 'SKIP'
+    else:
+        rec['verdict'] = 'PASS'
+    rec['fails'] = [f'{tag}: {f}' for tag, v in parts_of(rec).items() if isinstance(v, dict) and v.get('verdict') in FAIL_VERDICTS
+                    for f in v.get('fails') or []]
+    _split_invalid_fails(rec)
+    rec['fails'] = [f for f in rec['fails'] if f not in rec['invalid_fails']]
+    return rec['verdict']
+
+
+BLOCK_WAIT_S = 30.0              # how long the harness waits for the game's weapon block to lift before it gives up
+BLOCK_POLL_S = 3.0
+FORCE_EMPTY_UPPER_BODY = 5       # UpperBody state ForceEmptyHands in the POS lines (ub=5)
+UB_RE = re.compile(r'\[night\] POS .*?\bub=(-?\d+)')
+
+
+def latest_upper_body(text: str) -> int | None:
+    """The `ub=` value of the last POS line of a plugin log text, or None."""
+    found = None
+    for m in UB_RE.finditer(text):
+        found = m
+    return int(found.group(1)) if found else None
 
 
 # ---------------------------------------------------------------------------------------------- round 4: steering

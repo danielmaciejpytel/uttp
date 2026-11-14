@@ -405,5 +405,91 @@ class LuaTests(unittest.TestCase):
         self.assertEqual(self.run_lua("return tostring(STORE['core.log'])"), 'true')   # the rest was still written
 
 
+class SessionSettingsTests(unittest.TestCase):
+    """--settings author | shipped: the values of the session, what differs from the shipped defaults, and the way back."""
+
+    PLAYER = {'mm.bodyYawOffset': 8, 'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
+              'perspective.scene': True, 'perspective.blend': 0.8}
+
+    def test_plans(self):
+        self.assertEqual(dict(gs.session_plan('author')),
+                         {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+                          'perspective.scene': False, 'perspective.blend': 0.6})
+        shipped = dict(gs.session_plan('shipped'))
+        self.assertEqual(shipped, {'mm.bodyYawOffset': 8, 'mm.pelvisYawTrim': 5, 'mm.shinobiBonusReload': False,
+                                   'perspective.scene': True, 'perspective.blend': 0.8})      # camera.side: no known default
+
+    def test_difference_from_shipped(self):
+        diff = {d['key']: d for d in gs.differs_from_shipped(dict(gs.session_plan('author')))}
+        self.assertEqual(set(diff), {'mm.bodyYawOffset', 'mm.pelvisYawTrim', 'camera.side', 'mm.shinobiBonusReload',
+                                     'perspective.scene', 'perspective.blend'})
+        self.assertEqual((diff['mm.bodyYawOffset']['value'], diff['mm.bodyYawOffset']['shipped']), (4, 8))
+        self.assertIsNone(diff['camera.side']['shipped'])
+        self.assertEqual(gs.differs_from_shipped(dict(gs.session_plan('shipped'))), [])
+        self.assertEqual(gs.differs_from_shipped({'perspective.blend': 0.8}), [])
+        line = gs.settings_line('author', dict(gs.session_plan('author')))
+        self.assertIn('settings author: differ from the shipped defaults: mm.bodyYawOffset 4 (shipped 8)', line)
+        self.assertIn('camera.side 1 (shipped unknown)', line)
+        self.assertEqual(gs.settings_line('shipped', dict(gs.session_plan('shipped'))), 'settings shipped: all as shipped')
+        self.assertIn('NOT applied: camera.side', gs.settings_line('author', {}, ['camera.side']))
+
+    def make_night(self, mode, store):
+        import night
+        args = night.build_parser().parse_args(['--out-root', 'unused', '--log-dir', tempfile.mkdtemp(), '--settings', mode])
+        n = night.Night(args, runner=lambda c, **k: None)
+        n.settings.pending_path = None
+        n.cycle = {'name': 't', 'steps': []}
+        n.log = lambda msg: None
+        io = FakeIo(store)
+        n.settings_io = lambda pad, guard: io
+        return n, io
+
+    def test_the_night_applies_the_values_records_them_and_puts_everything_back(self):
+        for mode in ('author', 'shipped'):
+            n, io = self.make_night(mode, self.PLAYER)
+            info = {}
+            n.apply_session_settings(None, info)
+            plan = dict(gs.session_plan(mode))
+            for k, v in plan.items():
+                self.assertEqual(io.store[k], v, (mode, k))
+            rec = info['session_settings']
+            self.assertEqual(rec['mode'], mode)
+            self.assertEqual(rec['values'], plan)
+            self.assertEqual(n.cycle['session_settings'], rec)
+            self.assertEqual(bool(rec['differs_from_shipped']), mode == 'author')
+            self.assertTrue(all(e['owner'] == '--settings' and e['state'] == 'applied' for e in n.settings.entries))
+            res = n.settings.restore_all(io, 'test')
+            self.assertEqual(res['failed'], [])
+            self.assertEqual(io.store, self.PLAYER, mode)                     # the player's values are back
+
+    def test_a_cet_command_that_sets_the_same_keys_is_warned_about(self):
+        n, io = self.make_night('author', self.PLAYER)
+        n.args.cet = "for k,v in pairs({['mm.bodyYawOffset']=4}) do c.Set(k,v) end"
+        info = {}
+        n.apply_session_settings(None, info)
+        self.assertEqual(info['session_settings_conflict'], ['mm.bodyYawOffset'])
+        n2, io2 = self.make_night('author', self.PLAYER)
+        info2 = {}
+        n2.apply_session_settings(None, info2)
+        self.assertNotIn('session_settings_conflict', info2)
+
+    def test_a_key_the_game_does_not_know_is_listed_not_applied(self):
+        store = {k: v for k, v in self.PLAYER.items() if k != 'camera.side'}
+        n, io = self.make_night('author', store)
+        info = {}
+        n.apply_session_settings(None, info)
+        rec = info['session_settings']
+        self.assertEqual(rec['not_applied'], ['camera.side'])
+        self.assertNotIn('camera.side', rec['values'])
+        self.assertIn('NOT applied: camera.side', rec['line'])
+        self.assertNotIn('camera.side', io.store)
+
+    def test_the_summary_line_reaches_the_body_summary(self):
+        import gt_session
+        d = {'run': 'r', 'result': 'ok', 'pose_body': 'woman', 'scenarios': {}, 'settings_line': 'settings author: x'}
+        lines = gt_session.side_by_side_lines({'female': d})
+        self.assertIn('female: settings author: x', lines)
+
+
 if __name__ == '__main__':
     unittest.main()

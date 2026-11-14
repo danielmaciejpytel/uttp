@@ -1085,12 +1085,23 @@ def selection_unscored(metrics: dict, thresholds: dict, step: str = '', slow: bo
 TRACE_PERIOD_S = 1.0   # the trace line is written about once a second
 
 
+TRACE_JITTER_S = 0.25  # the trace lines are not exactly one period apart (seen: 1.001 .. 1.016 s); a window this much longer than
+                       # the period can still fall between two of them
+TRACE_COVER_LINES = 3  # motion lines (about 4 a second) that show the driver ran through a window of a full period or longer
+
+
 def trace_gap(metrics: dict) -> bool:
-    """True when a window without a trace sample is shorter than the trace period while the motion lines show the driver ran in it:
-    the window fell between two trace lines, which says nothing about the mod. Its sample-and-hold metrics are not measured then."""
+    """True when a window without a trace sample is too short to be sure of one while the continuous motion lines show the driver
+    ran in it: the window fell between two trace lines, which says nothing about the mod. Its sample-and-hold metrics are not
+    measured then. A window shorter than the trace period needs one motion line; one up to TRACE_JITTER_S longer than the period
+    (a 1.0 s ramp with a 1.02 s trace period) needs TRACE_COVER_LINES of them. Longer windows must hold a trace sample."""
     dur = metrics.get('duration_s')
-    return (dur is not None and dur < TRACE_PERIOD_S and metrics.get('samples') == 0
-            and (metrics.get('motion_samples') or 0) >= 1)
+    if dur is None or metrics.get('samples') != 0:
+        return False
+    motion = metrics.get('motion_samples') or 0
+    if dur < TRACE_PERIOD_S:
+        return motion >= 1
+    return dur < TRACE_PERIOD_S + TRACE_JITTER_S and motion >= TRACE_COVER_LINES
 
 
 def evaluate(metrics: dict, thresholds: dict, step: str = '', slow: bool = False) -> list[str]:

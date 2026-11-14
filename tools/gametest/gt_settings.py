@@ -26,6 +26,56 @@ DIAG_DEPS = ('core.log', 'mm.trace', 'mm.feedDump', 'camera.trace', 'perspective
 DIAG_VALUES = {'off': 'off', 'timed': 'timed', 'until': 'until'}
 DIAG_LEFT_TEXT = 'diagnostic logs left ON - restore needed'
 
+# The mod settings a test session runs with. 'author' = the values the author plays with (the harness applies them itself,
+# through the ledger, so they are put back before the game is quit); 'shipped' = the registered defaults of the same keys.
+SETTINGS_AUTHOR = 'author'
+SETTINGS_SHIPPED = 'shipped'
+SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
+AUTHOR_VALUES = (('mm.bodyYawOffset', 4), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
+                 ('perspective.scene', False), ('perspective.blend', 0.6))
+# registered defaults (the `default =` of each Register call); None = not known to the harness (nothing is applied for it
+# in 'shipped' mode and a difference cannot be named)
+SHIPPED_DEFAULTS = {'mm.bodyYawOffset': 8, 'mm.pelvisYawTrim': 5, 'camera.side': None, 'mm.shinobiBonusReload': False,
+                    'perspective.scene': True, 'perspective.blend': 0.8}
+
+
+def session_plan(mode: str) -> list[tuple[str, object]]:
+    """[(key, value)] the harness sets after arming for a --settings mode."""
+    if mode == SETTINGS_SHIPPED:
+        return [(k, SHIPPED_DEFAULTS[k]) for k, _ in AUTHOR_VALUES if SHIPPED_DEFAULTS.get(k) is not None]
+    return list(AUTHOR_VALUES)
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a is b
+    try:
+        return abs(float(a) - float(b)) < 1e-9
+    except (TypeError, ValueError):
+        return a == b
+
+
+def differs_from_shipped(values: dict) -> list[dict]:
+    """The session values (key -> value in force) that are not the shipped default: [{'key', 'value', 'shipped'}]; 'shipped' is None
+    for a key whose default the harness does not know (listed, because it cannot be called equal)."""
+    out = []
+    for key, value in values.items():
+        shipped = SHIPPED_DEFAULTS.get(key)
+        if shipped is None or not _same(value, shipped):
+            out.append({'key': key, 'value': value, 'shipped': shipped})
+    return out
+
+
+def settings_line(mode: str, values: dict, not_applied=()) -> str:
+    """One line for the run record: which settings of this session differ from the shipped defaults."""
+    diff = differs_from_shipped(values)
+    text = ', '.join(f'{d["key"]} {d["value"]!r} (shipped {"unknown" if d["shipped"] is None else repr(d["shipped"])})' for d in diff)
+    line = f'settings {mode}: ' + (f'differ from the shipped defaults: {text}' if diff else 'all as shipped')
+    if not_applied:
+        line += f'; NOT applied: {", ".join(not_applied)}'
+    return line
+
+
 _SETGET_RE = re.compile(r'\[night\] SETGET ok=(true|false)\s*(.*)')
 _SETSET_RE = re.compile(r'\[night\] SETSET ok=(true|false)\s*(.*)')
 _SET_CALL_RE = re.compile(r'''Set\(\s*['"]([\w.]+)['"]''')

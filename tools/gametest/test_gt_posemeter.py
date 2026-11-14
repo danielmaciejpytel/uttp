@@ -409,5 +409,46 @@ class RunFolderTests(unittest.TestCase):
         self.assertIn('copied', text)
 
 
+class RotatedLogTests(unittest.TestCase):
+    """The plugin log rotates at 10 MB (utpp-<stamp>.1.log, then utpp-<stamp>.log): the meter reads every part."""
+
+    def split_session(self, d):
+        with open(LOG, encoding='utf-8') as f:
+            lines = f.read().splitlines(True)
+        half = len(lines) // 2
+        old = os.path.join(d, 'utpp-2026-11-14-17-52-11.1.log')
+        cur = os.path.join(d, 'utpp-2026-11-14-17-52-11.log')
+        with open(old, 'w', encoding='utf-8') as f:
+            f.writelines(lines[:half])
+        with open(cur, 'w', encoding='utf-8') as f:
+            f.writelines(lines[half:])
+        return old, cur
+
+    def test_parse_log_of_the_current_part_includes_the_rotated_part(self):
+        whole = pm.parse_log(LOG)
+        self.assertGreater(len(whole['motion']), 4)
+        with tempfile.TemporaryDirectory() as d:
+            old, cur = self.split_session(d)
+            split = pm.parse_log(cur)
+            only_old = pm.parse_log(old)
+        self.assertEqual(split['motion'], whole['motion'])
+        self.assertEqual(split['first'], whole['first'])
+        self.assertEqual(split['last'], whole['last'])
+        self.assertLess(len(only_old['motion']), len(whole['motion']))       # one part alone is not the session
+
+    def test_session_log_picks_the_current_part_not_the_rotated_one(self):
+        import glob
+        import gt_collect
+        with tempfile.TemporaryDirectory() as d:
+            old, cur = self.split_session(d)
+            self.assertEqual(sorted(glob.glob(os.path.join(d, 'utpp-2*.log')))[0], old)   # the trap of plain sorting
+            self.assertEqual(gt_collect.session_log(d), cur)
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(gt_collect.session_log(d))
+            lone = os.path.join(d, 'utpp-2026-11-14-17-52-11.1.log')
+            open(lone, 'w').close()
+            self.assertEqual(gt_collect.session_log(d), lone)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -63,6 +63,15 @@ def first_with(folder: str, pattern: str) -> str | None:
     return files[0] if files else None
 
 
+def session_log(folder: str) -> str | None:
+    """The plugin log of a folder as the readers want it: the CURRENT utpp-<stamp>.log (readers add the rotated .N.log parts
+    themselves). Plain sorting would put utpp-<stamp>.1.log, the older part of a rotated session, first."""
+    import gt_log
+    files = sorted(glob.glob(os.path.join(folder, 'utpp-2*.log')))
+    current = [f for f in files if gt_log.is_session_log(f)]
+    return (current or files or [None])[0]
+
+
 class SessionCollector:
     def __init__(self, src_dir: str, dest_dir: str, since: datetime | None, extra_files=None, log=print,
                  now=datetime.now):

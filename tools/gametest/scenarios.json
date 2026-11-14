@@ -419,6 +419,22 @@
         {"name": "stop", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.2, 0, 0]]}
       ]
     },
+    "trav_vault_jump": {
+      "description": "traversal macro part (gt_traversal.py): V stands at the hood side of the car facing it; the stick is pushed into the car for 1.4 s with one A tap at 0.5 s (a vault over the hood), then 1.5 s landing; no locomotion limits (the macro judges the traversal from the log)",
+      "steps": [
+        {"name": "settle", "duration": 0.6, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "jump", "duration": 1.4, "interp": "linear", "ls": [[0, 0, 0], [0.1, 0, 1]], "buttons": [{"t": 0.5, "button": "A", "hold": 0.12}], "metrics": false},
+        {"name": "land", "duration": 1.5, "interp": "linear", "ls": [[0, 0, 1], [0.3, 0, 0]], "metrics": false}
+      ]
+    },
+    "trav_climb_jump": {
+      "description": "traversal macro part (gt_traversal.py): V stands at the cabin side of the car facing it; the stick is pushed into the car for 1.6 s with the A button held 0.35 s from 0.4 s (a climb onto the car), then 2 s up on the car; no locomotion limits (the macro judges the traversal from the log)",
+      "steps": [
+        {"name": "settle", "duration": 0.6, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "jump", "duration": 1.6, "interp": "linear", "ls": [[0, 0, 0], [0.1, 0, 1]], "buttons": [{"t": 0.4, "button": "A", "hold": 0.35}], "metrics": false},
+        {"name": "up", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1], [0.3, 0, 0]], "metrics": false}
+      ]
+    },
     "slide_sprint": {
       "description": "state scenario (set states): sprint 3 s (full stick + L3 tap), R3 tap while sprinting = slide (Alternative scheme: ToggleCrouch / Dive = R3; the game needs >= 4.5 m/s, stick within 45 deg of the facing) with the stick held 2.6 s (slide, exit into the crouch; not scored), stick released and 1.5 s crouched (not scored), R3 tap = stand up (not scored; the steps named pad_* keep their R3 press as a pad press: never replaced by the keyboard crouch key, never skipped with --background), 2.5 s stand check: FAILs with 'stand not reached after the slide' when MMTRACE loco is not 1 (an R3 toggle parity error: the slide did not leave V crouched)",
       "thresholds": {

@@ -153,6 +153,7 @@ import gt_capture  # noqa: E402
 import gt_log  # noqa: E402
 import gt_melee_weapons as gw  # noqa: E402
 import gt_ranged_families as rf  # noqa: E402
+import gt_traversal as gtv  # noqa: E402
 import gt_night as gn  # noqa: E402
 import run as gt_run  # noqa: E402
 import failure_clips  # noqa: E402
@@ -739,6 +740,13 @@ class Night:
         return [r for r in runs or [] if f'{r["scenario"]}#{r["run"]}' not in nj
                 and not str(r.get('aborted') or '').startswith(gt_freeze.MESSAGE_HEAD)]
 
+    def macro_summary(self, kind: str) -> list[dict]:
+        """The macro failures / INVALID macros of this cycle as plain data ('at' is text)."""
+        nj = self.freeze_not_judged()
+        recs = self.cycle.get('scenarios') or []
+        items = gn.macro_failures(recs, nj) if kind == 'failures' else gn.macro_invalid(recs, nj)
+        return [{k: (v.strftime('%H:%M:%S.%f')[:12] if hasattr(v, 'strftime') else v) for k, v in i.items()} for i in items]
+
     def freeze_summary(self) -> dict:
         ev = self.freeze_info
         evd = ev.get('evidence') or {}
@@ -897,6 +905,33 @@ class Night:
         info['diag'] = {k: ent[k] for k in ('requested', 'state', 'previous', 'note')}
         if ent['state'] != 'applied':
             self.log(f'[arm] WARNING: --diag {mode} not applied ({ent["note"]}): the run has no diagnostic recording')
+
+    def apply_session_settings(self, guard, info: dict) -> None:
+        """--settings author | shipped: the mod settings of this session, set through the ledger (restored before ExitGame). The
+        values in force and the ones that differ from the shipped defaults go to the run record (summary.json 'session_settings')."""
+        mode = getattr(self.args, 'settings', gs.SETTINGS_AUTHOR)
+        values, missed = {}, []
+        keys = [k for k, _ in gs.session_plan(mode)]
+        clash = [u for u in (self.cycle.get('unowned_settings') or []) if any(k in str(u) for k in keys)]
+        cet_text = str(getattr(self.args, 'cet', '') or '')          # a Set loop over a table is not found by scan_unowned
+        clash += [k for k in keys if k in cet_text and k not in clash]
+        if clash:
+            info['session_settings_conflict'] = clash
+            self.log(f'[settings] WARNING: --cet already sets {clash}: the ledger records those values as "previous" and puts them back, '
+                     'not the player\'s own; drop those --cet commands when --settings is used')
+        for key, value in gs.session_plan(mode):
+            ent = self.settings.apply(self.settings_io(None, guard), key, value, '--settings')
+            if ent['state'] == 'applied':
+                values[key] = value
+            else:
+                missed.append(key)
+        # a key that was not applied keeps the value the game had: it is listed, not guessed
+        self.session_settings = {'mode': mode, 'values': values, 'not_applied': missed,
+                                 'differs_from_shipped': gs.differs_from_shipped(values),
+                                 'line': gs.settings_line(mode, values, missed)}
+        info['session_settings'] = self.session_settings
+        self.note_cycle('session_settings', self.session_settings)
+        self.log(f'[settings] {self.session_settings["line"]}')
 
     def request_post_helper_stream(self, guard) -> bool | None:
         """The helper reports compare the recorded pose with the helper bones the engine holds after the mod's commit. Only a
@@ -1293,6 +1328,7 @@ class Night:
                 info['night_auto_retry'] = True
                 self.log(f'[arm] NightAuto retry: {"on" if self.auto_pos else "LOST again - console polls"}')
             self.apply_diag(g, info)
+            self.apply_session_settings(g, info)
             if getattr(self.args, 'background', False):
                 try:
                     info['bg_input'] = self.bg_input(True, 'after arming')
@@ -2648,6 +2684,131 @@ class Night:
         target = (pos['p'][0] + side[0] * 10.0, pos['p'][1] + side[1] * 10.0)
         self.camera_align(pad, guard, plan, pos, target, {'events': []}, why='clear-path')
 
+    def weapon_block_check(self, pad, guard, plan: dict, name: str, run_no: int, rec: dict, records: list) -> None:
+        """The game's forced holstering (ForceEmptyHands, logged once on entry) keeps V's weapon slot empty until it ends.
+        A weapon macro that failed because of it is INVALID, not a failure of the mod: the failing parts are marked
+        (gt_night.mark_blocked), the harness waits a bounded time for the block to lift (UpperBody leaves 5 in the POS
+        lines) and then repeats the INVALID parts once, whether it lifted or not (a block that holds makes them INVALID again).
+        The outcome goes to cycle['weapon_blocks'] and summary.json."""
+        self.scan_weapon_blocks()
+        if rec.get('verdict') not in gn.FAIL_VERDICTS or not self.weapon_blocks:
+            return
+        key = f'{name}#{run_no}'
+        mine = [m for m in gn.mark_blocked(records, self.weapon_blocks) if m['scenario'] == key]
+        if not mine:
+            return
+        inv = mine[0]
+        info = {'scenario': key, 'parts': inv['macros'], 'cause': inv['cause'], 'at': inv['at'].strftime('%H:%M:%S.%f')[:12],
+                'lifted': None, 'waited_s': 0.0, 'retried': False}
+        self.cycle.setdefault('weapon_blocks', []).append(info)
+        self.log(f'[weapon-block] {key}: the game blocked the weapon at {info["at"]} ({inv["cause"]}); '
+                 f'{", ".join(inv["macros"]) or "the macro"} not scored (INVALID), waiting up to {gn.BLOCK_WAIT_S:g} s for the block to lift')
+        t0 = time.monotonic()
+        try:
+            info['lifted'] = self.wait_block_lift(pad, guard)
+        finally:
+            info['waited_s'] = round(time.monotonic() - t0, 1)
+        state = {True: 'block lifted', False: 'block still there (UpperBody 5)', None: 'UpperBody not readable'}[info['lifted']]
+        info['retried'] = rec['block_retried'] = True
+        self.log(f'[weapon-block] {key}: {state} after {info["waited_s"]} s -> one second try of {", ".join(inv["macros"]) or name}')
+        try:
+            self.retry_blocked(pad, guard, plan, name, rec, inv)
+        except (StopNight, CycleError, GuardError):
+            raise
+        except (ScenarioTimeout, NeedsKeyboard) as e:
+            rec.setdefault('fails', []).append(f'second try: {e}')
+            info['retry_error'] = str(e)
+            pad.release()
+        except Exception as e:  # noqa: BLE001 - the second try must not end the cycle; the first result stays in the record
+            info['retry_error'] = f'{type(e).__name__}: {str(e)[:120]}'
+            self.log(f'[weapon-block] {key}: second try failed: {info["retry_error"]}')
+            pad.release()
+        finally:
+            self.scenario_deadline = None
+        self.scan_weapon_blocks()                            # a block during the second try makes it INVALID again
+        gn.mark_blocked(records, self.weapon_blocks)
+        gn.recompute_verdict(rec)
+        info['verdict_after'] = rec.get('verdict')
+        self.log(f'[weapon-block] {key}: second try done, verdict {rec.get("verdict")}')
+
+    def scan_weapon_blocks(self) -> None:
+        """Adds the ForceEmptyHands entries of the plugin log since the start of the current scenario to self.weapon_blocks (called after
+        every scenario, so a block that began in a walk or a vehicle scenario is known when the next weapon macro fails)."""
+        if not self.utpp_log:
+            return
+        seen = {e['t'] for e in self.weapon_blocks}
+        for e in gn.blocked_weapon_events(read_since(self.utpp_log, self.scen_log_off)):
+            if e['t'] not in seen:
+                self.weapon_blocks.append(e)
+
+    def wait_block_lift(self, pad, guard) -> bool | None:
+        """True when the POS lines show UpperBody other than ForceEmptyHands within gn.BLOCK_WAIT_S, False when it stays, None when
+        no POS line could be read."""
+        end = time.monotonic() + gn.BLOCK_WAIT_S
+        seen = None
+        while True:
+            try:
+                self.poll_pos(guard, pad)
+            except ScenarioTimeout:
+                raise
+            ub = gn.latest_upper_body(self.log_tail(60000))
+            if ub is not None:
+                seen = ub != gn.FORCE_EMPTY_UPPER_BODY
+                if seen:
+                    return True
+            if time.monotonic() >= end:
+                return False if seen is not None else None
+            guard.wait(gn.BLOCK_POLL_S)
+
+    def run_single_macro(self, name: str, pad, guard, plan: dict, rec: dict) -> bool:
+        """The macros without parts of their own (the dispatch of run_scenarios); False for any other name."""
+        if name == 'weapon_draw_aim_holster' or name in gn.FIRING_MACROS:
+            rec.update(self.weapon_macro(pad, guard, plan, fire=name in gn.FIRING_MACROS))
+        elif name == 'melee_fists':
+            rec.update(self.melee_macro(pad, guard, plan))
+        elif name == 'melee_fists_target':
+            rec.update(self.enemy_macro(pad, guard, plan))
+        else:
+            return False
+        return True
+
+    def retry_blocked(self, pad, guard, plan: dict, name: str, rec: dict, inv: dict) -> None:
+        """The one second try: the INVALID parts of a weapon set / family set again, or a macro without parts as a whole."""
+        self.scenario_deadline = time.monotonic() + max(self.args.scenario_timeout, 300.0)
+        if name in gw.WEAPON_SETS and 'weapons' in rec:
+            tables = gw.load_script_tables()
+            for tag in inv['macros']:
+                out2 = {'weapons': {}, 'fails': [], 'warnings': [], 'phase_windows': [], 'own_clip_phases': []}
+                try:
+                    gw.run_one(self, pad, guard, plan, tag, tables, out2)
+                finally:
+                    view = out2['weapons'].get(tag)
+                    if view is not None:
+                        view['second_try_of_invalid'] = True
+                        rec['weapons'][tag] = view
+                        rec['phase_windows'] = list(rec.get('phase_windows') or []) + view['phase_windows']
+        elif name in rf.SET_MEMBERS and 'families' in rec:
+            records = rf.options_of(self.args)[1]
+            for tag in inv['macros']:
+                out2 = {'families': {}, 'fails': [], 'warnings': [], 'phase_windows': []}
+                try:
+                    rf.run_one(self, pad, guard, plan, tag, records[tag], out2, run_no=int(rec.get('run', 1) or 1))
+                finally:
+                    view = out2['families'].get(tag)
+                    if view is not None:
+                        view['second_try_of_invalid'] = True
+                        rec['families'][tag] = view
+                        rec['phase_windows'] = list(rec.get('phase_windows') or []) + view['phase_windows']
+        else:
+            new: dict = {}
+            first = {k: rec.get(k) for k in ('verdict', 'fails', 'invalid_fails', 'invalid_cause')}
+            if not self.run_single_macro(name, pad, guard, plan, new):
+                return
+            rec['first_try'] = first
+            rec.update({k: v for k, v in new.items() if k not in ('start', 'name', 'run', 'end')})
+            rec.pop('invalid_cause', None)
+            rec.pop('invalid_fails', None)
+
     def leave_car(self, pad, guard, plan: dict, seconds: float = 4.0) -> None:
         """After the car scenario: turn the camera away from the car and sprint off, so the walking scenarios that
         follow do not start next to it. Best effort (needs a position with the vehicle)."""
@@ -3075,6 +3236,8 @@ class Night:
     def door_spot(self) -> tuple:
         """Car-frame (lon, lat) to stand at for X: the spot where X last worked for this V body (MOUNT_SPOTS_FILE),
         else gn.DOOR_BY_BODY, else --door-lon / --door-lat. The body comes from the UTPP log of this run."""
+        if getattr(self, 'door_spot_override', None):      # the traversal set stands at other places along the car
+            return self.door_spot_override
         body = getattr(self, 'body', None)
         if body is None and self.utpp_log:
             body = self.body = gn.body_in_log(read_since(self.utpp_log, 0))
@@ -3538,6 +3701,8 @@ class Night:
     def run_scenarios(self, plan: dict) -> list[dict]:
         st = self.step('scenarios')
         records = []
+        self.weapon_blocks = []          # ForceEmptyHands entries seen in the plugin log during this cycle
+        self.cycle['weapon_blocks'] = []
         guard = self.guard()
         pad = None
         self.start_load()
@@ -3574,6 +3739,8 @@ class Night:
                             limit = max(limit, self.scenarios[name].duration * 2 + 30)
                         if name == 'melee_fists_target':     # ~2 min: spawn polls, 4 phases, console commands
                             limit = max(limit, 300.0)
+                        if name == gtv.SET_NAME:
+                            limit = max(limit, gtv.TIME_LIMIT_S)
                         if name in gw.WEAPON_SETS:
                             limit = max(limit, gw.time_limit_s(name))
                         if name in rf.SET_MEMBERS:
@@ -3598,6 +3765,8 @@ class Night:
                                 rf.run_ranged_macro(self, pad, guard, plan, name, rec)   # fills rec while it runs
                             elif name == 'melee_fists_target':
                                 rec.update(self.enemy_macro(pad, guard, plan))
+                            elif name == gtv.SET_NAME:
+                                gtv.run_traversal_macro(self, pad, guard, plan, rec)   # fills rec while it runs
                             elif name == 'shoulder_key':
                                 rec.update(self.shoulder_key_macro(pad, guard))
                             elif name == 'aim_probe':
@@ -3636,6 +3805,9 @@ class Night:
                         rec['end'] = datetime.now()
                         records.append(rec)
                         self.cycle['scenarios'] = records
+                        self.scan_weapon_blocks()
+                        if gn.parts_of(rec) or name in gn.WEAPON_MACRO_NAMES:
+                            self.weapon_block_check(pad, guard, plan, name, r, rec, records)
                         self.save()
                         with self.budget.timed('copy'):
                             self.secure_session_files('between scenarios')   # the ring keeps ten minutes: finished segments go now
@@ -3791,7 +3963,8 @@ class Night:
         if judged_runs and utpp_copy:
             gdir = os.path.join(self.cycle_dir, 'gametest')
             os.makedirs(gdir, exist_ok=True)
-            plan_s = dict(plan, runs=judged_runs, log=utpp_copy, log_offset=0, created=datetime.now())
+            plan_s = dict(plan, runs=judged_runs, log=utpp_copy, log_offset=0, created=datetime.now(),
+                          macro_failures=self.macro_summary('failures'), macro_invalid=self.macro_summary('invalid'))
             with open(os.path.join(gdir, 'plan.json'), 'w', encoding='utf-8') as f:
                 json.dump(gt_run.serialise_plan(plan_s), f, indent=1, default=str)
             if self.meter_job is not None:
@@ -3812,6 +3985,12 @@ class Night:
                     harness_steps = h.get('steps', [])
                 except Exception as e:  # noqa: BLE001
                     summary['harness'] = {'error': repr(e)}
+        # macro verdicts (weapons, fists, enemy, vehicle ...): counted in the overall verdict like the harness steps
+        summary['macro_failures'] = self.macro_summary('failures')
+        summary['macro_invalid'] = self.macro_summary('invalid')
+        summary['weapon_blocks'] = self.cycle.get('weapon_blocks') or []
+        summary['overall'] = gn.overall_with_macros((summary.get('harness') or {}).get('overall') or 'PASS',
+                                                    summary['macro_failures'], summary['macro_invalid'])
         # failures at a glance: test mechanics (crouch/mount/weapon/timeouts) vs locomotion metrics
         mech, metr = gn.split_failures(harness_steps, self.judged_scenarios(self.cycle.get('scenarios', [])))
         summary['mechanics_failures'] = mech
@@ -3899,6 +4078,7 @@ class Night:
                 'keyboard_skips': [f'{s["name"]}#{s["run"]}' for s in self.cycle.get('scenarios', [])
                                    if s.get('skip_reason') == 'needs keyboard']}
         summary['machine_load'] = self.cycle.get('machine_load')
+        summary['session_settings'] = self.cycle.get('session_settings')
         summary['settings'] = {'ledger': self.settings.record(), 'left': self.cycle.get('settings_left'),
                                'pending_restored_at_launch': self.cycle.get('pending_settings_restore'),
                                'unowned': self.cycle.get('unowned_settings')}
@@ -4108,6 +4288,7 @@ class Night:
             self.report_load()
             self.marker(rec, f'{name}-end')
             self.cycle['result'] = 'ok' if early is None else f'failed: {early}'
+            self.apply_macro_verdicts()
         except StopNight as e:
             self.cycle['result'] = f'stopped: {e}'
             self.secure_session_files('stop', final=True)
@@ -4181,6 +4362,16 @@ class Night:
         if unexpected is not None:
             raise unexpected
         return self.cycle
+
+    def apply_macro_verdicts(self) -> None:
+        """A macro that failed (or was not scored because the game blocked the weapon) is no longer an 'ok' cycle: the result line
+        and with it the exit status name the macros (gt_night.macro_result_text)."""
+        nj = self.freeze_not_judged()
+        recs = self.cycle.get('scenarios') or []
+        text = gn.macro_result_text(gn.macro_failures(recs, nj), gn.macro_invalid(recs, nj))
+        if text:
+            res = self.cycle.get('result')
+            self.cycle['result'] = text if res == 'ok' else f'{res}; {text}'
 
     def apply_graphics(self) -> None:
         """--graphics low: the lowest quality profile, with the game closed, before the launch. Put back by finish_graphics at
@@ -4280,6 +4471,8 @@ def dry_run(args) -> int:
     print(f'     launch: {args.launch} -> ' + (f'{GAME_EXE_PATH} (cwd {os.path.dirname(GAME_EXE_PATH)})'
                                                  if args.launch == 'exe' else f'Start-Process {STEAM_URL}'))
     print(f'     quit command (CET console): {gn.QUIT_CMD}')
+    print(f'     --settings {args.settings}: ' + ', '.join(f'{k}={v!r}' for k, v in gs.session_plan(args.settings))
+          + ' (set after arming through the ledger, restored before ExitGame)')
     print(f'     recording safety: pose segments (utpp-pose-*.utpppose), input dump (utpp-feed-*.txt) and mod log from {args.log_dir} '
           'are copied into <run>\\logs between the scenarios, at the end of the scenario phase on every exit path, and after the quit')
     print('     --diag ' + args.diag + ': ' + ('the diagnostic logs option is not touched' if args.diag == 'keep' else
@@ -4354,6 +4547,9 @@ def dry_run(args) -> int:
             print(f'     {n}: weapon macros (gt_melee_weapons.py), commands per weapon:')
             for tag in gw.WEAPON_SETS[n]:
                 print('\n'.join('       ' + ln for ln in gw.dry_run_lines(tag, scenarios)))
+        if n == gtv.SET_NAME:
+            print(f'     {n}: vault and climb at the car (gt_traversal.py); scenario time limit {gtv.TIME_LIMIT_S:.0f} s:')
+            print('\n'.join('       ' + ln for ln in gtv.dry_run_lines(scenarios)))
         if n in rf.SET_MEMBERS:
             try:
                 fams, recs = rf.options_of(args)
@@ -4729,6 +4925,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help='how commands reach the game: console = typed into the CET overlay; file = cmd.txt of the test '
                         'module utpp_testcmd, confirmed by its ACK in the UTPP log (no overlay, no keys, no clicks); '
                         'auto = file when the module logged READY in the session, else console')
+    p.add_argument('--settings', default='author', choices=list(gs.SETTINGS_MODES),
+                   help='mod settings of the session: author = the author\'s own values (body yaw offset 4, pelvis yaw trim 2, camera '
+                        'side 1, Shinobi bonus reload on, first person in scenes off, blend 0.6), set after arming and put back before '
+                        'ExitGame; shipped = the registered defaults of the same keys. The run record lists what differs from shipped.')
     p.add_argument('--diag', default='keep', choices=['keep', 'off', 'timed', 'until'],
                    help="the mod's diagnostic logs option: keep = do not touch (default); off | timed (5 minutes) | until = set "
                         'at arm and put back (previous value read first) before every ExitGame and on every exit path; if the '

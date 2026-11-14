@@ -267,7 +267,8 @@ def run_digest(run_dir: str) -> dict:
         scen.setdefault(str(r['label']), {})['pose'] = {k: r.get(k) for k in (
             'duration_s', 'head_speed_p95', 'chest_speed_p95', 'spikes_per_s', 'helper_p95_cm', 'anatomy_share')}
     return {'run': os.path.basename(os.path.abspath(run_dir)), 'result': cyc.get('result'), 'pose_body': pose.get('body'),
-            'perf': cyc.get('perf_status'), 'scenarios': scen, 'harness': summ.get('harness'),
+            'perf': cyc.get('perf_status'), 'settings_line': (summ.get('session_settings') or {}).get('line'),
+            'scenarios': scen, 'harness': summ.get('harness'),
             'skipped': summ.get('skipped_scenarios'), 'body_mismatch': cyc.get('body_mismatch'), 'pose_owner': summ.get('pose_owner')}
 
 
@@ -310,6 +311,8 @@ def side_by_side_lines(digests: dict[str, dict]) -> list[str]:
                      + f', pose owner {gt_log.pose_owner_label(d.get("pose_owner"))}'
                      + (f', {len(d["skipped"])} scenarios not played' if d.get('skipped') else '')
                      + (f', perf {d["perf"]}' if d.get('perf') else ''))
+        if d.get('settings_line'):
+            lines.append(f'{b}: {d["settings_line"]}')
         want = POSE_BODY.get(b)
         if d.get('body_mismatch') or (want and d.get('pose_body') and d['pose_body'] != want):
             lines.append(f'{b}: !!! BODY MISMATCH: ' + (d.get('body_mismatch') or
