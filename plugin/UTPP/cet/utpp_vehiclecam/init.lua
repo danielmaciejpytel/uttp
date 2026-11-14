@@ -188,8 +188,9 @@ M.DEFAULTS = {
   -- ('behind' mounts of standard3 / utility4): the hold camera rests against the closed door (boom shortened by the body), the door opens
   -- right after the mount and the camera follows it into the cabin at about 2.2 m/s; pullEscape fired only once it was pullEscapeDepth deep and
   -- pullEscapeMin s after the mount, the rendered camera was in the box for 0.12 - 0.33 s (0.14 / 0.29 m deep). pullEscapeLead: the orbit camera that
-  -- moves toward the box and would be closer than pullEscapeAhead m to its face (or inside) within pullEscapeLead frames at its current per-frame
-  -- approach starts the pull-out at once (no pullEscapeMin wait, the pivot blend still waits), so the path is frozen outside the box; 0 = off.
+  -- moves toward the box and would be closer than pullEscapeAhead m to its face (or inside) within pullEscapeLead 60 Hz frames (pullEscapeLead / 60 s,
+  -- the same look-ahead time at any frame rate) at its current approach speed starts the pull-out at once (no pullEscapeMin wait, the pivot blend
+  -- still waits), so the path is frozen outside the box; 0 = off.
   pullEscapeLead = 3, pullEscapeAhead = 0.03,
   -- the eased pull weight follows the arc length of the actual path (clearance detour around V, the exit leg, the box push included; sampled once at
   -- the freeze with V there, pullArcSamples points): the former path weight ran through the detour around V at 1.4 x the planned peak (Bratsk 9.7 ->
@@ -2947,13 +2948,13 @@ function M.OwnPose(ctrl, f, orbit)
     local ox, oy, oz = worldToVeh(orbit.x, orbit.y, orbit.z, f)
     local d = M.HullDepth(M.HullFor(cfg, ctrl.vehRecKey), ox, oy, oz)
     ctrl.camInBox = d > (tonumber(cfg.pullEscapeDepth) or 0.1) and d or nil
-    -- the approach of the orbit camera per frame (previous call of this mount hold, at most 0.1 s ago) extrapolated pullEscapeLead frames (the flag
+    -- the approach speed of the orbit camera (previous call of this mount hold, at most 0.1 s ago) extrapolated pullEscapeLead / 60 s (the flag
     -- is read by the next UpdatePull, the frozen pose is the orbit of that frame and the override shows from then on)
     local lead, prev, now = tonumber(cfg.pullEscapeLead) or 0, ctrl.camBoxPrev, ctrl.clock or 0
     if prev == nil or now ~= prev.at then -- (a second call in the same frame keeps the result of the first)
       ctrl.camBoxNear = nil
       if lead > 0 and prev ~= nil and now > prev.at and now - prev.at <= 0.1 then
-        local step = d - prev.d
+        local step = (d - prev.d) * ((1 / 60) / (now - prev.at)) -- approach per 1/60 s
         local pred = d + lead * step
         if step > 1e-4 and pred > -(tonumber(cfg.pullEscapeAhead) or 0.03) then ctrl.camBoxNear = { d = d, pred = pred } end
       end

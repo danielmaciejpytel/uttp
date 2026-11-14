@@ -2411,5 +2411,140 @@ do
   end
 end
 
+-- ---------------------------------------------------------------- frame rate independence of the executor's per-frame thresholds
+-- The same input is driven at 60 Hz, at 45 Hz with +-30 % frame time jitter, at 144 Hz and at 30 Hz; the state after the same real
+-- time is compared with the 60 Hz run.
+do
+  local FR_MOD_PATH, FR_CHECK = UTPP_BODYTURN_PATH, xcheck
+  local function frNorm(v)
+    local n = (v + 180) % 360
+    if n < 0 then n = n + 360 end
+    return n - 180
+  end
+  -- reproducible frame times: 45 Hz +-30 % from a fixed-seed Lehmer generator (exact in doubles, no math.random)
+  local function frameTimes(kind, total)
+    local out, t, seed = {}, 0, 12345
+    while t < total - 1e-9 do
+      local dt
+      if kind == "45j" then
+        seed = (seed * 16807) % 2147483647
+        dt = (1 / 45) * (1 + 0.3 * (2 * seed / 2147483647 - 1))
+      else
+        dt = 1 / kind
+      end
+      out[#out + 1] = dt
+      t = t + dt
+    end
+    return out
+  end
+  local RATES = { 60, "45j", 144, 30 }
+  local function label(kind) return kind == "45j" and "45 Hz +-30 %" or (tostring(kind) .. " Hz") end
+  -- mock game: the executor's request lands before the next frame; follow = the camera is V's yaw (coupled) or world-fixed
+  local function newExecWorld(cmdFn, coupled)
+    local w = { body = 0, cam = 0, pending = nil, t = 0, dt = 1 / 60, rate = 0, nativeOn = nil }
+    w.api = {
+      arm = function() return true end,
+      setNative = function(on) w.nativeOn = on end,
+      locomotionEnable = function() end,
+      locomotionReasons = function() return 0 end,
+      locomotionActive = function() return true end,
+      active = function() return w.nativeOn == true end,
+      bodyYaw = function() return w.body end,
+      cameraYaw = function() return w.cam end,
+      command = function(cur) return cmdFn(w, cur) end,
+      apply = function(yaw) w.pending = yaw; return true end,
+      camHeld = function() if coupled then return nil end return true end,
+      camHold = function() return not coupled end,
+    }
+    return w
+  end
+  local function newExec()
+    local m = dofile(FR_MOD_PATH)
+    m.exec.aimSmooth = false
+    m.lines = {}
+    m.log = function(msg) m.lines[#m.lines + 1] = msg end
+    return m
+  end
+  local function step(m, w, dt, coupled)
+    w.dt = dt
+    m.ExecStep(w.api, dt)
+    if w.pending ~= nil then w.body = w.pending; w.pending = nil end
+    if coupled then w.cam = w.body end
+    w.t = w.t + dt
+  end
+
+  -- (A) minimum step: the native follow law (BodyTurn.hpp CommandFollow: rate = err / 0.15 s, <= 360 deg/s, <= 1430 deg/s^2; the
+  -- controller keeps its rate when a step is not sent) tracks a goal turning at 4 deg/s for 3 s, then held for 2 s. Measured: the
+  -- body's lag behind the goal at 3 s and the residual error at 5 s (the residual is where the last step below the minimum lands:
+  -- within one follow step, err * dt / 0.15 s, under 0.45 deg - hence the 0.1 deg tolerance).
+  local function followCmd(goalAt)
+    return function(w, cur)
+      local err = frNorm(goalAt(w.t) - cur)
+      local dt = math.min(w.dt, 0.1)
+      local want = math.max(-360, math.min(360, err / 0.15))
+      local dv = 1430 * dt
+      local rate = math.max(w.rate - dv, math.min(w.rate + dv, want))
+      if rate * err < 0 then rate = 0 end
+      local s = rate * dt
+      if math.abs(s) > math.abs(err) then s = err end
+      w.rate = s / dt
+      return frNorm(cur + s)
+    end
+  end
+  local function runFollow(kind)
+    local goalAt = function(t) return 4 * math.min(t, 3) end
+    local m, w = newExec(), nil
+    w = newExecWorld(followCmd(goalAt), false)
+    m.SelectExecutor(w.api)
+    local lag3, res5
+    for _, dt in ipairs(frameTimes(kind, 5)) do
+      step(m, w, dt, false)
+      if lag3 == nil and w.t >= 3 - 1e-9 then lag3 = frNorm(goalAt(w.t) - w.body) end
+    end
+    res5 = frNorm(goalAt(w.t) - w.body)
+    return lag3, res5
+  end
+  local base = {}
+  base.lag, base.res = runFollow(60)
+  local rows, okA = {}, true
+  for _, kind in ipairs(RATES) do
+    local lag, res = runFollow(kind)
+    rows[#rows + 1] = string.format("%s lag %.3f res %.3f", label(kind), lag, res)
+    if math.abs(lag - base.lag) > 0.1 or math.abs(res - base.res) > 0.1 then okA = false end
+  end
+  FR_CHECK(string.format("frame rate: slow body turn (4 deg/s goal) - lag at 3 s and residual at 5 s within 0.1 deg of 60 Hz (60 Hz: %.3f / %.3f)",
+    base.lag, base.res), okA, table.concat(rows, "; "))
+
+  -- (B) camera coupling guard: the camera turns with V while the executor turns V at 40 deg/s toward a goal 90 deg ahead of the camera
+  -- (a spin). Measured: the time of the first trip and the degrees V turned before it, over 4 s.
+  local function runCoupled(kind)
+    local m = newExec()
+    local w = newExecWorld(function(w, cur)
+      local err = frNorm(w.cam + 90 - cur)
+      local s = math.min(40 * w.dt, math.abs(err))
+      return frNorm(cur + (err >= 0 and s or -s))
+    end, true)
+    m.SelectExecutor(w.api)
+    local turned, tripAt, tripTurned = 0, nil, nil
+    for _, dt in ipairs(frameTimes(kind, 4)) do
+      local before = w.body
+      step(m, w, dt, true)
+      turned = turned + math.abs(frNorm(w.body - before))
+      if tripAt == nil and m.exec.trips >= 1 then tripAt, tripTurned = w.t, turned end
+    end
+    return tripAt, tripTurned, turned
+  end
+  local bAt, bDeg = runCoupled(60)
+  local rowsB, okB = {}, bAt ~= nil
+  for _, kind in ipairs(RATES) do
+    local at, deg, total = runCoupled(kind)
+    rowsB[#rowsB + 1] = string.format("%s trip %s after %s deg (turned %.1f deg in 4 s)", label(kind), at and string.format("%.3f s", at) or "none",
+      deg and string.format("%.1f", deg) or "-", total)
+    if at == nil or bAt == nil or math.abs(at - bAt) > 0.05 or math.abs(deg - bDeg) > 2.0 then okB = false end
+  end
+  FR_CHECK(string.format("frame rate: camera coupling guard trips after the same time and turn as at 60 Hz (+-0.05 s, +-2 deg; 60 Hz: %s s, %s deg)",
+    bAt and string.format("%.3f", bAt) or "none", bDeg and string.format("%.1f", bDeg) or "-"), okB, table.concat(rowsB, "; "))
+end
+
 print(string.format("utpp_bodyturn 0.6.3 executor + weapon turn: %d passed, %d failed", X.pass, X.fail))
 assert(X.fail == 0, "utpp_bodyturn executor / weapon turn test failed")

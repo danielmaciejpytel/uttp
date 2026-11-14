@@ -56,7 +56,8 @@ local E = {
   cameraHold = true,    -- hold utpp_camera's free-look (decoupled) camera while the executor turns the body
   enableLocomotion = true, -- switch UTPP Locomotion on when the executor is selected
   maxRate = 900,        -- deg/s safety clamp on top of the native controller (its total cap is 900 as well)
-  minStep = 0.05,       -- deg: smaller steps are not sent
+  minStep = 0.05,       -- deg per 1/60 s: smaller steps are not sent (scaled with the frame time, so the same 3 deg/s at any frame rate)
+  coupledMinStep = 0.5, -- deg per 1/60 s: the camera coupling guard counts only frames whose body turn is at least this (30 deg/s)
   linger = 0.5,         -- s the camera hold stays after the executor stops
   coupledLimit = 60,    -- deg of body turn with the camera following before the executor pauses
   coupledPause = 5,     -- s
@@ -101,7 +102,7 @@ local E = {
   vehicleHeldPrev = false, vehicleSettleUntil = nil,
   -- runtime
   nativeOn = nil, holdOwned = false, holdTimer = 0, score = 0, pausedUntil = nil, trips = 0, clock = 0,
-  prevBody = nil, prevCam = nil, prevStep = 0, locomotionOwned = false, why = "-", selected = false,
+  prevBody = nil, prevCam = nil, prevStep = 0, prevStepDt = 1 / 60, locomotionOwned = false, why = "-", selected = false,
 }
 M.exec = E
 local xs = { frames = 0, applied = 0, deadband = 0, rejected = 0, clamped = 0, cmdErrors = 0, toggles = 0, holds = 0, armFails = 0,
@@ -1113,10 +1114,12 @@ function M.ExecStep(api, dt)
   end
   if moving then gcam, gsrc = nil, "moving" end
   -- camera coupling guard: while the executor turns the body, a camera that turns by the same amount means the target
-  -- (camera + stick) turns with the body -> V would spin
-  if E.prevBody ~= nil and E.prevCam ~= nil and gcam ~= nil and math.abs(E.prevStep) >= 0.5 then
+  -- (camera + stick) turns with the body -> V would spin. The body turn measured now is the step sent on the previous
+  -- frame, so both per-frame thresholds scale with that frame's time (the same deg/s at any frame rate).
+  local coupledMin = (E.coupledMinStep or 0.5) * ((E.prevStepDt or 1 / 60) * 60)
+  if E.prevBody ~= nil and E.prevCam ~= nil and gcam ~= nil and math.abs(E.prevStep) >= coupledMin then
     local bd, cd = norm(cur - E.prevBody), norm(gcam - E.prevCam)
-    if math.abs(bd) >= 0.5 then
+    if math.abs(bd) >= coupledMin then
       if math.abs(cd - bd) <= 0.25 * math.abs(bd) then E.score = E.score + math.abs(bd)
       else E.score = math.max(0, E.score - math.abs(bd)) end
     end
@@ -1145,13 +1148,14 @@ function M.ExecStep(api, dt)
     return E.why
   end
   local step = norm(cmd - cur)
-  local lim = E.maxRate * math.min(math.max(dt, 1 / 240), 0.1)
+  local stepDt = math.min(math.max(dt, 1 / 240), 0.1)
+  local lim = E.maxRate * stepDt
   if math.abs(step) > lim then
     step = (step >= 0) and lim or -lim
     xs.clamped = xs.clamped + 1
   end
   local sent = false
-  if math.abs(step) >= E.minStep then
+  if math.abs(step) >= E.minStep * (stepDt * 60) then
     local okP, res = try(api.apply, norm(cur + step))
     sent = okP and res == true
     if sent then xs.applied = xs.applied + 1 else xs.rejected = xs.rejected + 1 end
@@ -1166,6 +1170,7 @@ function M.ExecStep(api, dt)
     E.why = "deadband"
   end
   E.prevBody, E.prevCam, E.prevStep = cur, (E.guardFix and gcam ~= nil) and gcam or cam, sent and step or 0
+  E.prevStepDt = stepDt
   xs.lastCur, xs.lastCmd, xs.lastStep, xs.lastCam = cur, cmd, step, cam or 0
   return E.why
 end

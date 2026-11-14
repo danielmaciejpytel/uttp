@@ -2318,9 +2318,31 @@ do -- 2026-11-04 r15 (r13d 'behind' mounts of standard3 / utility4): the hold ca
     check("r15 escape flag: an orbit camera moving away from the box or along its side is not flagged", a1 == nil and a2 == nil)
     for _, fps in ipairs({ 30, 60, 144 }) do
       local _, d = seq(S3REC, { -2.5, -0.3, 1.1 }, { 1, 0, 0 }, 2.4, fps, fps)
-      -- (lead 3 frames at 2.4 m/s + 0.03 m: 0.27 m at 30 fps, 0.15 m at 60 fps, 0.08 m at 144 fps from the face)
-      check(string.format("r15 escape flag @%d fps: an approaching camera is flagged outside the box, within lead frames + 0.03 m of its face (depth %.3f m)", fps, d or 9),
-        d ~= nil and d < 0 and d >= -(3 * 2.4 / fps + 0.03) - 1e-6)
+      -- (lead 3 / 60 s at 2.4 m/s + 0.03 m = 0.15 m from the face at any frame rate; the flag comes on the first frame inside that distance,
+      -- at most one frame of approach (2.4 m/s / fps) later)
+      check(string.format("r15 escape flag @%d fps: an approaching camera is flagged outside the box, within lead / 60 s + 0.03 m of its face (depth %.3f m)", fps, d or 9),
+        d ~= nil and d < 0 and d >= -(3 * 2.4 / 60 + 0.03) - 1e-6 and d <= -(3 * 2.4 / 60 + 0.03) + 2.4 / fps + 1e-6)
+    end
+    -- uneven frame times (45 Hz +-30 %, fixed-seed Lehmer generator): the same look-ahead distance, within the longest frame of approach
+    do
+      local c = newOwn({})
+      c.keep, c.keepSince, c.vehCar, c.vehRecKey = "mount", 0, true, S3REC
+      local f = { px = VPOS.x - 3, py = VPOS.y, pz = VPOS.z, pyaw = 0, vx = VPOS.x, vy = VPOS.y, vz = VPOS.z, vyaw = VYAW }
+      local hull = V.HullFor(c.cfg, S3REC)
+      local t, seed, maxDt, d = 0, 12345, 0, nil
+      while t < 1.0 and d == nil do
+        local x, y, z = -2.5 + 2.4 * t, -0.3, 1.1
+        c.clock = t
+        local ox, oy, oz = vehToWorld(x, y, z)
+        V.OwnPose(c, f, { x = ox, y = oy, z = oz, yaw = 0, pitch = -14 })
+        if c.camBoxNear then d = V.HullDepth(hull, x, y, z) end
+        seed = (seed * 16807) % 2147483647
+        local dt = (1 / 45) * (1 + 0.3 * (2 * seed / 2147483647 - 1))
+        maxDt = math.max(maxDt, dt)
+        t = t + dt
+      end
+      check(string.format("r15 escape flag @45 Hz +-30 %% jitter: flagged outside the box within lead / 60 s + 0.03 m of its face (depth %.3f m)", d or 9),
+        d ~= nil and d < 0 and d >= -(3 * 2.4 / 60 + 0.03) - 1e-6 and d <= -(3 * 2.4 / 60 + 0.03) + 2.4 * maxDt + 1e-6)
     end
     local off = seq(S3REC, { -2.5, -0.3, 1.1 }, { 1, 0, 0 }, 2.4, 60, 60, { pullEscapeLead = 0 })
     check("r15 escape flag mutation: pullEscapeLead = 0 never flags (r14)", off == nil and a3 ~= nil)
