@@ -107,6 +107,7 @@ REGISTRY = {
     'melee/test_anatomy_gate.py': {},
     'melee/test_apply_keyposes.py': {'note': 'needs the melee dumps (melee_dump.py all)'},
     'melee/test_contact.py': {},
+    'melee/test_fist_base_fixture.py': {},
     'melee/test_redo.py': {'note': 'needs base_body.py build once'},
     'melee/test_melee_regenerate.py': {'markers': {'gpu'}, 'note': 'MotionBricks on CUDA; writes into the melee MB4\\_tmp'},
     'mmbake/test_extra_assets.py': {'note': 'pure functions only without --off/--on'},

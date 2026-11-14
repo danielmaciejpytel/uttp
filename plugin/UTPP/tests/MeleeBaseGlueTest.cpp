@@ -1,7 +1,7 @@
 // Offline test of the PRODUCTION glue of the melee chest base correction (src/mm/MeleeBase.cpp through tests/MeleeBaseReplay.hpp: OnArmed,
 // SetArmedBody, LowerBodyKeepWeight / LowerBodyReset, BlendIntoRecords, Apply in the order of FkHook.cpp) on two small recorded excerpts
-// (tests/data/melee_base_male.bin / melee_base_female.bin: one standing combo + one walking window of the 2026-11-12 23:3x pose recordings, made
-// by tools/melee/fist_base_fixture.py). Not shipped. Usage: utpp_melee_base_glue_test <tests/data dir>
+// (tests/data/melee_base_male.bin / melee_base_female.bin: one standing combo window + one walking window cut from a pose recording of each body
+// by tools/melee/fist_base_fixture.py, which documents the recording and the windows it needs). Not shipped. Usage: utpp_melee_base_glue_test <tests/data dir>
 // Covers: ONLY the armed body's table is used (Male recording: no Female row, and the reverse), the punch direction against the clip's
 // reference at the matched time (p95), the jitter of the applied rotation (frame to frame, A-B-A clip alternations), the flag as an eased
 // target (a flip is no jump), body unknown = layer off, the lower body guard (Male: legs on MM, Female: engine legs untouched) and its ease
@@ -240,7 +240,7 @@ static void TestBody(const std::string& aDir, int aBody)
 
 // The first punch of a series: the one that lands while the melee upper-body mask is still blending in (0.15 s, the records are a mix of the MM pose
 // and the game pose) or right after it. Two recorded windows per body (tests/data/melee_base_blend_*.bin, "MBO3": engine records raw + the MM pose of
-// the blended upper bones, tools/melee/fist_base_blend_fixture.py; 2026-11-13 runs) replayed through the production path with the real blend.
+// the blended upper bones, cut by tools/melee/fist_base_fixture.py) replayed through the production path with the real blend.
 // Before the fix the table was matched on the mixed records (rms 10..23 deg until ~0.1 s: no correction), the correction then climbed from zero
 // while the first punch landed (female: +10 deg above the clip, male: +10 / +13 deg at the cross, wrist above the head).
 static void TestBlend(const std::string& aDir, int aBody)

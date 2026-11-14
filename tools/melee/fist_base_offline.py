@@ -8,6 +8,8 @@ Subcommands (python -I fist_base_offline.py <cmd> ...; needs numpy, Pillow-free;
            writes <out>/offline_rows_<TAG>.pkl for the report scripts.
   fixture  same inputs + --fixture PATH [--stand-frames N] [--walk-frames N]: a small excerpt (one standing combo window + one walking
            window) with the clip reference elevation per frame, for the ctest (tests/data/melee_base_<body>.bin).
+           tools/melee/fist_base_fixture.py is the documented front end for the fixture files (it also cuts the blend fixture).
+--steps 'settle=HH:MM:SS.s-HH:MM:SS.s,punches=...,punch_walk=...' replaces --night (the step windows of the recording, seconds of the day).
 The recording: stage 0 = the engine's records, stage 1 = after the MM blend (before this layer). The snapshot's MM pose of the lower bones is the
 recorded MM pose while walking (stage 1) and the MM idle pose of the 'settle' window while standing (the recording shows the engine there).
 """
@@ -29,10 +31,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'analysis'))
 import pose_helper_report as ph  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, '..'))
-from utpp_paths import game_dir  # noqa: E402
+from utpp_paths import game_dir, project_root  # noqa: E402
 
-ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
-CLIPS_IN = os.path.join(ROOT, 'Build', 'work', 'melee-fists-combined-20261109', 'clips-in')
+ROOT = project_root()
+# the clip set the table src/mm/MeleeBaseData.cpp is generated from (tools/melee/fist_base_table.py uses the same default)
+CLIPS_IN = os.path.join(ROOT, 'Build', 'work', 'fists-heavy-punch-20261113', 'pack', 'input')
 EXE = os.path.join(ROOT, 'Build', 'UTPP', 'utpp_melee_base_offline.exe')
 OUT2 = struct.Struct('<5i 4f 3f 3f 3f I f')
 LOWER_PREFIX = ('LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftHeel', 'LeftToe', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightHeel', 'RightToe')
@@ -69,7 +72,9 @@ def qmean(q):
 
 
 class Recording:
-    def __init__(self, pose_name, night_dir):
+    def __init__(self, pose_name, night_dir=None, steps=None):
+        """steps: {name: (from_s, to_s)} seconds of the day for 'settle' (idle, MM pose), 'punches' (standing), 'punch_walk'; when None they
+        are read from <night_dir>/gametest/summary.json."""
         cfg = ph.Config()
         g = ph.load_groups([os.path.join(game_dir(), 'red4ext', 'logs', pose_name)], cfg)[0]
         h = g['header']
@@ -84,11 +89,14 @@ class Recording:
             vals.append(v.astype(np.float32))
         self.t = np.concatenate(secs)
         self.V = np.concatenate(vals)
-        s = json.load(open(os.path.join(night_dir, 'gametest', 'summary.json')))
         self.steps = {}
-        for st in s['steps']:
-            if st['scenario'].startswith('melee'):
-                self.steps[st['step']] = (sec_of(st['t0'].split(' ')[1]), sec_of(st['t1'].split(' ')[1]))
+        if steps is not None:
+            self.steps = dict(steps)
+        else:
+            s = json.load(open(os.path.join(night_dir, 'gametest', 'summary.json')))
+            for st in s['steps']:
+                if st['scenario'].startswith('melee'):
+                    self.steps[st['step']] = (sec_of(st['t0'].split(' ')[1]), sec_of(st['t1'].split(' ')[1]))
         order, done = [], set()
 
         def visit(i):
@@ -139,18 +147,29 @@ class Recording:
         return MP, MQ
 
 
+def parse_steps(text):
+    """'settle=HH:MM:SS.s-HH:MM:SS.s,punches=...' -> {name: (from_s, to_s)}"""
+    out = {}
+    for item in text.split(','):
+        name, rng = item.split('=')
+        a, b = rng.split('-')
+        out[name.strip()] = (sec_of(a.strip() if '.' in a else a.strip() + '.0'), sec_of(b.strip() if '.' in b else b.strip() + '.0'))
+    return out
+
+
 def windows(log, pat):
     out, cur = [], None
-    for ln in open(log, encoding='utf-8', errors='replace'):
-        m = re.match(r'\[2026-11-\d\d (\d\d:\d\d:\d\d\.\d+)\].*UTPP ' + pat + r' (on|off)\b', ln)
-        if not m:
-            continue
-        t = sec_of(m.group(1))
-        if m.group(2) == 'on' and cur is None:
-            cur = t
-        elif m.group(2) == 'off' and cur is not None:
-            out.append((cur, t))
-            cur = None
+    with open(log, encoding='utf-8', errors='replace') as fh:
+        for ln in fh:
+            m = re.match(r'\[\d{4}-\d\d-\d\d (\d\d:\d\d:\d\d\.\d+)\].*UTPP ' + pat + r' (on|off)\b', ln)
+            if not m:
+                continue
+            t = sec_of(m.group(1))
+            if m.group(2) == 'on' and cur is None:
+                cur = t
+            elif m.group(2) == 'off' and cur is not None:
+                out.append((cur, t))
+                cur = None
     return out
 
 
@@ -175,8 +194,9 @@ def elev_yaw(pos, side):
     return (float(np.degrees(np.arcsin(np.clip(v[2] / np.linalg.norm(v), -1, 1)))), float(np.degrees(np.arctan2(v[0], v[1]))), float(np.linalg.norm(v)))
 
 
-def build_frames(r, log, wins, stand_frames=None, walk_frames=None):
-    """list of dicts (one per replay frame), in time order; each window starts with a hard reset (dt < 0)."""
+def build_frames(r, log, wins, stand_frames=None, walk_frames=None, pick=None):
+    """list of dicts (one per replay frame), in time order; each window starts with a hard reset (dt < 0).
+    pick: {step name: mask-on time (seconds of the day)}: for a step in it only the window that starts there (+-50 ms) is cut."""
     mask_w = windows(log, 'MMMASK')
     full_w = windows(log, 'MMMELEEFULL')
     ixs = r.idx(r.steps['settle'][0] + 0.3, r.steps['settle'][1] - 0.1)
@@ -190,6 +210,8 @@ def build_frames(r, log, wins, stand_frames=None, walk_frames=None):
         got_one = False
         for wa, wb in mask_w:
             if not (t0 - 1 < wa < t1 + 1):
+                continue
+            if pick and wname in pick and abs(wa - pick[wname]) > 0.05:
                 continue
             if limit is not None and got_one:
                 break
@@ -304,17 +326,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['eval', 'fixture'])
     ap.add_argument('--pose', required=True)
-    ap.add_argument('--night', required=True)
+    ap.add_argument('--night', default=None, help='run folder with gametest/summary.json (the step windows)')
+    ap.add_argument('--steps', default=None, help='step windows of the recording instead of --night')
     ap.add_argument('--utpp-log', required=True)
     ap.add_argument('--body', required=True, choices=['F', 'M'])
     ap.add_argument('--tag', default='')
     ap.add_argument('--exe', default=EXE)
-    ap.add_argument('--out', default=os.path.join(ROOT, 'Build', 'work', 'release-0.1.0', '_tmp', 'fists_dirfix'))
+    ap.add_argument('--out', default=os.path.join(os.getcwd(), '_tmp'), help='scratch folder for the replay files')
     ap.add_argument('--fixture', default='')
     ap.add_argument('--stand-frames', type=int, default=110)
     ap.add_argument('--walk-frames', type=int, default=60)
     a = ap.parse_args()
-    r = Recording(a.pose, a.night)
+    if not a.night and not a.steps:
+        ap.error('--night or --steps is required')
+    os.makedirs(a.out, exist_ok=True)
+    r = Recording(a.pose, a.night, parse_steps(a.steps) if a.steps else None)
     tag = a.tag or a.body
     clips = load_clip_table(a.body)
     if a.cmd == 'fixture':

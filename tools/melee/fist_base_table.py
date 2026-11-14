@@ -7,7 +7,8 @@ authored orientation, so a punch keeps its direction on the hips / spine the gam
 
 usage: python -I fist_base_table.py [--clips-in DIR] [--out FILE]
 Inputs: <clips-in>/pwa_fists__*.npc1.npz (Female V) and pma_fists__*.npc1.npz (Male V): the exact inputs of the shipped archive
-(Build/work/melee-fists-combined-20261109/clips-in). Arrays used: names152 + lr (local rotations), names + W (model matrices, metres).
+(default <project>/Build/work/fists-heavy-punch-20261113/pack/input; regenerating with the defaults reproduces
+plugin/UTPP/src/mm/MeleeBaseData.cpp byte for byte). Arrays used: names152 + lr (local rotations), names + W (model matrices, metres).
 """
 import argparse
 import glob
@@ -17,13 +18,16 @@ import sys
 
 import numpy as np
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from utpp_paths import project_root  # noqa: E402
+
 KEYS = ['Neck', 'Head', 'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand', 'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand', 'Spine1', 'Spine2', 'Spine3']
 # clips whose lower body / trunk is not the standing guard family: the game shows them on sprint / crouch / slide / air bases that the
 # mod owns (they stay as they are)
 EXCLUDE_PREFIXES = ('melee_crouch', 'melee_idle_to_crouch', 'melee_slide', 'melee_sprint', 'melee_air_sprint', 'melee_groundslam',
                     'crouch_attack', 'sprint_attack', 'hold_start_offscreen')
 BODIES = (('Female', 'pwa_fists'), ('Male', 'pma_fists'))
-DEFAULT_IN = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'Build', 'work', 'melee-fists-combined-20261109', 'clips-in')
+DEFAULT_IN = os.path.join(project_root(), 'Build', 'work', 'fists-heavy-punch-20261113', 'pack', 'input')
 DEFAULT_OUT = os.path.join(os.path.dirname(__file__), '..', '..', 'plugin', 'UTPP', 'src', 'mm', 'MeleeBaseData.cpp')
 
 

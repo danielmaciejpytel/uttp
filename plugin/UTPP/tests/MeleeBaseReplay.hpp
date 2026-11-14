@@ -3,7 +3,8 @@
 // LowerBodyKeepWeight / LowerBodyReset, BlendIntoRecords, Apply - the calls and their order of FkHook.cpp), shared by the ctest
 // (MeleeBaseGlueTest.cpp) and the offline replay tool (MeleeBaseOffline.cpp, tools/melee/fist_base_offline.py), not shipped.
 //
-// File ("MBO2" or "MBO3", little endian), written by tools/melee/fist_base_offline.py / fist_base_blend_fixture.py from a pose recording:
+// File ("MBO2" or "MBO3", little endian), written by tools/melee/fist_base_offline.py / fist_base_blend_fixture.py (the fixtures are cut by
+// tools/melee/fist_base_fixture.py) from a pose recording:
 //   "MBO2" | int32 nb | nb x { int16 parent, char name[32] } | int32 body (0 Female, 1 Male) | int32 nLower | nLower x int32 bone |
 //   int32 nframes | nframes x { float P[nb*3] (the engine records: local positions), float Q[nb*4] (local rotations xyzw),
 //     float mmP[nLower*3], float mmQ[nLower*4] (the MM pose the snapshot carries for the lower bones), float meleeWeight (snapshot
