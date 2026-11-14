@@ -46,7 +46,7 @@ if (Test-Path $Out) { throw "output exists, choose a new -Out: $Out" }
 $all = @('default_melee_weapon', 'pma_default_melee_weapon', 'pwa_fists', 'pma_fists', 'pwa_katana', 'pma_katana', 'pwa_knife', 'pma_knife',
          'pwa_one_handed_blunt', 'pma_one_handed_blunt', 'pwa_two_handed_blunt', 'pma_two_handed_blunt', 'pwa_two_handed_hammer', 'pma_two_handed_hammer')
 # known but not in 'all' (melee_export_lib.EXTRA_SETS; the default vanilla-frozen dir has no json for them: pass -Vanilla with them)
-$known = $all + @('pwa_baton', 'pma_baton', 'pwa_strongarms_melee_fists', 'pma_strongarms_melee_fists')
+$known = $all + @('pwa_baton', 'pma_baton', 'pwa_strongarms_melee_fists', 'pma_strongarms_melee_fists', 'pwa_mantisblade', 'pma_mantisblade')
 $sel = if ($Sets -eq 'all') { $all } else { $Sets -split ',' | ForEach-Object { $_.Trim() } }
 foreach ($s in $sel) { if ($known -notcontains $s) { throw "unknown set $s" } }
 $sel = @($sel | Where-Object { $Rig -eq 'both' -or (($Rig -eq 'man') -eq $_.StartsWith('pma_')) })

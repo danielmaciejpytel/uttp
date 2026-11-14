@@ -8,7 +8,8 @@
   3 aug_vanilla.plan: new allowlisted names get a template, unknown names are ignored, a missing template is reported
   4 aug_vanilla end to end (needs the frozen vanilla dir with pma_knife; skipped without): clones in json / glb / glb-nort, unique handle and
     buffer ids, vanilla dir untouched, the original clip entries unchanged, sets without new names copied byte for byte
-  5 WEAPON_HELPER_SETS: the merged list (hammer, one-handed blunt, baton, both default sets), and NOT fists / StrongArms / knife / katana
+  5 WEAPON_HELPER_SETS: the merged list (hammer, one-handed blunt, baton, both default sets, knife, katana), and NOT fists / StrongArms /
+    two-handed blunt / mantis blades; every set has a depot path and a rig and is known to run_melee_export.ps1
 Exit 0 = all pass.
 """
 import argparse
@@ -130,8 +131,15 @@ def test_helper_sets():
             'default_melee_weapon', 'pma_default_melee_weapon', 'pwa_knife', 'pma_knife', 'pwa_katana', 'pma_katana'}
     check(ws == want, 'WEAPON_HELPER_SETS = hammer + one-handed blunt + baton + both default sets + knife + katana')
     out = {'pwa_fists', 'pma_fists', 'pwa_strongarms_melee_fists', 'pma_strongarms_melee_fists',
-           'pwa_two_handed_blunt', 'pma_two_handed_blunt'}
-    check(not (ws & out), 'WEAPON_HELPER_SETS leaves fists / StrongArms / two-handed blunt out')
+           'pwa_two_handed_blunt', 'pma_two_handed_blunt', 'pwa_mantisblade', 'pma_mantisblade'}
+    check(not (ws & out), 'WEAPON_HELPER_SETS leaves fists / StrongArms / two-handed blunt / mantis blades out')
+    check(L.VANILLA_DEPOT.get('pwa_mantisblade') == r'base\animations\cyberware\mantisblade\pwa_mantisblade.anims'
+          and L.VANILLA_DEPOT.get('pma_mantisblade') == r'base\animations\cyberware\mantisblade\pma_mantisblade.anims'
+          and L.RIG_OF_SET.get('pwa_mantisblade') == 'woman' and L.RIG_OF_SET.get('pma_mantisblade') == 'man'
+          and 'pwa_mantisblade' not in L.ALL_SETS, 'SETS: mantis blade sets (extra sets, base depot paths, rigs)')
+    with open(os.path.join(HERE, 'run_melee_export.ps1'), encoding='utf-8') as f:
+        ps1 = f.read()
+    check(all("'%s'" % s in ps1 for s in L.SETS), 'run_melee_export.ps1 knows every set of melee_export_lib.SETS')
     check(all(s in L.SETS and s in L.VANILLA_DEPOT and s in L.RIG_OF_SET for s in L.SETS) and set(L.SETS) == set(L.ALL_SETS) | set(L.EXTRA_SETS),
           'SETS: every set has a depot path and a rig (baton and StrongArms included)')
     check(L.RIG_OF_SET['pma_baton'] == 'man' and L.RIG_OF_SET['pwa_strongarms_melee_fists'] == 'woman', 'SETS: rigs of the extra sets')

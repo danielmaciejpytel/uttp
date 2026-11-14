@@ -33,7 +33,7 @@ CI = np.linalg.inv(C)
 ALL_SETS = ['default_melee_weapon', 'pma_default_melee_weapon', 'pwa_fists', 'pma_fists', 'pwa_katana', 'pma_katana',
             'pwa_knife', 'pma_knife', 'pwa_one_handed_blunt', 'pma_one_handed_blunt', 'pwa_two_handed_blunt', 'pma_two_handed_blunt',
             'pwa_two_handed_hammer', 'pma_two_handed_hammer']
-EXTRA_SETS = ['pwa_baton', 'pma_baton', 'pwa_strongarms_melee_fists', 'pma_strongarms_melee_fists']
+EXTRA_SETS = ['pwa_baton', 'pma_baton', 'pwa_strongarms_melee_fists', 'pma_strongarms_melee_fists', 'pwa_mantisblade', 'pma_mantisblade']
 SETS = ALL_SETS + EXTRA_SETS
 RIG_OF_SET = {s: ('man' if s.startswith('pma_') else 'woman') for s in SETS}
 # depot path of the vanilla set (game 2.5) per set name
@@ -56,6 +56,8 @@ VANILLA_DEPOT = {
     'pma_baton': r'base\animations\weapon\baton\pma_baton.anims',
     'pwa_strongarms_melee_fists': r'ep1\animations\cyberware\strongarms\pwa_strongarms_melee_fists.anims',
     'pma_strongarms_melee_fists': r'ep1\animations\cyberware\strongarms\pma_strongarms_melee_fists.anims',
+    'pwa_mantisblade': r'base\animations\cyberware\mantisblade\pwa_mantisblade.anims',
+    'pma_mantisblade': r'base\animations\cyberware\mantisblade\pma_mantisblade.anims',
 }
 # weapon IK helpers: in every vanilla melee set arm_right_ik_weapon sits on WeaponRight and arm_left_ik_weapon on WeaponLeft (0-1.4 cm, same
 # rotation; probe 2026-11-09/10).  Sets in WEAPON_HELPER_SETS: the builder puts arm_*_ik_weapon on its weapon joint on every frame farther
@@ -64,7 +66,8 @@ VANILLA_DEPOT = {
 #   on throws off the joint), and the two default sets (game convention is <= 1.4 cm; the fists-based exports
 #   reached 99.8 cm there).
 # NOT in the list (their exports stay byte-identical to the accepted / installed ones; the distance is only reported, ik_weapon_vs_weapon_joint_cm):
-#   pwa_fists / pma_fists (accepted in game), knife (<= vanilla + 0.27 cm), katana, two_handed_blunt, StrongArms.
+#   pwa_fists / pma_fists (accepted in game), knife (<= vanilla + 0.27 cm), katana, two_handed_blunt, StrongArms, mantis blades (the game's
+#   own mantis clips keep arm_*_ik_weapon about 10 cm off the weapon joints: the helpers follow the clip, not the joint).
 WEAPON_HELPERS = {'arm_right_ik_weapon': 'WeaponRight', 'arm_left_ik_weapon': 'WeaponLeft'}
 WEAPON_HELPER_SETS = ('pwa_two_handed_hammer', 'pma_two_handed_hammer',
                       'pwa_one_handed_blunt', 'pma_one_handed_blunt', 'pwa_baton', 'pma_baton',

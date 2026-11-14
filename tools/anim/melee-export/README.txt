@@ -3,7 +3,7 @@ UTPP melee export (2026-11-09): re-solved melee clips -> third-person, full-body
 What it makes
   utpp_melee.archive with utpp\melee\utpp_<set>.anims for the fourteen vanilla first-person melee sets (default_melee_weapon,
   pma_default_melee_weapon, p{w,m}a_{fists,katana,knife,one_handed_blunt,two_handed_blunt,two_handed_hammer}; hammer added 2026-11-10; also known
-  since 2026-11-10 but not in "-Sets all": p{w,m}a_baton and p{w,m}a_strongarms_melee_fists = melee_export_lib.EXTRA_SETS, the default vanilla-frozen
+  since 2026-11-10 but not in "-Sets all": p{w,m}a_baton, p{w,m}a_strongarms_melee_fists and p{w,m}a_mantisblade = melee_export_lib.EXTRA_SETS, the default vanilla-frozen
   dir has no json for them, pass -Vanilla with them). Each UTPP set holds only the replaced
   NON-ADDITIVE clips, under the vanilla clip names; the registration is Source\plugin\UTPP\archive\utpp_melee_tpp.archive.xl
   (vanilla vars + utpp_foot_tpp, priority vanilla - 1: third person only, first person unchanged). Nothing is installed by these tools.
@@ -92,7 +92,7 @@ Weapon IK helpers (2026-11-10): vanilla melee sets keep arm_right_ik_weapon on W
     reached 99.8 cm), p?a_knife and p?a_katana (the b1 builds measured 7.2 / 8.1 cm off the weapon joint,
     vanilla ~1 cm).
   NOT in the list: p?a_fists and p?a_strongarms_melee_fists (accepted in game; their exports are byte-identical to the installed ones: the build GLBs
-    of the six combined-fists sets, rebuilt with these tools, equal the recorded run; see "Merge 2026-11-10" below), two_handed_blunt. There the distance is only reported (ik_weapon_vs_weapon_joint_cm). Adding a set = one name in WEAPON_HELPER_SETS;
+    of the six combined-fists sets, rebuilt with these tools, equal the recorded run; see "Merge 2026-11-10" below), two_handed_blunt, p?a_mantisblade (the game's mantis clips keep the helpers ~10 cm off the joints). There the distance is only reported (ik_weapon_vs_weapon_joint_cm). Adding a set = one name in WEAPON_HELPER_SETS;
     that changes the bytes of that set's export (the installed default sets of the combined fists archive are therefore rebuilt by design).
 
 UTPP-only clip names (2026-11-10; replaces the earlier per-run vanilla-aug folders): the pipeline works per clip name of the vanilla set, a name
