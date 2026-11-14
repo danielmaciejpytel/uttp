@@ -19,6 +19,7 @@
 #include "MeleeBaseRuntime.hpp"
 #include "MeleeBodyId.hpp"
 #include "MeleePose.hpp"
+#include "MeleePoseGuard.hpp"
 #include "MeleePoseRuntime.hpp"
 
 namespace utpp::meleepose
@@ -64,6 +65,29 @@ std::atomic<int32_t> g_lastClip{-1};
 std::atomic<float> g_lastWeight{0.0f}, g_lastRms{0.0f}, g_lastClock{0.0f};
 std::atomic<int32_t> g_lastBody{-1};
 std::atomic<bool> g_lastMatched{false}, g_lastHeld{false};
+
+// reference pose guard (mm/MeleePoseGuard.hpp): its own rig message, state and entrant flag
+struct GuardRigMsg
+{
+    core::GuardRig rig;
+    uint64_t rigPtr = 0;
+};
+integ::SeqlockBuffer<GuardRigMsg> g_guardRig;
+std::atomic<bool> g_guardRigOk{false};
+std::atomic_flag g_guardBusy = ATOMIC_FLAG_INIT;
+core::GuardState g_guard;
+std::atomic<uint64_t> g_guardCalls{0}, g_guardHeld{0}, g_guardPassed{0}, g_guardBusySkips{0};
+
+void GuardReset()
+{
+    while (g_guardBusy.test_and_set(std::memory_order_acquire))
+    {
+    }
+    g_guard.have = false;
+    g_guard.held = 0;
+    g_guard.ticks = 0;
+    g_guardBusy.clear(std::memory_order_release);
+}
 
 double Freq()
 {
@@ -130,6 +154,12 @@ void OnArmed(void* aRig, const std::vector<uint64_t>& aHashes, const std::vector
     g_rig.Publish(m);
     g_rigOk.store(m.keyRig.ok != 0 && m.lower.ok != 0, std::memory_order_release);
     HardReset();
+    GuardRigMsg g;
+    g.rig = core::ResolveGuardRig(std::span<const uint64_t>(aHashes), std::span<const int16_t>(aParents));
+    g.rigPtr = reinterpret_cast<uint64_t>(aRig);
+    g_guardRig.Publish(g);
+    g_guardRigOk.store(g.rig.ok != 0, std::memory_order_release);
+    GuardReset();
 }
 
 void OnDisarmed()
@@ -137,6 +167,40 @@ void OnDisarmed()
     g_rig.Publish(RigMsg{});
     g_rigOk.store(false, std::memory_order_release);
     HardReset();
+    g_guardRig.Publish(GuardRigMsg{});
+    g_guardRigOk.store(false, std::memory_order_release);
+    GuardReset();
+}
+
+void GuardEngine(uint8_t* aBones, uint32_t aCount, void* aRig, float aMeleeWeight, int64_t aNowTicks)
+{
+    const bool active = std::isfinite(aMeleeWeight) && aMeleeWeight > 0.0f && aBones && g_guardRigOk.load(std::memory_order_acquire);
+    if (!active)
+    {
+        if (g_guard.have && !g_guardBusy.test_and_set(std::memory_order_acquire))
+        {
+            g_guard.have = false; // the melee reason ended: the next episode starts without a stored pose
+            g_guard.held = 0;
+            g_guardBusy.clear(std::memory_order_release);
+        }
+        return;
+    }
+    GuardRigMsg gm;
+    if (!g_guardRig.Read(gm) || gm.rigPtr != reinterpret_cast<uint64_t>(aRig))
+        return;
+    if (g_guardBusy.test_and_set(std::memory_order_acquire))
+    {
+        g_guardBusySkips.fetch_add(1, std::memory_order_relaxed); // another animation job owns the stored pose: this call is left alone
+        return;
+    }
+    g_guardCalls.fetch_add(1, std::memory_order_relaxed);
+    const float age = g_guard.have ? Age(aNowTicks, g_guard.ticks) : 1e9f;
+    const core::GuardResult r = core::GuardStep(g_guard, gm.rig, aBones, aCount, true, aNowTicks, age);
+    if (r == core::GuardResult::Held)
+        g_guardHeld.fetch_add(1, std::memory_order_relaxed);
+    else if (r == core::GuardResult::Passed)
+        g_guardPassed.fetch_add(1, std::memory_order_relaxed);
+    g_guardBusy.clear(std::memory_order_release);
 }
 
 void SetWeapon(uint64_t aVariableHash) { g_weapon.store(aVariableHash, std::memory_order_relaxed); }
@@ -236,6 +300,10 @@ Counters GetCounters()
     c.noTable = g_noTable.load();
     c.noWeapon = g_noWeapon.load();
     c.busy = g_busySkips.load();
+    c.guardCalls = g_guardCalls.load();
+    c.guardHeld = g_guardHeld.load();
+    c.guardPassed = g_guardPassed.load();
+    c.guardBusy = g_guardBusySkips.load();
     const double us = 1e6 / Freq();
     c.meanMicros = c.calls ? double(g_costTicks.load()) * us / double(c.calls) : 0.0;
     c.maxMicros = double(g_costMax.load()) * us;
@@ -263,15 +331,17 @@ std::string Status()
     const char* name = (body >= 0 && body <= 1 && g_loaded[body].load() && clip >= 0 && size_t(clip) < g_tables[body].clipNames.size())
         ? g_tables[body].clipNames[size_t(clip)]
         : "-";
-    char buf[400];
+    char buf[512];
     std::snprintf(buf, sizeof(buf),
                   "meleepose on=%d tables=%d/%d rig=%d calls=%llu written=%llu held=%llu relocks=%llu noTable=%llu noWeapon=%llu busy=%llu "
-                  "clip=%s w=%.2f rms=%.1f cost=%.1f/%.1fus",
+                  "clip=%s w=%.2f rms=%.1f cost=%.1f/%.1fus refguard rig=%d calls=%llu held=%llu passed=%llu busy=%llu",
                   g_enabled.load() ? 1 : 0, g_loaded[0].load() ? 1 : 0, g_loaded[1].load() ? 1 : 0, g_rigOk.load() ? 1 : 0,
                   static_cast<unsigned long long>(c.calls), static_cast<unsigned long long>(c.written), static_cast<unsigned long long>(c.held),
                   static_cast<unsigned long long>(c.relocks), static_cast<unsigned long long>(c.noTable),
                   static_cast<unsigned long long>(c.noWeapon), static_cast<unsigned long long>(c.busy), name,
-                  static_cast<double>(g_lastWeight.load()), static_cast<double>(g_lastRms.load()), c.meanMicros, c.maxMicros);
+                  static_cast<double>(g_lastWeight.load()), static_cast<double>(g_lastRms.load()), c.meanMicros, c.maxMicros,
+                  g_guardRigOk.load() ? 1 : 0, static_cast<unsigned long long>(c.guardCalls), static_cast<unsigned long long>(c.guardHeld),
+                  static_cast<unsigned long long>(c.guardPassed), static_cast<unsigned long long>(c.guardBusy));
     return buf;
 }
 } // namespace utpp::meleepose

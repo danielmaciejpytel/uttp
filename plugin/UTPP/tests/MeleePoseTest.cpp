@@ -1,15 +1,18 @@
 // Melee full pose (mm/MeleePose.hpp): data file parsing and synthetic replays per weapon. The clip's upper body (key bones, played at
 // 60 fps between the 30 fps rows) runs on a foreign lower body; the layer must write the clip's own lower body time-synchronised with
 // the clip, continuously at entry, between strikes and at the hand-back, and hold over a one-frame reference pose.
-// usage: utpp_melee_pose_test <dir with utpp_melee_pose_female.bin / utpp_melee_pose_male.bin>
+// Reference pose guard (mm/MeleePoseGuard.hpp): synthetic rigs and the recorded engine poses of <dir>/melee_pose_guard_female.bin.
+// usage: utpp_melee_pose_test <dir with utpp_melee_pose_female.bin / utpp_melee_pose_male.bin / melee_pose_guard_female.bin> [<guard fixture> ...]
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <vector>
 
 #include "../src/mm/MeleePose.hpp"
+#include "../src/mm/MeleePoseGuard.hpp"
 
 using namespace utpp::mm;
 using meleepose::LowerPose;
@@ -318,6 +321,237 @@ void TestOff(const PoseTables& aT, const meleepose::Weapon& aW)
     Check(meleepose::Step(st, aT, &aW, key, 0.0f, 0.016f, pose) == 0.0f, "share 0 writes nothing");
     Check(meleepose::Step(st, aT, nullptr, key, 1.0f, 0.016f, pose) == 0.0f, "no weapon section writes nothing");
 }
+
+// ------------------------------------------------------------------------------------------------ reference pose guard
+
+void SetRec(std::vector<uint8_t>& aB, uint32_t aBone, const math::Vec3& aP, const math::Quat& aQ)
+{
+    float* r = reinterpret_cast<float*>(aB.data() + size_t(aBone) * integ::kGameBoneStride);
+    r[0] = aP.x;
+    r[1] = aP.y;
+    r[2] = aP.z;
+    r[3] = 1.0f;
+    r[4] = aQ.x;
+    r[5] = aQ.y;
+    r[6] = aQ.z;
+    r[7] = aQ.w;
+    r[8] = r[9] = r[10] = 1.0f;
+    r[11] = 0.0f;
+}
+
+math::Quat AxisAngle(float aX, float aY, float aZ, float aDeg)
+{
+    const float h = aDeg * 0.5f / 57.2957795f, s = std::sin(h), n = std::sqrt(aX * aX + aY * aY + aZ * aZ);
+    return math::Quat{aX / n * s, aY / n * s, aZ / n * s, std::cos(h)};
+}
+
+// synthetic rig: Root, Hips, Spine, LeftArm, RightArm (under Spine), LeftUpLeg (under Hips), Head (under Spine)
+void TestGuardSynthetic()
+{
+    const char* names[] = {"Root", "Hips", "Spine", "LeftArm", "RightArm", "LeftUpLeg", "Head"};
+    const int16_t parents[] = {-1, 0, 1, 2, 2, 1, 2};
+    std::vector<uint64_t> h;
+    for (const char* n : names)
+        h.push_back(integ::CNameHash(n));
+    const meleepose::GuardRig rig = meleepose::ResolveGuardRig(h, parents);
+    Check(rig.ok == 1 && rig.count == 4, "guard rig = Spine subtree (Spine, both arms, Head)", rig.count);
+    // fail closed: no Spine / a cycle
+    std::vector<uint64_t> h2 = h;
+    h2[2] = integ::CNameHash("Spine9");
+    Check(meleepose::ResolveGuardRig(h2, parents).ok == 0, "guard rig without Spine rejected");
+    const int16_t cyc[] = {-1, 6, 1, 2, 2, 1, 1};
+    Check(meleepose::ResolveGuardRig(h, cyc).ok == 0, "guard rig with a parent cycle rejected");
+
+    const uint32_t nb = 7;
+    auto pose = [&](float aLeftDeg, float aRightDeg, float aLegDeg) {
+        std::vector<uint8_t> b(size_t(nb) * integ::kGameBoneStride, 0);
+        for (uint32_t k = 0; k < nb; ++k)
+            SetRec(b, k, math::Vec3{0.0f, 0.1f * float(k), 0.0f}, math::Quat{0, 0, 0, 1});
+        SetRec(b, 3, math::Vec3{0.17f, 0, 0}, AxisAngle(0, 0, 1, aLeftDeg));
+        SetRec(b, 4, math::Vec3{0.17f, 0, 0}, AxisAngle(0, 1, 1, aRightDeg));
+        SetRec(b, 5, math::Vec3{0, 0, 0}, AxisAngle(1, 0, 0, aLegDeg));
+        return b;
+    };
+    // reference frame: both arms the same local (here: identity), the leg elsewhere
+    auto refPose = [&](float aLegDeg) {
+        std::vector<uint8_t> b = pose(0.0f, 0.0f, aLegDeg);
+        SetRec(b, 3, math::Vec3{0.17f, 0, 0}, AxisAngle(0, 0, 1, -22.6f));
+        SetRec(b, 4, math::Vec3{0.17f, 0, 0}, AxisAngle(0, 0, 1, -22.6f));
+        SetRec(b, 6, math::Vec3{0, 0.3f, 0}, math::Quat{0, 0, 0, 1});
+        return b;
+    };
+    meleepose::GuardState st;
+    std::vector<uint8_t> good = pose(40.0f, 30.0f, 5.0f);
+    Check(meleepose::GuardStep(st, rig, good.data(), nb, true, 0, 0.0f) == meleepose::GuardResult::Stored, "normal frame stored");
+    std::vector<uint8_t> ref = refPose(7.0f);
+    Check(meleepose::GuardStep(st, rig, ref.data(), nb, true, 16, 0.016f) == meleepose::GuardResult::Held, "reference frame held");
+    bool same = true;
+    for (uint32_t k : {2u, 3u, 4u, 6u})
+        same = same && std::memcmp(ref.data() + k * integ::kGameBoneStride, good.data() + k * integ::kGameBoneStride, integ::kGameBoneStride) == 0;
+    Check(same, "held frame = last good pose of the Spine subtree");
+    Check(AngleDeg(meleepose::GuardRot(ref.data(), 5), AxisAngle(1, 0, 0, 7.0f)) < 1e-3f, "legs of the held frame untouched");
+    std::vector<uint8_t> ref2 = refPose(7.0f);
+    Check(meleepose::GuardStep(st, rig, ref2.data(), nb, true, 33, 0.033f) == meleepose::GuardResult::Held, "second reference frame held");
+    std::vector<uint8_t> ref3 = refPose(7.0f);
+    Check(meleepose::GuardStep(st, rig, ref3.data(), nb, true, 50, 0.050f) == meleepose::GuardResult::Passed, "third reference frame passes (cap)");
+    Check(meleepose::GuardRot(ref3.data(), 3).w != meleepose::GuardRot(good.data(), 3).w, "passed frame unchanged");
+    // a normal frame resets the cap; a stale stored pose is never used
+    std::vector<uint8_t> good2 = pose(41.0f, 31.0f, 5.0f);
+    Check(meleepose::GuardStep(st, rig, good2.data(), nb, true, 66, 0.1f) == meleepose::GuardResult::Stored, "normal frame after the cap stored");
+    std::vector<uint8_t> refStale = refPose(7.0f);
+    Check(meleepose::GuardStep(st, rig, refStale.data(), nb, true, 200, 0.134f) == meleepose::GuardResult::Passed, "stale stored pose not used");
+    // a pose that really rests on the signature without a step (both arms already equal in the stored pose) is left alone
+    meleepose::GuardState st2;
+    std::vector<uint8_t> sym = refPose(0.0f);
+    Check(meleepose::GuardStep(st2, rig, sym.data(), nb, true, 0, 0.0f) == meleepose::GuardResult::Passed, "signature without stored pose passes");
+    std::vector<uint8_t> symGood = pose(-22.0f, 30.0f, 0.0f);
+    meleepose::GuardStep(st2, rig, symGood.data(), nb, true, 0, 0.0f);
+    std::vector<uint8_t> sym2 = refPose(0.0f);
+    SetRec(sym2, 4, math::Vec3{0.17f, 0, 0}, AxisAngle(0, 0, 1, -22.4f)); // within the signature, but neither arm moved 20 deg
+    SetRec(symGood, 4, math::Vec3{0.17f, 0, 0}, AxisAngle(0, 0, 1, -10.0f));
+    meleepose::GuardStep(st2, rig, symGood.data(), nb, true, 16, 0.016f);
+    const meleepose::GuardResult rSym = meleepose::GuardStep(st2, rig, sym2.data(), nb, true, 33, 0.016f);
+    Check(rSym == meleepose::GuardResult::Passed, "signature without a 20 deg step passes", double(int(rSym)));
+    // inactive: nothing stored, the state is cleared
+    std::vector<uint8_t> ref4 = refPose(7.0f);
+    Check(meleepose::GuardStep(st, rig, ref4.data(), nb, false, 300, 0.0f) == meleepose::GuardResult::Off && !st.have, "inactive clears");
+}
+
+// Recorded engine poses ("MPG1", tools/melee/melee_pose_guard_fixture.py): windows around every reference-pose frame of a melee run plus
+// windows around hard cuts and fast strikes (negative controls). Every replaceable reference frame is held, no other frame changes,
+// no reference frame reaches the output, and the single-frame hand turns above 100 deg drop to the cuts between two clips.
+struct GuardFixtureResult
+{
+    int frames = 0, signatureIn = 0, held = 0, passed = 0, signatureOut = 0, changedOther = 0, popsIn = 0, popsOut = 0;
+};
+
+GuardFixtureResult RunGuardFixture(const std::string& aPath, bool aVerbose)
+{
+    GuardFixtureResult res;
+    const std::vector<uint8_t> in = ReadFile(aPath);
+    if (in.size() < 12 || std::memcmp(in.data(), "MPG1", 4) != 0)
+    {
+        Check(false, ("guard fixture missing or bad: " + aPath).c_str());
+        return res;
+    }
+    size_t o = 4;
+    auto rd = [&](void* aDst, size_t aN) {
+        if (o + aN > in.size())
+            throw 1;
+        std::memcpy(aDst, in.data() + o, aN);
+        o += aN;
+    };
+    try
+    {
+        int32_t nb = 0;
+        rd(&nb, 4);
+        std::vector<int16_t> par(static_cast<size_t>(nb));
+        std::vector<std::string> names(static_cast<size_t>(nb));
+        std::vector<uint64_t> hashes(static_cast<size_t>(nb));
+        for (int32_t i = 0; i < nb; ++i)
+        {
+            char s[33] = {};
+            rd(&par[size_t(i)], 2);
+            rd(s, 32);
+            names[size_t(i)] = s;
+            hashes[size_t(i)] = integ::CNameHash(names[size_t(i)]);
+        }
+        int32_t body = 0, nwin = 0;
+        rd(&body, 4);
+        rd(&nwin, 4);
+        const meleepose::GuardRig rig = meleepose::ResolveGuardRig(hashes, par);
+        Check(rig.ok == 1, "guard rig of the recorded catalogue");
+        int32_t hand[2] = {-1, -1};
+        for (int32_t i = 0; i < nb; ++i)
+        {
+            if (names[size_t(i)] == "LeftHand")
+                hand[0] = i;
+            if (names[size_t(i)] == "RightHand")
+                hand[1] = i;
+        }
+        // model rotation of a bone (chain through the catalogue parents)
+        auto modelRot = [&](const std::vector<uint8_t>& aB, int32_t aBone) {
+            math::Quat q{0, 0, 0, 1};
+            for (int32_t k = aBone, n = 0; k >= 0 && n < 64; k = par[size_t(k)], ++n)
+                q = math::QuatMul(math::QuatNormalize(meleepose::GuardRot(aB.data(), uint32_t(k))), q);
+            return q;
+        };
+        std::vector<int16_t> P(size_t(nb) * 3), Q(size_t(nb) * 4);
+        for (int32_t w = 0; w < nwin; ++w)
+        {
+            char label[33] = {};
+            int32_t nf = 0;
+            rd(label, 32);
+            rd(&nf, 4);
+            meleepose::GuardState st;
+            double t = 0.0;
+            std::vector<uint8_t> prevIn, prevOut;
+            int winHeld = 0, winPopsIn = 0, winPopsOut = 0;
+            for (int32_t f = 0; f < nf; ++f)
+            {
+                float dt = 0.0f;
+                rd(&dt, 4);
+                rd(P.data(), P.size() * 2);
+                rd(Q.data(), Q.size() * 2);
+                t += double(dt);
+                std::vector<uint8_t> b(size_t(nb) * integ::kGameBoneStride, 0);
+                for (int32_t i = 0; i < nb; ++i)
+                    SetRec(b, uint32_t(i),
+                           math::Vec3{P[size_t(i) * 3] * 1e-4f, P[size_t(i) * 3 + 1] * 1e-4f, P[size_t(i) * 3 + 2] * 1e-4f},
+                           math::Quat{Q[size_t(i) * 4] / 32767.0f, Q[size_t(i) * 4 + 1] / 32767.0f, Q[size_t(i) * 4 + 2] / 32767.0f,
+                                      Q[size_t(i) * 4 + 3] / 32767.0f});
+                const std::vector<uint8_t> before = b;
+                const bool sig = meleepose::GuardSignature(b.data(), rig);
+                const int64_t now = int64_t(t * 1e6);
+                const float age = st.have ? float(double(now - st.ticks) * 1e-6) : 1e9f;
+                const meleepose::GuardResult r = meleepose::GuardStep(st, rig, b.data(), uint32_t(nb), true, now, age);
+                ++res.frames;
+                res.signatureIn += sig ? 1 : 0;
+                res.held += r == meleepose::GuardResult::Held ? 1 : 0;
+                winHeld += r == meleepose::GuardResult::Held ? 1 : 0;
+                res.passed += (sig && r != meleepose::GuardResult::Held) ? 1 : 0;
+                res.signatureOut += meleepose::GuardSignature(b.data(), rig) ? 1 : 0;
+                if (!sig && std::memcmp(before.data(), b.data(), b.size()) != 0)
+                    ++res.changedOther;
+                if (!prevIn.empty() && hand[0] >= 0 && hand[1] >= 0)
+                {
+                    float stepIn = 0.0f, stepOut = 0.0f;
+                    for (int s = 0; s < 2; ++s)
+                    {
+                        stepIn = std::fmax(stepIn, AngleDeg(modelRot(before, hand[s]), modelRot(prevIn, hand[s])));
+                        stepOut = std::fmax(stepOut, AngleDeg(modelRot(b, hand[s]), modelRot(prevOut, hand[s])));
+                    }
+                    winPopsIn += stepIn > 100.0f ? 1 : 0;
+                    winPopsOut += stepOut > 100.0f ? 1 : 0;
+                }
+                prevIn = before;
+                prevOut = b;
+            }
+            res.popsIn += winPopsIn;
+            res.popsOut += winPopsOut;
+            if (aVerbose)
+                std::printf("  guard window %-22s frames %3d held %d  hand steps >100 deg: %d -> %d\n", label, nf, winHeld, winPopsIn, winPopsOut);
+        }
+    }
+    catch (int)
+    {
+        Check(false, ("guard fixture truncated: " + aPath).c_str());
+    }
+    std::printf("guard %s: frames %d, reference frames in %d, held %d, passed %d, reference frames out %d, other frames changed %d, "
+                "hand steps >100 deg %d -> %d\n",
+                aPath.c_str(), res.frames, res.signatureIn, res.held, res.passed, res.signatureOut, res.changedOther, res.popsIn, res.popsOut);
+    return res;
+}
+
+void TestGuardRecorded(const std::string& aPath)
+{
+    const GuardFixtureResult r = RunGuardFixture(aPath, true);
+    Check(r.signatureIn >= 29, "recorded reference frames present", r.signatureIn);
+    Check(r.held == r.signatureIn && r.passed == 0 && r.signatureOut == 0, "every recorded reference frame held", r.held);
+    Check(r.changedOther == 0, "no other recorded frame changed", r.changedOther);
+    // what stays: the cuts between two clips whose poses differ (no reference frame) and the jump from the held pose to the next clip
+    Check(r.popsOut * 2 < r.popsIn, "hand steps above 100 deg at least halved", r.popsOut);
+}
 } // namespace
 
 int main(int aArgc, char** aArgv)
@@ -351,6 +585,14 @@ int main(int aArgc, char** aArgv)
     std::printf("weapon runs %d  worst vs the played clip: rot %.2f deg hips %.2f mm\n", tot.strikes, tot.worstRot, tot.worstHips * 1000.0f);
     // the lower body follows the clip (the old behaviour leaves the engine's base: tens of degrees, hips several cm off)
     Check(tot.strikes == 10, "weapon runs (5 weapons x 2 bodies)", tot.strikes);
+    TestGuardSynthetic();
+    TestGuardRecorded(dir + "/melee_pose_guard_female.bin");
+    // optional further recordings (e.g. a whole run cut with --all): reported, judged only for frames that must not change
+    for (int i = 2; i < aArgc; ++i)
+    {
+        const GuardFixtureResult r = RunGuardFixture(aArgv[i], false);
+        Check(r.changedOther == 0 && r.signatureOut <= r.passed, "extra guard fixture: only reference frames change", r.changedOther);
+    }
     std::printf(g_fail ? "FAILED %d\n" : "OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -116,6 +116,9 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
         trace.thread = GetCurrentThreadId(); trace.count = aCount; trace.snap = snap;
         captured = mm::posetrace::Capture(trace, 0, bones, aCount);
     }
+    // melee reference pose guard (mm/MeleePoseGuard.hpp): a frame where the graph left the upper body on the skeleton's reference pose
+    // gets the last good engine pose back before any layer reads it
+    utpp::meleepose::GuardEngine(bones, aCount, reinterpret_cast<void*>(aMergedRig), snap.meleeAimWeight, aNow);
     // melee full body: when the engine pose of Hips is not where MM's Hips are (the kneeling engine base of Male V) the lower body stays on MM
     const float keepLowerOnMM = snap.lowerScale < 1.0f ? utpp::meleebase::LowerBodyKeepWeight(bones, aCount, reinterpret_cast<void*>(aMergedRig), snap, aNow)
                                                        : utpp::meleebase::LowerBodyReset();
