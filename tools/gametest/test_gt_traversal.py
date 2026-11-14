@@ -27,6 +27,8 @@ TRAV_REJECTED = ('UTPP trav: action=9 h=0.90 ext=1.20 depth=1.00 back=0.00 v=0.4
                  'result=Rejected(too slow) montage=-')
 VEHICLE_NO = '[utpp_vehicle_vault] no vault over a car (vanilla: jump pressed too far from the edge; assist: speed) top=0.9'
 VEHICLE_ASSIST = '[utpp_vehicle_vault] assisted vault over a car (vanilla: jump pressed too far from the edge) top=0.9'
+VEHICLE_NOT_VALID = ('[utpp_vehicle_vault] no vault over a car (vanilla: vaultValid=false (game obstacle probe); assist: no game vault data) '
+                     'valid=false/true top=1.38 ext=2.31 behind=0.10 reach=0.50 max=0.79/1.15 v=0.8 cross=0.70 car=0 driver=false')
 RELEASED = lambda d: f'UTPP trav: released to game animation (detail={d})'  # noqa: E731
 
 
@@ -130,6 +132,21 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn('too far from the edge', rej['why'])
         self.assertIn('no traversal line at all', gt.judge('vault', gt.evidence(''))['why'])
 
+    def test_a_vault_the_game_reports_as_not_valid_is_flagged(self):
+        ev = gt.evidence(VEHICLE_NOT_VALID)
+        self.assertEqual(ev['vault_not_valid'], 1)
+        res = gt.judge('vault', ev)
+        self.assertFalse(res['ok'])
+        self.assertTrue(res['invalid'])
+        self.assertIn('vaultValid=false', res['why'])
+        self.assertEqual(gt.evidence(VEHICLE_NO)['vault_not_valid'], 0)
+        self.assertFalse(gt.judge('vault', gt.evidence(VEHICLE_NO))['invalid'])
+        self.assertFalse(gt.judge('climb', ev)['invalid'])                          # only a vault is "not valid" here
+        # a vault that happened anyway is not invalid
+        done = gt.judge('vault', gt.evidence(VEHICLE_NOT_VALID + '\n' + TRAV_OK(9)))
+        self.assertTrue(done['ok'])
+        self.assertFalse(done['invalid'])
+
     def test_feed_column_detailed(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, 'utpp-feed-2026-11-14-19-00-00.txt')
@@ -192,6 +209,48 @@ class MacroTests(unittest.TestCase):
         self.assertEqual(len(out['fails']), 1)
         self.assertTrue(out['fails'][0].startswith('climb: '))
         self.assertIn('too far from the edge', out['fails'][0])
+
+    def test_a_vault_the_game_reports_as_not_valid_is_invalid_not_a_failure(self):
+        def script(part, n):
+            return [VEHICLE_NOT_VALID] if part == 'trav_vault_jump' else success(part, n)
+        night, out = self.run_macro(script)
+        self.assertEqual(out['verdict'], 'INVALID')
+        self.assertEqual(out['fails'], [])
+        self.assertEqual(out['results'], {'vault': 'invalid', 'climb': True})
+        self.assertEqual(len(out['invalid_fails']), 1)
+        self.assertTrue(out['invalid_fails'][0].startswith('vault: '))
+        self.assertIn('vaultValid=false', out['invalid_cause'])
+        self.assertTrue(all(a['invalid'] for a in out['attempts'] if a['kind'] == 'vault'))
+        self.assertTrue(any('INVALID' in m for m in night.logs))
+        # the night verdict counts it as an invalid macro, not as a failure of the mod
+        rec = dict(out, name='traversal', run=1)
+        self.assertEqual(gn.macro_failures([rec]), [])
+        self.assertEqual([i['scenario'] for i in gn.macro_invalid([rec])], ['traversal#1'])
+
+    def test_one_attempt_without_the_not_valid_line_keeps_the_failure(self):
+        def script(part, n):
+            if part == 'trav_vault_jump':
+                return [VEHICLE_NOT_VALID] if n == 1 else [TRAV_REJECTED]
+            return success(part, n)
+        night, out = self.run_macro(script)
+        self.assertEqual(out['verdict'], 'FAIL')
+        self.assertTrue(out['fails'][0].startswith('vault: '))
+        self.assertEqual(out['invalid_fails'], [])
+
+    def test_a_failed_climb_still_fails_next_to_an_invalid_vault(self):
+        def script(part, n):
+            return [VEHICLE_NOT_VALID] if part == 'trav_vault_jump' else [VEHICLE_NO]
+        night, out = self.run_macro(script)
+        self.assertEqual(out['verdict'], 'FAIL')
+        self.assertEqual([f.split(':')[0] for f in out['fails']], ['climb'])
+        self.assertEqual([f.split(':')[0] for f in out['invalid_fails']], ['vault'])
+
+    def test_a_not_valid_line_does_not_excuse_a_climb(self):
+        def script(part, n):
+            return success(part, n) if part == 'trav_vault_jump' else [VEHICLE_NOT_VALID]
+        night, out = self.run_macro(script)
+        self.assertEqual(out['verdict'], 'FAIL')
+        self.assertEqual(out['invalid_fails'], [])
 
     def test_no_car_is_a_skip(self):
         night, out = self.run_macro(success, car=False)

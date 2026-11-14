@@ -140,6 +140,11 @@ class BlockedWeaponTests(unittest.TestCase):
         inv = gn.macro_invalid(recs)
         self.assertEqual(inv[0]['macros'], ['katana', 'blunt', 'baton', 'bat'])
         self.assertIn('INVALID (weapon blocked by the game, not scored)', gn.macro_result_text([], inv))
+        vault = [{'scenario': 'traversal#1', 'macros': [], 'cause': 'vault_1: the game reports the vault as not valid (vaultValid=false)'}]
+        text = gn.macro_result_text([], inv + vault)
+        self.assertIn('INVALID (weapon blocked by the game, not scored)', text)
+        self.assertIn('INVALID (the game reports the vault as not valid, not scored): traversal#1', text)
+        self.assertNotIn('weapon blocked', gn.macro_result_text([], vault))
 
     def test_without_a_block_line_the_failures_stay(self):
         recs = [session_record(), firearm_record()]

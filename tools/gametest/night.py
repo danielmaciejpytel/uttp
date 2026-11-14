@@ -2840,9 +2840,7 @@ class Night:
                 finally:
                     view = out2['weapons'].get(tag)
                     if view is not None:
-                        view['second_try_of_invalid'] = True
-                        rec['weapons'][tag] = view
-                        rec['phase_windows'] = list(rec.get('phase_windows') or []) + view['phase_windows']
+                        rf.merge_second_try(rec, tag, view, 'weapons')       # the first try stays in view['first_try']
         elif name in rf.SET_MEMBERS and 'families' in rec:
             records = rf.options_of(self.args)[1]
             for tag in inv['macros']:
@@ -2852,16 +2850,17 @@ class Night:
                 finally:
                     view = out2['families'].get(tag)
                     if view is not None:
-                        view['second_try_of_invalid'] = True
-                        rec['families'][tag] = view
-                        rec['phase_windows'] = list(rec.get('phase_windows') or []) + view['phase_windows']
+                        rf.merge_second_try(rec, tag, view, 'families')      # the first try stays in view['first_try']
         else:
             new: dict = {}
             first = {k: rec.get(k) for k in ('verdict', 'fails', 'invalid_fails', 'invalid_cause')}
+            first_windows = list(rec.get('phase_windows') or [])
             if not self.run_single_macro(name, pad, guard, plan, new):
                 return
             rec['first_try'] = first
             rec.update({k: v for k, v in new.items() if k not in ('start', 'name', 'run', 'end')})
+            if first_windows:                                    # the phases of the first try stay, marked
+                rec['phase_windows'] = rf.keep_first_try_windows(first_windows, rec.get('phase_windows'))
             rec.pop('invalid_cause', None)
             rec.pop('invalid_fails', None)
 
@@ -4947,6 +4946,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--weapon-window', type=float, default=6.0, help='draw/holster confirmation window (s)')
     p.add_argument('--ranged-families', default='',
                    help='set ranged_families: comma list of the weapon families to run (default all: ' + ', '.join(rf.FAMILIES) + ')')
+    p.add_argument('--ranged-phases', default='',
+                   help='set ranged_families: comma list of the phases to run (default all: ' + ', '.join(rf.PHASES) + '); e.g. '
+                        '--ranged-phases reload_walk,reload_then_run')
     p.add_argument('--ranged-records', action='append', default=[], metavar='FAMILY=RECORDS',
                    help='set ranged_families: candidate item records of a family, tried in order (replaces the built-in list; '
                         'repeatable), e.g. --ranged-records handgun=Items.Preset_Lexington_Default')

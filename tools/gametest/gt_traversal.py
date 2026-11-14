@@ -41,14 +41,17 @@ VAULT_LOG_OFF = VAULT_LOG_ON.replace('(true)', '(false)')
 TRAV_RE = re.compile(r'UTPP trav: action=(\d+) h=[-\d.]+ .*?result=(\w+)\(([^)]*)\)')
 RELEASE_RE = re.compile(r'UTPP trav: released to game animation \(detail=(-?\d+)\)')
 MMTRAV_RE = re.compile(r'UTPP MMTRAV ')
+# the game's own obstacle probe found no vault here: the vault line carries this text, the attempt says nothing about the mod
+VAULT_NOT_VALID = 'vaultValid=false'
 VEHICLE_VAULT_RE = re.compile(r'\[utpp_vehicle_vault\] (vanilla vault over a car|assisted vault over a car|no vault over a car)'
                               r'(?: \((.*?)\))?')
 
 
 def evidence(text: str) -> dict:
     """The traversal lines of a plugin log text: {'mm': [{'action', 'result', 'reason'}], 'released': [detail], 'vehicle_vault':
-    [{'kind': 'vanilla' | 'assisted' | 'none', 'why'}], 'mmtrav': n}. Pure."""
-    out: dict = {'mm': [], 'released': [], 'vehicle_vault': [], 'mmtrav': 0}
+    [{'kind': 'vanilla' | 'assisted' | 'none', 'why'}], 'mmtrav': n, 'vault_not_valid': number of vault lines that report the
+    game's vault data as not valid}. Pure."""
+    out: dict = {'mm': [], 'released': [], 'vehicle_vault': [], 'mmtrav': 0, 'vault_not_valid': 0}
     for line in text.splitlines():
         m = TRAV_RE.search(line)
         if m:
@@ -61,6 +64,8 @@ def evidence(text: str) -> dict:
         m = VEHICLE_VAULT_RE.search(line)
         if m:
             out['vehicle_vault'].append({'kind': m.group(1).split()[0], 'why': m.group(2) or ''})
+            if VAULT_NOT_VALID in line:
+                out['vault_not_valid'] += 1
             continue
         if MMTRAV_RE.search(line):
             out['mmtrav'] += 1
@@ -107,7 +112,8 @@ def newest_feed(log_dir: str | None) -> str | None:
 
 
 def judge(kind: str, ev: dict, feed: set | None = None) -> dict:
-    """-> {'ok': bool, 'by': [evidence names], 'why': text when not ok}. Vault / climb counts when the motion plan started the action
+    """-> {'ok': bool, 'by': [evidence names], 'why': text when not ok, 'invalid': True when a vault did not happen because the
+    game reported its vault data as not valid at this place (not a failure of the mod)}. Vault / climb counts when the motion plan started the action
     (`UTPP trav: action=<8|9> ... result=Ok`), when the game's own animation was released for it (detail = the action), when the
     vehicle vault line says the vault happened (vault only) or when the feed column `detailed` shows the action. Pure."""
     action = KINDS[kind]['action']
@@ -121,7 +127,7 @@ def judge(kind: str, ev: dict, feed: set | None = None) -> dict:
     if feed is not None and action in feed:
         by.append(f'feed detailed={action}')
     if by:
-        return {'ok': True, 'by': by, 'why': ''}
+        return {'ok': True, 'by': by, 'why': '', 'invalid': False}
     bits = []
     rej = [f'{e["result"]}({e["reason"]})' for e in ev['mm'] if e['action'] == action]
     if rej:
@@ -134,7 +140,10 @@ def judge(kind: str, ev: dict, feed: set | None = None) -> dict:
     if not ev['mm'] and not ev['vehicle_vault'] and not ev['released']:
         bits.append('no traversal line at all (the jump met no obstacle: V not at the car?)'
                     + ('' if feed is None else f'; feed detailed values {sorted(feed)}'))
-    return {'ok': False, 'by': [], 'why': '; '.join(bits)}
+    invalid = kind == 'vault' and bool(ev.get('vault_not_valid'))
+    if invalid:
+        bits.append('the game reports the vault as not valid here (' + VAULT_NOT_VALID + ')')
+    return {'ok': False, 'by': [], 'why': '; '.join(bits), 'invalid': invalid}
 
 
 def _stamp(t: datetime) -> str:
@@ -143,9 +152,11 @@ def _stamp(t: datetime) -> str:
 
 def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dict:
     """Vault and climb at the car, ATTEMPTS tries each. `out` (the scenario record) is filled while it runs; returns `out` with
-    'verdict' PASS | FAIL | SKIP (no car), 'fails', 'phase_windows', 'attempts' (evidence per attempt)."""
+    'verdict' PASS | FAIL | INVALID (a kind that only failed because the game reports the vault as not valid; not scored, the text
+    is in 'invalid_fails' and 'invalid_cause') | SKIP (no car), 'fails', 'phase_windows', 'attempts' (evidence per attempt)."""
     out = {} if out is None else out
-    for key, empty in (('fails', []), ('warnings', []), ('phase_windows', []), ('attempts', []), ('results', {})):
+    for key, empty in (('fails', []), ('invalid_fails', []), ('warnings', []), ('phase_windows', []), ('attempts', []),
+                       ('results', {})):
         out.setdefault(key, empty)
     ep: dict = {'events': []}
     ledger = getattr(night, 'settings', None)
@@ -189,7 +200,7 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
                 res = judge(kind, ev, feed)
                 out['phase_windows'].append({'label': f'{spec["label"]}_{attempt}', 'start': _stamp(t0), 'end': _stamp(t1)})
                 out['attempts'].append({'kind': kind, 'attempt': attempt, 'played': True, 'approach_dist_m': round(dist, 2),
-                                        'ok': res['ok'], 'by': res['by'], 'why': res['why'], 'evidence': ev,
+                                        'ok': res['ok'], 'by': res['by'], 'why': res['why'], 'invalid': res['invalid'], 'evidence': ev,
                                         'feed_detailed': sorted(feed) if feed is not None else None})
                 night.log(f'[traversal] {kind} #{attempt}: ' + ('OK by ' + ', '.join(res['by']) if res['ok'] else 'NOT done: ' + res['why']))
                 pos = night.poll_pos(guard, pad) or pos
@@ -200,8 +211,16 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
             if not done:
                 last = [a for a in out['attempts'] if a['kind'] == kind]
                 played = [a for a in last if a.get('played')]
-                out['fails'].append(f'{kind}: ' + (played[-1]['why'] if played else
-                                                   f'V could not stand at the car (approach ended {last[-1]["approach_dist_m"]} m away)'))
+                text = f'{kind}: ' + (played[-1]['why'] if played else
+                                      f'V could not stand at the car (approach ended {last[-1]["approach_dist_m"]} m away)')
+                if played and all(a.get('invalid') for a in played):
+                    # every played attempt met the game's "no vault data" answer: not scored
+                    out['results'][kind] = 'invalid'
+                    out['invalid_fails'].append(text)
+                    out['invalid_cause'] = f'{kind}: the game reports the vault as not valid ({VAULT_NOT_VALID})'
+                    night.log(f'[traversal] {kind}: INVALID, not scored: {VAULT_NOT_VALID}')
+                else:
+                    out['fails'].append(text)
     finally:
         if logged or entry is not None:
             try:
@@ -211,7 +230,7 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
             except Exception as e:  # noqa: BLE001 - the result must survive; the ledger restores it before the quit
                 out['warnings'].append(f'the vehicle vault log was not switched off: {type(e).__name__}')
     if out.get('verdict') != 'SKIP':
-        out['verdict'] = 'FAIL' if out['fails'] else 'PASS'
+        out['verdict'] = 'FAIL' if out['fails'] else 'INVALID' if out['invalid_fails'] else 'PASS'
     return out
 
 

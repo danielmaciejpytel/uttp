@@ -7,8 +7,8 @@ Set name: `ranged_families` (not part of 'all'). Options of night.py: `--ranged-
 
 Sequence per family (script commands and the virtual pad only, so it also runs with --background):
   pick record -> give weapon + ammunition, draw -> confirm the weapon in the hand (log) -> aim idle -> hip fire -> aimed fire ->
-  gun bash -> reload (the magazine is no longer full) -> walk -> walk aimed -> sprint -> crouch + aim -> holster -> take out what
-  was given.
+  gun bash -> reload (the magazine is no longer full) -> reload while walking -> reload, then run (before the reload ends) ->
+  walk -> walk aimed -> sprint -> crouch + aim -> holster -> take out what was given.
 Every phase has its own label `rf_<family>_<phase>` (plan run, pose meter window, contact sheet), so the pose reports and the
 sheets are per family and state. The phases measure what the runner already measures (clip changes, foot slip, frame pacing,
 pose capture with the helper reports); no limit is added here. Where no shape limit exists the values are only reported.
@@ -19,6 +19,20 @@ QuickMelee_Button_Alternative; the harness runs under that scheme, crouch is R3)
 confirmed in play. Whether the game played the move is read from the log: an `MMGATE` line (written with the MM trace on, when the
 melee gate changes) whose `melee=` value has the melee-attack bit 0x800, which the plugin sets while PSM.RightWeapon is QuickMelee.
 No such line = `not verified` (a warning, never a failure and never "no bash": the line is only written when the gate changes).
+
+Reload while moving (needs the reload diagnostics, whose `RELOAD episode ... dur=` line is read; without it the timing is reported as
+not verified): each of the two phases fires a few shots first (the magazine must be short), then plays one pad scenario with the reload
+button inside it. The reload button is also the mount button next to a vehicle: V seated before or after the press makes the phase
+INVALID (not scored, listed in `invalid_phases`), V leaves the vehicle again and walks away from it.
+  reload_walk      walk (stick 0.55), press reload while walking; passes when the magazine was refilled and V moved at least 1 m
+                   during the reload.
+  reload_then_run  stand, press reload, push the stick fully forward about 0.4 s before the reload is due to end (the duration of
+                   the standing reload phase; 1.2 s after the press when it is unknown), keep running until 1 s after the reload
+                   episode ended. Passes when the magazine was refilled and the movement began before the episode ended; a reload
+                   that had already ended before V moved makes the phase INVALID. The press time, the push time, the episode end
+                   and the measured start of the movement are recorded in the phase record.
+Option `ranged_phases` (night.py: --ranged-phases a,b) runs only the listed phases (equip, draw and the cleanup always run; `reload`
+is added when `reload_then_run` is listed, it supplies the duration).
 
 Records: the first candidate the game knows and whose item type belongs to the family is used. A family without such a record is
 skipped with a `record not found` line (never a silent pass). Candidates are base game `_Default` presets of the 2.5 weapon
@@ -41,7 +55,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -55,15 +69,29 @@ SET_MEMBERS = {SET_NAME: [SET_NAME]}
 # static pad parts of scenarios.json: the family copies of them (rf_<family>_<phase>) keep their thresholds
 PARTS = ['ranged_walk', 'ranged_walk_aimed', 'ranged_sprint']
 MOVING_PARTS = {'walk': 'ranged_walk', 'walk_aimed': 'ranged_walk_aimed', 'sprint': 'ranged_sprint'}
-PHASES = ('draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster')
+PHASES = ('draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'reload_walk', 'reload_then_run', 'walk', 'walk_aimed',
+          'sprint', 'crouch_aim', 'holster')
 BASH_BUTTON = 'LB'                    # QuickMelee_Button_Alternative (the harness runs under the Alternative scheme: crouch = R3)
 BASH_TAP_S = 0.08                     # a longer LB hold is the scanner (VisionHold times out at 0.1 s), not the quick melee
 BASH_WINDOW_S = 1.5                   # length of the phase
 BASH_MELEE_BIT = 0x800                # MMGATE melee= bit of a melee attack; the plugin sets it while PSM.RightWeapon is QuickMelee
 AMMO_GIVEN = 300                      # ammunition of the weapon's type is raised to this count
-SECONDS_PER_FAMILY = 75.0             # time limit per family (the run itself takes about 35-40 s)
+SECONDS_PER_FAMILY = 100.0            # time limit per family (the run itself takes about 50-60 s)
 RELOAD_MAX_S = 8.0                    # longest wait for the magazine to refill
 RELOAD_POLL_S = 0.6
+# reload while moving (phases reload_walk, reload_then_run)
+RELOAD_MOTION_PHASES = ('reload_walk', 'reload_then_run')
+RELOAD_WALK_STICK = 0.55              # reload_walk: left stick while walking and pressing reload
+RELOAD_WALK_MIN_M = 1.0               # reload_walk: V must have moved at least this far during the reload
+RELOAD_WALK_LEAD_S = 1.0              # reload_walk: walking before the reload press
+RELOAD_WALK_TAIL_S = 1.0              # reload_walk: time after the expected end of the reload
+RELOAD_PRESS_AT_S = 0.2               # reload_then_run: standing time before the reload press
+RELOAD_RUN_LEAD_S = 0.4               # reload_then_run: the stick is pushed this long before the reload is due to end
+RELOAD_RUN_FALLBACK_START_S = 1.2     # reload_then_run: movement starts this long after the press when the duration is unknown
+RELOAD_RUN_TAIL_S = 1.0               # reload_then_run: running goes on this long after the reload episode ended
+RELOAD_UNKNOWN_S = 2.5                # length assumed for the scenario when the reload duration is unknown
+RELOAD_MOVING_MIN_M = 0.3             # displacement from where V stood at the push that counts as "moving"
+RELOAD_PREP_MAX_SHOTS = 2             # shots fired before a moving reload so that the magazine is short
 UNREADABLE_WAIT_S = 3.0               # wait after the reload tap when the magazine cannot be read (only a reload log line could end it)
 PROBE_PHASES = ('walk', 'sprint')       # walking phases that look at the ground ahead first (the others reuse the ground just covered)
 DRAW_POLLS = 4                        # hand reads (0.6 s apart) before the one re-draw
@@ -150,9 +178,31 @@ def options_of(args) -> tuple[list[str], dict]:
     return fams, {t: over.get(t, DEFAULT_RECORDS[t]) for t in fams}
 
 
+def parse_phases(text) -> list[str] | None:
+    """'a,b' -> phase names in the table order; None / '' = every phase. ValueError for an unknown name."""
+    names = [t.strip() for t in str(text or '').split(',') if t.strip()]
+    bad = [n for n in names if n not in PHASES]
+    if bad:
+        raise ValueError(f'unknown ranged phase {bad}; known: {", ".join(PHASES)}')
+    return [p for p in PHASES if p in names] if names else None
+
+
+def phase_filter(args) -> set[str] | None:
+    """The phases to run according to the `ranged_phases` option (None = all). The standing reload supplies the duration of
+    `reload_then_run`, so it is part of a filter that names that phase."""
+    only = parse_phases(getattr(args, 'ranged_phases', None))
+    if only is None:
+        return None
+    wanted = set(only)
+    if 'reload_then_run' in wanted:
+        wanted.add('reload')
+    return wanted
+
+
 def option_errors(args) -> list[str]:
     try:
         options_of(args)
+        parse_phases(getattr(args, 'ranged_phases', None))
     except ValueError as e:
         return [str(e)]
     return []
@@ -370,6 +420,165 @@ def reload_result(mag_start: int | None, mag_end: int | None, cap: int | None, e
             'full': full, 'episodes': episodes}
 
 
+_EPISODE_RE = re.compile(r'UTPPMotion RELOAD episode .*?\bdur=(\d+(?:\.\d+)?)')
+_LOG_TS = '%Y-%m-%d %H:%M:%S.%f'
+
+
+def _line_time(line: str) -> datetime | None:
+    m = _gn().LOGTS_RE.match(line)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1)[:23], _LOG_TS)
+    except ValueError:
+        return None
+
+
+def reload_episode_stamps(text: str) -> list[tuple[datetime | None, float]]:
+    """[(time the line was written = end of the reload episode, duration in s)] of the `RELOAD episode ... dur=` lines of a log text."""
+    out = []
+    for line in (text or '').splitlines():
+        m = _EPISODE_RE.search(line)
+        if m:
+            out.append((_line_time(line), float(m.group(1))))
+    return out
+
+
+def pos_records(text: str) -> list[dict]:
+    """[{'t': datetime, 'xy': (x, y), 'mounted': True | False | None}] of the `[night] POS` lines of a log text, in file order
+    (`m=` is the mounted flag of the position line)."""
+    gn = _gn()
+    out = []
+    flag = {'1': True, '0': False}
+    for line in (text or '').splitlines():
+        if '[night] POS p=' not in line:
+            continue
+        t, pm = _line_time(line), gn.POS_RE.search(line)
+        if t is not None and pm:
+            out.append({'t': t, 'xy': (float(pm.group(1)), float(pm.group(2))), 'mounted': flag.get(pm.group(9))})
+    return out
+
+
+def position_at(samples: list[dict], t: datetime):
+    """Position (x, y) at time `t`, interpolated between the two samples around it (the nearest sample outside their span);
+    None without samples."""
+    if not samples:
+        return None
+    if t <= samples[0]['t']:
+        return samples[0]['xy']
+    for a, b in zip(samples, samples[1:]):
+        if a['t'] <= t <= b['t']:
+            span = (b['t'] - a['t']).total_seconds()
+            k = (t - a['t']).total_seconds() / span if span > 0 else 0.0
+            return (a['xy'][0] + (b['xy'][0] - a['xy'][0]) * k, a['xy'][1] + (b['xy'][1] - a['xy'][1]) * k)
+    return samples[-1]['xy']
+
+
+def moved_between(samples: list[dict], t_a: datetime, t_b: datetime) -> float | None:
+    """Horizontal distance (m) V covered between two times, or None when the position lines do not reach into that time span."""
+    if len(samples) < 2 or samples[-1]['t'] < t_a or samples[0]['t'] > t_b:
+        return None
+    pa, pb = position_at(samples, t_a), position_at(samples, t_b)
+    return round(((pb[0] - pa[0]) ** 2 + (pb[1] - pa[1]) ** 2) ** 0.5, 2)
+
+
+def moving_since(samples: list[dict], t: datetime, min_m: float = RELOAD_MOVING_MIN_M) -> datetime | None:
+    """Time of the first position line after `t` that lies at least `min_m` from where V stood at `t`; None = not seen."""
+    p0 = position_at(samples, t)
+    if p0 is None:
+        return None
+    for s in samples:
+        if s['t'] >= t and ((s['xy'][0] - p0[0]) ** 2 + (s['xy'][1] - p0[1]) ** 2) ** 0.5 >= min_m:
+            return s['t']
+    return None
+
+
+def reload_prep_shots(cap: int | None) -> int:
+    """Shots fired before a moving reload: a few, never the last round of the magazine (an empty magazine is refilled by the game)."""
+    hip = plan_shots(cap)[0]
+    return max(1, min(RELOAD_PREP_MAX_SHOTS, hip))
+
+
+def reload_run_timing(reload_s: float | None) -> dict:
+    """Seconds from the start of the reload_then_run scenario: the reload press, the push of the stick, the expected end of the
+    reload and the length of the scenario. `reload_s` = duration of the standing reload of this weapon (None = unknown: the stick is
+    pushed RELOAD_RUN_FALLBACK_START_S after the press and the end is assumed at RELOAD_UNKNOWN_S)."""
+    press = RELOAD_PRESS_AT_S
+    if reload_s and reload_s > 0:
+        push = press + max(0.0, reload_s - RELOAD_RUN_LEAD_S)
+        end = press + reload_s
+    else:
+        push = press + RELOAD_RUN_FALLBACK_START_S
+        end = press + max(RELOAD_UNKNOWN_S, RELOAD_RUN_FALLBACK_START_S)
+    return {'press': round(press, 3), 'push': round(push, 3), 'end': round(end, 3),
+            'duration': round(max(end, push) + RELOAD_RUN_TAIL_S + 0.2, 2)}
+
+
+def reload_walk_timing(reload_s: float | None) -> dict:
+    """Seconds from the start of the reload_walk scenario: the reload press, the expected end of the reload, the scenario length."""
+    est = reload_s if reload_s and reload_s > 0 else RELOAD_UNKNOWN_S
+    return {'press': RELOAD_WALK_LEAD_S, 'end': round(RELOAD_WALK_LEAD_S + est, 3),
+            'duration': round(RELOAD_WALK_LEAD_S + est + RELOAD_WALK_TAIL_S, 2)}
+
+
+def reload_walk_dict(reload_s: float | None = None) -> dict:
+    t = reload_walk_timing(reload_s)
+    return {'steps': [dict(_IDLE, name='reload_walk', duration=t['duration'], interp='step',
+                           ls=[[0, 0, 0], [0.05, 0, RELOAD_WALK_STICK]],
+                           buttons=[{'t': t['press'], 'button': 'X', 'hold': 0.12}])]}
+
+
+def reload_then_run_dict(reload_s: float | None = None) -> dict:
+    t = reload_run_timing(reload_s)
+    return {'steps': [dict(_IDLE, name='reload_run', duration=t['duration'], interp='step',
+                           ls=[[0, 0, 0], [t['push'], 0, 0], [round(t['push'] + 0.05, 3), 0, 1.0]],
+                           buttons=[{'t': t['press'], 'button': 'X', 'hold': 0.12}])]}
+
+
+def judge_reload_walk(res: dict, moved_m: float | None) -> dict:
+    """reload_walk: -> {'verdict': 'PASS' | 'FAIL', 'fails': [..], 'warnings': [..]}. The magazine must have been refilled and V must
+    have covered RELOAD_WALK_MIN_M during the reload (not measurable = a warning)."""
+    fails, warns = [], []
+    if res['detected'] is False:
+        fails.append(f'the magazine did not refill ({res["mag_start"]} -> {res["mag_end"]} of {res["cap"]}) and no reload episode is '
+                     'in the log')
+    elif res['detected'] is None:
+        warns.append('the magazine is not readable and no reload episode is in the log: the reload is not verified')
+    elif res['cap'] is not None and not res['full']:
+        warns.append(f'the magazine was at {res["mag_end"]} of {res["cap"]} when the wait ended')
+    if moved_m is None:
+        warns.append('the distance covered during the reload is not verified (no position lines around the reload)')
+    elif moved_m < RELOAD_WALK_MIN_M:
+        fails.append(f'V moved only {moved_m:.2f} m during the reload (at least {RELOAD_WALK_MIN_M:g} m expected)')
+    return {'verdict': 'FAIL' if fails else 'PASS', 'fails': fails, 'warnings': warns}
+
+
+def judge_reload_run(res: dict, push_at: datetime | None, episode_end: datetime | None, end_source: str) -> dict:
+    """reload_then_run: -> {'verdict': 'PASS' | 'FAIL' | 'INVALID', 'fails', 'warnings', 'invalid_reason'}. The magazine must have been
+    refilled and the movement must have begun before the reload episode ended; a reload that ended before V moved is INVALID (the
+    phase did not reach the case it is meant to measure). `end_source` says where `episode_end` comes from ('log' | 'estimated' | '')."""
+    fails, warns, invalid = [], [], None
+    if res['detected'] is False:
+        fails.append(f'the magazine did not refill ({res["mag_start"]} -> {res["mag_end"]} of {res["cap"]}) and no reload episode is '
+                     'in the log')
+    elif res['detected'] is None:
+        warns.append('the magazine is not readable and no reload episode is in the log: the reload is not verified')
+    elif res['cap'] is not None and not res['full']:
+        warns.append(f'the magazine was at {res["mag_end"]} of {res["cap"]} when the wait ended')
+    if not fails:
+        if push_at is None or episode_end is None:
+            warns.append('the end of the reload episode is not known: the order of reload end and movement is not verified')
+        else:
+            gap = (episode_end - push_at).total_seconds()
+            if gap <= 0:
+                invalid = (f'the reload had already ended before V moved (the stick was pushed {-gap:.2f} s after the end of the '
+                           f'reload episode, {end_source})')
+            elif end_source == 'estimated':
+                warns.append('the end of the reload episode is estimated (no episode line in the log), not read')
+    return {'verdict': 'FAIL' if fails else 'INVALID' if invalid else 'PASS', 'fails': fails, 'warnings': warns,
+            'invalid_reason': invalid}
+
+
 def phases_of(tag: str) -> tuple:
     """The phases of a family in order (PHASES without `bash` when the family has the flag switched off)."""
     on = FAMILIES[tag].get('bash', True)
@@ -458,16 +667,29 @@ def phase_plan(tag: str) -> list[str]:
     return ['equip'] + list(phases_of(tag)) + ['remove']
 
 
-def scenario_for(tag: str, phase: str, shots: tuple[int, int] = (3, 3)):
+def scenario_for(tag: str, phase: str, shots: tuple[int, int] = (3, 3), reload_s: float | None = None):
     """The Scenario of a pad phase (named rf_<family>_<phase>); the moving phases are copies of the static parts of
-    scenarios.json (loaded by the runner), so this builds only the phases without one."""
+    scenarios.json (loaded by the runner), so this builds only the phases without one. `reload_s` = reload duration of the weapon for
+    the two moving-reload phases; `reload_prep` = the shots that make the magazine short before them (`shots[0]` of them)."""
     from gt_scenario import parse_scenario
     name = phase_label(tag, phase)
     if phase in ('hip_fire', 'aim_fire'):
         raw = fire_scenario_dict(phase, FAMILIES[tag]['gap'], shots[0] if phase == 'hip_fire' else shots[1])
+    elif phase == 'reload_prep':
+        raw = fire_scenario_dict('hip_fire', FAMILIES[tag]['gap'], shots[0])
+    elif phase == 'reload_walk':
+        raw = reload_walk_dict(reload_s)
+    elif phase == 'reload_then_run':
+        raw = reload_then_run_dict(reload_s)
     else:
         raw = static_scenario_dict(phase)
     return parse_scenario(name, dict(raw, description=f'ranged family {tag}: {phase}'))
+
+
+def reload_motion_pad_seconds(tag: str) -> float:
+    """Pad input time of the two moving-reload phases of a family, including the shots before each (reload duration unknown)."""
+    prep = scenario_for(tag, 'reload_prep', (reload_prep_shots(None), 0)).duration
+    return sum(prep + scenario_for(tag, ph).duration for ph in RELOAD_MOTION_PHASES if ph in phases_of(tag))
 
 
 def pad_seconds(tag: str, scenarios: dict | None = None, shots: tuple[int, int] = (3, 3)) -> float:
@@ -479,9 +701,11 @@ def pad_seconds(tag: str, scenarios: dict | None = None, shots: tuple[int, int] 
             total += sc.duration if sc is not None else 0.0
         elif ph in ('draw', 'holster'):
             continue
+        elif ph in RELOAD_MOTION_PHASES:
+            continue                                   # counted below with the shots before them
         else:
             total += scenario_for(tag, ph, shots).duration
-    return total
+    return total + reload_motion_pad_seconds(tag)
 
 
 # ---------------------------------------------------------------------------------------------- macro
@@ -503,6 +727,9 @@ class _Run:
         self.windows: list = []
         self.fails: list = []
         self.warns: list = []
+        self.invalid_phases: list = []         # phases that were not scored: [{'phase', 'reason'}]
+        self.reload_dur: float | None = None   # duration of the standing reload (the `RELOAD episode` line), None = unknown
+        self.seated = False                    # V sits in a vehicle and could not be taken out again
         self.given: dict | None = None
         self.record: str | None = None
         self.removed = None
@@ -514,7 +741,7 @@ class _Run:
         self.view = {'family': self.tag, 'label': fam['label'], 'verdict': None, 'skip_reason': None, 'record': None,
                      'evidence': None, 'types': list(fam['types']), 'candidates': list(self.records), 'given': None,
                      'removed': None, 'ammo_removed': None, 'fails': self.fails, 'warnings': self.warns, 'phases': self.phases,
-                     'phase_windows': self.windows}
+                     'phase_windows': self.windows, 'invalid_phases': self.invalid_phases}
 
     def say(self, msg: str) -> None:
         self.night.log(f'{LOG_PREFIX} {self.tag}: {msg}')
@@ -558,7 +785,7 @@ class _Run:
         return rec
 
 
-def _register(run: _Run, phase: str, shots=(3, 3)):
+def _register(run: _Run, phase: str, shots=(3, 3), reload_s: float | None = None):
     """The Scenario of a phase, registered in the runner's table under its own name (the walking helpers look scenarios up there)."""
     n = run.night
     name = phase_label(run.tag, phase)
@@ -566,7 +793,7 @@ def _register(run: _Run, phase: str, shots=(3, 3)):
         base = n.scenarios[MOVING_PARTS[phase]]
         sc = dataclasses.replace(base, name=name, description=f'ranged family {run.tag}: {phase} ({MOVING_PARTS[phase]})')
     else:
-        sc = scenario_for(run.tag, phase, shots)
+        sc = scenario_for(run.tag, phase, shots, reload_s)
     n.scenarios[name] = sc
     return sc
 
@@ -709,21 +936,10 @@ def _ensure_in_hand(run: _Run, where: str) -> bool:
     return bool(h and h['match'])
 
 
-def _reload_phase(run: _Run) -> dict:
+def _wait_refill(run: _Run, mag_start: int | None, off: int, shot_in_phase: bool = False) -> tuple[dict, float]:
+    """Poll the magazine (and the reload episodes of the log since `off`) until the reload is seen to be done or the limit is up.
+    -> (reload_result, limit in s)."""
     gn = _gn()
-    mag_start, total_start = run.mag, run.total
-    t0, off = datetime.now(), file_size(run.night.utpp_log)
-    shot_in_phase = False
-    if run.cap is not None and mag_start is not None and mag_start >= run.cap:
-        # nothing to reload: the game refilled the magazine by itself after the last shot. One shot inside this phase.
-        shot = _register(run, 'reload_shot')
-        run.night.play(run.pad, run.guard, shot.name, run.plan, shot)
-        h = run.hand('mag-reload-shot')
-        shot_in_phase = bool(h and total_start is not None and run.total is not None and run.total < total_start)
-        if shot_in_phase and run.mag is not None and run.mag < run.cap:
-            mag_start = run.mag            # the magazine is short now: the reload below fills it
-    sc = _register(run, 'reload')
-    run.night.play(run.pad, run.guard, sc.name, run.plan, sc)
     readable = run.cap is not None and mag_start is not None
     limit = RELOAD_MAX_S if readable else UNREADABLE_WAIT_S        # nothing to wait for when only a log line could say it ended
     t_end = time.monotonic() + limit
@@ -742,6 +958,26 @@ def _reload_phase(run: _Run) -> dict:
         if time.monotonic() >= t_end:
             break
         run.guard.wait(RELOAD_POLL_S)
+    return res, limit
+
+
+def _reload_phase(run: _Run) -> dict:
+    mag_start, total_start = run.mag, run.total
+    t0, off = datetime.now(), file_size(run.night.utpp_log)
+    shot_in_phase = False
+    if run.cap is not None and mag_start is not None and mag_start >= run.cap:
+        # nothing to reload: the game refilled the magazine by itself after the last shot. One shot inside this phase.
+        shot = _register(run, 'reload_shot')
+        run.night.play(run.pad, run.guard, shot.name, run.plan, shot)
+        h = run.hand('mag-reload-shot')
+        shot_in_phase = bool(h and total_start is not None and run.total is not None and run.total < total_start)
+        if shot_in_phase and run.mag is not None and run.mag < run.cap:
+            mag_start = run.mag            # the magazine is short now: the reload below fills it
+    sc = _register(run, 'reload')
+    run.night.play(run.pad, run.guard, sc.name, run.plan, sc)
+    res, limit = _wait_refill(run, mag_start, off, shot_in_phase)
+    if res['episodes']:
+        run.reload_dur = res['episodes'][-1]
     t1 = datetime.now()
     rec = run.window('reload', t0, t1, {'result': res, 'wait_limit_s': limit})
     _extend_run_end(run.plan, phase_label(run.tag, 'reload'), t1)
@@ -755,6 +991,173 @@ def _reload_phase(run: _Run) -> dict:
         run.warns.append(f'reload: the magazine was at {res["mag_end"]} of {run.cap} when the wait ended ({limit:.0f} s)')
     elif res['detected'] is None:
         run.warns.append('reload: the magazine is not readable and no reload episode is in the log: the reload is not verified')
+    return rec
+
+
+_RERAISE =('ScenarioTimeout', 'StopNight', 'CycleError', 'EarlyStop', 'GuardError')
+
+
+def _mount_state(run: _Run) -> tuple[bool | None, dict | None]:
+    """(V in a vehicle: True | False | None = unknown, the position record) from a position read."""
+    poll = getattr(run.night, 'poll_pos', None)
+    pos = poll(run.guard, run.pad) if poll is not None else None
+    return (pos.get('mounted') if pos else None), pos
+
+
+def _leave_vehicle(run: _Run, pos: dict | None, why: str) -> bool:
+    """V sits in a vehicle (the reload button is also the mount button): leave it with the runner's own procedure, then walk away
+    from it, so that the next reload press cannot mount again. True = V is on foot."""
+    night = run.night
+    ensure = getattr(night, 'ensure_unmounted', None)
+    if ensure is None:
+        run.seated = True
+        run.warns.append(f'{why}: the runner has no vehicle exit; V is still in the vehicle')
+        return False
+    try:
+        if pos and pos.get('mounted') is True:
+            ensure(run.pad, run.guard, run.plan, why, pos=pos)
+        else:
+            ensure(run.pad, run.guard, run.plan, why)
+    except Exception as e:  # noqa: BLE001
+        if type(e).__name__ in _RERAISE:
+            raise
+        run.warns.append(f'{why}: leaving the vehicle failed: {type(e).__name__}: {str(e)[:100]}')
+    state, _ = _mount_state(run)
+    run.seated = state is True
+    if run.seated:
+        run.warns.append(f'{why}: V is still in the vehicle after the exit procedure')
+        return False
+    away = getattr(night, 'leave_car', None)
+    if away is not None:
+        try:
+            away(run.pad, run.guard, run.plan)
+        except Exception as e:  # noqa: BLE001
+            if type(e).__name__ in _RERAISE:
+                raise
+            run.warns.append(f'{why}: walking away from the vehicle failed: {type(e).__name__}: {str(e)[:100]}')
+    return True
+
+
+def _not_scored(run: _Run, phase: str, reason: str, t0: datetime, extra: dict | None = None, t1: datetime | None = None) -> dict:
+    """A moving-reload phase that could not be scored: recorded as a phase window with the reason, never a failure. `t1` = end of the
+    window (default now); a phase that ends with a vehicle exit passes the time taken before it, so the window does not cover the exit."""
+    rec = run.window(phase, t0, t1 or datetime.now(), {'verdict': 'INVALID', 'invalid_reason': reason})
+    if extra:
+        rec.update(extra)
+    run.invalid_phases.append({'phase': phase, 'reason': reason})
+    run.warns.append(f'{phase}: INVALID (not scored): {reason}')
+    return rec
+
+
+def _reload_motion_phase(run: _Run, phase: str) -> dict | None:
+    """reload_walk / reload_then_run (see the module text): a few shots, then one pad scenario with the reload button in it, then the
+    magazine. The mounted flag is read before the press and after it (position lines of the window, the vehicle camera line, a read
+    after the scenario); a V that got into a vehicle makes the phase INVALID."""
+    gn = _gn()
+    night = run.night
+    t_phase = datetime.now()
+    if run.seated:
+        return _not_scored(run, phase, 'V is still in a vehicle from the earlier phase', t_phase)
+    if not _ensure_in_hand(run, phase):
+        run.fails.append(f'{phase}: the weapon could not be put back in the hand; phase skipped')
+        return None
+    # shots first: the magazine must be short, else there is nothing to reload
+    prep = _register(run, 'reload_prep', (reload_prep_shots(run.cap), 0))
+    night.play(run.pad, run.guard, prep.name, run.plan, prep)
+    run.guard.wait(0.3)
+    h = run.hand(f'mag-{phase}-prep')
+    if run.cap is not None and run.mag is not None and run.mag >= run.cap:
+        return _not_scored(run, phase, f'the magazine is still full after the shots ({run.mag} of {run.cap}): nothing to reload',
+                           datetime.now())
+    mag_start = run.mag if h else None
+    seated, pos0 = _mount_state(run)
+    if seated is True:
+        t_end = datetime.now()
+        left = _leave_vehicle(run, pos0, f'{phase}: before the press')
+        return _not_scored(run, phase, 'V was in a vehicle before the reload press' + ('' if left else ' and could not leave it'),
+                           t_end, t1=t_end)
+    reload_s = run.reload_dur
+    sc = _register(run, phase, (0, 0), reload_s)
+    clear = getattr(night, 'clear_path', None)
+    if phase == 'reload_walk' and clear is not None:
+        clear(run.pad, run.guard, run.plan, sc.name)                 # open ground ahead (one probe, no repeat of the phase)
+    off, t0 = file_size(night.utpp_log), datetime.now()
+    played = night.play(run.pad, run.guard, sc.name, run.plan, sc) or {}
+    steps = played.get('steps') or []
+    start = steps[0].get('start') if steps and isinstance(steps[0], dict) and steps[0].get('start') else t0
+    timing = reload_walk_timing(reload_s) if phase == 'reload_walk' else reload_run_timing(reload_s)
+    press_at = start + timedelta(seconds=timing['press'])
+    when = {'press_at': gw._stamp(press_at)}                          # what the scenario commanded, kept for every outcome
+    if phase == 'reload_then_run':
+        when['push_at'] = gw._stamp(start + timedelta(seconds=timing['push']))
+    text = read_since(night.utpp_log, off)
+    samples = pos_records(text)
+    after, pos1 = _mount_state(run)
+    mounted = any(x['mounted'] for x in samples) or gn.MOUNT_RIDE in text or after is True
+    if mounted:
+        t_end = datetime.now()
+        left = _leave_vehicle(run, pos1, f'{phase}: after the press')
+        return _not_scored(run, phase, 'the reload button mounted V into a vehicle' + ('' if left else ' (V could not leave it)'),
+                           t0, dict(when, mounted=True), t_end)
+    if phase == 'reload_walk':
+        blocked = getattr(night, 'attempt_blocked', None)
+        rep = blocked(sc.name, {'res': played, 'off': off}) if blocked is not None and played else None
+        if rep:
+            return _not_scored(run, phase, f'V was stuck while the stick was pushed (stall {rep["stall_s"]} s)', t0,
+                               dict(when, blocked=rep['stall_s']))
+    res, limit = _wait_refill(run, mag_start, off)
+    t1 = datetime.now()
+    text = read_since(night.utpp_log, off)
+    samples = pos_records(text)
+    if any(x['mounted'] for x in samples) or gn.MOUNT_RIDE in text:
+        # the mount showed only after the scenario (the enter animation writes its line late): the magazine of a seated V is not judged
+        left = _leave_vehicle(run, None, f'{phase}: after the press')
+        return _not_scored(run, phase, 'the reload button mounted V into a vehicle (seen after the scenario)'
+                           + ('' if left else ' (V could not leave it)'), t0, dict(when, mounted=True), t1)
+    stamps = [(t, d) for t, d in reload_episode_stamps(text) if t is not None]
+    ep_end, ep_dur = (stamps[-1] if stamps else (None, None))
+    detail: dict = {'result': res, 'wait_limit_s': limit, 'mag_start': mag_start, 'reload_s_used': reload_s,
+                    'reload_s_source': 'standing reload episode' if reload_s else 'unknown (fallback timing)',
+                    'press_at': when['press_at'], 'episode_end': gw._stamp(ep_end) if ep_end else None}
+    if phase == 'reload_walk':
+        a = ep_end - timedelta(seconds=ep_dur) if ep_end else press_at
+        b = ep_end if ep_end else start + timedelta(seconds=timing['end'])
+        moved = moved_between(samples, a, b)
+        detail.update(moved_m=moved, moved_from=gw._stamp(a), moved_to=gw._stamp(b))
+        verdict = judge_reload_walk(res, moved)
+    else:
+        push_at = start + timedelta(seconds=timing['push'])
+        if ep_end:
+            end, src = ep_end, 'log'
+        elif reload_s:
+            end, src = press_at + timedelta(seconds=reload_s), 'estimated'
+        else:
+            end, src = None, ''
+        seen = moving_since(samples, push_at)
+        detail.update(push_at=gw._stamp(push_at), episode_end_source=src or None,
+                      push_before_end_s=round((end - push_at).total_seconds(), 2) if end else None,
+                      moving_at=gw._stamp(seen) if seen else None,
+                      moved_after_push_m=moved_between(samples, push_at, start + timedelta(seconds=timing['duration'])))
+        after_end = round((start + timedelta(seconds=timing['duration']) - end).total_seconds(), 2) if end else None
+        detail['run_after_end_s'] = after_end                   # how long the stick stayed pushed after the reload episode ended
+        verdict = judge_reload_run(res, push_at, end, src)
+        if after_end is not None and after_end < RELOAD_RUN_TAIL_S:
+            verdict['warnings'].append(f'the scenario ended {after_end:.2f} s after the reload episode (wanted {RELOAD_RUN_TAIL_S:g} s of running)')
+        if samples and seen is None and not verdict['invalid_reason']:
+            verdict['warnings'].append(f'V was not seen moving after the stick was pushed (no position line {RELOAD_MOVING_MIN_M:g} m '
+                                       'away from the push position)')
+    detail.update(verdict=verdict['verdict'], warnings=verdict['warnings'])
+    rec = run.window(phase, t0, t1, {'verdict': verdict['verdict']})
+    rec.update(detail)
+    _extend_run_end(run.plan, phase_label(run.tag, phase), t1)
+    run.warns += [f'{phase}: {w}' for w in verdict['warnings']]
+    if verdict['verdict'] == 'FAIL':
+        run.fails += [f'{phase}: {f}' for f in verdict['fails']]
+    elif verdict['verdict'] == 'INVALID':
+        reason = verdict['invalid_reason']
+        rec['invalid_reason'] = reason
+        run.invalid_phases.append({'phase': phase, 'reason': reason})
+        run.warns.append(f'{phase}: INVALID (not scored): {reason}')
     return rec
 
 
@@ -863,22 +1266,36 @@ def run_one(night, pad, guard, plan, tag: str, records, out: dict | None = None,
         reason = _equip(run)
         skip = bool(reason and reason.startswith('skip'))
         if reason is None:
+            only = phase_filter(getattr(night, 'args', None))            # --ranged-phases: None = every phase
+
+            def want(ph: str) -> bool:
+                return only is None or ph in only
             _stand_up(run, 'start')          # a crouch left by an earlier set or family would run every phase crouched
-            _pad_phase(run, 'aim_idle')
-            _fire_phase(run, 'hip_fire')
-            _fire_phase(run, 'aim_fire')
-            if 'bash' in phases_of(tag):
+            if want('aim_idle'):
+                _pad_phase(run, 'aim_idle')
+            if want('hip_fire'):
+                _fire_phase(run, 'hip_fire')
+            if want('aim_fire'):
+                _fire_phase(run, 'aim_fire')
+            if 'bash' in phases_of(tag) and want('bash'):
                 _bash_phase(run)
-            _reload_phase(run)
+            if want('reload'):
+                _reload_phase(run)
+            for ph in RELOAD_MOTION_PHASES:
+                if want(ph):
+                    _reload_motion_phase(run, ph)
             for ph in ('walk', 'walk_aimed', 'sprint'):
+                if not want(ph):
+                    continue
                 if not _ensure_in_hand(run, ph):
                     run.fails.append(f'{ph}: the weapon could not be put back in the hand; phase skipped')
                     continue
                 _walk_phase(run, ph)
-            if _ensure_in_hand(run, 'crouch_aim'):
-                _crouch_aim_phase(run)
-            else:
-                run.fails.append('crouch_aim: the weapon could not be put back in the hand; phase skipped')
+            if want('crouch_aim'):
+                if _ensure_in_hand(run, 'crouch_aim'):
+                    _crouch_aim_phase(run)
+                else:
+                    run.fails.append('crouch_aim: the weapon could not be put back in the hand; phase skipped')
             _holster(run)
     except BaseException as e:      # noqa: BLE001 - the cleanup below must run for every error, then it is re-raised
         failed = True
@@ -992,6 +1409,52 @@ def run_ranged_macro(night, pad, guard, plan, set_name: str, out: dict | None = 
     verdicts = [r['verdict'] for r in out['families'].values()]
     out['verdict'] = 'FAIL' if 'FAIL' in verdicts else 'SKIP' if not verdicts or all(v == 'SKIP' for v in verdicts) else 'PASS'
     return out
+
+
+# ---------------------------------------------------------------------------------------------- second try of a part
+
+FIRST_TRY_SUFFIX = '_first_try'
+# what a part view keeps of the try that came first when a second try replaces it
+FIRST_TRY_KEYS = ('verdict', 'skip_reason', 'fails', 'warnings', 'phases', 'phase_windows', 'invalid_phases', 'given', 'removed',
+                  'ammo_removed', 'record', 'evidence', 'shots_planned', 'capacity')
+
+
+def mark_first_try(windows) -> list:
+    """Flag phase windows as those of a first try. The label gets FIRST_TRY_SUFFIX too: the sheets and the pose meter rows are
+    named after the label and the run, so a second try with the same labels would otherwise take their names."""
+    windows = list(windows or [])
+    for w in windows:
+        w['first_try'] = True
+        label = w.get('label')
+        if label and not label.endswith(FIRST_TRY_SUFFIX):
+            w['label'] = label + FIRST_TRY_SUFFIX
+    return windows
+
+
+def keep_first_try_windows(first, new) -> list:
+    """The phase windows of a record whose second try rebuilt them: the windows of the first try (marked) followed by the new ones."""
+    first = mark_first_try(first)
+    return first + [w for w in (new or []) if not any(w is f for f in first)]
+
+
+def merge_second_try(rec: dict, tag: str, view: dict, key: str = 'families') -> dict:
+    """Put the view of a second try of part `tag` into the macro record `rec` (`key` = 'families' or 'weapons') and keep what the first
+    try recorded: its view moves to view['first_try'] (verdict, failures, phases and evidence), its phase windows stay in
+    rec['phase_windows'] marked as first try. Returns the view."""
+    views = rec.setdefault(key, {})
+    old = views.get(tag)
+    windows = list(rec.get('phase_windows') or [])
+    new_windows = view.get('phase_windows') or []
+    if old is not None and old is not view:
+        view['first_try'] = {k: old[k] for k in FIRST_TRY_KEYS if k in old}
+        mine = [w for w in windows if w.get('family', w.get('weapon')) == tag and not any(w is n for n in new_windows)]
+        mine += [w for w in old.get('phase_windows') or [] if not any(w is m for m in mine)]
+        mark_first_try(mine)
+        windows += [w for w in mine if not any(w is x for x in windows)]
+    view['second_try_of_invalid'] = True
+    views[tag] = view
+    rec['phase_windows'] = windows + [w for w in new_windows if not any(w is x for x in windows)]
+    return view
 
 
 # ---------------------------------------------------------------------------------------------- dry run

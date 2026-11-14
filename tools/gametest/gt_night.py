@@ -1307,12 +1307,16 @@ def _names_text(items: list[dict]) -> str:
 
 def macro_result_text(failures: list[dict], invalid: list[dict]) -> str:
     """'' when everything passed, else the text that replaces 'ok' in the body result line: 'macro FAIL: melee_weapons#1 (katana,
-    blunt); weapon_fire_reload#1', plus 'INVALID (...): ...' for runs the game blocked."""
+    blunt); weapon_fire_reload#1', plus 'INVALID (...): ...' for runs the game blocked or a vault the game refused."""
     parts = []
     if failures:
         parts.append('macro FAIL: ' + _names_text(failures))
-    if invalid:
-        parts.append('INVALID (weapon blocked by the game, not scored): ' + _names_text(invalid))
+    vault = [i for i in invalid if 'vault' in (i.get('cause') or '')]
+    blocked = [i for i in invalid if i not in vault]
+    if blocked:
+        parts.append('INVALID (weapon blocked by the game, not scored): ' + _names_text(blocked))
+    if vault:
+        parts.append('INVALID (the game reports the vault as not valid, not scored): ' + _names_text(vault))
     return '; '.join(parts)
 
 

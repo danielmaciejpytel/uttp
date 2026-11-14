@@ -10,9 +10,10 @@ import os
 import re
 import sys
 import tempfile
+import time
 import types
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +73,9 @@ class FakeNight:
     def append(self, lines):
         with open(self.utpp_log, 'a', encoding='utf-8') as f:
             for ln in lines or []:
+                if ln.startswith('['):                      # a line that carries its own time stamp
+                    f.write(ln + '\n')
+                    continue
                 self.clock += 0.05
                 f.write(stamp(self.clock, ln) + '\n')
 
@@ -90,6 +94,29 @@ class FakeNight:
         self.append(self.script('play:' + name, ''))
         return {'res': {}, 'cfails': [], 'off': off, 'start': datetime.now(), 'discarded': None}
 
+    def poll_pos(self, guard, pad=None, timeout=None):
+        self.calls.append(('poll_pos',))
+        r = self.script('POS', '')
+        return r if isinstance(r, dict) else None
+
+    def ensure_unmounted(self, pad, guard, plan, why, pos=None):
+        self.calls.append(('unmount', why))
+        self.unmount_at = getattr(self, 'unmount_at', []) + [datetime.now()]
+        time.sleep(0.02)                                         # the exit takes time: a window that covers it ends later
+        self.append(self.script('UNMOUNT', why) or [])
+        return True
+
+    def leave_car(self, pad, guard, plan, seconds=4.0):
+        self.calls.append(('leave_car',))
+
+    def clear_path(self, pad, guard, plan, where):
+        self.calls.append(('clear', where))
+
+    def attempt_blocked(self, name, att):
+        self.calls.append(('blocked?', name))
+        r = self.script('BLOCKED', name)
+        return r if isinstance(r, dict) else None
+
     def console_verified(self, pad, guard, cmd, echo, label, timeout=3.0):
         tag = re.search(r"\[night\] (RF_\w+) ok=", cmd).group(1)
         self.calls.append(('cmd', tag))
@@ -106,6 +133,9 @@ class FakeNight:
 
     def plays(self):
         return [c[1] for c in self.calls if c[0] in ('play', 'walk')]
+
+    def called(self, kind):
+        return [c[1:] for c in self.calls if c[0] == kind]
 
 
 def good_script(tag='handgun', cap=12, how='given', pick='ok', lost_once=(), orig=True, mag_readable=True, shots_fired=True,
@@ -162,6 +192,12 @@ def good_script(tag='handgun', cap=12, how='given', pick='ok', lost_once=(), ori
             st['mag'] -= 3 if shots_fired else 0
             return []
         if event == f'play:rf_{tag}_reload':
+            st['reload_polls'] = 2
+            return []
+        if event == f'play:rf_{tag}_reload_prep':
+            st['mag'] = max(1, st['mag'] - 2) if shots_fired else st['mag']
+            return []
+        if event in (f'play:rf_{tag}_reload_walk', f'play:rf_{tag}_reload_then_run'):
             st['reload_polls'] = 2
             return []
         if event == 'RF_HOLSTER':
@@ -421,7 +457,10 @@ class PureLogic(unittest.TestCase):
                 for st in sc.steps:
                     self.assertTrue(all(b.button in ('X', 'R3') for b in st.buttons))
                     self.assertFalse(st.metrics, f'{sc.name}.{st.name}: fire / aim steps carry no pass / fail metrics')
-            self.assertLess(rf.pad_seconds(tag, scen), 30.0, tag)       # + commands, reload wait and the path probes: ~40 s
+            moving = rf.reload_motion_pad_seconds(tag)
+            self.assertLess(rf.pad_seconds(tag, scen) - moving, 30.0, tag)      # the phases of before: + commands, reload wait and probes ~40 s
+            self.assertLess(moving, 16.0, tag)                                   # the two moving-reload phases with their shots
+            self.assertLess(rf.pad_seconds(tag, scen), 45.0, tag)
         self.assertEqual(rf.phase_label('smg', 'hip_fire'), 'rf_smg_hip_fire')
         self.assertEqual(rf.phase_plan('smg')[0], 'equip')
         self.assertEqual(rf.phase_plan('smg')[-1], 'remove')
@@ -483,7 +522,8 @@ def run_macro(script, args=None, patch_reload=True, raises=None, fams=None):
 
 
 class Macro(unittest.TestCase):
-    PHASES = ['draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster']
+    PHASES = ['draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'reload_walk', 'reload_then_run', 'walk', 'walk_aimed',
+              'sprint', 'crouch_aim', 'holster']
 
     def test_handgun_passes_in_order_with_a_label_per_phase(self):
         n, res, plan = run_macro(good_script('handgun'), fams='handgun')
@@ -496,7 +536,9 @@ class Macro(unittest.TestCase):
         for w in res['phase_windows']:
             self.assertLessEqual(w['start'], w['end'])
         self.assertEqual(n.plays(), ['rf_setup_walk', 'rf_handgun_aim_idle', 'rf_handgun_hip_fire', 'rf_handgun_aim_fire',
-                                     'rf_handgun_bash', 'rf_handgun_reload', 'rf_handgun_walk', 'rf_handgun_walk_aimed', 'rf_handgun_sprint',
+                                     'rf_handgun_bash', 'rf_handgun_reload', 'rf_handgun_reload_prep', 'rf_handgun_reload_walk',
+                                     'rf_handgun_reload_prep', 'rf_handgun_reload_then_run', 'rf_handgun_walk', 'rf_handgun_walk_aimed',
+                                     'rf_handgun_sprint',
                                      'rf_handgun_crouch_aim'])
         cmds = n.cmds()
         self.assertEqual(cmds[0], 'RF_HAND')                          # the weapon in the hand before the set
@@ -694,7 +736,7 @@ class Macro(unittest.TestCase):
         self.assertEqual((res['families']['handgun']['verdict'], res['families']['smg']['verdict']), ('PASS', 'PASS'))
         self.assertEqual(n.cmds().count('RF_REDRAW'), 1)                       # at the very end, not between the families
         self.assertEqual(n.cmds()[-1], 'RF_REDRAW')
-        self.assertEqual([w['label'].split('_')[1] for w in res['phase_windows']], ['handgun'] * 11 + ['smg'] * 11)
+        self.assertEqual([w['label'].split('_')[1] for w in res['phase_windows']], ['handgun'] * 13 + ['smg'] * 13)
         self.assertEqual(n.plays().count('rf_setup_walk'), 1)
 
     def test_set_verdict_fails_when_one_family_fails(self):
@@ -808,8 +850,9 @@ class GunBash(unittest.TestCase):
             self.assertEqual(rf.phases_of('handgun'), tuple(old))
             self.assertEqual([w['phase'] for w in res['phase_windows']], old)
             self.assertEqual(n.plays(), ['rf_setup_walk', 'rf_handgun_aim_idle', 'rf_handgun_hip_fire', 'rf_handgun_aim_fire',
-                                         'rf_handgun_reload', 'rf_handgun_walk', 'rf_handgun_walk_aimed', 'rf_handgun_sprint',
-                                         'rf_handgun_crouch_aim'])
+                                         'rf_handgun_reload', 'rf_handgun_reload_prep', 'rf_handgun_reload_walk',
+                                         'rf_handgun_reload_prep', 'rf_handgun_reload_then_run', 'rf_handgun_walk',
+                                         'rf_handgun_walk_aimed', 'rf_handgun_sprint', 'rf_handgun_crouch_aim'])
             r = res['families']['handgun']
             self.assertEqual(r['verdict'], 'PASS', r['fails'])
             self.assertFalse([w for w in r['warnings'] if 'bash' in w])
@@ -822,7 +865,8 @@ class GunBash(unittest.TestCase):
         self.assertAlmostEqual(on_s - off_s, 1.5)
         self.assertIn('bash', '\n'.join(rf.dry_run_lines('handgun', None, load_scenarios(gw.SCENARIO_FILE))))
 
-    PHASES_ALL = ['draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster']
+    PHASES_ALL = ['draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'reload_walk', 'reload_then_run', 'walk', 'walk_aimed',
+                  'sprint', 'crouch_aim', 'holster']
 
     def test_the_flag_defaults_to_on_for_every_family(self):
         for tag, fam in rf.FAMILIES.items():
@@ -833,6 +877,105 @@ class GunBash(unittest.TestCase):
         with mock.patch.dict(rf.FAMILIES['smg'], {'bash': False}):
             self.assertIn('bash', rf.phases_of('handgun'))
             self.assertNotIn('bash', rf.phases_of('smg'))
+
+
+class SecondTry(unittest.TestCase):
+    """A part that is repeated after the game blocked the weapon keeps the phases of the first try (marked) in the macro record."""
+
+    def first_record(self, **kw):
+        n, res, plan = run_macro(good_script('handgun', **kw), fams='handgun')
+        return dict(res, name='ranged_families', run=1)
+
+    def second_view(self):
+        n, res, plan = run_macro(good_script('handgun'), fams='handgun')
+        return res['families']['handgun']
+
+    def test_the_first_try_stays_in_the_record(self):
+        rec = self.first_record()
+        first = rec['families']['handgun']
+        first_phases = [p['phase'] for p in first['phases']]
+        n_windows = len(rec['phase_windows'])
+        second = self.second_view()
+        out = rf.merge_second_try(rec, 'handgun', second)
+        self.assertIs(out, second)
+        self.assertIs(rec['families']['handgun'], second)
+        self.assertTrue(second['second_try_of_invalid'])
+        kept = second['first_try']
+        self.assertEqual([p['phase'] for p in kept['phases']], first_phases)
+        self.assertEqual(kept['verdict'], first['verdict'])
+        self.assertIn('phase_windows', kept)
+        self.assertEqual(len(rec['phase_windows']), n_windows + len(second['phase_windows']))
+        flagged = [w for w in rec['phase_windows'] if w.get('first_try')]
+        self.assertEqual(len(flagged), n_windows)
+        self.assertTrue(all(w['label'].endswith(rf.FIRST_TRY_SUFFIX) for w in flagged))
+        self.assertFalse(any(w.get('first_try') for w in second['phase_windows']))
+
+    def test_sheet_and_pose_rows_of_the_two_tries_have_different_names(self):
+        rec = self.first_record()
+        raw = [w['label'] for w in rec['phase_windows']]
+        rf.merge_second_try(rec, 'handgun', self.second_view())
+        names = [p['name'] for p in gn.phase_windows_of([dict(rec, name='ranged_families', run=1)])]
+        self.assertEqual(len(names), len(set(names)), names)
+        self.assertEqual(len(names), 2 * len(raw))
+        self.assertIn('rf_handgun_hip_fire_first_try_r1', names)
+        self.assertIn('rf_handgun_hip_fire_r1', names)
+        rows = [w[0] for w in gp.build_windows([dict(rec, start=datetime.now(), end=datetime.now())], [])
+                if w[0].startswith('rf_handgun_hip_fire')]
+        self.assertEqual(sorted(rows), ['rf_handgun_hip_fire#1', 'rf_handgun_hip_fire_first_try#1'])
+
+    def test_only_the_windows_of_that_part_are_marked(self):
+        scripts = {t: good_script(t) for t in ('handgun', 'smg')}
+        n, res, plan = run_macro(combined(scripts['handgun'], scripts['smg']), fams='handgun,smg')
+        rec = dict(res, name='ranged_families', run=1)
+        smg_windows = [w for w in rec['phase_windows'] if w['family'] == 'smg']
+        n2, res2, plan2 = run_macro(good_script('smg'), fams='smg')
+        rf.merge_second_try(rec, 'smg', res2['families']['smg'])
+        self.assertTrue(all(w.get('first_try') for w in smg_windows))
+        self.assertFalse(any(w.get('first_try') for w in rec['phase_windows'] if w['family'] == 'handgun'))
+        self.assertEqual(len(rec['families']['handgun']['phases']), len(res['families']['handgun']['phases']))
+        self.assertNotIn('first_try', rec['families']['handgun'])
+
+    def test_a_first_try_that_stopped_at_the_block_keeps_its_phases(self):
+        # the game took the weapon after the aimed fire: the later phases are missing in the first record
+        rec = self.first_record()
+        first = rec['families']['handgun']
+        first['phases'] = [p for p in first['phases'] if p.get('phase') in ('equip', 'draw', 'aim_idle', 'hip_fire', 'aim_fire')]
+        blocked_second = {'family': 'handgun', 'verdict': 'FAIL', 'phases': [{'phase': 'equip'}], 'phase_windows': [], 'fails': ['x'],
+                          'warnings': []}
+        rf.merge_second_try(rec, 'handgun', blocked_second)
+        self.assertEqual([p['phase'] for p in rec['families']['handgun']['first_try']['phases']],
+                         ['equip', 'draw', 'aim_idle', 'hip_fire', 'aim_fire'])
+        self.assertEqual([p['phase'] for p in rec['families']['handgun']['phases']], ['equip'])
+        self.assertTrue(any(w['phase'] == 'hip_fire' and w['first_try'] for w in rec['phase_windows']))
+
+    def test_a_part_without_an_earlier_view_is_stored_as_it_is(self):
+        rec = {'name': 'ranged_families', 'run': 1}
+        view = {'phase_windows': [{'family': 'smg', 'phase': 'reload', 'label': 'rf_smg_reload', 'start': 'a', 'end': 'b'}]}
+        rf.merge_second_try(rec, 'smg', view)
+        self.assertIs(rec['families']['smg'], view)
+        self.assertNotIn('first_try', view)
+        self.assertEqual(rec['phase_windows'], view['phase_windows'])
+        self.assertFalse(view['phase_windows'][0].get('first_try'))
+
+    def test_a_weapon_set_record_works_the_same_way(self):
+        w1 = {'weapon': 'katana', 'phase': 'draw', 'start': 'a', 'end': 'b'}
+        w2 = {'weapon': 'katana', 'phase': 'draw', 'start': 'c', 'end': 'd'}
+        rec = {'weapons': {'katana': {'phase_windows': [w1], 'phases': [{'phase': 'draw'}], 'verdict': 'FAIL'}}, 'phase_windows': [w1]}
+        view = {'phase_windows': [w2], 'phases': [{'phase': 'draw'}], 'verdict': 'PASS'}
+        rf.merge_second_try(rec, 'katana', view, 'weapons')
+        self.assertEqual(rec['phase_windows'], [w1, w2])
+        self.assertTrue(w1['first_try'])
+        self.assertNotIn('first_try', w2)
+        self.assertEqual(rec['weapons']['katana']['first_try']['verdict'], 'FAIL')
+
+    def test_a_record_that_a_second_try_rebuilt_keeps_the_first_windows(self):
+        first = [{'label': 'trav_vault_1', 'start': 'a', 'end': 'b'}]
+        new = [{'label': 'trav_vault_1', 'start': 'c', 'end': 'd'}]
+        out = rf.keep_first_try_windows(first, new)
+        self.assertEqual([w['label'] for w in out], ['trav_vault_1_first_try', 'trav_vault_1'])
+        self.assertTrue(out[0]['first_try'])
+        self.assertEqual(rf.keep_first_try_windows(out[:1], out[:1]), out[:1])           # never twice, never with a second suffix
+        self.assertEqual(rf.keep_first_try_windows([], new), new)
 
 
 class RunnerParts(unittest.TestCase):
@@ -920,6 +1063,429 @@ class RunnerParts(unittest.TestCase):
             sys.path.remove(testing)
         self.assertIn('gametest/test_gt_ranged_families.py', rt.REGISTRY)
         self.assertIn('gametest/test_gt_ranged_families.py', rt.discover())
+
+
+def logline(t0, off, text):
+    """A log line with its own time stamp: `off` seconds after `t0` (the time the pad scenario started)."""
+    return '[' + (t0 + timedelta(seconds=off)).strftime('%Y-%m-%d %H:%M:%S.%f')[:23] + '] [info    ] [ 1] [UTPP] ' + text
+
+
+def pos_line(t0, off, x, mounted=0):
+    return logline(t0, off, f'[night] POS p={x:.2f},0.00,0.00 cf=1.00,0.00 v=nil w=1 m={mounted}')
+
+
+def episode_line(t0, off, dur):
+    return logline(t0, off, f'UTPPMotion RELOAD episode weapon=Items.Test dur={dur:.2f}')
+
+
+def with_motion(script, tag='handgun', dur=2.0, standing_episode=True, speed=1.3, run_speed=3.5, pos=True, mount_in=None,
+                mount_via=('pos',), episode=True, episode_at=None, mounted_start=False, unmount_works=True, blocked=None,
+                mount_late_in=None):
+    """The game as the macro sees it around the two moving-reload phases: the standing reload writes its episode line, the walking
+    and running scenarios write position lines (x grows with the speed) and the episode line of their own reload. `mount_in` = the
+    phase in which the reload button mounts V; `mount_via` = how it shows: 'pos' (m=1 in the position lines), 'ride' (the vehicle
+    camera line), 'poll' (the read after the scenario). `mount_late_in` = the phase in which the mount shows only on the first magazine
+    read after the scenario (position line with m=1 and the camera line written late)."""
+    st = script.state
+    st['mounted'] = mounted_start
+    episode_at = episode_at or {}
+    known = dur if standing_episode else None
+    timings = {'reload_walk': rf.reload_walk_timing, 'reload_then_run': rf.reload_run_timing}
+    late = {'phase': None}
+
+    def wrapped(event, cmd):
+        if event == 'RF_HAND' and late['phase']:
+            late['phase'] = None
+            now = datetime.now()
+            st['mounted'] = True
+            return (script(event, cmd) or []) + [pos_line(now, 0.0, 4.0, 1), logline(now, 0.01, '[utpp_vehiclecam] t=1.0 keepTpp mount -> ride')]
+        if event == f'play:rf_{tag}_reload' and standing_episode:
+            return (script(event, cmd) or []) + [f'UTPPMotion RELOAD episode weapon=Items.Test dur={dur:.2f}']
+        if event == 'POS':
+            return {'p': (0.0, 0.0, 0.0), 'cf': (1.0, 0.0), 'v': None, 'vr': None, 'src': None, 'weapon': True,
+                    'mounted': st['mounted']}
+        if event == 'UNMOUNT':
+            if unmount_works:
+                st['mounted'] = False
+            return []
+        if event == 'BLOCKED':
+            return blocked
+        for phase, timing in timings.items():
+            if event != f'play:rf_{tag}_{phase}':
+                continue
+            lines = list(script(event, cmd) or [])
+            t0 = datetime.now()
+            t = timing(known)
+            if mount_late_in == phase:
+                late['phase'] = phase
+            here = mount_in == phase
+            moves_from = 0.05 if phase == 'reload_walk' else t['push']
+            v = speed if phase == 'reload_walk' else run_speed
+            if pos:
+                for i in range(int(t['duration'] / 0.25) + 1):
+                    off = i * 0.25
+                    lines.append(pos_line(t0, off, v * max(0.0, off - moves_from),
+                                          1 if here and 'pos' in mount_via and off > t['press'] else 0))
+            if here:
+                if 'poll' in mount_via:
+                    st['mounted'] = True
+                if 'ride' in mount_via:
+                    lines.append(logline(t0, t['press'] + 0.3, '[utpp_vehiclecam] t=1.0 keepTpp mount -> ride'))
+            elif episode and mount_late_in != phase:
+                lines.append(episode_line(t0, episode_at.get(phase, t['end'] + 0.05), dur))
+            return sorted(lines)
+        return script(event, cmd)
+    wrapped.state = st
+    return wrapped
+
+
+def run_motion(base_kw=None, args=None, **cfg):
+    return run_macro(with_motion(good_script('handgun', **(base_kw or {})), **cfg), args=args, fams='handgun')
+
+
+def phase_rec(res, phase, tag='handgun'):
+    return next(p for p in res['families'][tag]['phases'] if p.get('phase') == phase)
+
+
+def stamp_time(text):
+    return datetime.strptime(text, '%Y-%m-%d %H:%M:%S.%f')
+
+
+class ReloadMotion(unittest.TestCase):
+    def test_both_phases_pass_and_their_timing_is_recorded(self):
+        n, res, plan = run_motion()
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        self.assertEqual(r['invalid_phases'], [])
+        labels = [w['phase'] for w in res['phase_windows']]
+        self.assertEqual(labels[labels.index('reload'):labels.index('reload') + 3], ['reload', 'reload_walk', 'reload_then_run'])
+        walk, run = phase_rec(res, 'reload_walk'), phase_rec(res, 'reload_then_run')
+        self.assertEqual((walk['verdict'], run['verdict']), ('PASS', 'PASS'))
+        self.assertGreaterEqual(walk['moved_m'], rf.RELOAD_WALK_MIN_M)
+        self.assertTrue(walk['result']['detected'])
+        self.assertEqual(walk['result']['mag_end'], 12)
+        # the timing record of the running phase: press, push, end of the episode, the measured start of the movement
+        for key in ('press_at', 'push_at', 'episode_end', 'moving_at'):
+            self.assertTrue(run[key], key)
+        self.assertLess(run['press_at'], run['push_at'])
+        self.assertLess(run['push_at'], run['episode_end'])
+        self.assertEqual(run['episode_end_source'], 'log')
+        self.assertAlmostEqual(run['push_before_end_s'], rf.RELOAD_RUN_LEAD_S + 0.05, delta=0.1)
+        self.assertEqual((run['reload_s_used'], run['reload_s_source']), (2.0, 'standing reload episode'))
+        self.assertAlmostEqual((stamp_time(run['push_at']) - stamp_time(run['press_at'])).total_seconds(), 2.0 - rf.RELOAD_RUN_LEAD_S, delta=0.01)
+        self.assertEqual(r['fails'], [])
+
+    def test_order_of_the_plays_and_one_probe_for_the_walk(self):
+        n, res, plan = run_motion()
+        plays = n.plays()
+        i = plays.index('rf_handgun_reload')
+        self.assertEqual(plays[i + 1:i + 5], ['rf_handgun_reload_prep', 'rf_handgun_reload_walk', 'rf_handgun_reload_prep',
+                                              'rf_handgun_reload_then_run'])
+        self.assertEqual(n.called('clear'), [('rf_handgun_reload_walk',)])           # no replay of a walk that already pressed reload
+        self.assertNotIn('walk', [c[0] for c in n.calls if c[1:2] == ('rf_handgun_reload_walk',)])
+        runs = {r['scenario'] for r in plan['runs']}
+        self.assertTrue({'rf_handgun_reload_walk', 'rf_handgun_reload_then_run', 'rf_handgun_reload_prep'} <= runs)
+        for w in res['phase_windows']:
+            self.assertLessEqual(w['start'], w['end'])
+        wins = gp.build_windows([{'name': 'ranged_families', 'run': 1, 'start': datetime.now(), 'end': datetime.now(),
+                                  'phase_windows': res['phase_windows']}], [])
+        labels = [w[0] for w in wins]
+        self.assertIn('rf_handgun_reload_walk#1', labels)
+        self.assertIn('rf_handgun_reload_then_run#1', labels)
+
+    def test_the_duration_comes_from_the_standing_reload(self):
+        for dur in (1.5, 3.0):
+            n, res, plan = run_motion(dur=dur)
+            run = phase_rec(res, 'reload_then_run')
+            self.assertEqual(run['verdict'], 'PASS', run)
+            self.assertEqual(run['reload_s_used'], dur)
+            gap = (stamp_time(run['push_at']) - stamp_time(run['press_at'])).total_seconds()
+            self.assertAlmostEqual(gap, dur - rf.RELOAD_RUN_LEAD_S, delta=0.01)
+            sc = n.scenarios['rf_handgun_reload_then_run']
+            self.assertAlmostEqual(sc.duration, rf.RELOAD_PRESS_AT_S + dur + rf.RELOAD_RUN_TAIL_S + 0.2, delta=0.01)
+
+    def test_without_a_known_duration_the_movement_starts_1_2_s_after_the_press(self):
+        n, res, plan = run_motion(standing_episode=False)
+        run = phase_rec(res, 'reload_then_run')
+        self.assertEqual(run['verdict'], 'PASS', run)
+        self.assertIsNone(run['reload_s_used'])
+        self.assertTrue(run['reload_s_source'].startswith('unknown'))
+        gap = (stamp_time(run['push_at']) - stamp_time(run['press_at'])).total_seconds()
+        self.assertAlmostEqual(gap, rf.RELOAD_RUN_FALLBACK_START_S, delta=0.01)
+
+    def test_a_reload_that_ended_before_the_movement_is_invalid_not_a_failure(self):
+        n, res, plan = run_motion(episode_at={'reload_then_run': 1.0})      # the push is at 1.8 s
+        r = res['families']['handgun']
+        run = phase_rec(res, 'reload_then_run')
+        self.assertEqual(run['verdict'], 'INVALID')
+        self.assertIn('already ended before V moved', run['invalid_reason'])
+        self.assertEqual([p['phase'] for p in r['invalid_phases']], ['reload_then_run'])
+        self.assertEqual(r['fails'], [])
+        self.assertEqual(r['verdict'], 'PASS')
+        self.assertEqual(phase_rec(res, 'reload_walk')['verdict'], 'PASS')
+        self.assertTrue(any('reload_then_run: INVALID (not scored)' in w for w in r['warnings']))
+        for key in ('press_at', 'push_at', 'episode_end'):                  # the timing is recorded for the invalid phase too
+            self.assertTrue(run[key], key)
+
+    def test_the_walk_must_cover_a_metre_during_the_reload(self):
+        n, res, plan = run_motion(speed=0.2)
+        r = res['families']['handgun']
+        walk = phase_rec(res, 'reload_walk')
+        self.assertEqual(walk['verdict'], 'FAIL')
+        self.assertLess(walk['moved_m'], 1.0)
+        self.assertTrue(any(f.startswith('reload_walk: V moved only') for f in r['fails']), r['fails'])
+        self.assertEqual(r['verdict'], 'FAIL')
+
+    def test_without_position_lines_the_distance_is_not_verified_and_the_phases_still_pass(self):
+        n, res, plan = run_motion(pos=False)
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        self.assertIsNone(phase_rec(res, 'reload_walk')['moved_m'])
+        self.assertTrue(any('distance covered during the reload is not verified' in w for w in r['warnings']), r['warnings'])
+
+    def test_a_magazine_that_does_not_refill_fails_both_phases(self):
+        n, res, plan = run_motion({'reload_grows': False}, standing_episode=False, episode=False)
+        r = res['families']['handgun']
+        self.assertTrue(any(f.startswith('reload_walk: the magazine did not refill') for f in r['fails']), r['fails'])
+        self.assertTrue(any(f.startswith('reload_then_run: the magazine did not refill') for f in r['fails']), r['fails'])
+        self.assertEqual(r['invalid_phases'], [])
+
+    def test_an_unreadable_magazine_is_a_warning(self):
+        n, res, plan = run_motion({'mag_readable': False}, standing_episode=False, episode=False)
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        self.assertTrue(any(w.startswith('reload_walk: the magazine is not readable') for w in r['warnings']), r['warnings'])
+
+    def test_nothing_to_reload_after_the_shots_is_invalid(self):
+        n, res, plan = run_motion({'shots_fired': False})
+        r = res['families']['handgun']
+        self.assertEqual([p['phase'] for p in r['invalid_phases']], ['reload_walk', 'reload_then_run'])
+        self.assertTrue(all('still full' in p['reason'] for p in r['invalid_phases']))
+        self.assertNotIn('rf_handgun_reload_walk', n.plays())                  # no press without a short magazine
+        self.assertFalse([f for f in r['fails'] if f.startswith('reload_')])
+
+    def test_a_walk_that_is_stuck_is_invalid(self):
+        n, res, plan = run_motion(blocked={'stall_s': 2.1, 'at': None})
+        r = res['families']['handgun']
+        walk = phase_rec(res, 'reload_walk')
+        self.assertEqual(walk['verdict'], 'INVALID')
+        self.assertIn('stuck', walk['invalid_reason'])
+        self.assertEqual([c for c in n.called('blocked?')], [('rf_handgun_reload_walk',)])
+        self.assertEqual(r['fails'], [])
+        self.assertEqual(phase_rec(res, 'reload_then_run')['verdict'], 'PASS')
+
+    # -- the reload button is the mount button next to a vehicle
+    def test_a_press_that_mounts_a_vehicle_is_invalid_and_the_runner_leaves_it(self):
+        for via in (('pos',), ('ride',), ('poll',)):
+            n, res, plan = run_motion(mount_in='reload_walk', mount_via=via)
+            r = res['families']['handgun']
+            walk = phase_rec(res, 'reload_walk')
+            self.assertEqual(walk['verdict'], 'INVALID', via)
+            self.assertTrue(walk['mounted'], via)
+            self.assertIn('mounted V into a vehicle', walk['invalid_reason'])
+            self.assertEqual(r['fails'], [], via)                              # not scored: no failure of the mod
+            self.assertEqual(r['verdict'], 'PASS', via)
+            self.assertEqual(n.called('unmount'), [('reload_walk: after the press',)], via)
+            self.assertEqual(n.called('leave_car'), [()], via)                  # away from the car before the next press
+            self.assertNotIn('result', walk)                                    # the magazine of a seated V is not judged
+            self.assertEqual(phase_rec(res, 'reload_then_run')['verdict'], 'PASS', via)
+            self.assertEqual([p['phase'] for p in r['invalid_phases']], ['reload_walk'], via)
+
+    def test_a_mount_that_shows_only_after_the_scenario_is_still_invalid(self):
+        for phase in ('reload_walk', 'reload_then_run'):
+            n, res, plan = run_motion(mount_late_in=phase)
+            r = res['families']['handgun']
+            rec = phase_rec(res, phase)
+            self.assertEqual(rec['verdict'], 'INVALID', phase)
+            self.assertTrue(rec['mounted'], phase)
+            self.assertIn('seen after the scenario', rec['invalid_reason'])
+            self.assertEqual(r['fails'], [], phase)                       # a seated V is not "magazine did not refill"
+            self.assertEqual(n.called('unmount'), [(f'{phase}: after the press',)], phase)
+            self.assertEqual(n.called('leave_car'), [()], phase)
+            self.assertNotIn('result', rec)
+
+    def test_the_window_of_a_mounted_phase_ends_before_the_exit(self):
+        n, res, plan = run_motion(mount_in='reload_walk')
+        rec = phase_rec(res, 'reload_walk')
+        window = next(w for w in res['phase_windows'] if w['phase'] == 'reload_walk')
+        self.assertEqual(window['end'], rec['end'])
+        self.assertLessEqual(stamp_time(rec['end']), n.unmount_at[0])      # the window ends before the exit starts
+
+    def test_the_time_the_stick_stays_pushed_after_the_episode_is_recorded(self):
+        n, res, plan = run_motion()
+        run = phase_rec(res, 'reload_then_run')
+        self.assertGreaterEqual(run['run_after_end_s'], rf.RELOAD_RUN_TAIL_S)
+        self.assertFalse([w for w in run['warnings'] if 'ended' in w and 'after the reload episode' in w])
+        n, res, plan = run_motion(episode_at={'reload_then_run': 2.9})       # the episode ends later than the scenario was made for
+        run = phase_rec(res, 'reload_then_run')
+        self.assertLess(run['run_after_end_s'], rf.RELOAD_RUN_TAIL_S)
+        self.assertTrue(any('after the reload episode' in w for w in run['warnings']), run['warnings'])
+        self.assertEqual(run['verdict'], 'PASS')
+
+    def test_the_running_phase_is_invalid_too_when_it_mounts(self):
+        n, res, plan = run_motion(mount_in='reload_then_run')
+        run = phase_rec(res, 'reload_then_run')
+        self.assertEqual(run['verdict'], 'INVALID')
+        self.assertTrue(run['mounted'])
+        self.assertLess(run['press_at'], run['push_at'])                      # the commanded timing is kept for a phase that is not scored
+        self.assertEqual(phase_rec(res, 'reload_walk')['verdict'], 'PASS')
+        self.assertEqual(n.called('unmount'), [('reload_then_run: after the press',)])
+
+    def test_a_vehicle_seat_before_the_press_means_no_press(self):
+        n, res, plan = run_motion(mounted_start=True)
+        r = res['families']['handgun']
+        walk = phase_rec(res, 'reload_walk')
+        self.assertEqual(walk['verdict'], 'INVALID')
+        self.assertIn('before the reload press', walk['invalid_reason'])
+        self.assertNotIn('rf_handgun_reload_walk', n.plays())
+        self.assertEqual(n.called('unmount'), [('reload_walk: before the press',)])
+        self.assertEqual(phase_rec(res, 'reload_then_run')['verdict'], 'PASS')     # on foot again after the exit
+        self.assertEqual(r['fails'], [])
+
+    def test_a_vehicle_that_cannot_be_left_makes_the_rest_invalid_without_a_press(self):
+        n, res, plan = run_motion(mount_in='reload_walk', mount_via=('pos', 'poll'), unmount_works=False)
+        r = res['families']['handgun']
+        self.assertEqual([p['phase'] for p in r['invalid_phases']], ['reload_walk', 'reload_then_run'])
+        self.assertIn('still in a vehicle', r['invalid_phases'][1]['reason'])
+        self.assertNotIn('rf_handgun_reload_then_run', n.plays())
+        self.assertEqual(n.called('leave_car'), [])                              # not walking away from a vehicle V sits in
+        self.assertTrue(any('still in the vehicle' in w for w in r['warnings']), r['warnings'])
+        self.assertEqual(r['fails'], [])
+
+    def test_an_exit_that_needs_the_keyboard_is_a_warning(self):
+        class NeedsKeyboard(Exception):
+            pass
+        base = with_motion(good_script('handgun'), mount_in='reload_walk', unmount_works=False)
+
+        def run(args=None):
+            with tempfile.TemporaryDirectory() as d:
+                n = FakeNight(d, base)
+
+                def boom(*a, **k):
+                    raise NeedsKeyboard('keys refused')
+                n.ensure_unmounted = boom
+                with mock.patch.object(rf, 'RELOAD_MAX_S', 0.05), mock.patch.object(rf, 'UNREADABLE_WAIT_S', 0.05):
+                    return rf.run_ranged_macro(n, _Pad(), _G(), {'runs': []}, 'ranged_families', {'name': 'x', 'run': 1})
+        res = run()
+        r = res['families']['handgun']
+        self.assertEqual(r['fails'], [])
+        self.assertTrue(any('leaving the vehicle failed: NeedsKeyboard' in w for w in r['warnings']), r['warnings'])
+
+    # -- the option and the pure parts
+    def test_phase_option_runs_only_the_listed_phases(self):
+        args = types.SimpleNamespace(ranged_families='handgun', ranged_records=[], ranged_phases='reload_walk')
+        n, res, plan = run_motion(args=args)
+        r = res['families']['handgun']
+        self.assertEqual([w['phase'] for w in res['phase_windows']], ['draw', 'reload_walk', 'holster'])
+        self.assertEqual(n.plays(), ['rf_setup_walk', 'rf_handgun_reload_prep', 'rf_handgun_reload_walk'])
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        self.assertEqual((r['removed'], r['ammo_removed']), ('removed', 'removed'))      # the cleanup runs as always
+
+    def test_the_running_phase_needs_the_standing_reload_for_its_duration(self):
+        args = types.SimpleNamespace(ranged_families='handgun', ranged_records=[], ranged_phases='reload_then_run')
+        n, res, plan = run_motion(args=args)
+        self.assertEqual([w['phase'] for w in res['phase_windows']], ['draw', 'reload', 'reload_then_run', 'holster'])
+        self.assertEqual(phase_rec(res, 'reload_then_run')['reload_s_used'], 2.0)
+        self.assertEqual(rf.phase_filter(args), {'reload', 'reload_then_run'})
+
+    def test_phase_option_parsing(self):
+        self.assertIsNone(rf.parse_phases(''))
+        self.assertIsNone(rf.parse_phases(None))
+        self.assertEqual(rf.parse_phases('reload_then_run, reload_walk'), ['reload_walk', 'reload_then_run'])
+        with self.assertRaises(ValueError):
+            rf.parse_phases('reload_walk,dance')
+        self.assertIsNone(rf.phase_filter(types.SimpleNamespace()))
+        self.assertEqual(rf.option_errors(types.SimpleNamespace(ranged_phases='dance'))[0][:20], 'unknown ranged phase')
+        self.assertEqual(rf.option_errors(types.SimpleNamespace(ranged_phases='reload_walk')), [])
+
+    def test_timing_of_the_scenarios(self):
+        t = rf.reload_run_timing(2.0)
+        self.assertAlmostEqual(t['push'] - t['press'], 1.6)                      # 0.4 s before the end of a 2 s reload
+        self.assertAlmostEqual(t['end'] - t['push'], rf.RELOAD_RUN_LEAD_S)
+        self.assertAlmostEqual(t['duration'], t['end'] + rf.RELOAD_RUN_TAIL_S + 0.2)
+        u = rf.reload_run_timing(None)
+        self.assertAlmostEqual(u['push'] - u['press'], 1.2)
+        self.assertGreater(u['duration'], u['push'])
+        self.assertAlmostEqual(rf.reload_run_timing(0.3)['push'], rf.RELOAD_PRESS_AT_S)   # never before the press
+        w = rf.reload_walk_timing(2.0)
+        self.assertEqual((w['press'], w['end']), (1.0, 3.0))
+        self.assertGreater(w['duration'], w['end'])
+        self.assertEqual(rf.reload_prep_shots(None), 2)
+        self.assertEqual(rf.reload_prep_shots(12), 2)
+        self.assertEqual(rf.reload_prep_shots(2), 1)                             # one round stays
+        self.assertEqual(rf.reload_prep_shots(1), 1)
+
+    def test_scenarios_use_the_pad_only_with_the_press_and_the_stick(self):
+        for tag in rf.FAMILIES:
+            walk = rf.scenario_for(tag, 'reload_walk', reload_s=2.0)
+            run = rf.scenario_for(tag, 'reload_then_run', reload_s=2.0)
+            prep = rf.scenario_for(tag, 'reload_prep', (2, 0))
+            self.assertEqual((walk.name, run.name, prep.name), (f'rf_{tag}_reload_walk', f'rf_{tag}_reload_then_run', f'rf_{tag}_reload_prep'))
+            for sc in (walk, run, prep):
+                self.assertFalse(any(st.metrics for st in sc.steps), sc.name)
+            self.assertEqual([(b.button, round(b.t, 2)) for st in walk.steps for b in st.buttons], [('X', 1.0)])
+            self.assertEqual([(b.button, round(b.t, 2)) for st in run.steps for b in st.buttons], [('X', 0.2)])
+            sticks = [round(f.ls[1], 2) for _, f in walk.sample(0.05)]
+            self.assertEqual((sticks[0], max(sticks), sticks[-1]), (0.0, 0.55, 0.55))
+            run_sticks = [(round(f.t, 2), round(f.ls[1], 2)) for _, f in run.sample(0.05)]
+            first_full = next(t for t, v in run_sticks if v >= 1.0)
+            self.assertAlmostEqual(first_full, 1.85, delta=0.06)                 # 0.2 + (2.0 - 0.4) + 0.05
+            self.assertTrue(all(v == 0.0 for t, v in run_sticks if t < 1.75))     # standing while the reload starts
+            self.assertEqual(run_sticks[-1][1], 1.0)                              # running until the end
+            self.assertEqual(sum(1 for _ in prep.steps[0].tracks['rt'].keys if _[1] == 1), 2)
+
+    def test_judges(self):
+        ok = rf.reload_result(6, 12, 12, [2.0], 1.0)
+        miss = rf.reload_result(6, 6, 12, [], 8.0)
+        self.assertEqual(rf.judge_reload_walk(ok, 2.0)['verdict'], 'PASS')
+        self.assertEqual(rf.judge_reload_walk(ok, 0.99)['verdict'], 'FAIL')
+        self.assertEqual(rf.judge_reload_walk(ok, rf.RELOAD_WALK_MIN_M)['verdict'], 'PASS')           # at least a metre
+        self.assertEqual(rf.judge_reload_walk(miss, 2.0)['verdict'], 'FAIL')
+        self.assertEqual(rf.judge_reload_walk(ok, None)['verdict'], 'PASS')
+        self.assertTrue(rf.judge_reload_walk(ok, None)['warnings'])
+        t = datetime(2026, 11, 14, 10, 0, 0)
+        self.assertEqual(rf.judge_reload_run(ok, t, t + timedelta(seconds=0.4), 'log')['verdict'], 'PASS')
+        late = rf.judge_reload_run(ok, t, t - timedelta(seconds=0.3), 'log')
+        self.assertEqual(late['verdict'], 'INVALID')
+        self.assertIn('0.30 s after the end', late['invalid_reason'])
+        self.assertEqual(rf.judge_reload_run(ok, t, t, 'log')['verdict'], 'INVALID')                  # the same instant: already ended
+        self.assertEqual(rf.judge_reload_run(miss, t, t - timedelta(seconds=1), 'log')['verdict'], 'FAIL')   # no reload at all
+        est = rf.judge_reload_run(ok, t, t + timedelta(seconds=0.4), 'estimated')
+        self.assertEqual(est['verdict'], 'PASS')
+        self.assertTrue(any('estimated' in w for w in est['warnings']))
+        unknown = rf.judge_reload_run(ok, t, None, '')
+        self.assertEqual(unknown['verdict'], 'PASS')
+        self.assertTrue(any('not known' in w for w in unknown['warnings']))
+
+    def test_position_helpers(self):
+        t0 = datetime(2026, 11, 14, 10, 0, 0)
+        text = '\n'.join([pos_line(t0, 0.0, 0.0), pos_line(t0, 1.0, 1.0), pos_line(t0, 2.0, 3.0, mounted=1), 'noise',
+                          logline(t0, 3.0, 'UTPPMotion RELOAD episode weapon=A dur=1.50')])
+        samples = rf.pos_records(text)
+        self.assertEqual([s['mounted'] for s in samples], [False, False, True])
+        self.assertEqual([s['xy'][0] for s in samples], [0.0, 1.0, 3.0])
+        self.assertEqual(rf.position_at(samples, t0 + timedelta(seconds=1.5))[0], 2.0)
+        self.assertEqual(rf.moved_between(samples, t0 + timedelta(seconds=0.5), t0 + timedelta(seconds=1.5)), 1.5)
+        self.assertIsNone(rf.moved_between(samples, t0 + timedelta(seconds=5), t0 + timedelta(seconds=6)))   # beyond the lines
+        self.assertIsNone(rf.moved_between(samples[:1], t0, t0 + timedelta(seconds=1)))
+        self.assertEqual(rf.moving_since(samples, t0 + timedelta(seconds=0.9)), t0 + timedelta(seconds=2.0))
+        self.assertIsNone(rf.moving_since(samples[:1], t0))
+        ep = rf.reload_episode_stamps(text)
+        self.assertEqual(ep, [(t0 + timedelta(seconds=3.0), 1.5)])
+        self.assertEqual(rf.pos_records(''), [])
+
+    def test_dry_run_and_the_pad_time(self):
+        scen = load_scenarios(gw.SCENARIO_FILE)
+        text = '\n'.join(rf.dry_run_lines('smg', None, scen))
+        self.assertIn('reload_walk', text)
+        self.assertIn('reload_then_run', text)
+        self.assertIn('rf_smg_reload_walk', text)
+        for tag in rf.FAMILIES:
+            self.assertAlmostEqual(rf.pad_seconds(tag, scen),
+                                   sum(scen[rf.MOVING_PARTS[p]].duration for p in rf.MOVING_PARTS)
+                                   + sum(rf.scenario_for(tag, p).duration for p in ('aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'crouch_aim'))
+                                   + rf.reload_motion_pad_seconds(tag), places=6)
+        self.assertGreater(rf.time_limit_s(1), 150.0)
 
 
 if __name__ == '__main__':
