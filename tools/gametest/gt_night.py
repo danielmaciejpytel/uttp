@@ -1236,14 +1236,18 @@ def vehiclecam_phase(text: str) -> str | None:
     return last
 
 
+MOUNTED_PHASES = ('mount', 'ride', 'game', 'chase')   # 'game' / 'chase': still seated, another camera has the view
+
+
 def mounted_state(pos: dict | None, log_text: str) -> bool | None:
-    """V in a vehicle? NightPos m= first, then the last vehiclecam phase (mount/ride = mounted)."""
+    """V in a vehicle? NightPos m= first, then the last vehiclecam phase (MOUNTED_PHASES = mounted). A save that
+    loads into a first-person ride logs only 'keepTpp off -> game'."""
     if pos and pos.get('mounted') is not None:
         return pos['mounted']
     ph = vehiclecam_phase(log_text)
     if ph is None:
         return None
-    return ph in ('mount', 'ride')
+    return ph in MOUNTED_PHASES
 
 
 def exit_done(text: str) -> bool:

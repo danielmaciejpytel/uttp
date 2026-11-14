@@ -2142,6 +2142,8 @@ class Night:
         Returns {'res', 'cfails', 'off', 'start', 'discarded': detail | None}; 'off' is the log offset of the kept
         attempt, 'start' its start time."""
         t_in = time.monotonic()
+        if self.on_foot_first(pad, guard, plan, name):
+            self.extend_deadline(time.monotonic() - t_in)
         if clear:
             self.clear_path(pad, guard, plan, name)
         att = self.play_attempt(pad, guard, plan, name, key_crouch)
@@ -2619,11 +2621,30 @@ class Night:
         """Forced exit with the same procedure: when V is mounted (NightPos m=1 or vehiclecam phase mount/ride), wait
         until seated (an enter animation may still run), then exit_vehicle. Returns the state before (None =
         unknown)."""
+        if pos is None and self.auto_pos:   # the newest NightAuto line costs nothing and carries the m= flag
+            pos = gn.latest_pos(self.log_tail(60000), datetime.now(), self.args.pos_max_age)
         state = gn.mounted_state(pos, self.log_tail())
         if state:
             self.wait_seated(pad, guard)
             self.exit_vehicle(pad, guard, plan, why)
         return state
+
+    def on_foot_first(self, pad, guard, plan: dict | None, name: str) -> bool:
+        """A walking scenario needs V on foot: when the newest NightAuto line says m=1, leave the vehicle before the
+        scenario instead of playing it seated (every attempt would only be reported as blocked). True = left one."""
+        if not self.auto_pos:
+            return False
+        pos = gn.latest_pos(self.log_tail(60000), datetime.now(), self.args.pos_max_age)
+        if not (pos and pos.get('mounted')):
+            return False
+        self.log(f'[scenarios] {name}: V sits in a vehicle (NightPos m=1) -> leaving it first')
+        try:
+            self.ensure_unmounted(pad, guard, plan, f'before {name}', pos=pos)
+        except NeedsKeyboard as e:
+            self.log(f'[scenarios] {name}: vehicle exit skipped: {e}')
+            return False
+        self.left_vehicle_this_cycle = True
+        return True
 
     def vehicle_macro(self, pad, guard, plan: dict) -> dict:
         out = []

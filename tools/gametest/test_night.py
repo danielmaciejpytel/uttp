@@ -1968,6 +1968,11 @@ class Round3Tests(unittest.TestCase):
         self.assertFalse(gn.mounted_state({'mounted': False}, t))          # NightPos m= wins
         self.assertIsNone(gn.mounted_state(None, 'nothing'))
         self.assertFalse(gn.mounted_state(None, t + chr(10) + '[utpp_vehiclecam] keepTpp exit -> off'))
+        # a save that loads into a first-person ride logs only this line: V is seated although no mount was logged
+        game = '[utpp_vehiclecam] t=7.90 keepTpp off -> game (driver ride without the hold)'
+        self.assertEqual(gn.vehiclecam_phase(game), 'game')
+        self.assertTrue(gn.mounted_state(None, game))
+        self.assertTrue(gn.mounted_state(None, t + chr(10) + '[utpp_vehiclecam] t=9.1 keepTpp mount -> chase (retake)'))
         self.assertTrue(gn.exit_done("x exit pull: end (utpp_camera's orbit)"))
         p = {'p': (1498.58, 2200.57), 'v': (1541.55, 2216.92)}
         self.assertTrue(gn.vehicle_in_range(p))                            # 46 m
@@ -2692,6 +2697,22 @@ class LookAheadTests(unittest.TestCase):
         run = next(r for r in plan['runs'] if r['scenario'] == 'free')
         self.assertEqual(set(run), {'scenario', 'run', 'steps', 'aborted'})      # no new keys on the scored run
         self.assertEqual(self.n.recoveries, [])
+
+    def test_seated_v_leaves_the_vehicle_before_a_walking_scenario(self):
+        w = self.world([_walk_scenario('free', 0.4, 3.0)])
+        stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        with open(self.log, 'a', encoding='utf-8') as f:                         # the newest NightAuto line: seated
+            f.write(f'[{stamp}] [info    ] [ 80716] [UTPP] UTPP CET [night] POS p=1574.85,2258.13,182.53 '
+                    'cf=0.424,-0.906 v=1574.86,2258.15,182.14,-0.905,-0.425 src=mounted w=0 m=1 freeMove=0/0x9 '
+                    'psmW=0 ub=0 wi=none n=1' + chr(10))
+        calls = []
+        self.n.ensure_unmounted = (lambda pad, g, plan, why, pos=None:
+                                   calls.append((why, pos.get('mounted'), list(w.played))) or True)
+        self.n.play_walking(_Pad(), _G(), {'runs': []}, 'free', clear=False)
+        self.assertEqual(calls, [('before free', True, [])])                    # asked once, before the scenario played
+        self.assertTrue(self.n.left_vehicle_this_cycle)
+        self.assertEqual(w.played.count('free'), 1)
+        self.assertTrue(any('sits in a vehicle' in m for m in self.n.logged))
 
     def test_without_night_auto_nothing_is_detected(self):
         self.n.auto_pos = False
