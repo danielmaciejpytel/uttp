@@ -438,6 +438,27 @@
       "steps": [
         {"name": "reload", "duration": 7.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "buttons": [{"t": 0.3, "button": "X", "hold": 0.12}], "metrics": false}
       ]
+    },
+    "ranged_walk": {
+      "description": "ranged family macro part (night.py ranged_families; gt_ranged_families.py): walk with the weapon drawn and not aimed, then stop; the family scenarios rf_<family>_walk are copies of it and use its thresholds",
+      "steps": [
+        {"name": "walk_armed", "duration": 2.6, "ls": [[0, 0, 0], [0.4, 0, 0.8]]},
+        {"name": "stop", "duration": 0.6, "ls": [[0, 0, 0.8], [0.2, 0, 0]], "lt": [[0, 0]], "metrics": false}
+      ]
+    },
+    "ranged_walk_aimed": {
+      "description": "ranged family macro part (night.py ranged_families): walk with the weapon drawn and aimed (LT = RangedADS_Button IK_Pad_LeftTrigger held), stick 0.5 as in weapon_aim aim_walk, then stop",
+      "steps": [
+        {"name": "aim_walk", "duration": 2.6, "ls": [[0, 0, 0], [0.4, 0, 0.5]], "lt": [[0, 0], [0.1, 1], [2.4, 1], [2.5, 0]]},
+        {"name": "stop", "duration": 0.6, "ls": [[0, 0, 0.5], [0.2, 0, 0]], "lt": [[0, 0]], "metrics": false}
+      ]
+    },
+    "ranged_sprint": {
+      "description": "ranged family macro part (night.py ranged_families): short sprint with the weapon drawn (L3 tap = sprint, as in slide_sprint), then stop",
+      "steps": [
+        {"name": "sprint", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}]},
+        {"name": "stop", "duration": 1.0, "ls": [[0, 0, 1], [0.3, 0, 0]], "metrics": false}
+      ]
     }
   }
 }

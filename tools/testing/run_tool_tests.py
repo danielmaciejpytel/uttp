@@ -113,6 +113,7 @@ REGISTRY = {
     'gametest/test_gt_collect.py': {},
     'gametest/test_gt_flow.py': {},
     'gametest/test_gt_melee_weapons.py': {},
+    'gametest/test_gt_ranged_families.py': {},
     'gametest/test_gt_states.py': {},
     'gametest/test_gt_post.py': {'note': 'one case cuts an 8 s test video with the project ffmpeg and SKIPs without it'},
     'gametest/test_gt_posemeter.py': {'note': 'runs the pose meter worker processes on the small slice in testdata (a few seconds)'},

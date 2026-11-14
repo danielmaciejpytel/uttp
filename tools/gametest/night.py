@@ -2,6 +2,7 @@
 
   python Source\\tools\\gametest\\night.py --dry-run [--set loco,sprint_dash,weapon_draw_aim_holster,vehicle_mount_exit]   (also: --set aim_probe and --set melee_fists_target, not in 'all')
   python Source\\tools\\gametest\\night.py --dry-run --set melee_weapons   (melee_knife, melee_katana, melee_blunt, melee_baton, melee_bat, melee_hammer, melee_mantis; see gt_melee_weapons.py; not in 'all')
+  python Source\\tools\\gametest\\night.py --dry-run --set ranged_families   (one weapon per ranged family, draw .. holster; --ranged-families / --ranged-records; see gt_ranged_families.py; not in 'all')
   python Source\\tools\\gametest\\night.py --go --cycles 3 --set all --db utpp_base
          [--install 0.5.8 "note" --cet-mods utpp_core,utpp_body] [--cet "Game.UTPPSetMMTurnCommit(true)"]
 
@@ -97,6 +98,7 @@ interpreter with numpy and psutil, run from the project root):
                   --pose-baseline <run folder of an earlier Female run> --fast
    (ii)  fists, enemy and the four melee weapon sets on both bodies:
          night.py --go --set melee_fists,melee_fists_target,melee_weapons --body both --diag until --fast
+         night.py --go --background --set ranged_families --body both --diag until --fast
    (iii) the background input probe (pad-only walks while the game window is behind others):
          night.py --go --background --set bg_probe --diag until --fast
 
@@ -140,6 +142,7 @@ sys.path.insert(0, HERE)
 import gt_capture  # noqa: E402
 import gt_log  # noqa: E402
 import gt_melee_weapons as gw  # noqa: E402
+import gt_ranged_families as rf  # noqa: E402
 import gt_night as gn  # noqa: E402
 import run as gt_run  # noqa: E402
 import failure_clips  # noqa: E402
@@ -3425,6 +3428,8 @@ class Night:
                             limit = max(limit, 300.0)
                         if name in gw.WEAPON_SETS:
                             limit = max(limit, gw.time_limit_s(name))
+                        if name in rf.SET_MEMBERS:
+                            limit = max(limit, rf.time_limit_s(len(rf.options_of(self.args)[0])))
                         self.scenario_deadline = time.monotonic() + limit
                         self.log(f'[scenarios] {name} run {r}')
                         rec = {'name': name, 'run': r, 'start': t0}
@@ -3440,6 +3445,8 @@ class Night:
                                 rec.update(self.melee_macro(pad, guard, plan))
                             elif name in gw.WEAPON_SETS:
                                 gw.run_weapon_macro(self, pad, guard, plan, name, rec)   # fills rec while it runs
+                            elif name in rf.SET_MEMBERS:
+                                rf.run_ranged_macro(self, pad, guard, plan, name, rec)   # fills rec while it runs
                             elif name == 'melee_fists_target':
                                 rec.update(self.enemy_macro(pad, guard, plan))
                             elif name == 'shoulder_key':
@@ -3522,7 +3529,8 @@ class Night:
                for s in self.cycle.get('scenarios', [])]
         return gt_post.plan_sheets(rec['path'], utpp_copy, stamp(ck['video_end']), ck['clock_offset_s'], self.args.ffmpeg,
                                    ck['video_start'], ck['duration_s'], scs, self.args.sheet_pad,
-                                   os.path.join(self.cycle_dir, 'sheets'), self.args.keep_sheet_frames)
+                                   os.path.join(self.cycle_dir, 'sheets'), self.args.keep_sheet_frames,
+                                   phases=gn.phase_windows_of(self.cycle.get('scenarios', [])))
 
     def start_sheets(self, jobs: list[dict]):
         """The contact sheets in a thread that drives the process pool; returns (thread, result dict filled when it ends)."""
@@ -3549,6 +3557,8 @@ class Night:
         for w in gn.sheet_windows(ck['video_start'], ck['duration_s'],
                                   [{'name': f'{s["name"]}_r{s["run"]}', 'start': s['start'], 'end': s.get('end')}
                                    for s in self.cycle.get('scenarios', [])], self.args.sheet_pad):
+            pend['sheets'].append({'sheet': w['name'], 'video_s': [w['start'], w['end']]})
+        for w in gn.phase_sheet_windows(ck['video_start'], ck['duration_s'], gn.phase_windows_of(self.cycle.get('scenarios', []))):
             pend['sheets'].append({'sheet': w['name'], 'video_s': [w['start'], w['end']]})
         if clips:
             pend['commands']['clips'] = (f'python -I "{os.path.join(HERE, "failure_clips.py")}" "{run}" --per-cause 0 '
@@ -4140,6 +4150,17 @@ def dry_run(args) -> int:
             print(f'     {n}: weapon macros (gt_melee_weapons.py), commands per weapon:')
             for tag in gw.WEAPON_SETS[n]:
                 print('\n'.join('       ' + ln for ln in gw.dry_run_lines(tag, scenarios)))
+        if n in rf.SET_MEMBERS:
+            try:
+                fams, recs = rf.options_of(args)
+            except ValueError as e:
+                print(f'     {n}: {e}')
+                fams, recs = [], {}
+            print(f'     {n}: ranged weapon families (gt_ranged_families.py), one weapon per family; options '
+                  f'--ranged-families / --ranged-records; record not found = that family is skipped with a line; the weapon that was '
+                  f'in the hand, the inventory and the ammunition are restored; scenario time limit {rf.time_limit_s(len(fams)):.0f} s:')
+            for tag in fams:
+                print('\n'.join('       ' + ln for ln in rf.dry_run_lines(tag, recs[tag], scenarios)))
     if 'melee_fists_target' in names:
         rec0 = args.enemy_record.split(',')[0]
         print(f'       place (Codeware, tag {gn.ENEMY_TAG}; the first one defines UTPPENEMY, {len(gn.ENEMY_DEFINE)} chars): '
@@ -4465,6 +4486,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--max-vehicle-dist', type=float, default=gn.MAX_VEHICLE_DIST,
                    help='a reported vehicle farther than this from V is ignored (m)')
     p.add_argument('--weapon-window', type=float, default=6.0, help='draw/holster confirmation window (s)')
+    p.add_argument('--ranged-families', default='',
+                   help='set ranged_families: comma list of the weapon families to run (default all: ' + ', '.join(rf.FAMILIES) + ')')
+    p.add_argument('--ranged-records', action='append', default=[], metavar='FAMILY=RECORDS',
+                   help='set ranged_families: candidate item records of a family, tried in order (replaces the built-in list; '
+                        'repeatable), e.g. --ranged-records handgun=Items.Preset_Lexington_Default')
     p.add_argument('--sheet-pad', type=float, default=3.0)
     p.add_argument('--no-sheets', action='store_true')
     p.add_argument('--post-workers', type=int, default=0,
@@ -4554,6 +4580,7 @@ def validate_args(args) -> list[str]:
         errs.append(f'--pose-baseline {pb!r}: no pose_metrics.json in that folder')
     if getattr(args, 'clips_per_cause', 0) < 0 or getattr(args, 'early_stop', 0) < 0 or getattr(args, 'post_workers', 0) < 0:
         errs.append('--clips-per-cause, --early-stop and --post-workers must not be negative')
+    errs += rf.option_errors(args)
     return errs
 
 

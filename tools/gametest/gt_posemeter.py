@@ -122,7 +122,8 @@ def build_windows(scenarios, plan_runs) -> list[tuple[str, datetime, datetime]]:
     '<scenario>#<run>' = the scenario as played: first step start to last step end of its plan run(s), so the walks the runner makes
     around a scenario (look-ahead probe, walk back, recovery) are not part of it.
     A scenario record without a plan run of its own name (a macro: it plays other scenarios and commands) gets '<name>#<run>~macro',
-    its whole time span including what the runner did; limits are not checked on it."""
+    its whole time span including what the runner did; limits are not checked on it. The 'phase_windows' of a macro record add one row
+    '<label>#<run>' per labelled phase (the ranged weapon families: rf_<family>_<phase>), also without a limit."""
     out = []
     steps_of: dict[tuple[str, int], list] = {}
     for r in plan_runs or []:
@@ -139,6 +140,10 @@ def build_windows(scenarios, plan_runs) -> list[tuple[str, datetime, datetime]]:
             out.append((f'{s["name"]}#{s["run"]}', min(a for _, a, _ in own), max(b for _, _, b in own)))
         else:
             out.append((f'{s["name"]}#{s["run"]}{MACRO_SUFFIX}', _dt(s['start']), _dt(s['end'])))
+    for s in scenarios or []:                  # labelled phases of a macro (rf_<family>_<phase>): one row per phase, report only
+        for w in s.get('phase_windows') or []:
+            if w.get('label') and w.get('start') and w.get('end'):
+                out.append((f'{w["label"]}#{s["run"]}', _dt(w['start']), _dt(w['end'])))
     for (name, run), steps in steps_of.items():
         for sname, a, b in steps:
             out.append((f'{name}#{run}/{sname}', a, b))

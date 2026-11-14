@@ -64,6 +64,11 @@ SETS['all'] = ['vehicle_mount_exit'] + SETS['loco'] + ['sprint_dash', 'weapon_dr
 import gt_melee_weapons as _gw  # noqa: E402
 MACROS.update({_name: list(_gw.PARTS) for _name in _gw.WEAPON_SETS})
 SETS.update(_gw.SET_MEMBERS)
+# ranged weapon family macro (gt_ranged_families.py; not in 'all'): one weapon per family, draw .. holster with a label per phase;
+# its static pad parts (walk, aimed walk, sprint) are in scenarios.json
+import gt_ranged_families as _rf  # noqa: E402
+MACROS.update({_name: list(_rf.PARTS) for _name in _rf.SET_MEMBERS})
+SETS.update(_rf.SET_MEMBERS)
 
 
 def resolve_sets(spec: str) -> list[str]:
@@ -990,6 +995,42 @@ def sheet_windows(video_start: datetime, duration: float, scenarios: list[dict],
             a, b = max(0.0, vt - pad), min(duration - 0.05, vt + pad)
             if b > a:
                 out.append({'name': f'{sc["name"]}_{edge}', 'start': round(a, 2), 'end': round(b, 2)})
+    return out
+
+
+def _stamp_time(x) -> datetime:
+    if isinstance(x, datetime):
+        return x
+    s = str(x)
+    return datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f' if '.' in s else '%Y-%m-%d %H:%M:%S')
+
+
+def phase_windows_of(scenario_records: list[dict]) -> list[dict]:
+    """The labelled phases of macro scenarios ({'label', 'start', 'end'} entries of a record's 'phase_windows'; the stamps are
+    strings or datetimes) as [{'name': '<label>_r<run>', 'start': datetime, 'end': datetime}]. Records without labelled phases
+    (every other scenario, the melee macros) give nothing."""
+    out = []
+    for rec in scenario_records or []:
+        for w in rec.get('phase_windows') or []:
+            if not (w.get('label') and w.get('start') and w.get('end')):
+                continue
+            out.append({'name': f'{w["label"]}_r{rec.get("run", 1)}', 'start': _stamp_time(w['start']), 'end': _stamp_time(w['end'])})
+    return out
+
+
+def phase_sheet_windows(video_start: datetime, duration: float, phases: list[dict], lead: float = 0.3, tail: float = 0.3,
+                        tiles: int = 30) -> list[dict]:
+    """One sheet window per labelled phase (video seconds, clipped to the recording): the phase with `lead` / `tail` seconds around
+    it, `every` = the span over `tiles` frames (at most a frame every 0.1 s)."""
+    out = []
+    for ph in phases:
+        a = (ph['start'] - video_start).total_seconds() - lead
+        b = (ph['end'] - video_start).total_seconds() + tail
+        a, b = max(0.0, a), min(duration - 0.05, b)
+        if b <= a:
+            continue
+        out.append({'name': ph['name'], 'start': round(a, 2), 'end': round(b, 2),
+                    'every': max(0.1, round((b - a) / max(1, tiles - 1), 2))})
     return out
 
 

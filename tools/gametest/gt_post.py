@@ -101,10 +101,12 @@ def run_pool(jobs, workers: int, runner=subprocess.run, timeout: float = JOB_TIM
 # ---------------------------------------------------------------------------------------------- contact sheets
 def plan_sheets(video: str, log: str, video_end: str, clock_offset: float, ffmpeg: str, video_start: datetime,
                 duration: float, scenarios: list[dict], pad: float, sheet_dir: str, keep_frames: bool = False,
-                only: str = '', part_frames: int = PART_FRAMES) -> list[dict]:
+                only: str = '', part_frames: int = PART_FRAMES, phases: list[dict] | None = None) -> list[dict]:
     """Jobs of the contact sheets: [{'sheet' (logical name), 'part' (index or None), 'out' (folder), 'args'}]. The "full"
     sheet (a frame every FULL_EVERY_S s, 6 x 4 tiles) is cut into parts of `part_frames` frames; every scenario start and
-    end gets its own sheet (gt_night.sheet_windows, 6 x 5 tiles, a frame every 0.1 s). `only` keeps one logical sheet."""
+    end gets its own sheet (gt_night.sheet_windows, 6 x 5 tiles, a frame every 0.1 s). `phases` ([{'name', 'start', 'end'}
+    datetimes, gt_night.phase_windows_of]) adds one sheet per labelled phase (6 x 5 tiles over the whole phase). `only` keeps one
+    logical sheet."""
     base = ['--video', video, '--log', log, '--video-end', video_end, '--clock-offset', str(clock_offset), '--ffmpeg', ffmpeg]
     if not keep_frames:
         base.append('--no-keep-sheet-frames')
@@ -123,6 +125,10 @@ def plan_sheets(video: str, log: str, video_end: str, clock_offset: float, ffmpe
     for w in gn.sheet_windows(video_start, duration, scenarios, pad):
         jobs.append({'sheet': w['name'], 'part': None, 'out': os.path.join(sheet_dir, w['name']),
                      'args': base + ['--every', '0.1', '--start', str(w['start']), '--end', str(w['end']), '--cols', '6',
+                                     '--rows', '5', '--width', '320', '--out', os.path.join(sheet_dir, w['name'])]})
+    for w in gn.phase_sheet_windows(video_start, duration, phases or []):
+        jobs.append({'sheet': w['name'], 'part': None, 'out': os.path.join(sheet_dir, w['name']),
+                     'args': base + ['--every', str(w['every']), '--start', str(w['start']), '--end', str(w['end']), '--cols', '6',
                                      '--rows', '5', '--width', '320', '--out', os.path.join(sheet_dir, w['name'])]})
     if only:
         jobs = [j for j in jobs if j['sheet'] == only]
@@ -239,9 +245,10 @@ def sheets_for_run(run_dir: str, only: str = '', workers: int = 0, ffmpeg: str =
                   'end': _parse_time(s['end']) if s.get('end') else None} for s in cyc.get('scenarios', [])]
     sd = os.path.join(run_dir, 'sheets')
     jobs = plan_sheets(video, log, ck['video_end'], ck['clock_offset_s'], ffmpeg or video_sheets.FFMPEG,
-                       _parse_time(ck['video_start']), float(ck['duration_s']), scenarios, pad, sd, keep_frames, only)
+                       _parse_time(ck['video_start']), float(ck['duration_s']), scenarios, pad, sd, keep_frames, only,
+                       phases=gn.phase_windows_of(cyc.get('scenarios', [])))
     if only and not jobs:
-        raise SystemExit(f'no sheet named {only!r} (names: full, <scenario>_r<run>_start / _end)')
+        raise SystemExit(f'no sheet named {only!r} (names: full, <scenario>_r<run>_start / _end, <phase label>_r<run>)')
     res, timing = run_sheets(jobs, sd, workers, runner)
     if move and res:
         import failure_clips

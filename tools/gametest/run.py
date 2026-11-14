@@ -175,7 +175,7 @@ def analyze(plan: dict, lines: list, base_thresholds: dict, scenarios: dict, clo
     off = timedelta(seconds=clock_offset_s)
     rows = []
     for run in plan['runs']:
-        sc = scenarios.get(run['scenario'])
+        sc = scenarios.get(run['scenario']) or scenarios.get(run.get('part'))   # 'part': a copy under its own name (a family label)
         thr = gt_log.merge_thresholds(base_thresholds, sc.thresholds if sc else {})
         stick = sc.step_stick_stats() if sc else {}
         started = [s for s in run['steps'] if s.get('start')]
