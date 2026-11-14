@@ -2489,6 +2489,19 @@ class PerfStatusTests(unittest.TestCase):
         self.assertIn('feedP95us=87.5', self.n.cycle['perf_status'])
         self.assertEqual(self.calls, [('overlay', 'closed'), ('cv', gn.PERF_STATUS_CMD)])   # overlay checked first
 
+    def test_budget_fields_come_from_their_own_line(self):
+        tail = 'wallP95us=412.0 budgetTrips=2 budgetPauseS=0.00 budgetCoolS=10 threadTime=1'
+        self.stub([self.OK + chr(10) + '[2026-11-12 03:40:00.001] [info] [1] [UTPP] UTPP CET [night] PERFB ' + tail + chr(10)])
+        self.n.perf_status()
+        self.assertEqual(self.n.cycle['perf_budget'], tail)
+        self.assertTrue(self.n.cycle['perf_status'].endswith('| ' + tail))
+        self.assertIn("string.find(tostring(s),'wallP95us='", gn.PERF_STATUS_CMD)
+        # a status without those fields (an older build): the status line alone, no error
+        self.stub([self.OK + chr(10)])
+        self.n.cycle = {'name': 't', 'steps': []}
+        self.n.perf_status()
+        self.assertNotIn('perf_budget', self.n.cycle)
+
     def test_retries_then_succeeds(self):
         self.stub([None, None, self.OK])
         self.n.perf_status()

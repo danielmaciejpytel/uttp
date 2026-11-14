@@ -102,8 +102,11 @@ def validate_sets(names: list[str], scenarios: dict) -> list[str]:
 QUIT_CMD = ("local ok,e=pcall(function() GetSingleton('inkMenuScenario'):GetSystemRequestsHandler():ExitGame() end) "
             "pcall(function() Game.UTPPLogLine('[night] QUIT exitgame ok='..tostring(ok)..' '..tostring(e)) end)")
 # the motion driver status line (frames, applied, feedP95us, budget, skip) written into the UTPP log at the end of a run
+# (a log line holds 479 characters: the budget fields at the end of the status go into a second line, PERFB)
 PERF_STATUS_CMD = ("local ok,s=pcall(function() return Game.UTPPGetMotionStatus() end) "
-                   "pcall(function() Game.UTPPLogLine('[night] PERF '..tostring(ok)..' '..tostring(s)) end)")
+                   "pcall(function() Game.UTPPLogLine('[night] PERF '..tostring(ok)..' '..tostring(s)) end) "
+                   "pcall(function() local i=string.find(tostring(s),'wallP95us=',1,true) "
+                   "if i then Game.UTPPLogLine('[night] PERFB '..string.sub(tostring(s),i)) end end)")
 NIGHT_TAG = 'UTPPNight'
 FALLBACK_VEHICLE = os.environ.get('UTPP_NIGHT_VEHICLE', 'Vehicle.v_standard2_archer_hella_player')
 # UTPP_NIGHT_VEHICLE=<record> forces that vehicle record (e.g. a car while the active player vehicle is a motorcycle)

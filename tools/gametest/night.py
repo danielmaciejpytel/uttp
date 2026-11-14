@@ -3829,6 +3829,18 @@ class Night:
         if line:
             self.cycle['perf_status'] = line.split('[night] PERF ', 1)[1].strip()
             self.cycle['perf_source'] = 'console'
+            # the budget fields of the status (wall p95, trips, pause) come in their own line: the first one is cut at 479 characters
+            end = time.monotonic() + 1.0
+            tail = None
+            while tail is None:
+                tail = next((ln.split('[night] PERFB ', 1)[1].strip() for ln in (txt or '').splitlines() if '[night] PERFB ' in ln), None)
+                if tail is not None or time.monotonic() >= end:
+                    break
+                time.sleep(0.2)
+                txt = read_since(self.utpp_log, max(0, file_size(self.utpp_log) - 4096)) if self.utpp_log else txt
+            if tail:
+                self.cycle['perf_budget'] = tail
+                self.cycle['perf_status'] += ' | ' + tail
         else:
             try:
                 st = newest_motion_status(self.utpp_log or gt_log.newest_log(self.args.log_dir))
