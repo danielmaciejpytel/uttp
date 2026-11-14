@@ -307,17 +307,28 @@ def skip_text(fam: dict, records, echo_info: str = '') -> str:
 # ---------------------------------------------------------------------------------------------- pure phase logic
 
 def plan_shots(cap: int | None, total: int = 6) -> tuple[int, int]:
-    """(hip shots, aimed shots) for a magazine of `cap` rounds: at most `total` in all, split hip first, never more than the
-    magazine holds (a double-barrel shotgun has 2). Unknown capacity = 3 + 3."""
+    """(hip shots, aimed shots) for a magazine of `cap` rounds: at most `total` in all, split hip first, and one round stays in
+    the magazine (the game reloads an empty magazine by itself, which would move the reload out of its phase); a double-barrel
+    shotgun fires one hip shot, a magazine of one round is fired once. Unknown capacity = 3 + 3."""
     if not cap or cap <= 0:
         return 3, 3
-    n = max(1, min(total, cap))
+    n = max(1, min(total, cap - 1 if cap > 1 else 1))
     hip = min(3, (n + 1) // 2)
     return hip, min(3, n - hip)
 
 
-def fire_result(mag_before: int | None, mag_after: int | None) -> dict:
-    """Rounds the magazine lost in a fire phase; `problem` when both readings are known and nothing was fired."""
+def fire_result(mag_before: int | None, mag_after: int | None, total_before: int | None = None,
+                total_after: int | None = None, planned: int | None = None) -> dict:
+    """Rounds fired in a fire phase. A drop of the ammunition total (magazine + inventory) counts the shots: the total only
+    drops by shots, while the magazine also rises when the game reloads an empty magazine by itself. When the total did not drop
+    (or is unknown) the magazine difference decides. `problem` when the readings are known, shots were planned and nothing was
+    fired."""
+    if planned == 0:
+        return {'shots': 0, 'problem': None, 'note': 'no shot planned (one round stays in the magazine)'}
+    if total_before is not None and total_after is not None and total_before > total_after:
+        shots = total_before - total_after
+        self_reload = mag_before is not None and mag_after is not None and mag_after > mag_before - shots
+        return {'shots': shots, 'problem': None, 'note': 'the game reloaded by itself during the phase' if self_reload else ''}
     if mag_before is None or mag_after is None:
         return {'shots': None, 'problem': None, 'note': 'magazine not readable: shots not counted'}
     shots = mag_before - mag_after
@@ -377,6 +388,10 @@ def static_scenario_dict(phase: str) -> dict:
     if phase == 'reload':
         # X tap = Reload_Button (X is also the interaction button: the set walks away from the car first)
         return {'steps': [dict(_IDLE, name='reload', duration=0.6, buttons=[{'t': 0.2, 'button': 'X', 'hold': 0.12}])]}
+    if phase == 'reload_shot':
+        # one trigger pull inside the reload phase: a magazine that one pull empties is refilled by the game right away, so the
+        # reload of such a weapon can only be seen after a shot
+        return {'steps': [dict(_IDLE, name='shot', duration=0.9, rt={'keys': _taps(1, 0.5, first=0.2), 'interp': 'step'})]}
     if phase == 'crouch_aim':
         return {'steps': [
             dict(_IDLE, name='crouch', duration=1.0, buttons=[gw._R3_TAP]),
@@ -448,6 +463,7 @@ class _Run:
         self.ammo_removed = None
         self.cap: int | None = None
         self.mag: int | None = None
+        self.total: int | None = None
         self.shots = (3, 3)
         self.view = {'family': self.tag, 'label': fam['label'], 'verdict': None, 'skip_reason': None, 'record': None,
                      'evidence': None, 'types': list(fam['types']), 'candidates': list(self.records), 'given': None,
@@ -475,6 +491,7 @@ class _Run:
         h = parse_hand(info) if ok else None
         if h:
             self.mag = h['mag']
+            self.total = h['total']
             self.cap = h['cap'] or self.cap
         return h
 
@@ -543,14 +560,16 @@ def _walk_phase(run: _Run, phase: str) -> dict:
 
 
 def _fire_phase(run: _Run, phase: str) -> dict:
-    mag_before = run.mag
-    rec = _pad_phase(run, phase, {'shots_planned': run.shots[0] if phase == 'hip_fire' else run.shots[1]})
+    mag_before, total_before = run.mag, run.total
+    planned = run.shots[0] if phase == 'hip_fire' else run.shots[1]
+    rec = _pad_phase(run, phase, {'shots_planned': planned})
     run.guard.wait(0.3)
     h = run.hand(f'mag-{phase}')
-    res = fire_result(mag_before, run.mag if h else None)
-    rec.update(mag_before=mag_before, mag_after=run.mag if h else None, shots_seen=res['shots'])
+    res = fire_result(mag_before, run.mag if h else None, total_before, run.total if h else None, planned)
+    rec.update(mag_before=mag_before, mag_after=run.mag if h else None, total_before=total_before,
+               total_after=run.total if h else None, shots_seen=res['shots'])
     if res['problem']:
-        run.fails.append(f'{phase}: {res["problem"]} ({mag_before} -> {run.mag})')
+        run.fails.append(f'{phase}: {res["problem"]} (magazine {mag_before} -> {run.mag}, total {total_before} -> {run.total})')
     elif res['note']:
         run.warns.append(f'{phase}: {res["note"]}')
     return rec
@@ -624,8 +643,17 @@ def _ensure_in_hand(run: _Run, where: str) -> bool:
 
 def _reload_phase(run: _Run) -> dict:
     gn = _gn()
-    mag_start = run.mag
+    mag_start, total_start = run.mag, run.total
     t0, off = datetime.now(), file_size(run.night.utpp_log)
+    shot_in_phase = False
+    if run.cap is not None and mag_start is not None and mag_start >= run.cap:
+        # nothing to reload: the game refilled the magazine by itself after the last shot. One shot inside this phase.
+        shot = _register(run, 'reload_shot')
+        run.night.play(run.pad, run.guard, shot.name, run.plan, shot)
+        h = run.hand('mag-reload-shot')
+        shot_in_phase = bool(h and total_start is not None and run.total is not None and run.total < total_start)
+        if shot_in_phase and run.mag is not None and run.mag < run.cap:
+            mag_start = run.mag            # the magazine is short now: the reload below fills it
     sc = _register(run, 'reload')
     run.night.play(run.pad, run.guard, sc.name, run.plan, sc)
     readable = run.cap is not None and mag_start is not None
@@ -637,6 +665,10 @@ def _reload_phase(run: _Run) -> dict:
         h = run.hand('mag-reload')
         episodes = gn.reload_episodes(read_since(run.night.utpp_log, off))
         res = reload_result(mag_start, run.mag if h else None, run.cap, episodes, time.monotonic() - t_begin)
+        if shot_in_phase and not res['detected'] and res['full']:
+            # a shot was fired in this phase and the magazine is full again: the game reloaded by itself
+            res.update(detected=True, via='self reload after a shot')
+        res['shot_in_phase'] = shot_in_phase
         if res['detected'] and (res['full'] or episodes):
             break
         if time.monotonic() >= t_end:
@@ -658,16 +690,44 @@ def _reload_phase(run: _Run) -> dict:
     return rec
 
 
+STANCE_SETTLE_READS = 4               # stance reads, 0.5 s apart, after a crouch toggle (the stand-up takes a moment)
+
+
+def _settled_stance(run: _Run, off: int) -> str | None:
+    """Stance once it has settled: the stand-up is still under way when a pad phase ends, so the last trace line read at once
+    can still say crouched. Reads the log from `off` up to STANCE_SETTLE_READS times and stops at the first standing reading."""
+    stance = None
+    for _ in range(STANCE_SETTLE_READS):
+        run.guard.wait(0.5)
+        stance = gw._crouch_state(read_since(run.night.utpp_log, off))
+        if stance != 'crouched':
+            break
+    return stance
+
+
+def _stand_up(run: _Run, why: str) -> str | None:
+    """One R3 tap when V is crouched (stance settled first); returns the stance afterwards. Never taps a standing V."""
+    off = max(0, file_size(run.night.utpp_log) - 60000)
+    stance = _settled_stance(run, off)
+    if stance != 'crouched':
+        return stance
+    run.warns.append(f'{why}: V is crouched; one R3 tap to stand up')
+    off = file_size(run.night.utpp_log)
+    sc = _register(run, 'stand')
+    run.night.play(run.pad, run.guard, sc.name, run.plan, sc)
+    stance = _settled_stance(run, off)
+    if stance == 'crouched':
+        run.fails.append(f'{why}: V is still crouched after the R3 tap')
+    return stance
+
+
 def _crouch_aim_phase(run: _Run) -> dict:
     off = file_size(run.night.utpp_log)
     rec = _pad_phase(run, 'crouch_aim')
-    text = read_since(run.night.utpp_log, off)
-    stance = gw._crouch_state(text)
+    stance = _settled_stance(run, off)
     rec['stance_end'] = stance
     if stance == 'crouched':
-        run.warns.append('crouch_aim: V is still crouched after the phase; one more R3 tap')
-        sc = _register(run, 'stand')
-        run.night.play(run.pad, run.guard, sc.name, run.plan, sc)
+        rec['stance_end'] = _stand_up(run, 'crouch_aim')
     elif stance is None:
         run.warns.append('crouch_aim: no MMTRACE stance lines, the crouch was not verified')
     return rec
@@ -735,6 +795,7 @@ def run_one(night, pad, guard, plan, tag: str, records, out: dict | None = None,
         reason = _equip(run)
         skip = bool(reason and reason.startswith('skip'))
         if reason is None:
+            _stand_up(run, 'start')          # a crouch left by an earlier set or family would run every phase crouched
             _pad_phase(run, 'aim_idle')
             _fire_phase(run, 'hip_fire')
             _fire_phase(run, 'aim_fire')

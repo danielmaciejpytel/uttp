@@ -379,10 +379,11 @@ class PureLogic(unittest.TestCase):
     def test_plan_shots(self):
         self.assertEqual(rf.plan_shots(None), (3, 3))
         self.assertEqual(rf.plan_shots(12), (3, 3))
-        self.assertEqual(rf.plan_shots(6), (3, 3))
-        self.assertEqual(rf.plan_shots(2), (1, 1))               # double-barrel shotgun
+        self.assertEqual(rf.plan_shots(6), (3, 2))               # one round stays: the game would reload an empty revolver itself
+        self.assertEqual(rf.plan_shots(7), (3, 3))
+        self.assertEqual(rf.plan_shots(2), (1, 0))               # double-barrel shotgun
         self.assertEqual(rf.plan_shots(1), (1, 0))
-        self.assertEqual(rf.plan_shots(4), (2, 2))
+        self.assertEqual(rf.plan_shots(4), (2, 1))
         for cap in (1, 2, 3, 5, 8, 100):
             hip, aim = rf.plan_shots(cap)
             self.assertLessEqual(hip + aim, max(1, cap))
@@ -393,6 +394,15 @@ class PureLogic(unittest.TestCase):
         self.assertIn('no shot', rf.fire_result(12, 12)['problem'])
         self.assertIsNone(rf.fire_result(None, 9)['problem'])    # not readable: not judged
         self.assertIsNone(rf.fire_result(None, 9)['shots'])
+        # the total decides when it is known: 3 shots emptied a revolver and the game reloaded it (magazine 3 -> 6)
+        r = rf.fire_result(3, 6, 469, 466, 3)
+        self.assertEqual(r['shots'], 3)
+        self.assertIsNone(r['problem'])
+        self.assertIn('reloaded by itself', r['note'])
+        self.assertIn('no shot', rf.fire_result(2, 2, 196, 196, 1)['problem'])
+        self.assertEqual(rf.fire_result(12, 9, 250, 250, 3)['shots'], 3)       # total not counted down: the magazine decides
+        self.assertIsNone(rf.fire_result(None, None, 250, 250, 3)['problem'])    # nothing readable changed: not judged
+        self.assertIsNone(rf.fire_result(1, 1, 196, 196, 0)['problem'])    # nothing planned: nothing judged
 
     def test_reload_result(self):
         self.assertEqual(rf.reload_result(6, 12, 12, [], 2.0)['detected'], True)
@@ -633,7 +643,7 @@ class Macro(unittest.TestCase):
     def test_double_barrel_capacity_limits_the_shots(self):
         n, res, plan = run_macro(good_script('double_shotgun', cap=2), fams='double_shotgun')
         r = res['families']['double_shotgun']
-        self.assertEqual(r['shots_planned'], [1, 1])
+        self.assertEqual(r['shots_planned'], [1, 0])     # one round stays in the magazine
 
     def test_weapon_the_player_owned_stays_and_only_the_ammunition_is_restored(self):
         n, res, plan = run_macro(good_script('handgun', how='had'), fams='handgun')
