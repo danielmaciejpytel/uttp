@@ -736,15 +736,172 @@ class Macro(unittest.TestCase):
         self.assertEqual(res['own_clip_phases'], [])
 
 
+# lines in the shape the DLL writes
+COVERAGE = ('skin helpers coverage: calls={calls} w[driver={w} host=0 vehtrans=0 neck=0 vault=0 vehguard=0 none=1438] '
+            'c[driver={c} host=0 vehtrans=0 neck=0 vault=0 vehguard=0 none=0] o.driver[receipt=16{ident}] '
+            'o.none[gate=1294 receipt=87 ref=57] state[src=driver w=1.00 body=0 fallback=none skip=- detail=1]')
+COUNTERS = ('skin helpers counters (tpp): evaluated={n} rejected=1397 buildFailed=0 proposed=472 applied=415 writes=31540 '
+            'commitRejected=0 jumpRejected=0 rej[ragdoll=0 gate=1294 identity={ident} perspective=0 receipt=103 body=0] apply=1')
+ARM = ('skin helpers arm: 1 cycleCensus=1 catalog=106 rigBones=645 (arm plan prepared: man (body 1, rig layout base), '
+       'woman (body 0, rig layout base))')
+ARM_REFUSED = ('skin helpers arm: 0 cycleCensus=1 catalog=106 rigBones=294 (man: arm refused: rig of 294 bones is smaller than the '
+               'merged player rig the approved helper bundle is valid for (at least 619 bones))')
+
+
+def cov(calls, c, ident=0):
+    return COVERAGE.format(calls=calls, w=c, c=c, ident=f' identity={ident}' if ident else '')
+
+
+def seconds(sec: int, text: str) -> str:
+    return stamp(sec + 0.0, text)
+
+
+class InstalledProbe(unittest.TestCase):
+    """Arm cyberware that is installed but not held (the projectile launcher): no draw, judged from the skin helper lines."""
+
+    def judge(self, window, before=()):
+        return gw.judge_installed('\n'.join(window), '\n'.join(before))
+
+    def test_a_running_refresh_without_identity_rejections_passes_and_reports_the_layout_seen_before(self):
+        r = self.judge([seconds(1, cov(1531, 77)), seconds(2, cov(1588, 134)), seconds(3, cov(1644, 190)),
+                        seconds(4, COUNTERS.format(n=1869, ident=0)), seconds(5, cov(1738, 284))],
+                       [seconds(0, ARM), seconds(0, cov(1504, 50))])
+        self.assertTrue(r['ok'], r['fails'])
+        self.assertEqual(r['calls'], [1531, 1738])
+        self.assertEqual(r['commits'], [77, 284])
+        self.assertEqual(r['coverage_lines'], 4)
+        self.assertEqual(r['identity_delta'], 0)
+        self.assertIn('rig layout base / base', r['rig_layout'])
+        self.assertIn('rigBones=645', r['rig_layout'])
+        self.assertIn('last seen before the equip', r['rig_layout'])
+        self.assertEqual(r['warns'], [])
+
+    def test_an_arm_line_inside_the_window_wins_over_the_one_before(self):
+        r = self.judge([seconds(1, ARM), seconds(2, cov(10, 5)), seconds(3, cov(70, 60))], [seconds(0, ARM_REFUSED)])
+        self.assertTrue(r['ok'], r['fails'])
+        self.assertIn('in the window', r['rig_layout'])
+
+    def test_identity_rejections_fail_with_the_count(self):
+        r = self.judge([seconds(1, cov(100, 50)), seconds(2, cov(160, 100, ident=7))], [seconds(0, cov(90, 40))])
+        self.assertFalse(r['ok'])
+        self.assertEqual(r['identity_delta'], 7)
+        self.assertTrue(any('7 identity rejection' in f for f in r['fails']), r['fails'])
+
+    def test_the_cumulative_counters_are_compared_with_the_last_line_before_the_window(self):
+        before = [seconds(0, cov(90, 40, ident=4)), seconds(0, COUNTERS.format(n=800, ident=4))]
+        same = self.judge([seconds(1, cov(100, 50, ident=4)), seconds(2, cov(160, 100, ident=4)),
+                           seconds(3, COUNTERS.format(n=1869, ident=4))], before)
+        self.assertTrue(same['ok'], same['fails'])                      # old rejections are not this item's
+        more = self.judge([seconds(1, cov(100, 50, ident=4)), seconds(2, cov(160, 100, ident=4)),
+                           seconds(3, COUNTERS.format(n=1869, ident=6))], before)
+        self.assertFalse(more['ok'])
+        self.assertEqual(more['identity_delta'], 2)
+
+    def test_a_refresh_that_did_not_run_fails_with_the_reason(self):
+        self.assertTrue(any('0 coverage line' in f for f in self.judge([])['fails']))
+        self.assertTrue(any('1 coverage line' in f for f in self.judge([seconds(1, cov(100, 50))])['fails']))
+        stuck = self.judge([seconds(1, cov(100, 50)), seconds(2, cov(100, 50))])
+        self.assertTrue(any('did not run' in f for f in stuck['fails']), stuck['fails'])
+        no_commit = self.judge([seconds(1, cov(100, 50)), seconds(2, cov(160, 50))])
+        self.assertTrue(any('no helper commit' in f for f in no_commit['fails']), no_commit['fails'])
+
+    def test_no_arm_line_anywhere_is_a_warning_not_a_failure(self):
+        r = self.judge([seconds(1, cov(100, 50)), seconds(2, cov(160, 100))])
+        self.assertTrue(r['ok'])
+        self.assertIsNone(r['rig_layout'])
+        self.assertTrue(any('no skin helpers arm line' in w for w in r['warns']))
+
+    def test_a_refused_arm_is_reported(self):
+        r = self.judge([seconds(1, cov(100, 50)), seconds(2, cov(160, 100))], [seconds(0, ARM_REFUSED)])
+        self.assertTrue(any('not armed' in w for w in r['warns']), r['warns'])
+
+    def test_registration_flag_only_on_the_launcher(self):
+        self.assertIs(gw.WEAPONS['launcher']['held'], False)
+        for tag, w in gw.WEAPONS.items():
+            if tag != 'launcher':
+                self.assertNotIn('held', w, tag)
+        self.assertEqual(gw.phase_plan('launcher'), ['equip', 'installed', 'remove'])
+        self.assertEqual(gw.phase_plan('monowire'), ['equip', 'draw', 'holster', 'remove'])       # the other probe is unchanged
+        self.assertEqual(gw.phase_plan('strong_arms')[:2], ['equip', 'draw'])
+
+    def launcher_script(self, ident=0, flat=False, equip_ok=True, prev=3021684592):
+        def script(event, cmd):
+            if event == 'MW_CW_EQUIP':
+                if not equip_ok:
+                    return ['CET [night] MW_CW_EQUIP ok=false launcher item not in the inventory after the give']
+                rows = [cov(1531, 77), cov(1531 if flat else 1588, 77 if flat else 134), cov(1531 if flat else 1644, 77 if flat else 190, ident)]
+                return ['CET [night] MW_CW_EQUIP ok=true launcher rec=Items.AdvancedProjectileLauncherLegendary given prev=%d' % prev] + rows
+            if event == 'MW_CW_RESTORE':
+                return ['CET [night] MW_CW_RESTORE ok=true launcher restored=1 removed=1']
+            if event == 'MW_INHAND':
+                return ['CET [night] MW_INHAND ok=true none | meleefull flag=0']
+            if event == 'MW_HOLSTER':
+                return ['CET [night] MW_HOLSTER ok=true eqsystem']
+            return []
+        return script
+
+    def run_launcher(self, script, seed=(ARM,)):
+        os.environ[gw.ALLOW_CYBERWARE_ENV] = '1'
+        self.addCleanup(os.environ.pop, gw.ALLOW_CYBERWARE_ENV, None)
+        with tempfile.TemporaryDirectory() as d:
+            n = FakeNight(d, script)
+            n.settings = gt_settings.Ledger(None, log=lambda m: None)
+            n.append(list(seed))                                         # the arm plan was logged long before the equip
+            res = gw.run_weapon_macro(n, _Pad(), _G(), {'runs': []}, 'melee_launcher')
+            return n, res
+
+    def test_the_launcher_passes_without_a_draw_and_is_restored(self):
+        n, res = self.run_launcher(self.launcher_script())
+        r = res['weapons']['launcher']
+        self.assertEqual(res['verdict'], 'PASS', res['fails'])
+        self.assertEqual([p['phase'] for p in r['phases']], gw.phase_plan('launcher'))
+        self.assertNotIn(('cmd', 'MW_CW_DRAW'), n.calls)                 # it cannot be drawn like a melee weapon
+        self.assertNotIn(('cmd', 'MW_HOLSTER'), n.calls[:n.calls.index(('cmd', 'MW_CW_RESTORE'))])
+        self.assertIn(('cmd', 'MW_CW_RESTORE'), n.calls)
+        self.assertTrue(r['installed']['ok'])
+        self.assertIn('rig layout base', r['installed']['rig_layout'])
+        self.assertEqual(r['removed'], 'removed')
+        self.assertTrue(any('installed: refresh running' in m and 'rig layout base' in m for m in n.logs), n.logs)
+        self.assertFalse(any('nothing in the weapon slot' in f for f in res['fails']))
+
+    def test_identity_rejections_fail_the_launcher_and_it_is_still_restored(self):
+        n, res = self.run_launcher(self.launcher_script(ident=5))
+        self.assertEqual(res['verdict'], 'FAIL')
+        self.assertTrue(any('5 identity rejection' in f for f in res['fails']), res['fails'])
+        self.assertIn(('cmd', 'MW_CW_RESTORE'), n.calls)
+
+    def test_a_stalled_refresh_fails_the_launcher(self):
+        n, res = self.run_launcher(self.launcher_script(flat=True))
+        self.assertEqual(res['verdict'], 'FAIL')
+        self.assertTrue(any('did not run' in f for f in res['fails']), res['fails'])
+
+    def test_a_failed_equip_still_fails_with_its_own_reason(self):
+        n, res = self.run_launcher(self.launcher_script(equip_ok=False))
+        self.assertEqual(res['verdict'], 'FAIL')
+        self.assertTrue(any('arms cyberware equip failed' in f for f in res['fails']), res['fails'])
+        self.assertNotIn(('cmd', 'MW_CW_DRAW'), n.calls)
+
+    def test_the_dry_run_names_the_probe(self):
+        text = '\n'.join(gw.dry_run_lines('launcher'))
+        self.assertIn('not held in the hand: no draw', text)
+        self.assertNotIn('draw    :', text)
+        self.assertIn('equip', text)
+        self.assertNotIn('holster :', text)
+        self.assertIn('draw    :', '\n'.join(gw.dry_run_lines('monowire')))
+
+
 class DryRun(unittest.TestCase):
     def test_prints_commands_for_every_weapon(self):
         scen = load_scenarios(gw.SCENARIO_FILE)
         for tag in gw.WEAPONS:
             text = '\n'.join(gw.dry_run_lines(tag, scen))
             self.assertIn(gw.WEAPONS[tag]['anim_var'], text)
-            self.assertIn('MW_HOLSTER', text)
             self.assertIn('MW_INHAND', text)
-            self.assertIn('phases  : equip -> draw', text)
+            if gw.WEAPONS[tag].get('held', True):
+                self.assertIn('MW_HOLSTER', text)
+                self.assertIn('phases  : equip -> draw', text)
+            else:
+                self.assertIn('phases  : equip -> installed -> remove', text)
         self.assertIn(gw.ALLOW_CYBERWARE_ENV, '\n'.join(gw.dry_run_lines('mantis', scen)))
         text = '\n'.join(gw.dry_run_lines('strong_arms', scen))
         self.assertIn(gw.ALLOW_CYBERWARE_ENV, text)

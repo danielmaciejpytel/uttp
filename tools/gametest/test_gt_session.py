@@ -185,12 +185,12 @@ class GraphicsTests(unittest.TestCase):
         with open(self.settings, encoding='utf-8') as f:
             return {o['name']: o['value'] for g in json.load(f)['data'] for o in g['options']}
 
-    def test_low_changes_only_the_profile_options_and_never_restores(self):
+    def test_low_changes_only_the_profile_options(self):
         sd = os.path.join(self.d, 'state')
         res = gs.apply_graphics('low', self.settings, sd)
         self.assertEqual(res['code'], 0)
         self.assertIn('graphics profile: low', res['status'])
-        self.assertIn('not restored automatically', res['status'])
+        self.assertIn('put back when the session ends', res['status'])
         self.assertEqual(self.read(), {'FilmGrain': False, 'Vignette': False, 'MotionBlur': 'Off', 'Volume': 70})
         self.assertTrue(os.path.isfile(os.path.join(sd, 'state.json')))                    # the previous values are remembered
         self.assertIn('applied', gs.graphics_status(self.settings, sd))
@@ -212,6 +212,44 @@ class GraphicsTests(unittest.TestCase):
         self.assertEqual(res['code'], 3)
         self.assertIn('NOT applied', res['status'])
         self.assertEqual(self.read()['FilmGrain'], True)
+
+    def test_restore_puts_the_players_values_back_and_counts_the_options(self):
+        sd = os.path.join(self.d, 'state')
+        before = self.read()
+        gs.apply_graphics('low', self.settings, sd)
+        gs.apply_graphics('low', self.settings, sd)                        # a second session found it applied
+        res = gs.restore_graphics(self.settings, sd)
+        self.assertEqual(res['code'], 0)
+        self.assertEqual(res['restored'], 3)
+        self.assertEqual(res['status'], 'graphics profile restored: 3 options (the player\'s values are back)')
+        self.assertEqual(self.read(), before)
+        res2 = gs.restore_graphics(self.settings, sd)                      # nothing is applied any more: nothing changes
+        self.assertEqual((res2['code'], res2['restored']), (0, 0))
+        self.assertIn('nothing to restore', res2['status'])
+        self.assertEqual(self.read(), before)
+
+    def test_restore_counts_only_the_options_it_found(self):
+        sd = os.path.join(self.d, 'state')
+        gs.apply_graphics('low', self.settings, sd)
+        with open(self.settings, encoding='utf-8') as f:
+            doc = json.load(f)
+        doc['data'][0]['options'] = [o for o in doc['data'][0]['options'] if o['name'] != 'Vignette']
+        with open(self.settings, 'w', encoding='utf-8') as f:
+            json.dump(doc, f)
+        res = gs.restore_graphics(self.settings, sd)
+        self.assertEqual(res['restored'], 2)
+
+    def test_restore_writes_nothing_while_the_game_runs(self):
+        sd = os.path.join(self.d, 'state')
+        gs.apply_graphics('low', self.settings, sd)
+        low = self.read()
+        graphics_profile.game_running = lambda: True
+        res = gs.restore_graphics(self.settings, sd)
+        self.assertEqual(res['code'], 3)
+        self.assertIn('NOT restored', res['status'])
+        self.assertIn('graphics_profile.py --restore', res['status'])
+        self.assertEqual(self.read(), low)
+        self.assertTrue(os.path.isfile(os.path.join(sd, 'state.json')))    # still remembered for the next try
 
 
 class BackgroundTests(unittest.TestCase):

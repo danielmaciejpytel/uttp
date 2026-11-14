@@ -177,7 +177,8 @@ def main(argv=None) -> int:
     save(a.settings, doc)
     os.replace(state_file, os.path.join(a.state_dir, 'state.restored-%s.json' % time.strftime('%Y%m%d-%H%M%S')))
     print('\n'.join(lines))
-    print(f'user settings restored: {len(lines)} options')
+    missing = sum(1 for ln in lines if ln.lstrip().startswith('missing'))
+    print(f'user settings restored: {len(lines) - missing} options' + (f' ({missing} not found in the file)' if missing else ''))
     return 0
 
 

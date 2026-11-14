@@ -658,6 +658,8 @@ class BackgroundGuard(ForegroundGuard):
             if not alive:
                 raise GuardError(f'{self.exe_name} is not running')
             self.game_pids = alive
+        if self.extra_check is not None:
+            self.extra_check()
         for vk in self.abort_keys:
             if self.api.key_down_now(vk):
                 raise GuardError(f'user abort key 0x{vk:02X} pressed')

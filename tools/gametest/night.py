@@ -80,13 +80,23 @@ Speed (gt_flow.py, gt_post.py, gt_budget.py):
    launch, arm, scenarios, recorder stop, quit, collect and its post-processing parts) goes to the log, time_budget.txt and
    summary.json.
 
+Frozen game (gt_freeze.py): while the scenarios run, the newest game-thread line of the mod log is watched (status lines of
+helper threads do not count). When none arrived for --freeze-seconds (default 10, 0 = off; the watch arms only after the log was
+seen flowing densely) and the process still exists, input stops, a "[freeze] game not responding since <time> (<evidence>)" line is
+written, a process dump (--freeze-dump full|heap|mini|off, lowered by free disk space), two nvidia-smi samples and the tails of
+the mod log, the script console log and the test host log go to <run>\\dumps (--freeze-dump-dir), the game process this run started is
+ended and a leftover crash reporter closed. The cycle ends as "game froze": its scenarios that reach into the frozen period are not
+judged (summary.json "game_froze"); the selected save and the settings are restored as after any failed cycle.
+
 Session modes:
  - --body female|male|both: that body's save is made the newest (select_save.py, times only, backup first) with the game closed and
    put back exactly after the run on every exit path; a game that is already running is never closed for it (the run refuses); a
    leftover selection of an earlier runner session is restored first at every start; "both" = one launch per body and one
    body_summary_<time>.txt with the two runs side by side. --pose-baseline is used only against the body it was recorded on.
- - --graphics low: the lowest quality profile before the launch (game closed); never restored automatically
-   (graphics_profile.py --restore).
+ - --graphics low: the lowest quality profile before the launch (game closed). It is put back at the end of the session (after
+   the last body, with the game closed, also after a failed or aborted cycle and on Ctrl+C once the game is closed) unless
+   --graphics-keep is given (chains of sessions; graphics_profile.py --restore puts it back by hand). Nothing is written while
+   the game runs: a game that is still running at the end leaves the profile in place and a line says so.
  - --background: needs nothing in the foreground, no keyboard and no user idle time (--min-idle defaults to 0, --cmd-channel to auto);
    window recorder, file command channel, pad plugin switched on after arming and off at the end of the cycle; only Pause stops the
    run. --dry-run --background states which requirements are met (test command module, pad plugin, window recorder).
@@ -149,6 +159,7 @@ import failure_clips  # noqa: E402
 import gt_budget as gb  # noqa: E402
 import gt_collect as gc  # noqa: E402
 import gt_flow  # noqa: E402
+import gt_freeze  # noqa: E402
 import gt_load  # noqa: E402
 import gt_post  # noqa: E402
 import gt_posemeter as gp  # noqa: E402
@@ -469,6 +480,12 @@ class Night:
         self.body = None                       # --body: 'female' | 'male' | None (the game's own save)
         self.graphics_settings = None          # tests point these at temporary files
         self.graphics_state_dir = None
+        self.graphics_applied = False          # this session applied (or found applied) the test profile: put back at its end
+        self.freeze = None                     # gt_freeze.FreezeWatch of the scenario phase
+        self.freeze_tools = gt_freeze.Tools()  # dump writer, nvidia-smi, disk space: tests replace the parts
+        self.freeze_info = None                # evidence of this cycle's freeze (None = the game did not freeze)
+        self.launched_pids: set = set()        # game processes this run started: the only ones it ends
+        self.current_scenario = None           # 'name#run' of the scenario being played
 
     # -- bookkeeping --
     def log(self, msg: str) -> None:
@@ -509,8 +526,11 @@ class Night:
     def guard(self) -> ForegroundGuard:
         # clock resolved at call time (tests replace night.time with a fake clock)
         if getattr(self.args, 'background', False):
-            return BackgroundGuard(api=self.api, focus_grace=self.args.focus_grace, clock=lambda: time.monotonic())
-        return ForegroundGuard(api=self.api, focus_grace=self.args.focus_grace, clock=lambda: time.monotonic())
+            g = BackgroundGuard(api=self.api, focus_grace=self.args.focus_grace, clock=lambda: time.monotonic())
+        else:
+            g = ForegroundGuard(api=self.api, focus_grace=self.args.focus_grace, clock=lambda: time.monotonic())
+        g.extra_check = self.freeze_check
+        return g
 
     # -- command channel (--cmd-channel console | file | auto) --
     def use_file(self) -> bool:
@@ -602,8 +622,131 @@ class Night:
             raise GracefulStop(why)
 
     def check_scenario_time(self) -> None:
+        self.freeze_check()
         if self.scenario_deadline is not None and time.monotonic() > self.scenario_deadline:
             raise ScenarioTimeout(f'scenario exceeded --scenario-timeout {self.args.scenario_timeout:.0f} s')
+
+    # -- frozen game (gt_freeze) --
+    def freeze_check(self) -> None:
+        """Guard hook (every check of every guard of this runner): raises GameFrozenError while the scenario phase runs and the
+        game is taken as frozen; the answer is sticky until the phase ends."""
+        w = self.freeze
+        if w is None or not w.active:
+            return
+        ev = w.poll()
+        if ev is not None:
+            raise gt_freeze.GameFrozenError(ev['guard_message'])
+
+    def freeze_begin(self) -> None:
+        """Start watching the mod log (--freeze-seconds, 0 = off) when the scenario phase starts."""
+        self.freeze = None
+        secs = float(getattr(self.args, 'freeze_seconds', gt_freeze.DEFAULT_SECONDS))
+        if secs <= 0 or not self.utpp_log:
+            return
+        w = gt_freeze.FreezeWatch(secs, lambda: self.utpp_log, pids_fn=self.pids, on_trip=self.freeze_trip)
+        w.start()
+        self.freeze = w
+
+    def freeze_end(self) -> None:
+        if self.freeze is not None:
+            self.freeze.stop()
+
+    def freeze_hold(self):
+        """Context of a harness action that may pause the game on purpose (closing a menu): no freeze verdict inside it."""
+        from contextlib import nullcontext
+        return self.freeze.hold() if self.freeze is not None else nullcontext()
+
+    def freeze_trip(self, ev: dict) -> None:
+        """Runs once, inside the guard hook, the moment the freeze is taken as real: the line, the evidence, the end of the
+        process. The engine's own watchdog ends the process about two minutes after the stall, so this must be quick."""
+        ev['scenario'] = self.current_scenario
+        self.freeze_info = ev
+        self.log(f'[freeze] {ev["message"]}')
+        self.log('[freeze] input stopped; collecting evidence, then ending the game process this run started')
+        try:
+            self.freeze_collect(ev)
+        except Exception as e:  # noqa: BLE001
+            ev['capture_error'] = repr(e)
+            self.log(f'[freeze] evidence step failed: {e!r}')
+        try:
+            self.freeze_kill(ev)
+        except Exception as e:  # noqa: BLE001
+            ev['kill_error'] = repr(e)
+            self.log(f'[freeze] ending the game process failed: {e!r}')
+        self.note_cycle('freeze', ev)
+
+    def freeze_collect(self, ev: dict) -> None:
+        if not ev.get('pids'):
+            return
+        out_dir = getattr(self.args, 'freeze_dump_dir', '') or os.path.join(self.cycle_dir, 'dumps')
+        tails = {'mod_log': self.utpp_log, 'script_console': os.path.join(CET_DIR, 'scripting.log'),
+                 'test_host_log': gt_freeze.newest_file(self.args.log_dir, 'utpptesthost-*.log')}
+        ev['evidence'] = gt_freeze.capture_evidence(out_dir, ev['pids'][0], getattr(self.args, 'freeze_dump', 'full'),
+                                                    self.freeze_tools, tails, log=self.log, run_cmd=self.runner)
+
+    def freeze_kill(self, ev: dict) -> None:
+        """Ends the game processes this run started (never one it did not start), then closes a crash reporter the engine may
+        have left (a leftover one keeps the store client in its running state and later launches are ignored)."""
+        ours = [p for p in ev.get('pids', []) if p in self.launched_pids]
+        foreign = [p for p in ev.get('pids', []) if p not in self.launched_pids]
+        if foreign:
+            self.log(f'[freeze] game process {foreign} was not started by this run: it is left alone')
+        for p in ours:
+            self.runner(['taskkill', '/F', '/PID', str(p)], capture_output=True, text=True)
+        end = time.monotonic() + 15.0
+        while ours and time.monotonic() < end and set(ours) & set(self.pids()):
+            time.sleep(0.5)
+        gone = [p for p in ours if p not in self.pids()]
+        ev['ended'], ev['left_alone'] = gone, foreign
+        if ours:
+            self.log(f'[freeze] game process {gone} ended' + ('' if len(gone) == len(ours) else f' (still alive: {sorted(set(ours) - set(gone))})'))
+        closed, empty = 0, 0
+        for _ in range(8):
+            n = self._close_crash_reporter({}, 'the game was ended after it froze')
+            closed += n
+            empty = 0 if n else empty + 1
+            if empty >= 3:
+                break
+            time.sleep(1.0)
+        ev['crash_reporter_closed'] = closed
+
+    def finish_frozen_cycle(self, err: BaseException) -> None:
+        """Ends a cycle whose game froze: the result is its own kind, nothing is sent to the game, the settings the run changed
+        wait in the pending file for the next launch."""
+        ev = self.freeze_info
+        self.cycle['result'] = f'{gt_freeze.FREEZE_RESULT}: {ev["message"]}'
+        self.log(f'[night] cycle ended: {gt_freeze.FREEZE_RESULT} (not a mod or scenario failure; stopped by {type(err).__name__})')
+        self.bg_input_active = False
+        self.secure_session_files('game froze', final=True)
+        self.settings_left('the game froze')
+
+    def freeze_not_judged(self) -> list[str]:
+        """'name#run' of the scenarios of a frozen cycle that were played against the frozen game (empty without a freeze)."""
+        ev = self.freeze_info
+        if not ev:
+            return []
+        since = datetime.strptime(ev['since'], TS)
+        return gt_freeze.not_judged_keys(self.cycle.get('scenarios'), since, ev.get('scenario'))
+
+    def judged_scenarios(self, scenarios):
+        nj = set(self.freeze_not_judged())
+        return [s for s in scenarios or [] if f'{s["name"]}#{s["run"]}' not in nj] if nj else scenarios
+
+    def judged_runs(self, runs):
+        nj = set(self.freeze_not_judged())
+        if not nj:
+            return runs
+        return [r for r in runs or [] if f'{r["scenario"]}#{r["run"]}' not in nj
+                and not str(r.get('aborted') or '').startswith(gt_freeze.MESSAGE_HEAD)]
+
+    def freeze_summary(self) -> dict:
+        ev = self.freeze_info
+        evd = ev.get('evidence') or {}
+        return {'since': ev['since'], 'detected': ev['detected'], 'silent_s': ev['silent_s'], 'scenario': ev.get('scenario'),
+                'not_judged': sorted(self.freeze_not_judged()), 'dump': evd.get('dump'), 'evidence_dir': evd.get('dir'),
+                'ended': ev.get('ended'), 'crash_reporter_closed': ev.get('crash_reporter_closed'),
+                'note': 'the game stopped responding; the scenarios listed were played against a frozen game and are neither '
+                        'passed nor failed'}
 
     # -- CET overlay state (cycle 8: the toggle got out of sync; an open overlay swallows game input) --
     def grab_game(self, guard):
@@ -938,7 +1081,7 @@ class Night:
             res['final_commands_error'] = repr(e)
             self.log(f'[quit] final commands NOT sent: {e!r}')
 
-    def _close_crash_reporter(self, res: dict) -> None:
+    def _close_crash_reporter(self, res: dict, why: str = 'game crashed on exit?') -> int:
         """After the game ends (ExitGame crashes the game on quit at times), close the
         CD Projekt crash-reporter dialogs without sending and note it in the cycle record."""
         try:
@@ -950,7 +1093,8 @@ class Night:
         if n:
             self.runner(['taskkill', '/F', '/IM', 'CrashReporter.exe'], capture_output=True, text=True)
             res['crash_reporter_closed'] = n
-            self.log(f'[quit] crash reporter dialog(s) closed without sending: {n} (game crashed on exit?)')
+            self.log(f'[quit] crash reporter dialog(s) closed without sending: {n} ({why})')
+        return n
 
     def _quit_wait(self, st: dict, res: dict, t0: float, killed: bool, forced: bool) -> dict:
         while True:
@@ -1051,6 +1195,7 @@ class Night:
             while time.monotonic() < end:
                 if not info['process_at'] and self.pids():
                     info['process_at'] = datetime.now()
+                    self.launched_pids |= set(self.pids())
                 if info['process_at'] and not info['log']:
                     n = gt_log.newest_log(self.args.log_dir)
                     if n and n != prev and os.path.getmtime(n) >= t_launch.timestamp() - 2:
@@ -1062,6 +1207,7 @@ class Night:
                         break
                 time.sleep(1.0)
             if info['gameplay_at']:
+                self.launched_pids |= set(self.pids())
                 self.log(f'[launch] gameplay ({info["gameplay_by"]!r}) in '
                          f'{(info["gameplay_at"] - t_launch).total_seconds():.0f} s, log {info["log"]}')
                 time.sleep(self.args.gameplay_settle)
@@ -1597,16 +1743,17 @@ class Night:
     def press_close(self, pad, guard, plan: dict) -> str:
         """--wheel-close: pad button tap (default B) or 'key:0xNN' scan code tap."""
         spec = self.args.wheel_close
-        if spec.lower().startswith('key:'):
-            self.tap_key(pad, guard, int(spec.split(':', 1)[1], 0))
-        else:
-            b = spec.upper()
-            sc = parse_scenario('wheel_close', {'steps': [{'name': 'close', 'duration': 0.6, 'ls': [[0, 0, 0]],
-                                                           'rs': [[0, 0, 0]], 'buttons': [{'t': 0.1, 'button': b,
-                                                                                            'hold': 0.08}],
-                                                           'metrics': False}]})
-            self.play(pad, guard, 'wheel_close', plan, sc)
-        guard.wait(0.8)
+        with self.freeze_hold():            # a menu that closes here may have paused the game: no freeze verdict meanwhile
+            if spec.lower().startswith('key:'):
+                self.tap_key(pad, guard, int(spec.split(':', 1)[1], 0))
+            else:
+                b = spec.upper()
+                sc = parse_scenario('wheel_close', {'steps': [{'name': 'close', 'duration': 0.6, 'ls': [[0, 0, 0]],
+                                                               'rs': [[0, 0, 0]], 'buttons': [{'t': 0.1, 'button': b,
+                                                                                                'hold': 0.08}],
+                                                               'metrics': False}]})
+                self.play(pad, guard, 'wheel_close', plan, sc)
+            guard.wait(0.8)
         return spec
 
     def recover(self, pad, guard, plan: dict, where: str, sc=None, res=None, log_off: int | None = None,
@@ -3394,6 +3541,7 @@ class Night:
         guard = self.guard()
         pad = None
         self.start_load()
+        self.freeze_begin()
         try:
             guard.ensure_focus()
             pad, fresh = gt_run.open_pad(self.run_args, guard)
@@ -3432,6 +3580,7 @@ class Night:
                             limit = max(limit, rf.time_limit_s(len(rf.options_of(self.args)[0])))
                         self.scenario_deadline = time.monotonic() + limit
                         self.log(f'[scenarios] {name} run {r}')
+                        self.current_scenario = f'{name}#{r}'
                         rec = {'name': name, 'run': r, 'start': t0}
                         try:
                             if getattr(self.args, 'background', False) and self.scenario_needs_keyboard(name):
@@ -3502,6 +3651,7 @@ class Night:
             self.done(st, 'failed', error=str(e))
             raise
         finally:
+            self.freeze_end()
             if self.budget.current:
                 self.budget.end(0.0)
             if pad is not None:
@@ -3593,6 +3743,7 @@ class Night:
                     shutil.copy2(s, os.path.join(ld, rel))
                     copied.append(rel)
         utpp_copy = os.path.join(ld, os.path.basename(self.utpp_log)) if self.utpp_log else None
+        not_judged = set(self.freeze_not_judged())           # scenarios played against a frozen game
         summary = {'cycle': self.cycle['name'], 'result': self.cycle.get('result'), 'utpp_log': utpp_copy,
                    'body': self.body, 'copied': copied,
                    'scenario_verdicts': {f'{s["name"]}#{s["run"]}': {'verdict': s.get('verdict'),
@@ -3601,10 +3752,13 @@ class Night:
                                                                          if 'aimprobe' in s else {}),
                                                                       **({'enemy': s['enemy']}
                                                                          if 'enemy' in s else {})}
-                                         for s in self.cycle.get('scenarios', []) if s.get('verdict')},
+                                         for s in self.cycle.get('scenarios', [])
+                                         if s.get('verdict') and f'{s["name"]}#{s["run"]}' not in not_judged},
                    'recoveries': self.cycle.get('recoveries', [])}
         if self.cycle.get('skipped_scenarios'):
             summary['skipped_scenarios'] = self.cycle['skipped_scenarios']
+        if self.freeze_info:
+            summary['game_froze'] = self.freeze_summary()
         # recording: the recorder was ended before the quit; its check (length, size, clock) is quick, the full decode runs in
         # the background (also from a recorder that died with the game: the fragmented mp4 stays decodable)
         if rec:
@@ -3630,10 +3784,11 @@ class Night:
                 sheets_th, sheets_out = self.start_sheets(sheet_jobs)
         # harness analysis (run.py)
         harness_steps: list = []
-        if plan['runs'] and utpp_copy:
+        judged_runs = self.judged_runs(plan['runs'])
+        if judged_runs and utpp_copy:
             gdir = os.path.join(self.cycle_dir, 'gametest')
             os.makedirs(gdir, exist_ok=True)
-            plan_s = dict(plan, log=utpp_copy, log_offset=0, created=datetime.now())
+            plan_s = dict(plan, runs=judged_runs, log=utpp_copy, log_offset=0, created=datetime.now())
             with open(os.path.join(gdir, 'plan.json'), 'w', encoding='utf-8') as f:
                 json.dump(gt_run.serialise_plan(plan_s), f, indent=1, default=str)
             if self.meter_job is not None:
@@ -3655,7 +3810,7 @@ class Night:
                 except Exception as e:  # noqa: BLE001
                     summary['harness'] = {'error': repr(e)}
         # failures at a glance: test mechanics (crouch/mount/weapon/timeouts) vs locomotion metrics
-        mech, metr = gn.split_failures(harness_steps, self.cycle.get('scenarios', []))
+        mech, metr = gn.split_failures(harness_steps, self.judged_scenarios(self.cycle.get('scenarios', [])))
         summary['mechanics_failures'] = mech
         summary['metric_failures'] = metr
         summary['failure_counts'] = {'mechanics': len(mech), 'metrics': len(metr)}
@@ -3773,7 +3928,7 @@ class Night:
             self.log('[pose] no pose recording in the run folder: the meter did not run (is --diag on, or the diagnostic logs on?)')
             return
         try:
-            windows = gp.build_windows(self.cycle.get('scenarios'), plan.get('runs'))
+            windows = gp.build_windows(self.judged_scenarios(self.cycle.get('scenarios')), self.judged_runs(plan.get('runs')))
             self.meter_job = gp.MeterJob(os.path.join(self.cycle_dir, '_tmp', 'pose_meter'), files, windows).start()
             self.log(f'[pose] meter started in worker processes: {len(files)} recording files, {len(windows)} windows')
         except Exception as e:  # noqa: BLE001
@@ -3921,6 +4076,10 @@ class Night:
         self.deep_check = None
         self.settings.entries = []
         self.settings.cycle_name = name
+        self.freeze = None
+        self.freeze_info = None
+        self.launched_pids = set()
+        self.current_scenario = None
         rec = None
         plan = {'runs': [], 'created': start}
         quit_game = True
@@ -3977,14 +4136,20 @@ class Night:
             if not quit_game:
                 self.restore_settings_leave('run stopped, the game stays open')
         except (CycleError, NeedsKeyboard, PaddError) as e:
-            self.cycle['result'] = f'failed: {e}'
-            self.log(f'[night] cycle failed: {e}')
-            self.secure_session_files('cycle failed', final=True)
+            if self.freeze_info:
+                self.finish_frozen_cycle(e)
+            else:
+                self.cycle['result'] = f'failed: {e}'
+                self.log(f'[night] cycle failed: {e}')
+                self.secure_session_files('cycle failed', final=True)
         except Exception as e:  # noqa: BLE001 - a defect of the runner: the game is still quit and everything collected, then it is raised
-            unexpected = e
-            self.cycle['result'] = f'failed: unexpected error: {e!r}'
-            self.log(f'[night] cycle failed on an unexpected error: {e!r} -> quitting the game, collecting, then raising it')
-            self.secure_session_files('unexpected error', final=True)
+            if self.freeze_info:             # whatever type the freeze came out as: it stays a freeze
+                self.finish_frozen_cycle(e)
+            else:
+                unexpected = e
+                self.cycle['result'] = f'failed: unexpected error: {e!r}'
+                self.log(f'[night] cycle failed on an unexpected error: {e!r} -> quitting the game, collecting, then raising it')
+                self.secure_session_files('unexpected error', final=True)
         finally:
             if self.bg_input_active and self.cycle['result'] is None:   # any other exception leaves run_cycle here
                 self.bg_input(False, 'error')
@@ -3992,7 +4157,8 @@ class Night:
                 self.secure_session_files('unexpected error', final=True)
                 self.restore_settings_leave('unexpected error')
             self.stop_idler()
-        self.bg_input(False, 'end of cycle')
+        if not self.freeze_info:               # a frozen game cannot answer the switch-off (it ended with the process)
+            self.bg_input(False, 'end of cycle')
         if rec:
             self.stop_recording(rec, check=False)      # the check (and the full decode) wait until the game is closed
         if quit_game:
@@ -4014,13 +4180,44 @@ class Night:
         return self.cycle
 
     def apply_graphics(self) -> None:
-        """--graphics low: the lowest quality profile, with the game closed, before the launch. Never restored here."""
+        """--graphics low: the lowest quality profile, with the game closed, before the launch. Put back by finish_graphics at
+        the end of the session."""
         mode = getattr(self.args, 'graphics', 'keep')
         if mode != 'low':
             return
         res = gt_session.apply_graphics(mode, self.graphics_settings, self.graphics_state_dir)
         self.log(f'[graphics] {res["status"]}')
         self.note_cycle('graphics', {k: res[k] for k in ('mode', 'code', 'status')})
+        if res['code'] == 0:
+            self.graphics_applied = True
+
+    def finish_graphics(self) -> dict | None:
+        """End of the session (after the last body, on every exit path including Ctrl+C): the player's own graphics values go
+        back when this session applied the test profile or found it applied, unless --graphics-keep. Nothing is written while
+        the game runs (the game writes the file when it exits): a game still running leaves the profile in place."""
+        if not self.graphics_applied:
+            return None
+        try:
+            if getattr(self.args, 'graphics_keep', False):
+                self.log('[graphics] --graphics-keep: the test profile stays applied '
+                         '(python tools\\gametest\\graphics_profile.py --restore puts the previous values back)')
+                return {'kept': True}
+            try:
+                running = bool(self.pids())
+            except Exception:  # noqa: BLE001 - cannot tell: treated as running, nothing is written
+                running = True
+            if running:
+                self.log('[graphics] the game is still running: the test profile is NOT restored; close the game, then run '
+                         'python tools\\gametest\\graphics_profile.py --restore')
+                return {'restored': None, 'game_running': True}
+            res = gt_session.restore_graphics(self.graphics_settings, self.graphics_state_dir)
+            self.log(f'[graphics] {res["status"]}')
+            if res['code'] == 0:
+                self.graphics_applied = False
+            return res
+        except Exception as e:  # noqa: BLE001 - the end of a session never fails because of this
+            self.log(f'[graphics] restore failed: {e!r}; python tools\\gametest\\graphics_profile.py --restore puts the values back')
+            return None
 
     def report_budget(self) -> None:
         """Time budget table of the cycle (printed, kept in cycle.json and next to summary.json as time_budget.txt)."""
@@ -4114,8 +4311,12 @@ def dry_run(args) -> int:
     print('     body: ' + (', '.join(f'{b} = {gt_session.BODY_SAVES[b]}' for b in bodies) + ' (select_save.py before each launch with the '
                            'game closed, exact restore after each run on every exit path; one launch per body, one summary '
                            'body_summary_<time>.txt)' if bodies else 'keep (the game starts with its own newest save)'))
-    print('     graphics: ' + ('low before the launch (graphics_profile.py --apply), never restored automatically'
-                               if args.graphics == 'low' else 'keep'))
+    print('     graphics: ' + (('low before the launch (graphics_profile.py --apply), kept after the session (--graphics-keep)'
+                                   if args.graphics_keep else 'low before the launch (graphics_profile.py --apply), put back '
+                                   'when the session ends (game closed)') if args.graphics == 'low' else 'keep'))
+    print('     frozen game: ' + (f'watched while the scenarios run (no game-thread log line for {args.freeze_seconds:g} s; '
+                                   f'dump {args.freeze_dump}, evidence in <run>\\dumps; the game process this run started is ended)'
+                                   if args.freeze_seconds > 0 else 'not watched (--freeze-seconds 0)'))
     print(f'     arm commands: {gn.arm_cmds(args.db, [c for c in args.cet.split(";;") if c.strip()])}')
     print(f'     position probe: {gn.NIGHTPOS_CMD} (needs utpp_core 0.5.2 installed; fallback inline '
           f'{len(gn.POS_FUNC_DEF) + len(gn.POS_CALL) + 1} chars)')
@@ -4547,8 +4748,21 @@ def build_parser() -> argparse.ArgumentParser:
                         '(default). A game that is already running is never closed for this (the run refuses). Saves: '
                         + ', '.join(f'{b} = {n}' for b, n in gt_session.BODY_SAVES.items()))
     p.add_argument('--graphics', default='keep', choices=['keep', 'low'],
-                   help='low = the lowest quality profile (graphics_profile.py) before the launch, game closed; it is NOT '
-                        'restored automatically (graphics_profile.py --restore); keep = settings as they are (default)')
+                   help='low = the lowest quality profile (graphics_profile.py) before the launch, game closed; the player\'s '
+                        'values are put back when the session ends (see --graphics-keep); keep = settings as they are (default)')
+    p.add_argument('--graphics-keep', action='store_true',
+                   help='with --graphics low: do not put the player\'s graphics values back at the end of the session '
+                        '(for chains of sessions; graphics_profile.py --restore does it by hand)')
+    p.add_argument('--freeze-seconds', type=float, default=gt_freeze.DEFAULT_SECONDS,
+                   help='a game process that is alive but wrote no game-thread line of the mod log for this long while the '
+                        'scenarios run is taken as frozen (evidence, the game ended, the cycle ends as "game froze"); '
+                        '0 = no watch; otherwise at least 3 (default %(default)s)')
+    p.add_argument('--freeze-dump', default='full', choices=list(gt_freeze.DUMP_MODES),
+                   help='process dump of a frozen game: full (all memory, handles, threads; many GB), heap (private memory), '
+                        'mini (small), off; a kind that does not fit the free disk space or fails to write falls back to the next '
+                        'smaller one (default %(default)s)')
+    p.add_argument('--freeze-dump-dir', default='',
+                   help='folder of the freeze evidence (dump, nvidia-smi, log tails); default <run folder>\\dumps')
     return p
 
 
@@ -4581,6 +4795,9 @@ def validate_args(args) -> list[str]:
     if getattr(args, 'clips_per_cause', 0) < 0 or getattr(args, 'early_stop', 0) < 0 or getattr(args, 'post_workers', 0) < 0:
         errs.append('--clips-per-cause, --early-stop and --post-workers must not be negative')
     errs += rf.option_errors(args)
+    fz = getattr(args, 'freeze_seconds', gt_freeze.DEFAULT_SECONDS)
+    if fz < 0 or 0 < fz < 3:
+        errs.append(f'--freeze-seconds {fz:g}: 0 (no watch) or at least 3')
     return errs
 
 
@@ -4602,7 +4819,8 @@ def run_cycles(night: Night, args, results: list, body: str | None) -> bool:
             c = night.run_cycle(n)
             results.append({'cycle': c['name'], 'body': body, 'result': c['result'],
                             **({'pose_limits_exceeded': c['pose_limits_exceeded']} if c.get('pose_limits_exceeded') else {}),
-                            **({'body_mismatch': c['body_mismatch']} if c.get('body_mismatch') else {})})
+                            **({'body_mismatch': c['body_mismatch']} if c.get('body_mismatch') else {}),
+                            **({'game_froze': c['freeze']['since']} if c.get('freeze') else {})})
         except StopNight:
             results.append({'cycle': night.cycle['name'], 'body': body, 'result': night.cycle['result']})
             return True
@@ -4698,6 +4916,7 @@ def main(argv=None) -> int:
                 break
     finally:
         keep_awake(False)
+        night.finish_graphics()          # after the last body, also after a failed cycle or Ctrl+C
     os.makedirs(args.out_root, exist_ok=True)
     with open(os.path.join(args.out_root, f'night_{datetime.now():%Y%m%d-%H%M%S}.json'), 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=1)

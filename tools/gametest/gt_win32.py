@@ -361,6 +361,7 @@ class ForegroundGuard:
         self._last_proc_check = -1e9
         self._name_cache: dict[int, str] = {}
         self.checks = 0
+        self.extra_check = None             # callable run by every check() after the liveness check (may raise GuardError)
 
     # -- queries --
     def refresh_game(self) -> bool:
@@ -414,6 +415,8 @@ class ForegroundGuard:
             if not alive:
                 raise GuardError(f'{self.exe_name} is not running')
             self.game_pids = alive
+        if self.extra_check is not None:
+            self.extra_check()
         if not self.foreground_is_game():
             first = self.describe_foreground()
             if self.focus_grace > 0:

@@ -81,11 +81,14 @@ WEAPONS = {
     'hammer': {'label': 'two-handed hammer', 'anim_var': 'w_melee_hammer', 'block': True, 'kind': 'weapon',
                'records': ('Items.Preset_Hammer_Default', 'Items.Preset_Hammer_Sasquatch')},
     # rig probes: arm cyberware that is equipped only to record the merged rig (the equip re-arms the skin helper plan and starts a
-    # new pose segment); the in-hand check is expected to skip them, the restore step still runs
+    # new pose segment); the in-hand check is expected to skip them, the restore step still runs. 'held': False = the item cannot
+    # be drawn into the hand like a melee weapon: no draw and no in-hand check; the probe passes when the equip succeeded and the
+    # skin helper refresh ran without identity rejections while the item was installed (see judge_installed)
     'monowire': {'label': 'monowire (rig probe)', 'anim_var': 'monowire', 'block': False, 'kind': 'cyberware',
                  'records': ('Items.NanoWires',), 'covered': False, 'states_default': True, 'phases': ()},
     'launcher': {'label': 'projectile launcher (rig probe)', 'anim_var': 'launcher', 'block': False, 'kind': 'cyberware',
-                 'records': ('Items.AdvancedProjectileLauncherLegendary',), 'covered': False, 'states_default': True, 'phases': ()},
+                 'records': ('Items.AdvancedProjectileLauncherLegendary',), 'covered': False, 'states_default': True, 'phases': (),
+                 'held': False},
     # arm cyberware: needs the cyberware loadout change, see cyberware_equip_cmd
     'mantis': {'label': 'mantis blades', 'anim_var': 'mantis_blade', 'block': True, 'kind': 'cyberware',
                'records': ('Items.MantisBlades',)},
@@ -106,6 +109,89 @@ WEAPON_SETS['melee_weapons'] = list(PACK_WEAPONS)
 # registered as scenario sets (gt_night.SETS); 'melee_weapons' = the pack weapons in one launch
 SET_MEMBERS = {name: [name] for name in WEAPON_SETS}
 SECONDS_PER_WEAPON = 160.0
+
+# an installed item that is not held in the hand: seconds the probe waits with the item installed (the helper coverage line comes
+# about once a second)
+INSTALLED_SETTLE_S = 5.0
+_COVERAGE_RE = re.compile(r'skin helpers coverage: calls=(\d+)')
+_COMMIT_GROUP_RE = re.compile(r'(?:^|\s)c\[([^\]]*)\]')
+_OUTCOME_GROUP_RE = re.compile(r'(?:^|\s)o\.\w+\[([^\]]*)\]')
+_COUNTERS_RE = re.compile(r'skin helpers counters[^:]*:.*?rej\[[^\]]*\bidentity=(\d+)')
+_ARM_RE = re.compile(r'skin helpers arm: (\d+) .*?rigBones=(\d+)')
+_LAYOUT_RE = re.compile(r'rig layout (\w+)')
+
+
+def _sum_counts(group: str, name: str | None = None) -> int:
+    return sum(int(v) for k, v in re.findall(r'(\w+)=(\d+)', group) if name is None or k == name)
+
+
+def parse_helper_lines(text: str) -> dict:
+    """Skin helper lines of a log window: coverage rows (calls, helper commits, identity rejections; all cumulative), counters rows
+    (identity rejections, cumulative) and the arm lines (armed flag, rig bones, rig layouts). Pure."""
+    cov, counters, arms = [], [], []
+    for line in (text or '').splitlines():
+        m = _COVERAGE_RE.search(line)
+        if m:
+            c = _COMMIT_GROUP_RE.search(line)
+            cov.append({'calls': int(m.group(1)), 'commits': _sum_counts(c.group(1)) if c else 0,
+                        'identity': sum(_sum_counts(g, 'identity') for g in _OUTCOME_GROUP_RE.findall(line))})
+            continue
+        m = _COUNTERS_RE.search(line)
+        if m:
+            counters.append(int(m.group(1)))
+            continue
+        m = _ARM_RE.search(line)
+        if m:
+            tm = _TS_RE.match(line)
+            arms.append({'armed': m.group(1) != '0', 'rig_bones': int(m.group(2)), 'layouts': _LAYOUT_RE.findall(line),
+                         'ts': tm.group(1)[11:] if tm else None})
+    return {'coverage': cov, 'counters': counters, 'arms': arms}
+
+
+def judge_installed(window: str, before: str = '') -> dict:
+    """Verdict of arm cyberware that is installed but not held: `window` = the mod log from the equip request to now, `before` = the
+    log up to the equip request. Passes when the helper refresh ran while the item was installed (at least two coverage lines
+    with rising call and helper commit counts) and no identity rejection was counted (coverage and counters lines are
+    cumulative: the change against the last line before the window). The rig layout is the newest arm line of the window, else of
+    the log before it (the arm plan is not logged again by every equip); a missing one is a warning. Pure.
+    Returns {'ok', 'fails', 'warns', 'rig_layout', 'coverage_lines', 'calls', 'commits', 'identity_delta'}."""
+    win, bef = parse_helper_lines(window), parse_helper_lines(before)
+    fails: list[str] = []
+    warns: list[str] = []
+    cov = win['coverage']
+    calls = [cov[0]['calls'], cov[-1]['calls']] if cov else None
+    commits = [cov[0]['commits'], cov[-1]['commits']] if cov else None
+    if len(cov) < 2:
+        fails.append(f'no skin helper refresh seen while the item was installed ({len(cov)} coverage line(s) in the window, '
+                     'at least 2 needed; the coverage lines need mm.trace, which the diagnostic logs keep on: are they off?)')
+    elif cov[-1]['calls'] <= cov[0]['calls']:
+        fails.append(f'skin helper refresh did not run while the item was installed (calls stayed at {cov[-1]["calls"]})')
+    elif cov[-1]['commits'] <= cov[0]['commits']:
+        fails.append('skin helper refresh wrote no helper commit while the item was installed '
+                     f'(calls {cov[0]["calls"]} -> {cov[-1]["calls"]}, commits stayed at {cov[-1]["commits"]})')
+    base_cov = bef['coverage'][-1]['identity'] if bef['coverage'] else 0
+    delta = max(0, cov[-1]['identity'] - base_cov) if cov else 0
+    base_cnt = bef['counters'][-1] if bef['counters'] else 0
+    delta_cnt = max(0, win['counters'][-1] - base_cnt) if win['counters'] else 0
+    identity = max(delta, delta_cnt)
+    if identity:
+        fails.append(f'{identity} identity rejection(s) of the skin helper refresh while the item was installed')
+    arm, where = None, ''
+    if win['arms']:
+        arm, where = win['arms'][-1], 'in the window'
+    elif bef['arms']:
+        arm, where = bef['arms'][-1], 'last seen before the equip'
+    layout = None
+    if arm is None:
+        warns.append('no skin helpers arm line (rig layout) found in the log')
+    else:
+        layout = (f'rig layout {" / ".join(arm["layouts"]) or "?"}, rigBones={arm["rig_bones"]}, {where}'
+                  + (f' at {arm["ts"]}' if arm['ts'] else ''))
+        if not arm['armed']:
+            warns.append(f'the newest skin helpers arm line says the helpers were not armed ({layout})')
+    return {'ok': not fails, 'fails': fails, 'warns': warns, 'rig_layout': layout, 'coverage_lines': len(cov), 'calls': calls,
+            'commits': commits, 'identity_delta': identity}
+
 
 # PSM.MeleeWeapon states (bit = 1 << state)
 STATE_NAMES = {0: 'NotReady', 1: 'Equipping', 2: 'Idle', 3: 'Safe', 4: 'PublicSafe', 5: 'Parried', 6: 'Hold', 7: 'ChargedHold',
@@ -440,6 +526,8 @@ def phase_plan(tag: str) -> list[str]:
     """Names of all phases in order for a weapon (equip .. remove)."""
     w = WEAPONS[tag]
     mid = [p['name'] for p in weapon_phases(w)]
+    if not w.get('held', True):
+        return ['equip', 'installed'] + mid + ['remove']
     return ['equip', 'draw'] + mid + ['holster', 'remove']
 
 
@@ -513,6 +601,7 @@ class _Run:
         self.full_active = False
         self.phases: list = []
         self.windows: list = []
+        self.installed_from: tuple | None = None     # (time, log offset) of the equip request of an item that is not held
         self.fails: list = []
         self.warns: list = []
         self.own_clip: list = []
@@ -582,6 +671,7 @@ def _equip(run: _Run) -> str | None:
     w = run.w
     t0, off = datetime.now(), file_size(run.night.utpp_log)
     if w['kind'] == 'cyberware':
+        run.installed_from = (t0, off)
         ok, info = run.cmd('MW_CW_EQUIP', cyberware_equip_cmd(w), 'equip')
         if ok is not True:
             return 'fail: arms cyberware equip ' + ('failed ' + info if ok is False else 'echo lost')
@@ -589,6 +679,8 @@ def _equip(run: _Run) -> str | None:
         if run.given is None:
             return 'fail: arms cyberware equip echo not understood, the loadout cannot be restored'
         run.record('equip', off, t0, {'echo': info})
+        if not w.get('held', True):
+            return None                       # installed only: nothing to draw, _installed_probe judges the refresh
         t0, off = datetime.now(), file_size(run.night.utpp_log)
         ok, info = run.cmd('MW_CW_DRAW', cyberware_draw_cmd(), 'draw')
         if ok is not True:
@@ -620,6 +712,25 @@ def _equip(run: _Run) -> str | None:
     if name != w['anim_var']:
         return f'skip: the hand holds {name}, expected {w["anim_var"]} (wrong anim variable, not tested)'
     return None
+
+
+def _installed_probe(run: _Run) -> None:
+    """An item that is installed but not held (entry flag 'held': False): wait with it installed, then judge the skin helper
+    refresh from the mod log window of the whole time since the equip request (judge_installed)."""
+    t0, off = run.installed_from
+    run.guard.wait(INSTALLED_SETTLE_S)
+    log = run.night.utpp_log
+    window = read_since(log, off)
+    head = read_since(log, max(0, off - 3_000_000))
+    before = head[:max(0, len(head) - len(window))]
+    res = judge_installed(window, before)
+    run.record('installed', off, t0, {'installed_probe': res})
+    run.view['installed'] = res
+    run.fails += res['fails']
+    run.warns += res['warns']
+    run.say(f'installed: {"refresh running" if res["ok"] else "FAIL"}, coverage lines {res["coverage_lines"]}, calls {res["calls"]}, '
+            f'helper commits {res["commits"]}, identity rejections {res["identity_delta"]}, '
+            f'{res["rig_layout"] or "no rig layout line"}')
 
 
 def _ensure_in_hand(run: _Run, where: str) -> bool:
@@ -765,7 +876,10 @@ def run_one(night, pad, guard, plan, tag: str, tables: dict | None, out: dict | 
         if reason is None:
             for phase in weapon_phases(w):
                 _strike_phase(run, phase)
-            _holster(run)
+            if w.get('held', True):
+                _holster(run)
+            else:
+                _installed_probe(run)
     except BaseException as e:      # noqa: BLE001 - the cleanup below must run for every error, then it is re-raised
         failed = True
         run.fails.append(f'{type(e).__name__}: {str(e)[:160]}')
@@ -775,7 +889,7 @@ def run_one(night, pad, guard, plan, tag: str, tables: dict | None, out: dict | 
             if failed:
                 night.scenario_deadline = None     # an expired scenario deadline would stop the cleanup
             try:
-                if not any(p['phase'] == 'holster' for p in run.phases):
+                if w.get('held', True) and not any(p['phase'] == 'holster' for p in run.phases):
                     _holster(run, final=True)
                 _remove(run)
             except Exception as e:  # noqa: BLE001
@@ -836,7 +950,13 @@ def dry_run_lines(tag: str, scenarios: dict | None = None) -> list[str]:
              f'   records (first with friendlyName == {w["anim_var"]} is used): {", ".join(w["records"])}']
     if w['kind'] == 'cyberware':
         lines += [f'   needs {ALLOW_CYBERWARE_ENV}=1 (changes and restores the cyberware loadout)',
-                  f'   equip   : {cyberware_equip_cmd(w)}', f'   draw    : {cyberware_draw_cmd()}']
+                  f'   equip   : {cyberware_equip_cmd(w)}']
+        if w.get('held', True):
+            lines.append(f'   draw    : {cyberware_draw_cmd()}')
+        else:
+            lines.append(f'   installed: not held in the hand: no draw; waits {INSTALLED_SETTLE_S:g} s, then passes when the skin '
+                         'helper refresh ran (rising coverage calls and helper commits) with no identity rejection; reports the '
+                         'rig layout line')
     if w.get('pose'):
         lines.append('   pose    : needs the pose recording (diagnostic logs on: night.py --diag timed | until) to measure the body')
     else:
@@ -859,7 +979,8 @@ def dry_run_lines(tag: str, scenarios: dict | None = None) -> list[str]:
             dur = f', {sc.duration:.1f} s of pad input'
         expect = 'off (the script does not cover this weapon)' if cov is False else p['expect_full']
         lines.append(f'   {p["name"]:14}: pad part {p["part"]} ({p["kind"]}){dur}; expects full body {expect}')
-    lines.append(f'   holster : {holster_cmd()}  (fallback pad part melee_holster)')
+    if w.get('held', True):
+        lines.append(f'   holster : {holster_cmd()}  (fallback pad part melee_holster)')
     if w['kind'] == 'cyberware':
         lines.append(f'   restore : {cyberware_restore_cmd(w, 0, True)}  (prev hash comes from the equip echo)')
     else:

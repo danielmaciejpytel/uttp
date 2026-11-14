@@ -5,7 +5,8 @@ requirements, and the side-by-side summary of several bodies.
                           backup copy) while the game is closed, and puts the times back exactly after the run, on every exit
                           path. The runner never takes over a game that somebody else started. A leftover selection of an earlier
                           runner session (body_session.json next to its pending_restore.json) is restored first on the next start.
---graphics low            the lowest quality profile (graphics_profile.py) before the launch, never restored automatically.
+--graphics low            the lowest quality profile (graphics_profile.py) before the launch; the player's values are put back when the
+                          session ends (restore_graphics), unless --graphics-keep.
 --background              requirements (test command module, background pad plugin, window recorder) and the defaults it implies.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -170,7 +172,7 @@ class SaveSession:
 # ---------------------------------------------------------------------------------------------- graphics
 def apply_graphics(mode: str, settings: str | None = None, state_dir: str | None = None) -> dict:
     """--graphics low: apply the lowest quality profile (the game must be closed). Returns {'mode', 'code', 'status' (one line),
-    'lines'}. keep: nothing is done. The profile is never restored here."""
+    'lines'}. keep: nothing is done. restore_graphics puts the player's values back at the end of the session."""
     if mode != 'low':
         return {'mode': mode, 'code': 0, 'status': 'graphics profile: not touched (--graphics keep)', 'lines': []}
     argv_extra = (['--settings', settings] if settings else []) + (['--state-dir', state_dir] if state_dir else [])
@@ -184,8 +186,28 @@ def apply_graphics(mode: str, settings: str | None = None, state_dir: str | None
                 'lines': lines}
     tail = lines[-1] if lines else ''
     return {'mode': mode, 'code': 0, 'lines': lines,
-            'status': f'graphics profile: low ({tail}); it is not restored automatically - '
-                      'python tools\\gametest\\graphics_profile.py --restore puts the previous values back'}
+            'status': f'graphics profile: low ({tail}); it is put back when the session ends (--graphics-keep keeps it; '
+                      'python tools\\gametest\\graphics_profile.py --restore does it by hand)'}
+
+
+def restore_graphics(settings: str | None = None, state_dir: str | None = None) -> dict:
+    """End of a --graphics low session: the player's values go back (the game must be closed; graphics_profile refuses otherwise
+    and nothing is written). Returns {'code', 'restored' (options put back), 'status' (one line), 'lines'}."""
+    argv_extra = (['--settings', settings] if settings else []) + (['--state-dir', state_dir] if state_dir else [])
+    buf = io.StringIO()
+    err = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+        code = graphics_profile.main(['--restore'] + argv_extra)
+    lines = [ln for ln in (buf.getvalue() + err.getvalue()).splitlines() if ln.strip()]
+    if code != 0:
+        return {'code': code, 'restored': 0, 'lines': lines,
+                'status': f'graphics profile: NOT restored (code {code}): {lines[-1] if lines else ""}; '
+                          'python tools\\gametest\\graphics_profile.py --restore puts the previous values back'}
+    m = re.search(r'user settings restored: (\d+) options', '\n'.join(lines))
+    if not m:
+        return {'code': 0, 'restored': 0, 'lines': lines, 'status': 'graphics profile: nothing to restore (the test profile is not applied)'}
+    return {'code': 0, 'restored': int(m.group(1)), 'lines': lines,
+            'status': f'graphics profile restored: {m.group(1)} options (the player\'s values are back)'}
 
 
 def graphics_status(settings: str | None = None, state_dir: str | None = None) -> str:
