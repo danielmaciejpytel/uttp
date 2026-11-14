@@ -7,13 +7,14 @@
 // chest correction, on a per-weapon section of a table loaded from a data file) and writes the clip's own lower body (Hips rotation and
 // translation, Spine, both legs) time-synchronised with that clip:
 //   * a clip clock: once locked on a clip it advances with the elapsed time at the table rate and is pulled softly toward the matched
-//     time (the per-frame match time jitters by a fraction of a row; the hips must not), it re-locks when the clip changes or the match
-//     is more than kRelockRows away;
+//     time (the per-frame match time jitters by a fraction of a row; the hips must not), it re-locks (a short cross-fade) when the clip
+//     changes or the match is more than kRelockRows away;
 //   * a seam guard: when no row matches (the engine's one-frame reference pose at clip seams, a one-frame mismatch) the last written
 //     lower pose is held for at most kHoldCalls calls, then the layer fades out;
 //   * the weight is the full-body fade of the snapshot (1 - lowerScale: the existing standing gate and its 0.15 s fades, so starting
 //     to move hands the legs back to locomotion on the same timeline as before) x the match gate (eases in / out) x the user switch.
-// The chest correction keeps running as the fallback, scaled by (1 - the weight of this layer), so the two never stack.
+// The chest correction keeps running as the fallback, scaled by (1 - the share of the playing clip this layer really writes: its weight
+// x the part of a relock cross-fade already on the new time), so the two never stack and never leave a gap.
 //
 // Data file (little endian; tools/melee/melee_pose_table.py):
 //   header 64 bytes: 'UTPPMPOS', u32 format (1), body, keyBones (13), lowerBones (8), weaponCount, clipCount, rowCount, fps, 0
@@ -281,6 +282,22 @@ inline LowerPose LerpPose(const LowerPose& aA, const LowerPose& aB, float aT)
     return p;
 }
 
+// Relock cross-fade as a decaying offset: the clip as it plays (aClip) plus aK (1 -> 0) of the difference the relock found between the pose
+// written before it (aFrom) and the clip at the relock (aBase). Equal to aFrom at the relock; the clip's own motion passes through at once
+// (blending toward a frozen aFrom would add the clip's motion since the relock to the catch-up).
+inline LowerPose CarryOffset(const LowerPose& aFrom, const LowerPose& aBase, const LowerPose& aClip, float aK)
+{
+    LowerPose p;
+    const Quat id{0.0f, 0.0f, 0.0f, 1.0f};
+    for (int k = 0; k < kLowerBones; ++k)
+    {
+        const Quat d = math::QuatNormalize(math::QuatMul(aFrom.q[k], math::QuatInv(math::QuatNormalize(aBase.q[k]))));
+        p.q[k] = math::QuatNormalize(math::QuatMul(math::QuatNlerpShortest(id, d, aK), aClip.q[k]));
+    }
+    p.hips = aClip.hips + (aFrom.hips - aBase.hips) * aK;
+    return p;
+}
+
 // Pose of the clip at a fractional row (absolute row index of the file), clamped to the clip's rows.
 inline LowerPose SamplePose(const PoseTables& aT, uint32_t aClip, float aRow)
 {
@@ -334,9 +351,11 @@ struct State
     uint64_t weapon = 0;   // hash of the weapon section the state belongs to
     float gate = 0.0f;
     int lost = 0;          // calls since the last match
+    int weak = 0;          // consecutive calls whose match was weaker than the gate
     bool havePose = false;
     LowerPose out{};       // last pose returned (held across a lost match)
     LowerPose from{};      // pose the relock cross-fade starts from
+    LowerPose fromClip{};  // the clip at the relock (the cross-fade carries from - fromClip and lets it decay)
     float xfade = 1.0f;    // relock cross-fade progress (1 = done)
     float heldTime = 0.0f; // seconds of lost calls since the last match (the clock did not advance meanwhile)
     Quat prevKey[meleebase::kMotionKeys]{}; // motion keys of the previous call (upper body speed)
@@ -351,6 +370,9 @@ struct StepInfo
     bool frozen = false; // held state with a still upper body: the clip clock stood
     int32_t clip = -1;
     float matchRow = 0.0f, clockRow = 0.0f, rmsDeg = 0.0f, conf = 0.0f, gate = 0.0f, weight = 0.0f;
+    // share of the locked clip's own pose in the returned pose (1 - the part still crossing from the previous pose after a relock): the
+    // chest correction covers the rest (weight x clipShare is what the layer really writes of the clip the upper body plays)
+    float clipShare = 1.0f;
 };
 
 // Advances the state by one FK call. aKey = key bone locals of the game pose (kKeyNames order); aWeapon = the drawn weapon's section
@@ -461,7 +483,9 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
         aS.hint = hint; // only a confident match steers the sticky search (a reference-pose frame must not move it)
         if (aS.clip != gclip || std::fabs(matchRow - aS.row) > kRelockRows)
         {
-            // another clip or a jump in time: the lower body crosses from what was written over kRelockBlendSeconds
+            // another clip or a jump in time: the difference between what was written and the new clip is carried on the playing clip
+            // and decays linearly over kRelockBlendSeconds (sibling clips differ by up to 80 deg in the lower body at a switch);
+            // meanwhile StepInfo::clipShare hands the not yet written part of the new clip to the chest correction
             if (aS.havePose)
             {
                 aS.from = aS.out;
@@ -470,6 +494,7 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
             aS.clip = gclip;
             aS.row = matchRow;
             aS.rate = aT.rowsPerSecond;
+            aS.fromClip = SamplePose(aT, uint32_t(gclip), matchRow);
             info.relocked = true;
         }
         else if (dt > 0.0f)
@@ -485,8 +510,8 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
         }
         aS.xfade = aS.xfade < 1.0f ? std::fmin(1.0f, aS.xfade + (info.relocked ? 0.0f : dt / kRelockBlendSeconds)) : 1.0f;
         const LowerPose clip = SamplePose(aT, uint32_t(aS.clip), aS.row);
-        const float x = aS.xfade * aS.xfade * (3.0f - 2.0f * aS.xfade);
-        aS.out = aS.xfade < 1.0f ? LerpPose(aS.from, clip, x) : clip;
+        const float x = aS.xfade; // linear: the relock offset decays at a constant rate (no peak speed mid-way)
+        aS.out = aS.xfade < 1.0f ? CarryOffset(aS.from, aS.fromClip, clip, 1.0f - x) : clip;
         aS.havePose = true;
         aS.lost = 0;
         aS.heldTime = 0.0f;
@@ -496,10 +521,15 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
         {
             // held state, upper body still: the gate keeps its value (a weaker match of the held guard does not hand the legs back)
         }
-        else if (aS.gate < conf)
+        else if (conf >= aS.gate)
+        {
+            aS.weak = 0;
             aS.gate = std::fmin(conf, aS.gate + dt / kGateRiseSeconds);
-        else
+        }
+        else if (++aS.weak > kHoldCalls)
             aS.gate = std::fmax(conf, aS.gate - dt / kGateFallSeconds);
+        // else: a weaker match for at most kHoldCalls calls (a frame between rows, a seam) keeps the gate, like a lost one: the lower body
+        // does not dip toward the base pose for a frame (in a lunge that is a hips jump of several cm)
         info.matched = true;
     }
     else
@@ -525,8 +555,8 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
             aS.row = aim::Clampf(aS.row + rateEff * dt, first, last);
             aS.xfade = aS.xfade < 1.0f ? std::fmin(1.0f, aS.xfade + dt / kRelockBlendSeconds) : 1.0f;
             const LowerPose clip = SamplePose(aT, uint32_t(aS.clip), aS.row);
-            const float x = aS.xfade * aS.xfade * (3.0f - 2.0f * aS.xfade);
-            aS.out = aS.xfade < 1.0f ? LerpPose(aS.from, clip, x) : clip;
+            const float x = aS.xfade;
+            aS.out = aS.xfade < 1.0f ? CarryOffset(aS.from, aS.fromClip, clip, 1.0f - x) : clip;
         }
     }
     aS.gate = aim::Clampf(aS.gate, 0.0f, 1.0f);
@@ -534,6 +564,7 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
     info.clockRow = aS.row;
     info.conf = conf;
     info.gate = aS.gate;
+    info.clipShare = aS.xfade < 1.0f ? aS.xfade : 1.0f;
     const float w = aS.havePose ? share * aS.gate : 0.0f;
     info.weight = w;
     aPose = aS.out;
@@ -831,29 +862,41 @@ inline bool BorderStep(BorderState& aS, uint8_t* aBones, uint32_t aCount, const 
         }
         if (f.mode == FootMode::Stepping)
         {
-            // rise in place, move the ground point toward the written ankle at step speed (it may move on meanwhile), set down in place
-            const float maxStep = kStepSpeed * dt, maxRise = f.lift / kStepUpSeconds * dt;
+            // rise in place, move the ground point toward the written ankle at step speed (it may move on meanwhile), set down in place.
+            // The foot moves no faster than kStepSpeed in 3D: the rise, the move along the ground and the height change share that speed
+            const float maxStep = kStepSpeed * dt, maxRise = std::fmin(f.lift / kStepUpSeconds, kStepSpeed) * dt;
+            float used = 0.0f;
             if (f.phase == 0)
             {
+                const float h0 = f.h;
                 f.h = std::fmin(f.lift, f.h + maxRise);
+                used = f.h - h0;
                 if (f.h >= f.lift)
                     f.phase = 1;
             }
             else if (f.phase == 1)
             {
-                const float rem0 = Horizontal(w, f.from);
-                const float adv = rem0 < maxStep ? rem0 : maxStep;
-                if (rem0 > 1e-6f)
-                {
-                    f.from.x += (w.x - f.from.x) * (adv / rem0);
-                    f.from.y += (w.y - f.from.y) * (adv / rem0);
-                }
+                const float rem0 = Horizontal(w, f.from), dz = w.z - f.from.z;
+                const float total = std::sqrt(rem0 * rem0 + dz * dz);
+                const float k = total > maxStep ? maxStep / total : 1.0f;
+                f.from.x += (w.x - f.from.x) * k;
+                f.from.y += (w.y - f.from.y) * k;
+                f.from.z += dz * k;
+                used = maxStep;
                 if (Horizontal(w, f.from) < 1e-3f)
                     f.phase = 2;
             }
             else
+            {
+                const float h0 = f.h;
                 f.h = std::fmax(0.0f, f.h - maxRise);
-            f.from.z = MoveToward(f.from.z, w.z, maxStep);
+                used = h0 - f.h;
+            }
+            if (f.phase != 1)
+            {
+                const float rest = maxStep * maxStep - used * used;
+                f.from.z = MoveToward(f.from.z, w.z, rest > 0.0f ? std::sqrt(rest) : 0.0f);
+            }
             target = f.from;
             target.z += f.h;
             if (f.phase == 2 && f.h <= 0.0f)

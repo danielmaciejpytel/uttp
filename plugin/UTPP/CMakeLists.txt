@@ -931,7 +931,8 @@ add_test(NAME utpp_melee_aim_test COMMAND utpp_melee_aim_test)
 # MeleeBase.hpp: clip-frame match + chest rotation back to the authored orientation (core); MeleeBase.cpp: FK detour runtime;
 # MeleeBaseData.cpp: GENERATED fists clip table (tools/melee/fist_base_table.py). utpp_melee_base_offline replays recorded poses
 # through the production glue (tools/melee/fist_base_offline.py); utpp_melee_base_glue_test drives the same glue with recorded fixtures
-# (tests/data/melee_base_*.bin, made by tools/melee/fist_base_fixture.py): built only on request.
+# (tests/data/melee_base_*.bin, made by tools/melee/fist_base_fixture.py) on the shipped default (the melee full pose layer on, with the
+# pose tables of Build/test-data/melee_pose); the chest correction alone is printed as information, its guard and flag checks are "fallback: ..." verdicts.
 target_sources(UTPP PRIVATE src/mm/MeleeBase.cpp src/mm/MeleeBase.hpp src/mm/MeleeBaseRuntime.hpp src/mm/MeleeBaseData.cpp
                src/mm/MeleeBaseData.hpp)
 add_executable(utpp_melee_base_test tests/MeleeBaseTest.cpp src/mm/MeleeBaseData.cpp src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp
@@ -939,10 +940,13 @@ add_executable(utpp_melee_base_test tests/MeleeBaseTest.cpp src/mm/MeleeBaseData
 target_compile_options(utpp_melee_base_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_melee_base_test COMMAND utpp_melee_base_test)
 add_executable(utpp_melee_base_glue_test tests/MeleeBaseGlueTest.cpp tests/MeleeBaseReplay.hpp src/mm/MeleeBase.cpp src/mm/MeleeBaseData.cpp
+               src/mm/MeleePose.cpp src/mm/MeleePose.hpp src/mm/MeleePoseRuntime.hpp
                src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp src/mm/MeleeBodyId.hpp src/mm/MeleeBaseRuntime.hpp src/mm/MeleeAim.hpp
                src/mm/AimOffset.hpp src/mm/GameIntegration.hpp src/mm/MMMath.hpp)
+target_compile_definitions(utpp_melee_base_glue_test PRIVATE UTPP_REPLAY_FULL_POSE)
 target_compile_options(utpp_melee_base_glue_test PRIVATE ${UTPP_WARNINGS} /EHsc)
-add_test(NAME utpp_melee_base_glue_test COMMAND utpp_melee_base_glue_test "${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+add_test(NAME utpp_melee_base_glue_test COMMAND utpp_melee_base_glue_test "${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose")
 add_executable(utpp_melee_base_offline EXCLUDE_FROM_ALL tests/MeleeBaseOffline.cpp tests/MeleeBaseReplay.hpp src/mm/MeleeBase.cpp
                src/mm/MeleeBaseData.cpp src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp src/mm/MeleeBodyId.hpp src/mm/MeleeBaseRuntime.hpp
                src/mm/MeleeAim.hpp src/mm/AimOffset.hpp src/mm/GameIntegration.hpp src/mm/MMMath.hpp)

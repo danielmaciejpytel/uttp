@@ -1,8 +1,9 @@
 // Melee full pose on recorded in-game fists sequences, through the production glue (MeleeBaseReplay.hpp with UTPP_REPLAY_FULL_POSE:
 // OnArmed, LowerBodyKeepWeight, CaptureEngineKeys, BlendIntoRecords, meleepose::Apply, meleebase::Apply in the order of FkHook.cpp).
 // Each fixture is replayed with the layer off (the chest correction alone) and on. Measured on the frames where the full pose writes
-// at full weight: Hips height and the chest (Spine3) orientation against the clip at the layer's clock; on every frame the largest
-// single-frame step of the Hips, both feet and the chest.
+// at full weight: the chest (Spine3) orientation against the clip at the layer's clock and the feet against the clip's own; the Hips
+// height against the clip outside a relock cross-fade and against the decaying jump inside one; on every frame the single-frame steps of the Hips (against
+// the off run or the clip's own step at the played rows), both feet and the chest.
 // usage: utpp_melee_pose_replay_test <pose table dir> <fixture.bin> [<fixture.bin> ...]
 #include <cmath>
 #include <cstdio>
@@ -49,6 +50,10 @@ struct Result
     float fadeHipsSpeed = 0.0f;   // fastest vertical Hips speed (shown) on frames inside the full-body fades
     float settledOffsetMax = 0.0f; // largest Hips height offset at full weight once the fade in has been over for kSettleSeconds
     int settledFrames = 0;
+    std::vector<float> stepHipsAt; // per frame: the Hips step against the previous frame (0 at a window start)
+    std::vector<float> ownHipsAt;  // per frame (layer on): the clip's own Hips step between the played (clip, clock) of this and the previous frame
+    int xfadeFrames = 0;           // frames at full weight inside a relock cross-fade (the clip's share below 1)
+    float xfadeErrMax = 0.0f, xfadeExcessMax = -1.0f;
 };
 
 struct RefFrame
@@ -56,6 +61,7 @@ struct RefFrame
     int32_t clip = -1;
     float clock = 0.0f;
     bool judged = false;
+    bool fullShare = false; // the clip at full share (outside a relock cross-fade): the Hips height is judged against the clip itself
 };
 
 // model position of a foot (Hips -> UpLeg -> Leg -> Foot) for a clip lower pose on the rig's own bone translations
@@ -94,6 +100,8 @@ Result Run(const std::string& aFixture, bool aFullPose, const meleepose::PoseTab
     RefFrame lastJudged;
     float lastHipsZ = 0.0f;
     float fullFor = 0.0f; // time at full weight (recorded lowerScale < 0.01 and the layer's own weight full) since the last fade frame
+    int32_t prevClip = -1;
+    float prevClock = 0.0f, lastWrittenZ = NAN, lastClipShare = 1.0f, jumpZ = NAN;
     for (size_t i = 0; i < rp.frames.size(); ++i)
     {
         rp.Step(i);
@@ -118,12 +126,25 @@ Result Run(const std::string& aFixture, bool aFullPose, const meleepose::PoseTab
         }
         const std::vector<aim::Xf> m = rp.Model();
         ++r.frames;
+        float stepH = 0.0f, ownH = 0.0f;
+        if (aFullPose)
+        {
+            const utpp::meleepose::LastStep ls = utpp::meleepose::GetLastStep();
+            const bool have = ls.clip >= 0 && size_t(ls.clip) < aT.clipFirstRow.size();
+            if (have && prevClip >= 0 && rp.frames[i].dt >= 0.0f)
+                ownH = aim::Length(meleepose::SamplePose(aT, uint32_t(ls.clip), ls.clockRow).hips - meleepose::SamplePose(aT, uint32_t(prevClip), prevClock).hips);
+            prevClip = have ? ls.clip : -1;
+            prevClock = ls.clockRow;
+        }
         if (havePrev && rp.frames[i].dt >= 0.0f)
         {
-            r.stepHips = std::fmax(r.stepHips, aim::Length(m[size_t(hips)].p - prev[size_t(hips)].p));
+            stepH = aim::Length(m[size_t(hips)].p - prev[size_t(hips)].p);
+            r.stepHips = std::fmax(r.stepHips, stepH);
             r.stepFoot = std::fmax(r.stepFoot, std::fmax(aim::Length(m[size_t(lf)].p - prev[size_t(lf)].p), aim::Length(m[size_t(rf)].p - prev[size_t(rf)].p)));
             r.stepChest = std::fmax(r.stepChest, AngleDeg(m[size_t(chest)].q, prev[size_t(chest)].q));
         }
+        r.stepHipsAt.push_back(stepH);
+        r.ownHipsAt.push_back(ownH);
         prev2 = prev.empty() ? m : prev;
         prev = m;
         havePrev = true;
@@ -132,10 +153,33 @@ Result Run(const std::string& aFixture, bool aFullPose, const meleepose::PoseTab
             const utpp::meleepose::LastStep ls = utpp::meleepose::GetLastStep();
             if (ls.held)
                 ++r.held;
-            // judged where the full pose writes at full weight
-            aRef[i].judged = rp.frames[i].lowerScale < 0.01f && ls.clip >= 0 && size_t(ls.clip) < aT.clipFirstRow.size() && ls.weight > 0.99f && ls.matched;
+            // judged where the full pose writes at full weight; the Hips height against the clip only outside a relock cross-fade
+            const bool full = rp.frames[i].lowerScale < 0.01f && ls.clip >= 0 && size_t(ls.clip) < aT.clipFirstRow.size() && ls.weight > 0.99f && ls.matched;
+            aRef[i].judged = full;
+            aRef[i].fullShare = full && ls.clipShare > 0.99f;
             aRef[i].clip = ls.clip;
             aRef[i].clock = ls.clockRow;
+            // a relock cross-fade carries the difference between the pose written before the relock and the clip at the relock and lets it
+            // decay: the Hips height stays within (1 - the clip's share) x that jump (+ 0.02 m) of the clip as it plays
+            const float written = aim::ReadLocal(rp.records.data(), uint32_t(hips)).p.z - ls.hipsOffset;
+            if (rp.frames[i].dt < 0.0f)
+            {
+                lastWrittenZ = NAN;
+                lastClipShare = 1.0f;
+                jumpZ = NAN;
+            }
+            const float clipZ = ls.clip >= 0 && size_t(ls.clip) < aT.clipFirstRow.size() ? meleepose::SamplePose(aT, uint32_t(ls.clip), ls.clockRow).hips.z : NAN;
+            if (ls.clipShare < lastClipShare - 1e-4f || (ls.clipShare < 0.999f && std::isnan(jumpZ)))
+                jumpZ = std::fabs(clipZ - lastWrittenZ); // a relock started (the clip's share dropped): the jump it found
+            if (full && ls.clipShare <= 0.99f && !std::isnan(jumpZ))
+            {
+                const float err = std::fabs(written - clipZ);
+                ++r.xfadeFrames;
+                r.xfadeErrMax = std::fmax(r.xfadeErrMax, err);
+                r.xfadeExcessMax = std::fmax(r.xfadeExcessMax, err - ((1.0f - ls.clipShare) * jumpZ + 0.02f));
+            }
+            lastWrittenZ = written;
+            lastClipShare = ls.clipShare;
         }
         if (i < aRef.size() && aRef[i].judged)
         {
@@ -154,7 +198,8 @@ Result Run(const std::string& aFixture, bool aFullPose, const meleepose::PoseTab
             lastJudged = ls;
             // the layer's written Hips height (the shown height minus the borders' offset, which eases a height change in the fades)
             const float hz = aim::ReadLocal(rp.records.data(), uint32_t(hips)).p.z - (aFullPose ? utpp::meleepose::GetLastStep().hipsOffset : 0.0f);
-            r.hipsErrMax = std::fmax(r.hipsErrMax, std::fabs(hz - clip.hips.z));
+            if (aRef[i].fullShare)
+                r.hipsErrMax = std::fmax(r.hipsErrMax, std::fabs(hz - clip.hips.z));
             // the clip's chest (model orientation) at the clock row
             const uint32_t i0 = uint32_t(ls.clock);
             const math::Quat c = math::QuatNormalize(meleebase::DecodeQuat(aT.keys + size_t(i0) * meleebase::kRowInts + meleebase::kKeyBones * 4));
@@ -207,7 +252,10 @@ int main(int aArgc, char** aArgv)
                     on.full, on.held, on.hipsErrMax * 1000.0f, on.chestErrMax, on.full ? on.chestErrSum / float(on.full) : 0.0f, on.stepHips * 1000.0f,
                     on.stepFoot * 1000.0f, on.stepChest, on.footZMin * 1000.0f, on.footZMax * 1000.0f, on.ownFootStep * 1000.0f);
         Check(on.full > 20, "frames written at full weight", on.full);
-        Check(on.hipsErrMax < 0.02f, "hips height vs the clip at the clock (m)", on.hipsErrMax);
+        Check(on.hipsErrMax < 0.02f, "hips height vs the clip at the clock, frames writing the clip at full share (m)", on.hipsErrMax);
+        std::printf("  relock cross-fades: %d frames at full weight, hips height vs the clip max %.0f mm\n", on.xfadeFrames, on.xfadeErrMax * 1000.0f);
+        Check(on.xfadeExcessMax <= 0.0f, "hips height in a relock cross-fade: within (1 - the clip's share) x the jump at the relock + 0.02 m (excess, m)",
+              on.xfadeExcessMax);
         // inside the full-body fades the shown Hips height moves at most at the borders' speed limit
         std::printf("  borders: Hips offset max %.0f mm | Hips vertical speed in the fades: on %.2f m/s, off %.2f m/s\n", on.hipsOffsetMax * 1000.0f,
                     on.fadeHipsSpeed, off.fadeHipsSpeed);
@@ -218,7 +266,23 @@ int main(int aArgc, char** aArgv)
               on.settledOffsetMax);
         Check(on.chestErrMax < off.chestErrMax, "chest vs the clip: full pose below the chest correction alone (max deg)", on.chestErrMax);
         // continuity: no step beyond the off run's own (+ 2 cm / 5 deg for the clip's own faster legs)
-        Check(on.stepHips <= off.stepHips + 0.02f, "largest hips step vs the off run (m)", on.stepHips - off.stepHips);
+        // the Hips may move as fast as the off run or as the clip itself between the rows the layer played (+ 2 cm), frame by frame
+        float hipsExcess = -1.0f, hipsRef = 0.0f, hipsOn = 0.0f;
+        size_t hipsAt = 0;
+        for (size_t i = 0; i < on.stepHipsAt.size() && i < off.stepHipsAt.size(); ++i)
+        {
+            const float allowed = std::fmax(off.stepHipsAt[i], on.ownHipsAt[i]);
+            if (on.stepHipsAt[i] - allowed > hipsExcess)
+            {
+                hipsExcess = on.stepHipsAt[i] - allowed;
+                hipsRef = allowed;
+                hipsOn = on.stepHipsAt[i];
+                hipsAt = i;
+            }
+        }
+        std::printf("  hips: largest step %.0f mm (off run %.0f mm); worst frame %d against its reference: step %.0f mm, reference %.0f mm\n",
+                    on.stepHips * 1000.0f, off.stepHips * 1000.0f, int(hipsAt), hipsOn * 1000.0f, hipsRef * 1000.0f);
+        Check(hipsExcess <= 0.02f, "hips step vs the off run or the clip's own step at the played rows, per frame (m)", hipsExcess);
         // feet at full weight: no faster than the clip's own feet (+ 1 cm). The fade in / out (the recorded lowerScale) moves the feet
         // from the locomotion stance to the clip's and back without pinning them: reported, not judged
         Check(on.stepFootJudged <= on.ownFootStep + 0.01f, "largest foot step at full weight vs the clip's own (m)", on.stepFootJudged - on.ownFootStep);

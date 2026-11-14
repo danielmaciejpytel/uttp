@@ -56,6 +56,7 @@ struct LastWrite
     core::LowerPose pose;
     float weight = 0.0f;
     int64_t ticks = 0;
+    float clipShare = 1.0f; // StepInfo::clipShare of that write
 };
 integ::SeqlockBuffer<LastWrite> g_last;
 
@@ -72,7 +73,7 @@ std::atomic<uint64_t> g_borderCalls{0}, g_planted{0}, g_steps{0}, g_hipsLimited{
 uint64_t g_loggedCalls = 0, g_loggedGuardCalls = 0, g_loggedBorderCalls = 0; // game thread (FormatLogLine)
 std::atomic<int64_t> g_costTicks{0}, g_costMax{0};
 std::atomic<int32_t> g_lastClip{-1};
-std::atomic<float> g_lastWeight{0.0f}, g_lastRms{0.0f}, g_lastClock{0.0f}, g_lastHipsOffset{0.0f};
+std::atomic<float> g_lastWeight{0.0f}, g_lastRms{0.0f}, g_lastClock{0.0f}, g_lastHipsOffset{0.0f}, g_lastClipShare{1.0f};
 std::atomic<int32_t> g_lastBody{-1};
 std::atomic<bool> g_lastMatched{false}, g_lastHeld{false};
 
@@ -304,7 +305,7 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
         {
             const float w = lw.weight * fade;
             if (core::WriteLower(aBones, aCount, rm.lower, lw.pose, w))
-                utpp::meleebase::SetFullPoseShare(w);
+                utpp::meleebase::SetFullPoseShare(w * lw.clipShare);
         }
         return;
     }
@@ -341,7 +342,8 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
     {
         wrote = true;
         g_written.fetch_add(1, std::memory_order_relaxed);
-        utpp::meleebase::SetFullPoseShare(wEff);
+        // the chest correction covers what the layer does not write of the clip the upper body plays: the fade and a relock's cross-fade
+        utpp::meleebase::SetFullPoseShare(wEff * si.clipShare);
     }
     // borders: feet planted / short steps and the Hips height speed limit, on the written pose (and after it, see BorderTail)
     {
@@ -375,10 +377,11 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
     g_lastWeight.store(wEff, std::memory_order_relaxed);
     g_lastRms.store(si.rmsDeg, std::memory_order_relaxed);
     g_lastClock.store(si.clockRow, std::memory_order_relaxed);
+    g_lastClipShare.store(si.clipShare, std::memory_order_relaxed);
     g_lastBody.store(body, std::memory_order_relaxed);
     g_lastMatched.store(si.matched, std::memory_order_relaxed);
     g_lastHeld.store(si.held, std::memory_order_relaxed);
-    g_last.Publish(LastWrite{pose, w, aNowTicks});
+    g_last.Publish(LastWrite{pose, w, aNowTicks, si.clipShare});
     g_busy.clear(std::memory_order_release);
     Track(start.QuadPart);
 }
@@ -417,6 +420,7 @@ LastStep GetLastStep()
     s.clip = g_lastClip.load();
     s.clockRow = g_lastClock.load();
     s.weight = g_lastWeight.load();
+    s.clipShare = g_lastClipShare.load();
     s.rmsDeg = g_lastRms.load();
     s.hipsOffset = g_lastHipsOffset.load();
     s.matched = g_lastMatched.load();

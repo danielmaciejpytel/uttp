@@ -51,6 +51,7 @@ struct LastStep // the last Apply that ran the layer (tests / the offline replay
     int32_t body = -1, clip = -1; // clip: global clip index of the body's table
     float clockRow = 0.0f, weight = 0.0f, rmsDeg = 0.0f;
     float hipsOffset = 0.0f; // borders: Hips height shown minus the layer's written height (m)
+    float clipShare = 1.0f;  // share of the locked clip in the written pose (below 1 during a relock cross-fade)
     bool matched = false, held = false;
 };
 LastStep GetLastStep();

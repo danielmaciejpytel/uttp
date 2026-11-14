@@ -490,6 +490,8 @@ public:
         m_target = Vec3{};
         m_cur = Vec3{};
         m_lost = 0.0f;
+        m_out = Vec3{};
+        m_haveOut = false;
         m_fresh = true;
     }
     float Value() const { return m_gate; }
@@ -532,7 +534,18 @@ public:
             m_cur = m_cur + step;
         }
         const float w = std::isfinite(aWeight) ? aim::Clampf(aWeight, 0.0f, 1.0f) : 0.0f;
-        return m_cur * (m_gate * w);
+        Vec3 out = m_cur * (m_gate * w);
+        if (m_haveOut && dt > 0.0f)
+        {
+            // the applied rotation itself keeps the rate limit when its weight changes (the melee full pose handing a clip switch over)
+            const Vec3 d = out - m_out;
+            const float maxStep = kMaxRotDegPerSecond * kDegF * dt, len = aim::Length(d);
+            if (len > maxStep && len > 0.0f)
+                out = m_out + d * (maxStep / len);
+        }
+        m_out = out;
+        m_haveOut = true;
+        return out;
     }
 
 private:
@@ -540,6 +553,8 @@ private:
     float m_lost = 0.0f;
     Vec3 m_target{};
     Vec3 m_cur{};
+    Vec3 m_out{};
+    bool m_haveOut = false;
     bool m_fresh = true;
 };
 
