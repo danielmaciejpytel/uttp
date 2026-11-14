@@ -3,8 +3,10 @@
 // path and reads ONE immutable copy before Capture/Finish. No cached game poses.
 #include "NativeReloadClavicleReach.hpp"
 #include <atomic>
+#include <limits>
 #include "GameIntegration.hpp"
 #include "Overlay.hpp"
+#include "ForearmTwist.hpp"
 
 namespace utpp::mm::reload_contacts_runtime
 {
@@ -23,6 +25,214 @@ inline constexpr float kAuthoredContactMinReach=0.0f; // mutation 3: default fol
 #else
 inline constexpr float kAuthoredContactMinReach=0.12f;
 #endif
+// Arm limits after the clavicle reach step. The solve keeps the native hand transform exactly and re-aims clavicle / upper arm /
+// forearm from V's own torso, so the difference between V's shoulder and the native one ends up in the wrist bend or in the
+// pronation (forearm roll + hand twist about the forearm axis). LimitArmBySwivel turns the elbow about the shoulder -> wrist axis
+// (the support-grip swivel of ForearmTwist.hpp: upper' = R(aP, phi) * upper, hand' = R(aF, -phi) * hand, forearm local unchanged),
+// so the MODEL transform of the hand, the weapon bindings and the fingers stay exact. phi = the smallest swivel (|phi| <= max)
+// that brings both the pronation under kReloadPronationLimitDeg and the wrist bend (angle between the hand and forearm bone
+// axes, both local +x of the CP rig, rest 0) under kReloadWristBendLimitDeg; out of reach the swivel with the smallest excess
+// that lowers it and raises neither value past max(limit, value before). The swivel also never raises the upper-arm twist (twist
+// about local x of the rest-relative upper-arm rotation, kUpperArmRestLocal^-1 * upper) past max(kReloadUpperArmTwistCapDeg, twist
+// before). Under both limits: pose untouched bit for bit.
+// aWeight scales phi (the correction weight: 0 = untouched).
+inline constexpr float kReloadPronationLimitDeg=ov::kSupportHandTwistLimitDeg;
+inline constexpr float kReloadWristBendLimitDeg=75.0f;
+inline constexpr float kReloadMaxSwivelDeg=ov::kSupportHandMaxSwivelDeg;
+inline constexpr float kReloadUpperArmTwistCapDeg=100.0f; // 5 deg under the 105 deg anatomical bound
+// Rest local rotation of LeftArm / RightArm of the CP rig (mean of both bodies; each body is within 2 deg of it).
+inline constexpr math::Quat kUpperArmRestLocal{-0.0102f,0.0237f,-0.1977f,0.9798f};
+struct ArmLimitResult
+{
+    bool applied=false;
+    bool reached=false;                                    // both limits met (else: smallest excess within the cap)
+    float pronationBeforeDeg=0.0f,pronationAfterDeg=0.0f; // |forearm roll + hand twist| about the forearm -> hand axis
+    float bendBeforeDeg=0.0f,bendAfterDeg=0.0f;           // wrist bend (deg)
+    float swivelDeg=0.0f;                                  // applied swivel (signed, deg)
+    bool overCap=false;                                    // continuous swivel kept although it raises a value past its cap
+};
+// Angle (deg) between the hand bone axis and the forearm bone axis for a hand local rotation (both bone axes local +x).
+inline float WristBendDeg(const math::Quat& aHandLocal)
+{
+    const math::Vec3 x=math::QuatRotate(math::QuatNormalize(aHandLocal),math::Vec3{1.0f,0.0f,0.0f});
+    return std::acos(std::fmax(-1.0f,std::fmin(1.0f,x.x)))*(180.0f/math::kPi);
+}
+// Continuity over time (aPrevDeg != nullptr): *aPrevDeg is the unweighted swivel of the previous frame of this arm and receives
+// this frame's. The wanted swivel is chosen as above, but beyond one step from 0 only on the side of the previous swivel (the
+// other side is reached through 0), and out of reach the excess is traded against the change from the previous swivel
+// (kReloadSwivelTieCost per deg). The applied swivel moves towards the wanted one by at most aMaxStepDeg, never crosses 0 in one
+// frame, and slews towards 0 instead when the step would raise a value past its cap. phi = swivel * aWeight, so a weight ramp
+// starts and ends at 0 deg. Under both limits with a previous swivel of 0: untouched bit for bit.
+inline constexpr float kReloadSwivelTieCost=0.1f;
+inline ArmLimitResult LimitArmBySwivel(ov::Pose& aPose,const ov::Skeleton& aSk,int aUpper,int aForearm,int aHand,
+                                       float aPronationLimitDeg,float aBendLimitDeg,float aMaxSwivelDeg,float aWeight,
+                                       float* aPrevDeg=nullptr,float aMaxStepDeg=std::numeric_limits<float>::infinity())
+{
+    ArmLimitResult r;
+    const float prevIn=aPrevDeg && std::isfinite(*aPrevDeg) ? *aPrevDeg : 0.0f;
+    if(aPrevDeg)*aPrevDeg=0.0f; // a pose the limiter cannot handle ends the continuous swivel
+    if(aUpper<0 || aForearm<0 || aHand<0 || aUpper>=aPose.n || aForearm>=aPose.n || aHand>=aPose.n || aSk.parent[aHand]!=aForearm ||
+       aSk.parent[aForearm]!=aUpper)return r;
+    for(int i=0;i<aSk.n && i<aPose.n;++i)if(i!=aHand && aSk.parent[i]==aForearm)return r; // another forearm child would move
+    const float w=ov::Clamp01(aWeight);
+    const math::Vec3 ht=aPose.b[aHand].t;
+    const float hl=std::sqrt(math::Dot(ht,ht));
+    if(!(hl>1e-5f) || !std::isfinite(hl))return r;
+    const math::Vec3 x=ht*(1.0f/hl);
+    const math::Quat qUp=math::QuatNormalize(aPose.b[aUpper].r);
+    const math::Quat qFo=math::QuatNormalize(aPose.b[aForearm].r);
+    const math::Quat qHand=math::QuatNormalize(aPose.b[aHand].r);
+    // forearm roll about the forearm -> hand axis (swing-twist): pronation = twist of (roll * hand) about that axis
+    const float d=qFo.x*x.x+qFo.y*x.y+qFo.z*x.z;
+    math::Quat roll{x.x*d,x.y*d,x.z*d,qFo.w};
+    const float rn=std::sqrt(roll.x*roll.x+roll.y*roll.y+roll.z*roll.z+roll.w*roll.w);
+    if(!(rn>1e-6f) || !std::isfinite(rn))return r;
+    roll=math::Quat{roll.x/rn,roll.y/rn,roll.z/rn,roll.w/rn};
+    const math::Vec3 sw=aPose.b[aForearm].t+math::QuatRotate(qFo,ht); // shoulder -> wrist, upper-arm frame
+    const float sl=std::sqrt(math::Dot(sw,sw));
+    if(!(sl>1e-5f) || !std::isfinite(sl))return r;
+    const math::Vec3 aF=math::QuatRotate(math::QuatInv(qFo),sw)*(1.0f/sl);
+    const math::Vec3 aP=math::QuatRotate(qUp,sw)*(1.0f/sl);
+    const math::Quat restInv=math::QuatInv(math::QuatNormalize(kUpperArmRestLocal));
+    const auto upTwist=[&](const math::Quat& aUp){
+        return std::fabs(ov::TwistAngleDeg(math::QuatNormalize(math::QuatMul(restInv,aUp)),math::Vec3{1.0f,0.0f,0.0f}));};
+    const auto upAt=[&](float aPhi){return math::QuatNormalize(math::QuatMul(ov::AxisAngleQuat(aP,aPhi),qUp));};
+    const float uCap=std::fmax(kReloadUpperArmTwistCapDeg,upTwist(qUp));
+    const auto handAt=[&](float aPhi){return math::QuatNormalize(math::QuatMul(ov::AxisAngleQuat(aF,-aPhi),qHand));};
+    const auto pronAt=[&](const math::Quat& aH){return std::fabs(ov::TwistAngleDeg(math::QuatNormalize(math::QuatMul(roll,aH)),x));};
+    const float p0=pronAt(qHand),b0=WristBendDeg(qHand);
+    r.pronationBeforeDeg=r.pronationAfterDeg=p0;
+    r.bendBeforeDeg=r.bendAfterDeg=b0;
+    if(!std::isfinite(p0) || !std::isfinite(b0))return r;
+    const bool stateful=aPrevDeg!=nullptr;
+    const float u0=stateful ? std::fmax(-aMaxSwivelDeg,std::fmin(aMaxSwivelDeg,prevIn)) : 0.0f;
+    const float maxStep=stateful && std::isfinite(aMaxStepDeg) && aMaxStepDeg>=0.0f ? aMaxStepDeg : std::numeric_limits<float>::infinity();
+    const bool over=!(p0<=aPronationLimitDeg && b0<=aBendLimitDeg);
+    if(!over && u0==0.0f)return r;
+    if(!(w>ov::kZeroWeight) || !(aMaxSwivelDeg>0.0f))return r;
+    const float pCap=std::fmax(aPronationLimitDeg,p0),bCap=std::fmax(aBendLimitDeg,b0);
+    // excess past the limits (deg, > 0 = over); +inf where a value would rise past its cap
+    const auto excessAt=[&](float aPhi){
+        const math::Quat h=handAt(aPhi);
+        const float p=pronAt(h),b=WristBendDeg(h);
+        if(!(p<=pCap+1e-3f) || !(b<=bCap+1e-3f) || !(upTwist(upAt(aPhi))<=uCap+1e-3f))
+            return std::numeric_limits<float>::infinity();
+        return std::fmax(p-aPronationLimitDeg,b-aBendLimitDeg);
+    };
+    const float e0=std::fmax(p0-aPronationLimitDeg,b0-aBendLimitDeg);
+    const int steps=static_cast<int>(std::ceil(aMaxSwivelDeg));
+    const float step=aMaxSwivelDeg/static_cast<float>(steps);
+    float best=0.0f;
+    bool reached=false;
+    if(over)
+    {
+        // side kept beyond one step from 0 (stateful only); keep == 0: both sides, + first
+        const float keep=stateful && std::fabs(u0)>maxStep ? (u0>0.0f ? 1.0f : -1.0f) : 0.0f;
+        const auto search=[&](bool aKeepSide)->bool{
+            float bestC=e0;
+            best=0.0f;
+            for(int k=1;k<=steps;++k)
+                for(const float side:{1.0f,-1.0f})
+                {
+                    if(aKeepSide && keep!=0.0f && side!=keep)continue;
+                    const float e=excessAt(side*step*static_cast<float>(k));
+                    if(e<=0.0f)
+                    {
+                        float lo=step*static_cast<float>(k-1),hi=step*static_cast<float>(k);
+                        for(int i=0;i<12;++i)
+                        {
+                            const float mid=0.5f*(lo+hi);
+                            (excessAt(side*mid)>0.0f ? lo : hi)=mid;
+                        }
+                        best=side*hi;
+                        return true;
+                    }
+                    if(!(e<e0))continue;
+                    const float phiK=side*step*static_cast<float>(k);
+                    const float c=stateful ? e+kReloadSwivelTieCost*(std::fabs(phiK-u0)-std::fabs(u0)) : e;
+                    if(c<bestC){bestC=c;best=phiK;}
+                }
+            return false;
+        };
+        reached=search(true);
+        if(!reached && keep!=0.0f)
+        {
+            const float sameSide=best;
+            reached=search(false); // the other side only when it meets the limits; it is reached through 0 below
+            if(!reached)best=sameSide;
+        }
+    }
+    float swivel=best;
+    if(stateful)
+    {
+        float u=u0+std::fmax(-maxStep,std::fmin(maxStep,best-u0));
+        if(u*u0<0.0f)u=0.0f; // never cross 0 in one frame
+        // a value would rise past its cap at the applied (weighted) swivel: inside this frame's window (9 samples of
+        // [u0 - step, u0 + step], no crossing of 0) the swivel nearest the slewed one that raises nothing; if every sample raises a
+        // value, the one with the smallest rise is kept (a small rise for a few frames is better than an elbow pop) and reported in overCap
+        if(u!=0.0f && !std::isfinite(excessAt(u*w)))
+        {
+            const auto riseAt=[&](float aPhi){
+                const math::Quat h=handAt(aPhi);
+                return std::fmax(std::fmax(pronAt(h)-pCap,WristBendDeg(h)-bCap),upTwist(upAt(aPhi))-uCap);};
+            const float win=std::isfinite(maxStep) ? maxStep : 0.0f;
+            float bestOk=0.0f,bestRiseU=0.0f,bestRise=std::numeric_limits<float>::infinity();
+            bool haveOk=false;
+            for(int k=-4;k<=4;++k)
+            {
+                float c=u0+win*static_cast<float>(k)/4.0f;
+                if(c*u0<0.0f)c=0.0f;
+                c=std::fmax(-aMaxSwivelDeg,std::fmin(aMaxSwivelDeg,c));
+                const float rise=riseAt(c*w);
+                if(!(rise>1e-3f))
+                {
+                    if(!haveOk || std::fabs(c-u)<std::fabs(bestOk-u)){bestOk=c;haveOk=true;}
+                }
+                else if(rise<bestRise){bestRise=rise;bestRiseU=c;}
+            }
+            u=haveOk ? bestOk : bestRiseU;
+            r.overCap=!haveOk && u!=0.0f;
+        }
+        swivel=std::fmax(-aMaxSwivelDeg,std::fmin(aMaxSwivelDeg,u));
+        *aPrevDeg=swivel;
+    }
+    if(swivel==0.0f)return r;
+    const float phi=swivel*w;
+    const math::Quat up=upAt(phi);
+    const math::Quat hand=handAt(phi);
+    if(!math::IsFinite(up) || !math::IsFinite(hand))return r;
+    aPose.b[aUpper].r=up;
+    aPose.b[aHand].r=hand;
+    r.applied=true;
+    r.reached=reached;
+    r.swivelDeg=phi;
+    r.pronationAfterDeg=pronAt(hand);
+    r.bendAfterDeg=WristBendDeg(hand);
+    return r;
+}
+// Per-arm swivel of the previous frame (unweighted, deg) for LimitArmBySwivel. The swivel moves at most
+// kReloadSwivelRateDegPerSec * dt per frame (dt capped at .05 s); a new episode, a gap above .25 s or a rig change starts at 0 deg
+// with one 60 fps step. Repeated calls within one tick do not step again.
+inline constexpr float kReloadSwivelRateDegPerSec=360.0f; // 6 deg per frame at 60 fps; the 60 deg cap is reached in 1/6 s
+struct SwivelState
+{
+    bool valid=false;
+    uint64_t rig=0;
+    int64_t lastTicks=0;
+    float deg[2]{};
+    void Reset(){valid=false;deg[0]=deg[1]=0.0f;}
+    // Largest swivel change (deg) allowed this frame; < 0 = no clock (the caller then uses the stateless rule).
+    float Begin(uint64_t rigId,int64_t ticks,int64_t ticksPerSecond)
+    {
+        if(ticks<=0 || ticksPerSecond<=0)return -1.0f;
+        if(!valid || rig!=rigId || ticks<lastTicks || (ticks-lastTicks)>ticksPerSecond/4)
+        {valid=true;rig=rigId;lastTicks=ticks;deg[0]=deg[1]=0.0f;return kReloadSwivelRateDegPerSec/60.0f;}
+        if(ticks==lastTicks)return 0.0f;
+        const float dt=std::min(float(double(ticks-lastTicks)/double(ticksPerSecond)),.05f);
+        lastTicks=ticks;
+        return kReloadSwivelRateDegPerSec*dt;
+    }
+};
 // Native pose divergence guard. The contact targets are native MODEL positions, correct only while the native body
 // stands where the MM body stands. After a jump / slide / crouch the native graph can leave the player squatting
 // (hips ~.34m against MM ~.95m, 21.10 01:56): the targets then put the hands at the MM hips. From
@@ -1495,7 +1705,8 @@ struct Continuity
     StockShiftState stock;
     LeftArmState leftArm,weaponFollow;
     PublishedStart published;
-    void Reset(){placement.Reset();divergence.Reset();reject.Reset();joints.Reset();stock.Reset();leftArm.Reset();weaponFollow.Reset();published.Reset();}
+    SwivelState swivel;
+    void Reset(){placement.Reset();divergence.Reset();reject.Reset();joints.Reset();stock.Reset();leftArm.Reset();weaponFollow.Reset();published.Reset();swivel.Reset();}
     // Last stage of a frame: the final records (after replay / ramp / limiter) become the reference of the next frame's
     // head clearance.
     void NoteOutput(const Prepared& p,const uint8_t* records,uint32_t count)
@@ -1575,7 +1786,10 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
        cycle.sequence!=s.sequence || cycle.rig!=s.rig || !Valid(p,s,count))return false;
     if(!std::isfinite(correctionWeight) || correctionWeight<0 || correctionWeight>1)return false;
     // A new episode starts every follower from the baseline: the correction weight reached 0 (the lag is gone with it).
-    const auto resetFollowers=[&]{if(continuity && kResetFollowersAtZero){continuity->leftArm.Reset();continuity->weaponFollow.Reset();}};
+    // The arm-limit swivel always restarts at 0 deg there.
+    const auto resetFollowers=[&]{
+        if(continuity)continuity->swivel.Reset();
+        if(continuity && kResetFollowersAtZero){continuity->leftArm.Reset();continuity->weaponFollow.Reset();}};
     if(correctionWeight<=0){resetFollowers();result.ok=true;result.reject=native_reload_contacts::Reject::None;return true;} // exact baseline; no IK
     ov::Pose authored,candidate,target;
     if(!Read(p,records,authored))return false;
@@ -1705,6 +1919,19 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
                                              1.0f,native_reload::kUnboundedGuideTurnRad,
                                              rightGuideCap,s.reloadAuthoredClip,
                                              s.reloadAuthoredClip ? authoredMinReach : 0.0f))return false;
+#if !(defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==24) // mutation 24: no arm limits after the reach step
+    {
+        const float swivelStep=continuity ? continuity->swivel.Begin(s.rig,nowTicks,ticksPerSecond) : -1.0f;
+        int side=0;
+        for(const gik::ArmChain* arm:{&p.arms.left,&p.arms.right})
+        {
+            float* const prev=swivelStep>=0.0f ? &continuity->swivel.deg[side] : nullptr;
+            LimitArmBySwivel(candidate,p.skeleton,arm->upper,arm->lower,arm->hand,kReloadPronationLimitDeg,kReloadWristBendLimitDeg,
+                             kReloadMaxSwivelDeg,correctionWeight,prev,swivelStep);
+            ++side;
+        }
+    }
+#endif
     result.stockShift=stockShift;result.leftArmShift=leftArmShift;
     if(rejectHold)
     {

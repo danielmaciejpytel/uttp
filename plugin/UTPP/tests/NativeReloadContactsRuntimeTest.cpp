@@ -138,5 +138,125 @@ int main(int argc,char** argv){
   }
  }
  check(postures>0,"at least one actual feminine narrow endpoint exercised");
+ // Arm limits after the reach step (LimitArmBySwivel): hand MODEL transform exact, forearm local unchanged, under both limits
+ // bit for bit, weight 0 bit for bit, an over-limit wrist bend / pronation lowered (reached = under the limit) and never raised.
+ {
+  using reload_contacts_runtime::LimitArmBySwivel;using reload_contacts_runtime::WristBendDeg;
+  const int index=file.FindOverlayPose(ov::PoseOverlay::Pistol2H,ov::AimState::Ready,false,false);if(index<0)return 2;
+  auto base=std::make_unique<ov::Pose>();file.FramePose(file.PoseAt(index).firstFrame,*base);
+  const auto sameModel=[&](const ov::Pose& a,const ov::Pose& b,int bone){
+   const auto x=native_reload::Model(sk,a,bone),y=native_reload::Model(sk,b,bone);
+   return gik::Len(x.t-y.t)<1e-5f && std::fabs(std::fabs(math::QuatDot(x.r,y.r))-1.0f)<1e-5f;};
+  int limitedCases=0;
+  for(const gik::ArmChain* arm:{&rig.left,&rig.right}){
+   const auto run=[&](const ov::Pose& in,float weight,ov::Pose& out){out=in;return LimitArmBySwivel(out,sk,arm->upper,arm->lower,arm->hand,
+    reload_contacts_runtime::kReloadPronationLimitDeg,reload_contacts_runtime::kReloadWristBendLimitDeg,reload_contacts_runtime::kReloadMaxSwivelDeg,weight);};
+   // a pose inside both limits: untouched bit for bit
+   // (forearm roll of the overlay pose moved into the hand first, then the hand set to identity: pronation 0, bend 0)
+   auto inside=std::make_unique<ov::Pose>(*base);
+   {ov::ForearmTwistRig tw;tw.Build(sk,rig.left.lower,rig.left.hand,rig.right.lower,rig.right.hand);float moved[2]={};ov::MoveForearmTwistToHands(tw,*inside,moved);}
+   inside->b[arm->hand].r=math::Quat{0,0,0,1};inside->b[arm->lower].r=math::QuatNormalize(math::QuatMul(inside->b[arm->lower].r,ov::AxisAngleQuat(math::Vec3{0,0,1},-40.0f)));
+   auto out=std::make_unique<ov::Pose>();
+   const auto rIn=run(*inside,1.0f,*out);
+   std::printf("arm limit inside side=%s bend %.1f pronation %.1f\n",arm==&rig.left?"L":"R",rIn.bendBeforeDeg,rIn.pronationBeforeDeg);
+   check(!rIn.applied && std::memcmp(out.get(),inside.get(),sizeof(ov::Pose))==0,"arm limit: pose inside both limits untouched bit for bit");
+   // pure bend (twist 0), pure twist (bend 0) and both; a combined case may stay where lowering one would raise the other
+   for(const float bendDeg:{0.0f,95.0f,110.0f})for(const float twistDeg:{0.0f,120.0f,150.0f}){
+    if(bendDeg==0.0f && twistDeg==0.0f)continue;
+    // elbow flexed 40 deg; hand bent about local z by bendDeg, then twisted about the forearm axis by twistDeg
+    auto bad=std::make_unique<ov::Pose>(*inside);
+    bad->b[arm->hand].r=math::QuatNormalize(math::QuatMul(ov::AxisAngleQuat(math::Vec3{1,0,0},twistDeg),ov::AxisAngleQuat(math::Vec3{0,0,1},bendDeg)));
+    const float b0=WristBendDeg(bad->b[arm->hand].r);
+    const auto r=run(*bad,1.0f,*out);
+    std::printf("arm limit side=%s bend %.1f->%.1f pronation %.1f->%.1f swivel %.2f applied=%d\n",arm==&rig.left?"L":"R",r.bendBeforeDeg,r.bendAfterDeg,
+                r.pronationBeforeDeg,r.pronationAfterDeg,r.swivelDeg,int(r.applied));
+    check(std::fabs(b0-r.bendBeforeDeg)<1e-3f,"arm limit: bend measure = axis angle of the hand local");
+    check(sameModel(*out,*bad,arm->hand),"arm limit: hand MODEL transform exact (contacts and weapon bindings unchanged)");
+    check(std::memcmp(&out->b[arm->lower],&bad->b[arm->lower],sizeof(ov::Xf))==0,"arm limit: forearm local unchanged (pure hinge kept)");
+    const bool raised=r.bendAfterDeg>std::fmax(reload_contacts_runtime::kReloadWristBendLimitDeg,r.bendBeforeDeg)+0.01f ||
+                      r.pronationAfterDeg>std::fmax(reload_contacts_runtime::kReloadPronationLimitDeg,r.pronationBeforeDeg)+0.01f;
+    check(!raised,"arm limit: neither the bend nor the pronation rises past max(limit, before)");
+    {
+     const math::Quat restInv=math::QuatInv(math::QuatNormalize(reload_contacts_runtime::kUpperArmRestLocal));
+     const auto upTw=[&](const math::Quat& q){return std::fabs(ov::TwistAngleDeg(math::QuatNormalize(math::QuatMul(restInv,q)),math::Vec3{1,0,0}));};
+     const float u0=upTw(bad->b[arm->upper].r),u1=upTw(out->b[arm->upper].r);
+     check(u1<=std::fmax(reload_contacts_runtime::kReloadUpperArmTwistCapDeg,u0)+0.01f,"arm limit: upper-arm twist never raised past max(100 deg, before)");
+    }
+    const float e0=std::fmax(r.bendBeforeDeg-reload_contacts_runtime::kReloadWristBendLimitDeg,r.pronationBeforeDeg-reload_contacts_runtime::kReloadPronationLimitDeg);
+    const float e1=std::fmax(r.bendAfterDeg-reload_contacts_runtime::kReloadWristBendLimitDeg,r.pronationAfterDeg-reload_contacts_runtime::kReloadPronationLimitDeg);
+    if(bendDeg==0.0f || twistDeg==0.0f)check(r.applied && e1<e0,"arm limit: an over-limit wrist (bend only / twist only) lowered by the swivel");
+    else check(!r.applied || e1<e0,"arm limit: combined over-limit wrist never made worse");
+    if(r.reached)
+     check(e1<=0.05f,"arm limit: a swivel inside the cap reaches both limits");
+    limitedCases+=r.applied;
+    const auto r0=run(*bad,0.0f,*out);
+    check(!r0.applied && std::memcmp(out.get(),bad.get(),sizeof(ov::Pose))==0,"arm limit: weight 0 untouched bit for bit");
+    // half weight: half the swivel, continuous
+    const auto rh=run(*bad,0.5f,*out);
+    check(std::fabs(rh.swivelDeg-0.5f*r.swivelDeg)<1e-3f,"arm limit: the weight scales the swivel");
+   }
+  }
+  check(limitedCases>0,"arm limit: at least one over-limit case limited");
+  // Continuity over time: the hand twist sweeps continuously through 180 deg (130 -> 230 deg about the forearm axis, 2 deg per frame
+  // at 60 fps) inside a weight ramp in / out. The stateless rule changes the swivel side when the twist passes 180 deg (an elbow
+  // pop); the stateful rule (SwivelState) moves the unweighted swivel by at most kReloadSwivelRateDegPerSec * dt per frame, never
+  // changes sign between two frames, never raises the pronation / bend past max(limit, before) and ends at 0 deg with the weight.
+  for(const gik::ArmChain* arm:{&rig.left,&rig.right}){
+   auto pose=std::make_unique<ov::Pose>(*base);
+   {ov::ForearmTwistRig tw;tw.Build(sk,rig.left.lower,rig.left.hand,rig.right.lower,rig.right.hand);float moved[2]={};ov::MoveForearmTwistToHands(tw,*pose,moved);}
+   pose->b[arm->lower].r=math::QuatNormalize(math::QuatMul(pose->b[arm->lower].r,ov::AxisAngleQuat(math::Vec3{0,0,1},-40.0f)));
+   const int frames=60;
+   const int64_t tps=60000;
+   reload_contacts_runtime::SwivelState state;
+   auto out=std::make_unique<ov::Pose>();
+   float prevStateless=0.0f,prevU=0.0f,prevApplied=0.0f,prevW=0.0f,maxStep=0.0f,maxApplied=0.0f;
+   int flipsStateless=0,flips=0,raised=0,raisedUnreported=0,overCap=0,stepOver=0,appliedOver=0;
+   float maxRaise=0.0f;
+   bool endUntouched=false;
+   for(int i=0;i<frames;++i){
+    const float w=std::fmin(1.0f,std::fmin(float(i)/10.0f,float(frames-1-i)/10.0f));
+    const float twistDeg=130.0f+2.0f*float(i);
+    pose->b[arm->hand].r=ov::AxisAngleQuat(math::Vec3{1,0,0},twistDeg);
+    *out=*pose;
+    const auto rs=LimitArmBySwivel(*out,sk,arm->upper,arm->lower,arm->hand,reload_contacts_runtime::kReloadPronationLimitDeg,
+                                   reload_contacts_runtime::kReloadWristBendLimitDeg,reload_contacts_runtime::kReloadMaxSwivelDeg,1.0f);
+    if(rs.swivelDeg*prevStateless<0.0f)++flipsStateless;
+    prevStateless=rs.swivelDeg;
+    const float step=state.Begin(1,int64_t(i+1)*(tps/60),tps);
+    *out=*pose;
+    const auto r=LimitArmBySwivel(*out,sk,arm->upper,arm->lower,arm->hand,reload_contacts_runtime::kReloadPronationLimitDeg,
+                                  reload_contacts_runtime::kReloadWristBendLimitDeg,reload_contacts_runtime::kReloadMaxSwivelDeg,w,
+                                  &state.deg[arm==&rig.left ? 0 : 1],step);
+    const float u=state.deg[arm==&rig.left ? 0 : 1];
+    const float limitStep=reload_contacts_runtime::kReloadSwivelRateDegPerSec/60.0f;
+    if(w>0.0f && prevW>0.0f){ // weight 0 resets the unweighted state (the applied swivel is 0 there)
+     maxStep=std::fmax(maxStep,std::fabs(u-prevU));
+     stepOver+=std::fabs(u-prevU)>limitStep+1e-3f;
+    }
+    if(u*prevU<0.0f)++flips;
+    // applied (weighted) step: the unweighted step plus the swivel carried by the weight change
+    const float applied=r.swivelDeg;
+    maxApplied=std::fmax(maxApplied,std::fabs(applied-prevApplied));
+    appliedOver+=std::fabs(applied-prevApplied)>limitStep+std::fabs(prevU)*std::fabs(w-prevW)+1e-3f;
+    {
+     const float raise=std::fmax(r.bendAfterDeg-std::fmax(reload_contacts_runtime::kReloadWristBendLimitDeg,r.bendBeforeDeg),
+                                 r.pronationAfterDeg-std::fmax(reload_contacts_runtime::kReloadPronationLimitDeg,r.pronationBeforeDeg));
+     const bool up=raise>0.01f;
+     raised+=up;raisedUnreported+=up && !r.overCap;overCap+=r.overCap;
+     if(up)maxRaise=std::fmax(maxRaise,raise);
+    }
+    if(i==frames-1)endUntouched=!r.applied && std::memcmp(out.get(),pose.get(),sizeof(ov::Pose))==0;
+    prevU=u;prevApplied=applied;prevW=w;
+   }
+   std::printf("swivel continuity side=%s stateless flips %d; stateful flips %d max step %.2f deg (applied %.2f) over-rate %d raised %d (max %.1f deg, overCap %d)\n",
+               arm==&rig.left?"L":"R",flipsStateless,flips,maxStep,maxApplied,stepOver,raised,maxRaise,overCap);
+   check(flipsStateless>0,"swivel continuity: the stateless rule flips the swivel side on this sequence (the case under test)");
+   check(flips==0,"swivel continuity: the stateful swivel never changes sign between two frames");
+   check(stepOver==0,"swivel continuity: unweighted swivel step <= kReloadSwivelRateDegPerSec * dt");
+   check(appliedOver==0,"swivel continuity: applied step <= rate step + swivel x weight change");
+   check(raisedUnreported==0,"swivel continuity: pronation / bend raised past max(limit, before) only on frames reported as overCap");
+   check(endUntouched && prevU==0.0f,"swivel continuity: weight 0 at the end = untouched pose and swivel 0");
+  }
+ }
  std::printf("Native reload runtime endpoint %d passed %d failed; no intermediate clip/AO/helper proof\n",passed,failed);return failed?1:0;
 }

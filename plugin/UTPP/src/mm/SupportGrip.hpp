@@ -245,15 +245,29 @@ inline float ReachLimitedWeight(const ov::Skeleton& aSk, const ov::Pose& aPose, 
     return lo;
 }
 
+// Wrist bend (deg): angle between the hand bone axis and the forearm bone axis for a hand local rotation (both bone axes local +x in
+// the CP rig, rest bend 0). The support-grip weight below keeps it at or under kSupportWristBendLimitDeg.
+inline constexpr float kSupportWristBendLimitDeg = 75.0f;
+inline float WristBendDeg(const Quat& aHandLocal)
+{
+    const Vec3 x = math::QuatRotate(math::QuatNormalize(aHandLocal), Vec3{1.0f, 0.0f, 0.0f});
+    return std::acos(std::fmax(-1.0f, std::fmin(1.0f, x.x))) * (180.0f / math::kPi);
+}
+
 // Largest weight in [0, aW] whose blended grip keeps the support-hand twist at or under the limit once the left arm reaches it: per
 // candidate the left arm is solved to the target on a scratch copy (two-bone IK, game forearm convention, then the swivel limit of
 // ForearmTwist.hpp at full weight) and the remaining |twist| is read. Allowed = max(aLimitDeg, |twist at weight 0|): a pose that is
 // already over the limit without the route is never pushed further, and the route never raises it past the limit (Defender: the game
 // grip asks 104-119 deg at the overlay's elbow bend, beyond the 60 deg swivel). aW itself when it fits; bisection, 10 steps.
+// The same candidate solve also keeps the wrist bend (WristBendDeg) at or under max(aBendLimitDeg, bend at weight 0): the shoulder-aim
+// grip of the SMGs bends the support wrist 97-115 deg on the low carry elbow of the Relaxed poses (a curled fist at the belly), while
+// Ready / Aiming stay at 25-59 deg and keep the full grip.
 inline float TwistLimitedWeight(const ov::Skeleton& aSk, const ov::Pose& aPose, const gik::Rig& aRig, const ov::ForearmTwistRig& aTwistRig,
                                 const gik::Grip& aAuthored, const Entry& aE, float aW, const gik::Params& aP, float aLimitDeg,
-                                float aMaxSwivelDeg)
+                                float aMaxSwivelDeg, float aBendLimitDeg = kSupportWristBendLimitDeg, float* aTwistOnlyW = nullptr)
 {
+    if (aTwistOnlyW)
+        *aTwistOnlyW = 0.0f;
     const float w = ov::Clamp01(aW);
     if (!(w > ov::kZeroWeight) || !aRig.Valid(aSk))
         return 0.0f;
@@ -263,6 +277,7 @@ inline float TwistLimitedWeight(const ov::Skeleton& aSk, const ov::Pose& aPose, 
     static thread_local ov::Pose scratch;
     scratch = aPose;
     const int bones[3] = {aRig.left.upper, aRig.left.lower, aRig.left.hand};
+    float bend = 0.0f; // wrist bend of the last candidate solve
     const auto twistAt = [&](float x) {
         for (const int b : bones)
             scratch.b[b] = aPose.b[b];
@@ -275,16 +290,44 @@ inline float TwistLimitedWeight(const ov::Skeleton& aSk, const ov::Pose& aPose, 
         ov::MoveForearmTwistToHands(aTwistRig, scratch, moved);
         const ov::HandTwistLimitResult lim = ov::LimitHandTwistBySwivel(scratch, aRig.left.upper, aRig.left.lower, aRig.left.hand,
                                                                          aTwistRig.childCount[0], aLimitDeg, aMaxSwivelDeg, 1.0f);
+        bend = WristBendDeg(scratch.b[aRig.left.hand].r);
         return std::fabs(lim.twistAfterDeg);
     };
     const float allowed = std::fmax(aLimitDeg, twistAt(0.0f)) + 0.01f;
-    if (twistAt(w) <= allowed)
+#if defined(UTPP_SUPPORTGRIP_MUTATION) && UTPP_SUPPORTGRIP_MUTATION == 2
+    const float allowedBend = std::numeric_limits<float>::infinity(); // mutation 2: no wrist-bend term (the build before)
+#else
+    const float allowedBend = std::fmax(aBendLimitDeg, bend) + 0.01f;
+#endif
+    const auto fits = [&](float x) { return twistAt(x) <= allowed && bend <= allowedBend; };
+    const bool twistFitsW = twistAt(w) <= allowed;
+    if (twistFitsW && bend <= allowedBend)
+    {
+        if (aTwistOnlyW)
+            *aTwistOnlyW = w;
         return w;
+    }
+    // aTwistOnlyW: the same weight without the wrist-bend term (the twist limit alone)
+    if (aTwistOnlyW)
+    {
+        if (twistFitsW)
+            *aTwistOnlyW = w;
+        else
+        {
+            float tlo = 0.0f, thi = w;
+            for (int k = 0; k < 10; ++k)
+            {
+                const float mid = 0.5f * (tlo + thi);
+                (twistAt(mid) <= allowed ? tlo : thi) = mid;
+            }
+            *aTwistOnlyW = tlo;
+        }
+    }
     float lo = 0.0f, hi = w;
     for (int k = 0; k < 10; ++k)
     {
         const float mid = 0.5f * (lo + hi);
-        (twistAt(mid) <= allowed ? lo : hi) = mid;
+        (fits(mid) ? lo : hi) = mid;
     }
     return lo;
 }

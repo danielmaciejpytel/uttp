@@ -424,6 +424,7 @@ int main(int argc, char** argv)
             for (const AimVar& av : kAimVars)
         {
             float maxTwist = 0, minW = 1, maxNeed = 0, maxShift = 0;
+            float maxBend[3] = {}, minWs[3] = {1, 1, 1}; // left wrist bend / route weight per state (relaxed, ready, aim)
             bool ok = true;
             for (int st = 0; st < 3; ++st)
             {
@@ -446,14 +447,63 @@ int main(int argc, char** argv)
                     minW = std::min(minW, info.supportGripWeight);
                     maxNeed = std::max(maxNeed, info.reachShiftNeedM);
                     maxShift = std::max(maxShift, info.reachShiftM);
+                    static ov::Pose po;
+                    ev->ToOv(out.data(), po);
+                    maxBend[st] = std::max(maxBend[st], sgrip::WristBendDeg(po.b[ev->GripRig().left.hand].r));
+                    minWs[st] = std::min(minWs[st], info.supportGripWeight);
                 }
             }
+            std::printf("   left wrist bend max relaxed / ready / aim %.1f / %.1f / %.1f deg, route weight min %.3f / %.3f / %.3f\n", maxBend[0], maxBend[1],
+                        maxBend[2], minWs[0], minWs[1], minWs[2]);
+            // the wrist-bend term of the route weight: the support wrist never bent past 75 deg (the SMG shoulder-aim grip on the low
+            // carry elbow of Relaxed asks 97-115 deg), and the Aiming grip keeps its weight (no family bends past 42 deg there)
+            Check(std::max({maxBend[0], maxBend[1], maxBend[2]}) <= sgrip::kSupportWristBendLimitDeg + 0.5f,
+                  Lbl("every family: support wrist bend <= 75 deg on the route (relaxed / ready / aim)", av));
+            if (!av.have)
+                Check(minWs[2] >= 0.79f, Lbl("every family: the Aiming grip keeps its weight (>= 0.79, the twist-limited Defender)", av));
             std::printf("%s %-10s relaxed/ready/aim, aim point %s p %+.0f y %+.0f: twist max %.1f deg, route weight min %.3f, reach shift max %.2f cm (needed %.2f cm)\n",
                         d.woman ? "woman" : "man", e.family, av.have ? "on " : "off", av.pitchDeg, av.yawDeg, maxTwist, minW, maxShift * 100.0f,
                         maxNeed * 100.0f);
             Check(ok && maxTwist <= ov::kSupportHandTwistLimitDeg + 0.05f && minW > 0.25f,
                   Lbl("every family: support-hand twist <= 85 deg on the route, route weight > 0.25", av));
         }
+
+    // (2d) the SMG carry in motion: walk / sprint / crouch (moving, crouched, sprinting inputs on the walk / sprint / idle clips), Relaxed and
+    //      Ready, every family: the support wrist bend stays <= 75 deg on the route (in game the Borg4a carry bent it 122 deg)
+    for (Data& d : body)
+        for (const sgrip::Entry& e : sgrip::kTable)
+            for (int variant = 0; variant < 3; ++variant) // 0 walk, 1 sprint, 2 crouch
+                for (int ready = 0; ready < 2; ++ready)
+                {
+                    auto ev = std::make_unique<motionpose::PoseEvaluator>();
+                    if (!ev->Init(d.db.get(), d.ov.get(), &d.style, 2, error))
+                        return 2;
+                    motionpose::OverlayFrameInputs in = Inputs(d, ov::PoseOverlay::Rifle, ready == 1, false, &e);
+                    in.machine.moving = variant != 2;
+                    in.machine.hasVelocity = variant != 2;
+                    in.machine.crouch = variant == 2;
+                    in.machine.wantsToSprint = in.machine.sprinting = variant == 1 && ready == 0;
+                    motion::MatchResult match;
+                    match.clip = variant == 0 ? d.walk : variant == 1 ? d.sprint : d.idle;
+                    std::vector<BoneTransform> out(d.db->NumBones());
+                    motionpose::FrameInfo info;
+                    float maxBend = 0, minW = 1;
+                    bool ok = true;
+                    for (int k = 0; k < 60; ++k)
+                    {
+                        match.clipTime = 0.5f + static_cast<float>(k) / 30.0f;
+                        ok = ev->Evaluate(1.0f / 30.0f, match, in, out.data(), static_cast<uint32_t>(out.size()), &info) && ok;
+                        if (k < 30)
+                            continue;
+                        static ov::Pose po;
+                        ev->ToOv(out.data(), po);
+                        maxBend = std::max(maxBend, sgrip::WristBendDeg(po.b[ev->GripRig().left.hand].r));
+                        minW = std::min(minW, info.supportGripWeight);
+                    }
+                    std::printf("%s %-10s %-6s %-7s: left wrist bend max %.1f deg, route weight min %.3f\n", d.woman ? "woman" : "man", e.family,
+                                variant == 0 ? "walk" : variant == 1 ? "sprint" : "crouch", ready ? "ready" : "relaxed", maxBend, minW);
+                    Check(ok && maxBend <= sgrip::kSupportWristBendLimitDeg + 0.5f, "carry in motion: support wrist bend <= 75 deg on the route");
+                }
 
     // (2c) every weapon with a stock contact and the stock pass (stockY < 0, no hand priority: Ajax, Masamune, Saratoga), both bodies, default
     //      width, steady Aim with and without an aim point: the stock stays on the shoulder pocket along the barrel (|gap| <= 0.5 cm, the
@@ -710,6 +760,7 @@ int main(int argc, char** argv)
             float sweepW[2] = {1.0f, 1.0f}, sweepStep = 0.0f; // round 6: the sweep really pitches the pose (weight dip at +-40, raw hand step)
             math::Vec3 prev[2]{}, prevGrip{};
             float gripStep = 0.0f;
+            double weightSum = 0.0, weightHash = 0.0; // per-frame grip weight of the run with the input (A/B against the build without the bend term)
             bool have = false, ok = true;
             for (const Seg& s : segs)
                 for (int k = 0; k < s.frames; ++k, ++frame)
@@ -757,6 +808,11 @@ int main(int argc, char** argv)
                         step[v] = have ? gik::Len(rel - prev[v]) * 100.0f : 0.0f;
                         maxStep[v] = std::max(maxStep[v], step[v]);
                         prev[v] = rel;
+                        if (v == 0)
+                        {
+                            weightSum += info.supportGripWeight;
+                            weightHash += info.supportGripWeight * static_cast<double>(frame % 97 + 1);
+                        }
                         if (v == 0 && s.aimPoint)
                         {
                             sweepW[s.p0 + s.p1 > 0.0f ? 0 : 1] = std::min(sweepW[s.p0 + s.p1 > 0.0f ? 0 : 1], info.supportGripWeight);
@@ -786,6 +842,7 @@ int main(int argc, char** argv)
             std::printf("%s %s continuity: %d frames, left hand step max %.2f cm / frame (without the input %.2f), extra over max(hand, grip point) without it %.2f cm (frame %d; "
                         "in the weapon swap %.2f, in the Pistol1H swap %.2f, in the pitch sweep %.2f)\n",
                         d.woman ? "woman" : "man", e->family, frame, maxStep[0], maxStep[1], maxExtra, maxFrame, maxExtraSwap[1], maxExtraSwap[2], maxExtraSweep);
+            std::printf("   grip weight per frame: sum %.6f, weighted sum %.6f\n", weightSum, weightHash);
             std::printf("   pitch sweep: grip weight min %.3f (0 -> +40 -> 0), %.3f (0 -> -40 -> 0), left hand step max %.2f cm / frame\n", sweepW[0],
                         sweepW[1], sweepStep);
             Check(ok && maxExtra <= 2.5f, "continuity: the route adds <= 2.5 cm / frame of left-hand motion (30 Hz)");

@@ -413,6 +413,8 @@ public:
         m_reachShiftHave = false;
         m_routeW = 0.0f;
         m_routeWHave = false;
+        m_limitF = 1.0f;
+        m_limitFHave = false;
         m_release.Reset();
         if (aStyle)
             m_styleTable = aStyle->weights;
@@ -467,6 +469,8 @@ public:
         m_reachShiftHave = false;
         m_routeW = 0.0f;
         m_routeWHave = false;
+        m_limitF = 1.0f;
+        m_limitFHave = false;
         m_release.Reset();
     }
 
@@ -881,9 +885,23 @@ private:
                 if (authored && authoredGrip.valid && supportW > ov::kZeroWeight)
                 {
                     supportW = sgrip::ReachLimitedWeight(sk, *m_lay, m_rig, authoredGrip, *sgEntry, supportW, m_gripParams.softStart);
-                    // ... and whose hand rotation the support-hand swivel limit below can still bring to its 85 deg (both bodies)
+                    // ... and whose hand rotation the support-hand swivel limit below can still bring to its 85 deg (both bodies), with the
+                    // wrist bend at or under its limit
+                    float twistOnlyW = 0.0f;
                     supportW = sgrip::TwistLimitedWeight(sk, *m_lay, m_rig, m_forearmTwist, authoredGrip, *sgEntry, supportW, m_gripParams,
-                                                         ov::kSupportHandTwistLimitDeg, ov::kSupportHandMaxSwivelDeg);
+                                                         ov::kSupportHandTwistLimitDeg, ov::kSupportHandMaxSwivelDeg,
+                                                         sgrip::kSupportWristBendLimitDeg, &twistOnlyW);
+                    // only the wrist-bend factor (bend-limited / twist-and-reach-limited weight) is rate-limited over the gate time: a state
+                    // change (Relaxed -> Ready) moves the hand over the gate time instead of in one frame, while the reach and twist limits
+                    // apply at once (the weight never exceeds twistOnlyW)
+                    if (twistOnlyW > ov::kZeroWeight)
+                    {
+                        const float want = ov::Clamp01(supportW / twistOnlyW);
+                        const float fstep = std::isfinite(aDt) && aDt > 0.0f ? std::fmin(aDt, 0.1f) / m_gateSeconds : 1.0f;
+                        m_limitF = m_limitFHave ? std::fmin(m_limitF + fstep, std::fmax(m_limitF - fstep, want)) : want;
+                        m_limitFHave = true;
+                        supportW = twistOnlyW * m_limitF;
+                    }
                     authoredGrip = sgrip::BlendGrip(authoredGrip, *sgEntry, supportW);
                 }
                 // slides of this frame for a release (sgrip::Release)
@@ -1779,6 +1797,8 @@ private:
     float m_gateSeconds = 0.2f;         // rifle-grip-stock: gate / reach-shift time of this frame (sgrip::GateSeconds)
     float m_routeW = 0.0f;              // rifle-grip-stock: rate-limited route weight (gate x Rifle pose weight)
     bool m_routeWHave = false;
+    float m_limitF = 1.0f;              // support grip: rate-limited wrist-bend factor (bend-limited weight over the reach / twist limited weight)
+    bool m_limitFHave = false;
     bool m_reachShiftHave = false;
     sgrip::Gate m_supportGate;          // rifle-grip-stock: route gate of the game grip / stock pass (SupportGrip.hpp)
     sgrip::Release m_release;           // rifle-grip-stock: release state while the gate falls under other weapon data (review round 5)
