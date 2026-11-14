@@ -254,9 +254,10 @@ CODE_EXPECT = {
 # scripts of a group are self-contained: no other shipped script references them).
 # group -> (title, what to check in game on the day of the build)
 DAYOF_GROUPS = {
-    "melee": ("Third-person melee: fists, knife, katana, one-handed blunt, baton, two-handed blunt",
+    "melee": ("Third-person melee: fists, knife, katana, one-handed blunt, baton, two-handed blunt, arm blades",
               "fist combat in third person (idle, punches, movement, equip/unequip, guard) with the UTPP body; knife, katana, "
               "one-handed blunt, baton and two-handed blunt: combo, heavy, block (not knife), parried from left / right; "
+              "arm blades: guard, combo, safe attack, hold and heavy (the other arm blade states play the game's clips); "
               "Male V only in the single short pre-release test"),
     "car": ("Third-person car entry/exit",
             "entering and leaving cars as driver and passenger (door, approach, exit clips, camera transitions), "
@@ -273,12 +274,14 @@ DAYOF_DATA = [
     # Re-pinned 2026-11-14 (was 770bb02a..., 22454272 bytes): knife, katana, one-handed blunt and baton final attacks start from the
     # attack before them; knife combo attacks hold their pose through the combo window; two-handed blunt sets for both bodies added.
     # The six fists / default / StrongArms sets are byte-identical to 770bb02a...
-    ("melee", P_ARC + "utpp_melee.archive", 26632192, "b978453a91c3240c5b2e999f61ccee19710cfe439ffeff662dc25ebb6f7fbb4b"),
+    # Re-pinned 2026-11-14 (was b978453a..., 26632192 bytes): arm blade sets (pwa_mantisblade, pma_mantisblade: guard, combo,
+    # safe, hold and heavy attacks) added; the other 16 sets are byte-identical to b978453a... (compared unbundled).
+    ("melee", P_ARC + "utpp_melee.archive", 27721728, "02bdb447cf41bbffd331d579fbd38cc65d7394f1827c4505a4348d919d6ef0c2"),
     # Melee full pose tables (hips, spine and legs of every packed melee clip, one file per body; generated from the clip inputs of
-    # the archive above by tools\melee\melee_pose_table.py): fists, knife, katana, one-handed blunt, baton and two-handed blunt,
-    # 368 clips each.
-    ("melee", P_DATA + "utpp_melee_pose_female.bin", 2127612, "882ba64ae582f829b5a990a3b4989b922b9940d6a2c9f2af43caa24fb3f5227b"),
-    ("melee", P_DATA + "utpp_melee_pose_male.bin", 2127612, "abb21addbf3d25f4186aa50eedd67f12e7f59a80175ac6768b06f9d44665aa2a"),
+    # the archive above by tools\melee\melee_pose_table.py): fists, knife, katana, one-handed blunt, baton, arm blades and
+    # two-handed blunt, 384 clips each (was 882ba64a... / abb21add..., 368 clips: the six other sections are unchanged).
+    ("melee", P_DATA + "utpp_melee_pose_female.bin", 2260680, "024fbef00fc4cd3b1a3d27b87ef2eb3f87ef0de13292de6a6c7e1fc9fb0e39e6"),
+    ("melee", P_DATA + "utpp_melee_pose_male.bin", 2260680, "7954c41506758cd5b0e929972d48eb106e0f896584f1bbd474eaf07f8c649140"),
     # stage Build\stages\vehexit6-20261109 (game copy of 2026-11-09 15:30 is identical)
     ("car", P_ARC + "utpp_vehicle_car.archive", 7102464, "3843163c100787fc0669c6f5091e58597e83a312cc1f21da1542fc09771119d5"),
 ]
@@ -314,11 +317,15 @@ DAYOF_DATA = [
 #   utpp_melee_tpp.archive.xl b3340155... -> 1e696565...  FUNCTIONAL: four entries added (fists and default sets of both bodies
 #                                                           behind [w_strong_arms, utpp_melee_tpp]); the existing entries are
 #                                                           unchanged
+# Re-pinned 2026-11-14 (arm blade sets):
+#   utpp_melee.reds           a1aec221... -> 1a279c0d...  FUNCTIONAL: the arm blades leave the excluded arm cyberware group; one
+#                                                           covered name and one state line added (mantis_blade 26816)
+#   utpp_melee_tpp.archive.xl 1e696565... -> e9d806ec...  FUNCTIONAL: two entries added; the existing entries are unchanged
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "a1aec221ff9a87c78a885bd8d9ac4efad58fdaae44f738c32e02e0fb965ca339"),
+     "1a279c0dcd5ed909f481122414bb08715eb6c24dc9c14cf257c9029af187b0ce"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
-     "1e6965658dea413426f6b40b2ff8b2a515c6fbae192bb9ef15570d245f70a996"),
+     "e9d806ec607eb6145860992b235632a08020722a490f3adea3c4a0b0367dd57d"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",
      "2dd3b9017b668236a21e6e7cb2b604fbf2a3f199a57f413856fecbae8f0f905e"),
     ("car", P_REDS + "utpp_vehicle_approach_table.reds", "scripts/utpp_vehicle_approach_table.reds",
@@ -360,6 +367,11 @@ PARRIED_CLIPS = {
     "b978453a91c3240c5b2e999f61ccee19710cfe439ffeff662dc25ebb6f7fbb4b": {
         "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
         "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike", "w_two_hand_blunt": "per-strike"},
+    # the same 16 sets + arm blade sets (no parried clip of their own: the game's plain parried_left / parried_right play)
+    "02bdb447cf41bbffd331d579fbd38cc65d7394f1827c4505a4348d919d6ef0c2": {
+        "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
+        "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike", "w_two_hand_blunt": "per-strike",
+        "mantis_blade": "generic"},
 }
 STATES_RX = re.compile(r'^if\s+Equals\(n,\s*n"([A-Za-z0-9_]+)"\)\s*\{\s*return\s+(\d+);\s*\}$')
 

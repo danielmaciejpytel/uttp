@@ -125,8 +125,8 @@ class DayOfBuild(unittest.TestCase):
         for g, files in want.items():
             have = {p for p, v in data.items() if v[0] == g} | {p for p, v in code.items() if v[0] == g}
             self.assertEqual(have, files)
-        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (26632192,
-                         "b978453a91c3240c5b2e999f61ccee19710cfe439ffeff662dc25ebb6f7fbb4b"))  # fists + knife, katana, blunt, baton, two-handed blunt
+        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (27721728,
+                         "02bdb447cf41bbffd331d579fbd38cc65d7394f1827c4505a4348d919d6ef0c2"))  # fists + knife, katana, blunt, baton, two-handed blunt, arm blades
         # the bike archive was checked in game (2026-11-10) and is pinned in the core DATA list, not in a day-of group
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", [r for r, _ in mr.DATA_PENDING])
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", data)
@@ -231,7 +231,7 @@ class ParriedGraph(unittest.TestCase):
         self.assertEqual(mr.parried_graph_rule(real, MELEE_SHA), (True, []))
         self.assertEqual(mr.parse_states_table(real), ({"w_melee_fists": 3669472, "w_melee_knife": 3668192, "w_melee_katana": 3669472,
                                                         "w_melee_one_hand_blunt": 3669472, "w_melee_baton": 3669472,
-                                                        "w_two_hand_blunt": 3669472}, []))
+                                                        "w_two_hand_blunt": 3669472, "mantis_blade": 26816}, []))
         # the same lines without the Parried bit (graph-less fallback): not needed
         self.assertEqual(mr.parried_graph_rule(t(("w_melee_knife", 3668160), ("w_melee_katana", 3669440),
                                                  ("w_melee_one_hand_blunt", 3669440), ("w_melee_baton", 3669440),
@@ -463,6 +463,14 @@ class MeleeRegistration(unittest.TestCase):
             ("utpp\\melee\\utpp_pwa_strongarms_melee_fists.anims", "EP1 animsets", 127, ["StrongArms", "utpp_melee_tpp"])])
         for e in self.all:
             self.assertIn("utpp_melee_tpp", e["vars"], e["set"])      # every entry stays behind the wrapper variable
+
+    def test_arm_blade_sets(self):
+        wa = ["base\\characters\\entities\\player\\player_wa_fpp.ent", "ep1\\characters\\entities\\player\\player_wa_fpp_ep1.ent"]
+        ma = ["base\\characters\\entities\\player\\player_ma_fpp.ent", "ep1\\characters\\entities\\player\\player_ma_fpp_ep1.ent"]
+        mb = [(e["set"], e["component"], e["priority"], e["vars"], e["entity"]) for e in self.all if "mantis_blade" in e["vars"]]
+        self.assertEqual(sorted(mb), sorted([
+            ("utpp\\melee\\utpp_pwa_mantisblade.anims", "root", 127, ["mantis_blade", "utpp_melee_tpp"], wa),
+            ("utpp\\melee\\utpp_pma_mantisblade.anims", "root", 127, ["mantis_blade", "utpp_melee_tpp"], ma)]))
 
 
 class ReleaseTexts(unittest.TestCase):

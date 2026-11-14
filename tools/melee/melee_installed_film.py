@@ -6,14 +6,16 @@ the set on the third-person body), right "Ultimate Third Person Project" (the cl
   python -I -B melee_installed_film.py film  (same options) [--res 640,720] --out <mp4>
   python -I -B melee_installed_film.py seams (same options)      steps of the body joints at every clip boundary of the sequence, both sides
 
-  weapons: knife, katana, blunt (one-handed blunt), baton, fists, bat (two-handed blunt)
+  weapons: knife, katana, blunt (one-handed blunt), baton, fists, bat (two-handed blunt), mantis (arm blades: body only, the blades
+           are not drawn; --game-clips <dir> = folder of the game's arm blade clip dumps, <set>\<clip>.npz)
   --input     folder of <set>__<clip>.npc1.npz (+ .npc1.info.json) the set was exported from
   --manifest  stage manifest (sets -> mod_clips); with --fists-pack every array of --input counts as packed
   --sha       input-sha256.txt of the export run: every array read for the right side must match it (the film is refused otherwise)
   --work      output folder: _tmp (skin caches, MKV), film_info_<weapon>_<body>.json
 
 Sequence: guard, draw (melee_equip), light combo (combo_attack_01..m, each cut at the game clip's recover start + crossfade as the game
-switches), the final attack that follows combo m (final_attack_0(m+1)), strong attack (hold_start_01, hold_loop_01, heavy_attack_01),
+switches), the final attack that follows combo m (final_attack_0(m+1); a set without final attacks plays its whole light combo chain),
+strong attack (hold_start_01, hold_loop_01, heavy_attack_01), the safe attack (arm blades only),
 block start / hold / end (not for the knife), one hit reaction (parried_left), guard.  A clip that is not in the packed set plays the
 game's own clip on the right as well (listed in the info file).  Before rendering, every packed clip used is checked with the base
 anatomy gate (anatomy_gate_base.frame_gate, the builders' limits) on all of its frames; a failing clip refuses the film.  For two-hand
@@ -41,7 +43,7 @@ GB = NB.GB
 RIG = BC.RIG
 BODY = {'woman': 'female', 'man': 'male'}[RIG]
 SETNAME = {'knife': 'knife', 'katana': 'katana', 'blunt': 'one_handed_blunt', 'baton': 'baton', 'fists': 'fists',
-           'bat': 'two_handed_blunt'}[WEAPON]
+           'bat': 'two_handed_blunt', 'mantis': 'mantisblade'}[WEAPON]
 ST = ('pwa_' if RIG == 'woman' else 'pma_') + SETNAME
 if WEAPON in ('blunt', 'baton'):
     F.HANDLE.update(blunt=(-0.06, 0.05, 0.018), baton=(-0.09, 0.03, 0.016))
@@ -53,6 +55,12 @@ if WEAPON == 'bat':
     BC.BLADE['bat'] = (0.21, 0.718, 0.032)
 if WEAPON == 'fists':
     BC.WEAPONS['fists'] = dict(player={'woman': 'pwa_fists', 'man': 'pma_fists'}, two_hand=False)
+if WEAPON == 'mantis':
+    BC.WEAPONS['mantis'] = dict(player={'woman': 'pwa_mantisblade', 'man': 'pma_mantisblade'}, two_hand=False)
+    _GAME_CLIPS = os.path.abspath(_A[_A.index('--game-clips') + 1])
+    _clip_path0 = MC.clip_path
+    MC.clip_path = lambda set_name, clip, base=None: _clip_path0(set_name, clip, base or (
+        _GAME_CLIPS if 'mantisblade' in set_name else None))
 TWO_HAND = WEAPON in ('katana', 'bat')
 opt = F.opt
 INPUT = os.path.abspath(opt(_A, '--input', ''))
@@ -121,8 +129,16 @@ def plan(weapon):
     c = lambda clip, mode='all', n=None, ov=F.XF: (clip, n, ov, mode)
     m = combo_len()
     out = [g(24), c('melee_equip'), g(12)]
-    out += [c('combo_attack_%02d' % k, 'chain') for k in range(1, m + 1)] + [c('final_attack_%02d' % (m + 1)), g(12)]
+    if m is None:   # no final attack in the set: the whole light combo chain
+        n = 0
+        while game_has('combo_attack_%02d' % (n + 1)):
+            n += 1
+        out += [c('combo_attack_%02d' % k, 'chain') for k in range(1, n + 1)] + [g(12)]
+    else:
+        out += [c('combo_attack_%02d' % k, 'chain') for k in range(1, m + 1)] + [c('final_attack_%02d' % (m + 1)), g(12)]
     out += [c('hold_start_01'), c('hold_loop_01', 'cycle', 20, 1), c('heavy_attack_01', ov=1), g(12)]
+    if weapon == 'mantis':
+        out += [c('safe_attack'), g(12)]
     if weapon != 'knife':
         out += [c('block_start'), c('block', 'cycle', 30, 1), c('block_end', ov=1), g(12)]
     out += [c('parried_left'), g(16)]
@@ -213,7 +229,7 @@ def render(W, title, color, name, res):
     json.dump([''] * len(W), open(lj, 'w', encoding='utf-8'))
     mkv = base + '.mkv'
     ex = ['--title-size', '0.075', '--title-align', 'center', '--label-size', '0.04']
-    if WEAPON == 'fists':
+    if WEAPON in ('fists', 'mantis'):
         cmd = [NR.BLENDER, '-b', '--factory-startup', '-P', os.path.join(HERE, 'npc_film_render.py'), '--', base, mkv, lj]
     else:
         wn = base + '.weapon.npy'
@@ -285,7 +301,7 @@ def clearance(W):
     try:
         if WEAPON in ('blunt', 'baton'):
             cnt, clr = UC.blade_pen_release(W, WEAPON)[:2]
-        elif WEAPON != 'fists':
+        elif WEAPON not in ('fists', 'mantis'):
             cnt, clr = BC.blade_pen(W, WEAPON)[:2]
         else:
             return None

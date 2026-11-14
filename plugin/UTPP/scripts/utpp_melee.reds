@@ -10,9 +10,10 @@
 //         registered behind the same anim wrapper variable; without it the game plays its first-person melee set (static,
 //         crouched legs) and the legs must stay on motion matching;
 //       - the UTPP third-person body is active (UTPPIsTppActive) and V is not mounted;
-//       - the weapon in AttachmentSlots.WeaponRight is no excluded arm cyberware (mantis blades, monowire, projectile launcher)
+//       - the weapon in AttachmentSlots.WeaponRight is no excluded arm cyberware (monowire, projectile launcher)
 //         and its clip variable (UTPPMeleeClipVariable of the item record friendlyName) is covered by the UTPP clips
-//         (UTPPMeleeFullBodyCoveredName); the strong arms (in-hand variable w_strong_arms) play the UTPP fist clips;
+//         (UTPPMeleeFullBodyCoveredName); the strong arms (in-hand variable w_strong_arms) play the UTPP fist clips; the arm
+//         blades (mantis_blade) play their own UTPP clips for the states of their line in UTPPMeleeFullBodyStates;
 //   * the full-body STATE MASK (UTPPSetMeleeFullBodyStates): PSM.MeleeWeapon states whose third-person clips exist, from the
 //     per-weapon table UTPPMeleeFullBodyStates (key = clip variable of the drawn weapon; default = the attacks without
 //     ThrowAttack), also sent when the drawn weapon changes;
@@ -47,11 +48,12 @@ public native func UTPPSetMeleeFullPoseSetting(on: Bool) -> Void
 // registered (standing lower body, planted feet, behind utpp_foot_tpp) get the full body; the item type is not enough (batons
 // share Wea_OneHandedClub with w_melee_one_hand_blunt but use w_melee_baton; long blades use w_melee_one_hand_blunt).
 // The list follows the installed clip export: only the variables packed for both rigs. The pack has fists, knife, katana,
-// one-handed blunt, baton and two-handed blunt sets for both bodies. Other melee variables (hammer, ...) take the upper body
-// from the game and keep the legs on motion matching.
+// one-handed blunt, baton, two-handed blunt and arm blade (mantis_blade) sets for both bodies. Other melee variables (hammer,
+// ...) take the upper body from the game and keep the legs on motion matching.
 public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
   return Equals(n, n"w_melee_fists") || Equals(n, n"w_melee_knife") || Equals(n, n"w_melee_katana")
-    || Equals(n, n"w_melee_one_hand_blunt") || Equals(n, n"w_melee_baton") || Equals(n, n"w_two_hand_blunt");
+    || Equals(n, n"w_melee_one_hand_blunt") || Equals(n, n"w_melee_baton") || Equals(n, n"w_two_hand_blunt")
+    || Equals(n, n"mantis_blade");
 }
 
 // PSM.MeleeWeapon states (gamePSMMeleeWeapon, bit = 1 << state) that may take the full body, per weapon: a table keyed by the
@@ -80,6 +82,10 @@ public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
 // baton and two-handed blunt: the same states as the fists = 3669472. The per-strike parried clips of these weapons
 // (parried_left_<strike> / parried_right_<strike>) are picked by the melee parried graph archive; without that archive drop
 // Parried 5 (knife 3668160, the other four 3669440).
+// Arm blades (mantis_blade): only the states whose clips are all third-person on both bodies: Hold 6 + ChargedHold 7 (hold_start_01,
+// hold_start_offscreen_01 / _02, hold_loop_01 / _02) + ComboAttack 11 (combo_attack_01 .. 09) + StrongAttack 13 (heavy_attack_01 / _02)
+// + SafeAttack 14 (safe_attack) = 0x68C0 = 26816. The other states of the arm blades (Parried, Block, Deflect, FinalAttack and the
+// sprint, crouch, jump, block, deflect and equip attacks) keep the game's clips and stay out of the line.
 // Format: one line per variable between the UTPP_STATES_TABLE markers (read by the melee stage installer).
 public func UTPPMeleeStatesDefault() -> Int32 {
   return 3667968;
@@ -93,6 +99,7 @@ public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
   if Equals(n, n"w_melee_one_hand_blunt") { return 3669472; }
   if Equals(n, n"w_melee_baton") { return 3669472; }
   if Equals(n, n"w_two_hand_blunt") { return 3669472; }
+  if Equals(n, n"mantis_blade") { return 26816; }
   // UTPP_STATES_TABLE end
   return UTPPMeleeStatesDefault();
 }
@@ -134,24 +141,20 @@ public func UTPPMeleeWeaponClipVariable(weapon: ref<WeaponObject>) -> CName {
   return UTPPMeleeClipVariable(UTPPMeleeWeaponAnimVariable(weapon));
 }
 
-// Arm cyberware weapons without UTPP clips (Mantis Blades, Monowire, Projectile Launch System): never the UTPP fists / blade
-// clips. The item type and the weapon tag decide, robust to the record variants (vanilla checks the type the same way:
-// aiHitReactionTasks.script:393, meleeTransitions.script:1982). The strong arms are not in this group: they play the UTPP fist
-// clips (UTPPMeleeClipVariable).
+// Arm cyberware weapons without UTPP clips (Monowire, Projectile Launch System): never the UTPP fists / blade clips. The item
+// type decides, robust to the record variants (vanilla checks the type the same way: aiHitReactionTasks.script:393,
+// meleeTransitions.script:1982). The strong arms and the arm blades are not in this group: the strong arms play the UTPP fist
+// clips (UTPPMeleeClipVariable), the arm blades their own clips (anim variable mantis_blade).
 public func UTPPMeleeIsArmCyberware(weapon: ref<WeaponObject>) -> Bool {
   if !IsDefined(weapon) {
     return false;
-  }
-  if weapon.WeaponHasTag(n"MantisBlades") {
-    return true;
   }
   let rec: ref<WeaponItem_Record> = TweakDBInterface.GetWeaponItemRecord(ItemID.GetTDBID(weapon.GetItemID()));
   if !IsDefined(rec) || !IsDefined(rec.ItemType()) {
     return false;
   }
   let t: gamedataItemType = rec.ItemType().Type();
-  return Equals(t, gamedataItemType.Cyb_MantisBlades) || Equals(t, gamedataItemType.Cyb_NanoWires)
-    || Equals(t, gamedataItemType.Cyb_Launcher);
+  return Equals(t, gamedataItemType.Cyb_NanoWires) || Equals(t, gamedataItemType.Cyb_Launcher);
 }
 
 // The weapon in WeaponRight while V is on foot in UTPP third person (null otherwise).

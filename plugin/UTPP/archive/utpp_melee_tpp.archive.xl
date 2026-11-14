@@ -5,7 +5,8 @@
 #   the 2.5 player entities (player_wa_fpp.ent / player_ma_fpp.ent and the ep1 *_ep1.ent, which carry the same entries) register the vanilla
 #   sets on the root animated component: default_melee_weapon / pma_default_melee_weapon at 200 without variables, and per weapon
 #   p?a_<weapon>.anims at 128 with the weapon variable (w_melee_fists, w_melee_katana, w_melee_knife, w_melee_one_hand_blunt, w_melee_baton,
-#   w_two_hand_blunt);
+#   w_two_hand_blunt); the arm blade cyberware set base\animations\cyberware\mantisblade\p?a_mantisblade.anims is registered the same
+#   way at 128 with [mantis_blade] (the ep1 entities add a second arm blade set on "EP1 animsets", which is not mirrored here);
 #   the ep1 entities add the Gorilla Arms set p?a_strongarms_melee_fists.anims at 128 [StrongArms] on the extension component "EP1 animsets".
 #   Strong arms (arm cyberware, in-hand anim variable w_strong_arms in game 2.5): the vanilla entities register no set behind w_strong_arms;
 #   the cyberware takes its fist clips from the fists set at 128 [StrongArms] (root) and from the default set at 200, its own clip
@@ -48,6 +49,8 @@
 #   utpp\melee\utpp_pma_baton.anims | root | [w_melee_baton, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
 #   utpp\melee\utpp_pwa_two_handed_blunt.anims | root | [w_two_hand_blunt, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
 #   utpp\melee\utpp_pma_two_handed_blunt.anims | root | [w_two_hand_blunt, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_mantisblade.anims | root | [mantis_blade, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_mantisblade.anims | root | [mantis_blade, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
 # Not mirrored (the clips of these paths stay vanilla): paths gated by a modifier variable of the vanilla entities - the fists set gated by
 #   StrongArms on the root component (the ep1 entities add the Gorilla Arms set at the same priority on an extension component; a mirrored entry
 #   would outrank or tie with it), the one-handed blunt set gated by additives (an extra
@@ -230,4 +233,18 @@ animations:
     component: root
     set: utpp\melee\utpp_pma_two_handed_blunt.anims
     vars: [w_two_hand_blunt, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pwa_mantisblade.anims
+    vars: [mantis_blade, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_mantisblade.anims
+    vars: [mantis_blade, utpp_melee_tpp]
     priority: 127
