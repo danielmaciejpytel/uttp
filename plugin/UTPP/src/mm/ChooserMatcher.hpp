@@ -148,6 +148,8 @@ struct ChooserState
     // adapter::MapToChooser; a hand-built state leaves the defaults (the catch-up rule never acts).
     float headingStepAgeS = 1.0e9f;
     float headingLagDeg = 0.0f;
+    // The step was a start from rest toward a direction away from the facing (the rule then acts only while a start clip plays).
+    bool headingStepFromRest = false;
 };
 
 inline cancelstart::State CancellationState(const ChooserState& state)
@@ -579,7 +581,7 @@ struct MatcherConfig
     // FR / RL / RR_offset ..., box / hourglass / prism patterns, pivots without an authored root turn), each replaced 50-200 ms later as
     // the facing caught up (one 90 deg key change: box -> RL -> FR -> F_R_20 -> F; one 45 deg change: F -> FR -> F_R_20 -> F).
     // headingCatchUpS: for this long after a heading step (ChooserState::headingStepAgeS), while the facing is still more than
-    // headingSettledDeg away from the wanted direction (ChooserState::headingLagDeg), moving on the stand ground, those clips are not NEW
+    // headingSettledDeg away from the wanted direction (ChooserState::headingLagDeg), moving on the ground (standing or crouched), those clips are not NEW
     // candidates: the pick is a turn or a forward / curved loop that turns with the body (a picked turn is then kept by turnCommit). The
     // continuing pose is not affected. 0 = off.
     float headingCatchUpS = 1.0f;
@@ -684,6 +686,7 @@ public:
         m_exitHoldClip = -1;
         m_stopHoldClip = -1;
         m_turnHoldClip = -1;
+        m_headingRestArmed = false;
         m_dbSlideExit.assign(aDb->NumDatabases(), 0);
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbSlideExit[d] = aDb->DbName(d).starts_with("PSD_Slide_ExitTo") ? 1 : 0;
@@ -965,6 +968,7 @@ public:
         m_exitHoldClip = -1;
         m_stopHoldClip = -1;
         m_turnHoldClip = -1;
+        m_headingRestArmed = false;
         m_slideExitAge = 1.0e9f;
         m_sinceJumpS = 1.0e9f;
         m_sinceSlideS = 1.0e9f;
@@ -1663,8 +1667,11 @@ public:
         // mutation 33: no heading catch-up rule
         m_headingCatchUp = UTPP_AND_NOT(JUMPPICK, 33) m_guardsOn && m_cfg.headingCatchUpS > 0.0f && aState.headingStepAgeS < m_cfg.headingCatchUpS &&
                            aState.headingLagDeg > m_cfg.headingSettledDeg && aState.movementMode == 0 && aState.movementState == 1 &&
-                           aState.stance == 0 && !aForce && !aState.justLandedLight && !aState.justLandedHeavy && !aState.justTraversed &&
-                           !aState.stationaryAimTurn && !aState.stationaryShotTurn && !aState.restTurn;
+                           (aState.stance == 0 || aState.stance == 1) && !aForce && !aState.justLandedLight && !aState.justLandedHeavy && !aState.justTraversed &&
+                           !aState.stationaryAimTurn && !aState.stationaryShotTurn && !aState.restTurn &&
+                           (!aState.headingStepFromRest || m_headingRestArmed || (m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 0));
+        // a start from rest arms the rule while its start clip plays; it then stays on until the facing has caught up or the window ends
+        m_headingRestArmed = m_headingCatchUp && aState.headingStepFromRest;
         // ---- search every chooser database
         for (uint32_t i = 0; i < numDb && !continueShotTurn && !continueAimTurn && !continueStartTurn && !continueSlideExit && !continueRise &&
                                   !continueExitClip && !continueStopClip && !continueDodge && !continueTurn; ++i)
@@ -2737,6 +2744,7 @@ private:
     bool m_runGaitWalkLoops = false;         // G10: this update searches the Walk_Loops database in the Run gait (runWalkLoopsMaxCmS)
     std::vector<uint8_t> m_clipKeepsFacing;  // headingCatchUpS: clip index -> 1 a clip for a body that keeps its facing
     bool m_headingCatchUp = false;           // headingCatchUpS: this update excludes the m_clipKeepsFacing clips from the new candidates
+    bool m_headingRestArmed = false;         // headingCatchUpS: the rule acts for a start from rest (armed while its start clip played)
     float m_speedCmS = 0.0f;                 // G10: chooser speed of this update
     float m_sinceSlowS = 1.0e9f;             // G10: seconds since the last update with chooser speed <= runTransitionSlowCmS
     std::vector<uint8_t> m_dbStandRunLoops;  // G10: database index -> 1 = PSD_Dense / Sparse_Stand_Run_Loops

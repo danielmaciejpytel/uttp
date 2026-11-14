@@ -767,6 +767,7 @@ struct MapConfig
     float gaitReturnRiseRate = 0.3f;
     // Digital heading step (ChooserState::headingStepAgeS, MatcherConfig::headingCatchUpS): the wanted run direction turns by at least this many
     // degrees from one feed to the next (a direction key; the camera turns 3-5 deg per feed under a fast mouse flick). 0 = never.
+    // A start from rest counts as a step too when the first wanted direction is at least this far from the facing.
     float headingStepDeg = 35.0f;
     // G2: capsule speed (game m/s) at the FULL stick while the game walk toggle is on (CET mm.walkSpeed -> UTPPSetMotionWalkSpeed; the
     // script holds the capsule there with one MaxSpeed multiplier, utpp.reds UTPPUpdateWalkSpeed). 0 = off: nothing below changes, bit
@@ -1085,6 +1086,7 @@ struct MapState
     bool headingValid = false;      // heading step: the previous feed had a wanted direction (OrientToMovement on the ground)
     float headingYawDeg = 0.0f;     // heading step: that direction (game yaw convention)
     float headingStepAgeS = 1.0e9f; // heading step: seconds since the last step (ChooserState::headingStepAgeS)
+    bool headingStepFromRest = false; // heading step: the last step was a start from rest (ChooserState::headingStepFromRest)
     float stopHoldCmS = 0.0f;
     float capsuleBrakeModel = 0.0f; // active grounded no-input CP deceleration; trace only
     float capsuleAccelModel = 0.0f; // active grounded full-input applied acceleration; trace only
@@ -1818,16 +1820,27 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // digital heading step (MapConfig::headingStepDeg): the wanted direction jumped from one feed to the next while it stayed valid
     {
         const bool headingNow = rot == motiontraj::RotationMode::OrientToMovement && mode == 0 && !slideActive && !motiontraj::IsZero(dir);
+        const float lagNow = headingNow && std::isfinite(f.playerYawDeg) ? std::fabs(motiontraj::NormalizeAxis(inputYaw - f.playerYawDeg)) : 0.0f;
         if (!headingNow)
             m.headingStepAgeS = 1.0e9f;
         else if (m.headingValid && c.headingStepDeg > 0.0f && std::fabs(motiontraj::NormalizeAxis(inputYaw - m.headingYawDeg)) >= c.headingStepDeg)
+        {
             m.headingStepAgeS = 0.0f;
+            m.headingStepFromRest = false;
+        }
+        // a start from rest toward a direction away from the facing: the body catches up from the start clip as after a key step
+        else if (!m.headingValid && c.headingStepDeg > 0.0f && lagNow >= c.headingStepDeg)
+        {
+            m.headingStepAgeS = 0.0f;
+            m.headingStepFromRest = true;
+        }
         else if (m.headingStepAgeS < 1.0e8f)
             m.headingStepAgeS += dt;
         m.headingValid = headingNow;
         m.headingYawDeg = inputYaw;
         s.headingStepAgeS = m.headingStepAgeS;
-        s.headingLagDeg = headingNow && std::isfinite(f.playerYawDeg) ? std::fabs(motiontraj::NormalizeAxis(inputYaw - f.playerYawDeg)) : 0.0f;
+        s.headingLagDeg = lagNow;
+        s.headingStepFromRest = m.headingStepFromRest;
     }
     s.shouldTurnInPlace = st.shouldTurnInPlace;
     s.shouldSpinTransition = st.shouldSpin;

@@ -34,7 +34,9 @@
 //   plays end the commit at once and the Stop clip is picked on the release frame, as in check B.
 //   K (heading catch-up, MatcherConfig::headingCatchUpS; churn_kbd_*.feed = Female 2026-11-14 03:53, full-deflection direction keys): after each
 //   heading step (the wanted direction turns >= 35 deg between two feeds) at most two clip changes until the next step for a 45 / 90 deg
-//   change and at most one per flip of the left / right taps (0.35 s apart); the windows also keep 3.0 changes per second.
+//   change and at most one per flip of the left / right taps (0.35 s apart); the windows also keep 3.0 changes per second. A start from rest
+//   toward a direction away from the facing counts as a step once its start clip plays, crouched too (churn_crouch_reface_man.feed, Male
+//   2026-11-13 09:24: the crouched reface start used to be followed by Loop_B, BR, RR, FR and F).
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
 // (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets),
@@ -442,6 +444,9 @@ int main(int argc, char** argv)
                                    {"kbd_strafe_weave strafe_taps key edges", 103.6f, 106.5f, 99, false, false, false, 1}}},
         {"churn_kbd_switch180.feed", {{"kbd_switch_180 back", 56.77f, 58.37f, 4}, {"kbd_switch_180 fwd_again", 58.37f, 59.97f, 4}, {"kbd_switch_180 right", 62.77f, 64.37f, 4},
                                       {"kbd_switch_180 left_again", 64.37f, 65.97f, 4}}},
+        // crouched start from rest with the facing 127 deg off the stick (Male): the reface start, then one forward loop while the body catches up
+        {"churn_crouch_reface_man.feed", {{"crouch_walk_turns walk (Male, reface start)", 222.48f, 224.48f, 2}}, true},
+        {"churn_crouch_reface_man.feed", {{"crouch_walk_turns walk (same feed, Female body)", 222.48f, 224.48f, 2}}},
     };
     for (const Slice& s : slices)
     {
