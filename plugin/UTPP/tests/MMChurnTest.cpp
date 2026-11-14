@@ -9,7 +9,7 @@
 // counts for the windows of the first guards (checked when those budgets were set; the start upshift guard shifted dash_left to 4 here against 5
 // in the full-feed replay, its budget stays 5), so a window count here is the number the harness would report within one change. The authoritative
 // table of all 63 windows is the full-feed replay (Build\work\mm-churn-20261111\report.txt).
-// Checks: A every window stays within its budget = the count with the guards (slalom 14, flick 7, flick_180_sprint / accel 4, dash_left 5,
+// Checks: A every window stays within its budget = the count with the guards (slalom 16 since the loop dwell override 0.2, 14 with 0.3; flick 7, flick_180_sprint / accel 4, dash_left 5,
 //   dash_right 4, dash_back 4, sprint_again 8); the counts without the guards are 31 / 10 / 5 / 9 / 8 / 5 / 9 (a bound of 3.0 per second is 24 / 7 / 4 /
 //   6 / 6 / 6 / 9 changes). flick_180_sprint / accel (the gait edges Walk -> Run -> Sprint of a full-stick start with a 180 deg reversal, the same
 //   count as the game report, 5 changes in 1.5 s = 3.33 per second) and sprint_again (the same start chain) are held by the start upshift guard
@@ -26,9 +26,11 @@
 //   real Run frame, once, without flicker (RunGaitReturnHold; mutation 27 removes the hold: "keeps Run" fails too).
 //   B an ordinary release at speed still picks its Stop clip on the release frame (no stick latency): none of the guards may delay a stick edge
 //   (the start upshift guard only defers the swap of a young start clip to the faster gait's start; the first start of a press and every release / stop are not held).
+//   F (gait return hold, no data files): the hold of check E driven by time with uneven frame times (1/43, 1/60, 1/120 s in turn) lasts as long and
+//   changes the gait as often as at a fixed 60 feeds per second (the stick's rise is a rate per second, MapConfig::gaitReturnRiseRate).
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
-// 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s like plain starts (check C), 30 no start restart / stalled dwell
-// (check D). Each must fail its check
+// 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
+// (check D), 31 the gait return hold's rise test per feed instead of per second (check F). Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
 #include "MotionDriverDecisionDump.cpp"
@@ -198,6 +200,54 @@ GaitHoldRun RunGaitReturnHold(float aHoldS)
     }
     return out;
 }
+// check F (gait return hold under uneven frame times): the same short run, dip and slow rising stick as check E, driven by time instead of by feed
+// count. The stick rises at aRampPerS (stick per second) from 0.3 to 0.6; aUneven cycles the feed time through 1/43, 1/60 and 1/120 s (a game that
+// does not hold a fixed frame rate), else every feed is 1/60 s. "Rising" is a rate (MapConfig::gaitReturnRiseRate), so the hold must last as long in
+// seconds and change the gait as often at any frame time; a fixed rise per feed (mutation 31) drops the hold on every short frame.
+GaitHoldRun RunGaitReturnHoldTimed(float aRampPerS, bool aUneven)
+{
+    namespace ad = utpp::mm::adapter;
+    ad::MapConfig mc;
+    ad::MapState ms;
+    GaitHoldRun out;
+    const float dts[3] = {1.0f / 43.0f, 1.0f / 60.0f, 1.0f / 120.0f};
+    const float tRun = 0.5f, tDip = 0.05f, tRamp = 0.3f / aRampPerS, tTail = 0.5f;
+    float t = 0.0f;
+    int prevGait = 1, k = 0;
+    bool sawWalk = false;
+    while (t < tRun + tDip + tRamp + tTail)
+    {
+        const float dt = aUneven ? dts[k++ % 3] : 1.0f / 60.0f;
+        t += dt;
+        float stick = 1.0f, speed = 3.84f;
+        if (t > tRun)
+            stick = 0.3f, speed = 3.0f;
+        if (t > tRun + tDip)
+            stick = std::fmin(0.6f, 0.3f + aRampPerS * (t - tRun - tDip)), speed = 2.5f;
+        const float vel[3] = {0.0f, speed, 0.0f}, mv[2] = {0.0f, stick};
+        ad::MotionFeed f = ad::MakeMotionFeed(vel, mv, dt, 0u, 0, ad::AirFeed{}, 0.0f, 0.0f);
+        ad::MapContext ctx;
+        ctx.rootYawValid = true;
+        const utpp::mm::motion::ChooserState cs = ad::MapToChooser(f, mc, ms, ctx);
+        if (t <= tRun + tDip)
+        {
+            prevGait = cs.gait;
+            continue;
+        }
+        if (cs.gait != prevGait)
+            ++out.flips;
+        // the first ramp feed may still be Walk (its rise since the dip is below the rate threshold): count Walk only once the hold has begun
+        sawWalk = sawWalk || (cs.gait == 0 && out.forcedFrames > 0);
+        if (cs.gait >= 1)
+        {
+            ++out.forcedFrames;
+            out.lastRunT = t - tRun - tDip;
+            out.runsAfterWalk += sawWalk ? 1 : 0;
+        }
+        prevGait = cs.gait;
+    }
+    return out;
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -219,6 +269,17 @@ int main(int argc, char** argv)
         Check(e.lastRunT <= 0.3f - static_cast<float>(kGaitHoldDipFrames) / 60.0f + 0.02f, "gait return hold expires 0.3 s after the last real Run frame", ed);
         const GaitHoldRun off = RunGaitReturnHold(0.0f);
         Check(off.forcedFrames == 0, "gait return hold off (knob 0) = the gait of the stick", std::to_string(off.forcedFrames) + " Run frames");
+    }
+    // F: the gait return hold under uneven frame times (1/43, 1/60, 1/120 s in turn) lasts as long and changes the gait as often as at a fixed 60 per second
+    {
+        const float ramp = 0.36f; // stick per second: above the 0.3 per second rise rate, 0.003 per feed at 120 per second
+        const GaitHoldRun fixed = RunGaitReturnHoldTimed(ramp, false), uneven = RunGaitReturnHoldTimed(ramp, true);
+        char fd[240];
+        std::snprintf(fd, sizeof(fd), "fixed 60/s: %d gait changes, last Run %.3f s; uneven: %d gait changes, last Run %.3f s, %d Run frames after the first Walk frame",
+                      fixed.flips, static_cast<double>(fixed.lastRunT), uneven.flips, static_cast<double>(uneven.lastRunT), uneven.runsAfterWalk);
+        Check(fixed.forcedFrames >= 3 && uneven.forcedFrames >= 3, "gait return hold holds under fixed and uneven frame times", fd);
+        Check(uneven.flips <= 2 && uneven.runsAfterWalk == 0, "gait return hold does not flicker under uneven frame times", fd);
+        Check(std::fabs(uneven.lastRunT - fixed.lastRunT) <= 1.0f / 43.0f + 1e-3f, "gait return hold lasts as long under uneven frame times", fd);
     }
     g_baseDb.assign(argv[2], argv[2] + std::strlen(argv[2]));
     g_fullFeed = true;

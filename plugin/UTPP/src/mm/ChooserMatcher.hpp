@@ -508,10 +508,15 @@ struct MatcherConfig
     //     query of that impulse picked a new pivot clip every 17-50 ms (Run_Prism_FL_F -> Run_Prism_FR_F -> ..., 4 of the 8 changes of the
     //     sprint dash windows). The playing clip is kept through it (like the other hold rules); a mode change (the dodge's jump) and a
     //     forced interrupt still search.
+    //     loopDwellOverride 0.2: while the camera turns under a held direction key (mouse look) the wanted heading sweeps through the loop
+    //     directions; with 0.3 the old loop was kept through such a turn and the planted foot drifted further (replays of keyboard-and-mouse
+    //     sessions). 0.15 lets the slalom window churn again.
     float loopDwellS = 0.5f;
-    float loopDwellOverride = 0.3f;
+    float loopDwellOverride = 0.2f;
+    // freshEventBias 0.025: half of the first value keeps the same reduction of clip changes over replays of six recorded sessions while a
+    // Walk start under an accelerating capsule is no longer kept against a better start (toe drift of the starts back to the unguarded level)
     float freshEventS = 0.2f;
-    float freshEventBias = 0.05f;
+    float freshEventBias = 0.025f;
     bool dodgeHold = true;
     //  4. startUpshiftHoldS: a fast-rising stick passes the gait thresholds within ~0.1-0.4 s (Walk -> Run -> Sprint), and every gait edge
     //     (InterruptOnDatabaseChange) dropped the playing start clip and picked a fresh one of the new gait's start database: Walk start ->
@@ -525,8 +530,9 @@ struct MatcherConfig
     //     (the first start is picked on the first feed), releases / movementState changes, downshifts, air, stance changes, forced interrupts; a
     //     clip older than startUpshiftHoldS re-searches at the edge as before (a slow, genuine walk start that is passed by the gait later is not
     //     held). Cost: the swap to the faster gait's start is deferred by up to the hold time minus the age of the start; reface starts have their own,
-    //     shorter hold times (below). startUpshiftHoldS 0 = guard off.
-    float startUpshiftHoldS = 0.35f;
+    //     shorter hold times (below). startUpshiftHoldS 0 = guard off. 0.25 s: the same counts in the windows that needed the guard (0.20 s lets
+    //     a stalled walk start churn again) with less toe drift after a release that follows a short start than 0.35 s.
+    float startUpshiftHoldS = 0.25f;
     // REFACE starts (2026-11-11 game runs 15:43-16:25 with the 0.35 s hold on them): the hold deferred the swap of a Walk reface start to the other
     // turn side (Walk_Reface_Start_F_L_180 -> Run_Reface_Start_F_R_180) from 66 ms to 183 ms after the pick, where the body had already turned and the
     // foot lock had to correct 16.1 cm (Male camera_whip_180 / accel; 6.7 cm before the hold). A reface start is therefore held only very briefly:
@@ -856,6 +862,11 @@ public:
     // B / LL / RL Start rows were kept out; JumpOutFall: past the apex the Start / Off rows were dropped (the fall loop owns the descent)
     bool JumpOutNoBack() const { return m_jumpOutBack; }
     bool JumpOutFall() const { return m_jumpOutFall; }
+    // Selection churn guards as a group (MatcherConfig "SELECTION CHURN GUARD": loop dwell, young event bias, dodge hold, start upshift hold,
+    // start restart dwell). true (default) = each guard as configured; false = every one of them off, the same selections as with their
+    // knobs at 0 / false. Takes effect on the next Update; no other state is touched.
+    void SetSelectionGuards(bool aOn) { m_guardsOn = aOn; }
+    bool SelectionGuards() const { return m_guardsOn; }
     // Authored ROOT, not a name suffix or the already steered blended root rate.
     // Zero means an invalid clip, a non-reface, or no meaningful authored turn.
     int StartTurnDirection(int32_t aClip) const
@@ -1163,14 +1174,14 @@ public:
             res.interrupt = Interrupt::InterruptOnDatabaseChange; // the deferred / swallowed edge: the exit clip leaves the search now
         // churn guard 4 (MatcherConfig::startUpshiftHoldS): a gait upshift during a young start is not an interrupting edge for a short time;
         // when the time is up the deferred edge re-searches (a held DoNotInterrupt would keep the outdated start competing for its whole length)
-        if (UTPP_AND_NOT(JUMPPICK, 28) m_cfg.startUpshiftHoldS > 0.0f && contValid && m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 0 && !aForce &&
+        if (UTPP_AND_NOT(JUMPPICK, 28) m_guardsOn && m_cfg.startUpshiftHoldS > 0.0f && contValid && m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 0 && !aForce &&
             (m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 2 || m_holdGait == 0) && aState.gait > m_holdGait && aState.movementState == m_holdMovementState && aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0 &&
             last.stance == 0 && !aState.jumpOutLandOver && !aState.justLandedLight && !aState.justLandedHeavy && !aState.justTraversed &&
             !aState.stationaryAimTurn && !aState.stationaryShotTurn && !aState.restTurn && !slideExitHold && m_slideExitHoldLeft <= 0.0f)
         {
             // a reface start is held much shorter than a plain start (startUpshiftRefaceWalkHoldS / startUpshiftRefaceRunHoldS)
             const float holdS = m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 2 ?
-                UTPP_TN_JUMPPICK(29, m_cfg.startUpshiftHoldS, (m_holdGait >= 1 ? m_cfg.startUpshiftRefaceRunHoldS : m_cfg.startUpshiftRefaceWalkHoldS)) :
+                UTPP_TN_JUMPPICK(29, 0.35f, (m_holdGait >= 1 ? m_cfg.startUpshiftRefaceRunHoldS : m_cfg.startUpshiftRefaceWalkHoldS)) :
                 m_cfg.startUpshiftHoldS;
             if (m_sinceJumpS < holdS)
             {
@@ -1184,7 +1195,7 @@ public:
             }
         }
         // churn guard 2 (MatcherConfig::freshEventS): the young event clip keeps competing with a cost advantage while no stick edge arrived
-        const bool freshEvent = UTPP_AND_NOT(JUMPPICK, 25) m_cfg.freshEventS > 0.0f && m_cfg.freshEventBias > 0.0f && contValid && m_cur.valid &&
+        const bool freshEvent = UTPP_AND_NOT(JUMPPICK, 25) m_guardsOn && m_cfg.freshEventS > 0.0f && m_cfg.freshEventBias > 0.0f && contValid && m_cur.valid &&
             m_sinceJumpS < m_cfg.freshEventS && !(db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) && !m_clipStop[static_cast<uint32_t>(m_cur.clip)] &&
             aState.stance == 0 && !aForce &&
             res.interrupt == Interrupt::DoNotInterrupt && aState.movementMode == 0 && last.movementMode == 0 && aState.stance == last.stance &&
@@ -1537,7 +1548,7 @@ public:
         }
 
         // churn guard 3 (MatcherConfig::dodgeHold): the playing clip is kept through the game's ground Dodge
-        const bool continueDodge = UTPP_AND_NOT(JUMPPICK, 26) m_cfg.dodgeHold && contEvaluated && aState.dodge && aState.movementMode == 0 &&
+        const bool continueDodge = UTPP_AND_NOT(JUMPPICK, 26) m_guardsOn && m_cfg.dodgeHold && contEvaluated && aState.dodge && aState.movementMode == 0 &&
             last.movementMode == 0 && aState.stance == 0 && !aForce;
         // ---- search every chooser database
         for (uint32_t i = 0; i < numDb && !continueShotTurn && !continueAimTurn && !continueStartTurn && !continueSlideExit && !continueRise &&
@@ -1584,8 +1595,10 @@ public:
                         break;
                     }
             }
-            // churn guard 7 (MatcherConfig::startRestartDwellS): a young start clip is not restarted from its first frame by the start of the other foot
-            if (UTPP_AND_NOT(JUMPPICK, 30) jump && m_cfg.startRestartDwellS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.startRestartDwellS && !aForce &&
+            // churn guard 7 (MatcherConfig::startRestartDwellS): a young start clip is not restarted from its first frame by the start of the other foot.
+            // Guards 7 and 1 act only without a stick edge (DoNotInterrupt): a gait / movement state edge whose continuing database is still searched
+            // re-picks freely, as the other guards do
+            if (UTPP_AND_NOT(JUMPPICK, 30) jump && m_guardsOn && res.interrupt == Interrupt::DoNotInterrupt && m_cfg.startRestartDwellS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.startRestartDwellS && !aForce &&
                 aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0 && bestCost > contBestCost - m_cfg.startRestartOverride &&
                 ((m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 1 && m_clipStart[en.clip] == 1 && newTime < 0.1f &&
                   steer::SpeedClassOfName(db.ClipName(static_cast<uint32_t>(m_cur.clip))) == steer::SpeedClassOfName(db.ClipName(en.clip))) ||
@@ -1598,7 +1611,7 @@ public:
                 bestEntry = contEntry;
             }
             // churn guard 1 (MatcherConfig::loopDwellS): a young loop gives way to another loop only by a clear margin
-            if (UTPP_AND_NOT(JUMPPICK, 24) jump && m_cfg.loopDwellS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.loopDwellS &&
+            if (UTPP_AND_NOT(JUMPPICK, 24) jump && m_guardsOn && res.interrupt == Interrupt::DoNotInterrupt && m_cfg.loopDwellS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.loopDwellS &&
                 aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0 && !aForce && (cl.flags & kClipLoop) &&
                 (db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) && bestCost > contBestCost - m_cfg.loopDwellOverride)
             {
@@ -2578,7 +2591,8 @@ private:
     float m_sinceSlideS = 1.0e9f;        // fix3/jump: seconds since the last update with the chooser MovementMode Sliding
     float m_sinceFastS = 1.0e9f;         // G1: seconds since the last update with gait Run / Sprint or chooser speed > walkTransitionFastCmS
     std::vector<uint8_t> m_dbStandWalkLoops; // G1: database index -> 1 = PSD_Dense / Sparse_Stand_Walk_Loops
-    bool m_upshiftEdgeDone = false;          // churn guard 4: the deferred gait edge of the playing start clip has been delivered (reset on every selection)
+    bool m_guardsOn = true;                  // SetSelectionGuards: false = every selection churn guard off
+    bool m_upshiftEdgeDone = false;          // churn guard 4:the deferred gait edge of the playing start clip has been delivered (reset on every selection)
     std::vector<uint8_t> m_clipStart;        // churn guard 4: clip index -> 1 start (Walk / Run / Sprint), 2 reface start (MatcherConfig::startUpshiftHoldS)
     std::vector<uint8_t> m_clipStop;         // churn guard 2: clip index -> 1 = a Stop clip (the stop commit owns those)
     std::vector<uint8_t> m_clipRunToWalk;    // G1: clip index -> 1 = M_Neutral_Transition_Run_to_Walk_L/Rfoot

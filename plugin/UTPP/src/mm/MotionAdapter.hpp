@@ -763,6 +763,8 @@ struct MapConfig
     // Gait return hold (0 = off, the pre-guard behaviour): a RISING stick keeps the Run gait for this long after the last Run frame while the capsule is still
     // running (the stick that passed the centre when the direction reversed); see the comment at the use in MapToChooser.
     float gaitReturnHoldS = 0.3f;
+    // Gait return hold: the stick counts as rising when it grows faster than this (stick magnitude per second; 0.3 = 0.005 per feed at 60 feeds per second)
+    float gaitReturnRiseRate = 0.3f;
     // G2: capsule speed (game m/s) at the FULL stick while the game walk toggle is on (CET mm.walkSpeed -> UTPPSetMotionWalkSpeed; the
     // script holds the capsule there with one MaxSpeed multiplier, utpp.reds UTPPUpdateWalkSpeed). 0 = off: nothing below changes, bit
     // for bit. > 0 (and < gameStandPoints[1]) and MotionFeed::wantsToWalk on the stand ground (EffectiveMapConfig): the first stand speed
@@ -1498,7 +1500,10 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // hold the gait for ever; and the frame after a forced one (st.gait == 1 because of the hold, m.gaitHeld) continues the hold instead of falling back to Walk.
     const float stickNow = motiontraj::IsZero(dir) ? 0.0f : stickRaw;
     const int gaitRaw = gait;
-    const bool held = UTPP_AND_NOT(JUMPPICK, 27) c.gaitReturnHoldS > 0.0f && gait == 0 && (st.gait == 0 || m.gaitHeld) && stickNow > m.prevStick + 0.005f &&
+    // "rising" is a rate (stick per second, MapConfig::gaitReturnRiseRate), so the hold does not depend on the frame time
+    // (mutation 31: the former fixed rise of 0.005 per feed, 0.3 per second only at 60 feeds per second)
+    const float riseMin = UTPP_TN_JUMPPICK(31, 0.005f, c.gaitReturnRiseRate * std::fmax(dt, 0.0f));
+    const bool held = UTPP_AND_NOT(JUMPPICK, 27) c.gaitReturnHoldS > 0.0f && gait == 0 && (st.gait == 0 || m.gaitHeld) && stickNow > m.prevStick + riseMin &&
                       m.sinceRunS < c.gaitReturnHoldS && gameSp > kGaitHoldRunSpeed && !wantsToWalk && mode == 0 && stance == 0 && st.stance == 0 &&
                       !m.takeoffHoldActive;
     if (held)

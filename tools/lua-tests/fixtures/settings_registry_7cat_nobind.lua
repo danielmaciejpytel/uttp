@@ -126,6 +126,7 @@ return {
     ["mm.pelvisYawTrim"] = "5",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
+    ["mm.selectionGuards"] = "true",
     ["mm.shinobiBonusReload"] = "false",
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
@@ -271,6 +272,7 @@ return {
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "v2 setLeanParams(0.84999999999999998,0.90000000000000002)",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
     "apply camera.startTpp(true,\"ok\")",
@@ -453,6 +455,7 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
     "apply camera.startTpp(true,\"ok\")",
@@ -1672,6 +1675,14 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
+    ["mm.selectionGuards"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.shinobiBonusReload"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -2208,6 +2219,7 @@ return {
     ["mm.pelvisYawTrim"] = "5",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
+    ["mm.selectionGuards"] = "true",
     ["mm.shinobiBonusReload"] = "false",
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
@@ -2368,6 +2380,7 @@ return {
     "mm.leanHead",
     "mm.leanScale",
     "mm.leanHeadScale",
+    "mm.selectionGuards",
     "mm.debug",
     "camera.impl",
     "camera.startTpp",
@@ -2541,6 +2554,7 @@ return {
     "mm.leanHead",
     "mm.leanScale",
     "mm.leanHeadScale",
+    "mm.selectionGuards",
     "mm.debug",
     "camera.impl",
     "camera.startTpp",
@@ -2704,6 +2718,7 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
     "apply camera.startTpp(true,\"ok\")",
@@ -2875,6 +2890,7 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=0.85\r\
 mm.leanHeadScale=0.9\r\
+mm.selectionGuards=true\r\
 mm.debug=false\r\
 camera.impl=true\r\
 camera.startTpp=true\r\
@@ -3123,6 +3139,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.leanHead",
       "mm.leanScale",
       "mm.leanHeadScale",
+      "mm.selectionGuards",
       "mm.debug"
     },
     ["perspective"] = {
@@ -3313,6 +3330,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.pelvisYawTrim"] = "5",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
+    ["mm.selectionGuards"] = "true",
     ["mm.shinobiBonusReload"] = "false",
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
@@ -3440,6 +3458,7 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.9\r\
+mm.selectionGuards=true\r\
 mm.debug=false\r\
 camera.impl=true\r\
 camera.startTpp=true\r\
@@ -3609,6 +3628,7 @@ other.module=42\r\
     "/utpp/motion|switch|mm.leanHead",
     "/utpp/motion|float|mm.leanScale",
     "/utpp/motion|float|mm.leanHeadScale",
+    "/utpp/motion|switch|mm.selectionGuards",
     "/utpp/motion|switch|mm.debug",
     "/utpp/camera|switch|camera.impl",
     "/utpp/camera|switch|camera.startTpp",

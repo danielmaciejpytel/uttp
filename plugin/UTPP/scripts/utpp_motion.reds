@@ -79,6 +79,10 @@ public native func UTPPFeedMotionMagTap() -> Bool
 // straight running, low speed and everything else stay bit-identical). Always true (no validation). Status: orientWarp= owW= owRoot=
 // owTorso=. Keep this declaration and the DLL native (Main.cpp) in sync: a declared native without registration breaks the scripts.
 public native func UTPPSetMotionOrientWarp(on: Bool) -> Bool
+// Clip selection churn guards as a group (default on; CET developer setting mm.selectionGuards, for A/B tests): off = the motion matcher
+// switches clips without its selection guards (loop dwell, young clip bias, dodge hold, start holds, gait return hold). Always true.
+// Status: selGuards=. Keep this declaration and the DLL native (Main.cpp) in sync: a declared native without registration breaks the scripts.
+public native func UTPPSetMotionSelectionGuards(on: Bool) -> Bool
 // 1.2 lateral-acceleration lean (default off; CET settings mm.lean, mm.leanHead, mm.leanScale): while V runs / walks on the
 // ground the body leans into the turn (mesh space additive from the pack motion\utpp_lean_<body>.bin; no pack = nothing happens). Aiming,
 // weapons, air, crouch, slide, traversal and straight running stay bit-identical. UTPPSetMotionLeanHead: the head layer replaces the

@@ -108,6 +108,23 @@ FeedFile ClosedLoop(const FeedFile& aOpen, float aRateDegS, int aRepeat)
 
 // one feed through the real driver (fresh v1 state, v2 bundle loaded before the measured run, as check 2 of the integration test)
 int g_dumpBody = 0; // UTPP_DUMP_BODY=man: the Male V bundle (body slot 1)
+bool g_dumpCorr = false; // UTPP_DUMP_SLIDE=3: the foot lock correction of each foot after every frame
+std::vector<float> g_corr; // 2 per frame (cm): corrL, corrR of motionhost::Status()
+
+void ReadFootLockCorr(float& aL, float& aR)
+{
+    const std::string st = motionhost::Status();
+    const size_t p = st.find("flReady=");
+    aL = aR = 0.0f;
+    if (p == std::string::npos)
+        return;
+    const size_t l = st.find("corrL=", p), r = st.find("corrR=", p);
+    if (l != std::string::npos)
+        aL = std::strtof(st.c_str() + l + 6, nullptr);
+    if (r != std::string::npos)
+        aR = std::strtof(st.c_str() + r + 6, nullptr);
+}
+
 std::vector<FrameOut> RunDriver(const Rig& aRig, const FeedFile& aF)
 {
     motiondriver::SetRigBody(g_dumpBody);
@@ -120,7 +137,23 @@ std::vector<FrameOut> RunDriver(const Rig& aRig, const FeedFile& aF)
     ResetBase(aRig);
     motiondriver::SetEnabled(false);
     motiondriver::SetEnabled(true);
-    return RunFeed(aF, kNoop);
+    g_corr.clear();
+    if (!g_dumpCorr)
+        return RunFeed(aF, kNoop);
+    // the callback runs before each frame: it reads the state the previous frame left
+    std::vector<FrameOut> run = RunFeed(aF, [](size_t aI) {
+        if (aI == 0)
+            return;
+        float l = 0.0f, r = 0.0f;
+        ReadFootLockCorr(l, r);
+        g_corr.push_back(l);
+        g_corr.push_back(r);
+    });
+    float l = 0.0f, r = 0.0f;
+    ReadFootLockCorr(l, r);
+    g_corr.push_back(l);
+    g_corr.push_back(r);
+    return run;
 }
 
 int DumpMain(const std::string& aOut, const std::string& aData, const std::string& aFlick, const std::string& aArc,
@@ -132,6 +165,12 @@ int DumpMain(const std::string& aOut, const std::string& aData, const std::strin
     _dupenv_s(&bodyEnv, &bodyEnvLen, "UTPP_DUMP_BODY");
     g_dumpBody = bodyEnv && std::strcmp(bodyEnv, "man") == 0 ? 1 : 0;
     std::free(bodyEnv);
+    // opt-in: UTPP_DUMP_GUARDS=0 replays with every selection churn guard off (motiondriver::SetSelectionGuards(false)); unset = on
+    char* guardsEnv = nullptr;
+    size_t guardsEnvLen = 0;
+    _dupenv_s(&guardsEnv, &guardsEnvLen, "UTPP_DUMP_GUARDS");
+    motiondriver::SetSelectionGuards(!(guardsEnv && std::strcmp(guardsEnv, "0") == 0));
+    std::free(guardsEnv);
     const motiondriver::Paths pw = DataPaths(aData, g_dumpBody ? "man" : "woman");
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
@@ -142,7 +181,7 @@ int DumpMain(const std::string& aOut, const std::string& aData, const std::strin
     }
     motiondriver::SetPathsOverride(g_dumpBody, pw);
     motionhost::SetMotionHooks(&kHooks);
-    // UTPP_DUMP_SLIDE=1 (full-feed dump): two more columns, the toe displacement per frame (m) of each foot while the pick's contact is >= 0.5
+    // UTPP_DUMP_SLIDE=1 or 2 (full-feed dump): two more columns, the toe displacement per frame (m) of each foot while the pick's contact is >= 0.5
     // (MetricCtx of the integration test): a proxy of the planted-foot slide the foot lock has to correct
     MetricCtx mc;
     mc.rig = &rig;
@@ -158,6 +197,10 @@ int DumpMain(const std::string& aOut, const std::string& aData, const std::strin
     size_t slideEnvLen = 0;
     _dupenv_s(&slideEnv, &slideEnvLen, "UTPP_DUMP_SLIDE");
     const bool slideCols = slideEnv != nullptr;
+    // UTPP_DUMP_SLIDE=2: four more columns, the world position (m, x / y) of the left and the right toe (the planted-foot drift of a contact phase)
+    // UTPP_DUMP_SLIDE=3: as 2, plus two columns, the foot lock correction (cm) of the left and the right foot after the frame
+    g_dumpCorr = slideEnv && std::strcmp(slideEnv, "3") == 0;
+    const bool slideToe = slideEnv && (std::strcmp(slideEnv, "2") == 0 || g_dumpCorr);
     std::free(slideEnv);
     if (slideCols)
         g_metrics = &mc;
@@ -225,7 +268,16 @@ int DumpMain(const std::string& aOut, const std::string& aData, const std::strin
                          static_cast<double>(run[i].clipTime), static_cast<double>(run[i].visualYawDeg),
                          static_cast<unsigned long long>(run[i].hash), static_cast<int>(dbn.size()), dbn.data(), static_cast<int>(cln.size()),
                          cln.data());
-            if (slideCols)
+            if (slideCols && slideToe)
+            {
+                std::fprintf(o, " %.5f %.5f %.4f %.4f %.4f %.4f", static_cast<double>(run[i].slide[0]), static_cast<double>(run[i].slide[1]),
+                             static_cast<double>(run[i].toeW[0][0]), static_cast<double>(run[i].toeW[0][1]), static_cast<double>(run[i].toeW[1][0]),
+                             static_cast<double>(run[i].toeW[1][1]));
+                if (g_dumpCorr && 2 * i + 1 < g_corr.size())
+                    std::fprintf(o, " %.1f %.1f", static_cast<double>(g_corr[2 * i]), static_cast<double>(g_corr[2 * i + 1]));
+                std::fputc('\n', o);
+            }
+            else if (slideCols)
                 std::fprintf(o, " %.5f %.5f\n", static_cast<double>(run[i].slide[0]), static_cast<double>(run[i].slide[1]));
             else
                 std::fputc('\n', o);

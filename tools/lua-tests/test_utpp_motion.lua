@@ -10,7 +10,7 @@ local function fresh()
   return v
 end
 local function mock()
-  local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
+  local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
     walk = {}, minWalk = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
@@ -60,6 +60,11 @@ local function mock()
     setLeanParams = function(scale, headScale)
       t.leanParams[#t.leanParams + 1] = { scale, headScale }
       return not t.leanParamsReject
+    end,
+    setSelectionGuards = function(on)
+      t.guards[#t.guards + 1] = on
+      if t.guardsError then error("selectionGuards native failure") end
+      return not t.guardsReject
     end,
     setOrientWarp = function(on)
       t.orient[#t.orient + 1] = on
@@ -202,6 +207,9 @@ do
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
+  check("registered mm.selectionGuards on by default, bool, motion section",
+    defs["mm.selectionGuards"] ~= nil and defs["mm.selectionGuards"].default == true and defs["mm.selectionGuards"].type == "bool"
+    and defs["mm.selectionGuards"].section == "motion")
   check("registered mm.lean on by default, bool, motion section",
     defs["mm.lean"] ~= nil and defs["mm.lean"].default == true and defs["mm.lean"].type == "bool"
     and defs["mm.lean"].section == "motion")
@@ -593,6 +601,36 @@ do
   v.SetEnabled(false)
   v.Sync(t.api)
   check("orientWarp setting alone never calls the native while motion is off", #t.orient == before)
+end
+
+-- mm.selectionGuards: the DLL default is ON - the default makes no native call; off is sent once after v2 is on, on again when it differs
+do
+  local v, t = fresh(), mock()
+  v.SetEnabled(true)
+  check("selectionGuards default on: enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.guards == 0)
+  check("selectionGuards default on: steady sync makes no call", v.Sync(t.api) == "same" and #t.guards == 0)
+  v.SetSelectionGuards(false, t.api)
+  check("selectionGuards off is sent once", #t.guards == 1 and t.guards[1] == false and v.rt.selectionGuardsApplied == false)
+  check("steady selectionGuards off is not resent", v.Sync(t.api) == "same" and #t.guards == 1)
+  v.SetSelectionGuards(true, t.api)
+  check("selectionGuards on is sent when it differs from the DLL", #t.guards == 2 and t.guards[2] == true and v.rt.selectionGuardsApplied == true)
+end
+do
+  local v, t = fresh(), mock()
+  v.SetSelectionGuards(false, t.api)
+  check("selectionGuards off while motion is off makes no native call", #t.guards == 0 and v.want.selectionGuards == false)
+  v.SetEnabled(true)
+  check("selectionGuards off is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.guards == 1 and t.guards[1] == false)
+  t.guardsReject = true
+  v.SetSelectionGuards(true, t.api)
+  check("rejected selectionGuards call is never acknowledged", v.rt.selectionGuardsApplied == false and #t.guards == 2)
+  t.guardsReject = false
+  t.guardsError = true
+  v.Sync(t.api)
+  check("thrown selectionGuards call is never acknowledged", v.rt.selectionGuardsApplied == false and #t.guards == 3)
+  t.guardsError = false
+  v.Sync(t.api)
+  check("selectionGuards call retries until accepted", v.rt.selectionGuardsApplied == true and #t.guards == 4 and t.guards[4] == true)
 end
 
 -- mm.lean / leanHead / leanScale: same contract as the slide - the defaults (off / off / 1.0) make no native call at all

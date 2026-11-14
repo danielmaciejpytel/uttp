@@ -2,8 +2,9 @@
 # expects UTPP_WARNINGS, UTPP_MMDB_TEST_FILE and _utpp_mdmotion_data_native (motion-derived data, outside git: the targets exist only where it is).
 #
 # A8  utpp_motion_driver_decisiondump: NOT a ctest test. A tool that writes one line per frame of the real v1 MMDriver + MotionDriver
-#     (stepped, clip, db, clip time, visual root yaw, published pose hash). Built twice (baseline 723aee0 and the feature branch with the
-#     setting off); the files must be byte-identical. It uses only API that already exists at 723aee0.
+#     (stepped, clip, db, clip time, visual root yaw, published pose hash). Two builds of different commits replayed on the same feed
+#     must write byte-identical files when the change under test is off. It calls MotionDriver::SetSelectionGuards (UTPP_DUMP_GUARDS=0),
+#     so it builds only on commits that have that setter.
 #     Usage: utpp_motion_driver_decisiondump <out.txt> <data dir> <v1 db> [--closed13 <flick_180_run.feed> <run_arc_left.feed>] [feed ...]
 # A9  utpp_motion_driver_h2session_test: the H2 safeguard replayed on recorded game sessions, at gate level (MapToChooser with the real MapState,
 #     MotionFeed from all 31 feed columns) and through the full driver with the guard on and off. The sidecar of each session (tests/data/
@@ -15,7 +16,8 @@ if(DEFINED _utpp_mdmotion_data_native AND UTPP_MMDB_TEST_FILE)
     add_executable(utpp_motion_driver_decisiondump EXCLUDE_FROM_ALL tests/MotionDriverDecisionDump.cpp src/MotionHost.cpp src/MotionDriver.cpp)
     target_link_libraries(utpp_motion_driver_decisiondump PRIVATE bcrypt)
     target_compile_options(utpp_motion_driver_decisiondump PRIVATE ${UTPP_WARNINGS} /EHsc)
-    target_compile_definitions(utpp_motion_driver_decisiondump PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
+    # UTPP_MUTATION_JUMPPICK (run-time, unset = 0 = production) switches single selection churn guards off for the replay analysis
+    target_compile_definitions(utpp_motion_driver_decisiondump PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV UTPP_RUNTIME_MUTATION_JUMPPICK)
     target_compile_features(utpp_motion_driver_decisiondump PRIVATE cxx_std_20)
 
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/mm/MotionAdapter.hpp" _utpp_fe_drmotion)

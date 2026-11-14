@@ -55,6 +55,8 @@
 --                  game's own slow speeds. Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, air: untouched.
 --   mm.leanScale float 0 .. 2, default 0.85 (DLL default 1) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
 --   mm.leanHeadScale float 0 .. 2, default 0.9 (DLL default 1) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
+--   mm.selectionGuards bool, default true (developer option; DLL default on, so no call is made at the default) - clip selection guards of the
+--                  motion matcher as a group (native UTPPSetMotionSelectionGuards); off = every guard off, for A/B tests.
 -- Debug line: UTPPMotionGlue:Status() = glue state + " | " + Game.UTPPGetMotionStatus() (enabled, body, db loaded, fallback
 -- reason, last pick, feed p95 us), refreshed every STATUS_PERIOD s while shown.
 -- Console: print(GetMod("utpp_motion").Status())   GetMod("utpp_motion").SetEnabled(true|false)
@@ -71,12 +73,12 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 -- wanted state (settings) and what the glue reported last
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = false, orientWarp = false,
   lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
-  bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0 }
+  bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, selectionGuards = true }
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
   leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
   bodyYawOffsetApplied = 0, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, aimPointApplied = nil,
-  pistolAutoApplied = nil, errors = 0 }
+  pistolAutoApplied = nil, selectionGuardsApplied = true, errors = 0 }
 
 -- no file system paths in the log: a Lua error text names the script file with its full path (user name included); a path in
 -- the CET mods folder is cut to "mods\...", the game folder prefix is dropped, a user profile path becomes "~" (same rules as
@@ -196,6 +198,7 @@ function M.Sync(api)
     M.ApplyAimGameUpper(api)
     M.ApplySlide(api)
     M.ApplyOrientWarp(api)
+    M.ApplySelectionGuards(api)
     M.ApplyPelvisYawTrim(api)
     M.ApplyShoulderNarrow(api)
     M.ApplyBodyYawOffset(api)
@@ -238,6 +241,7 @@ function M.Sync(api)
   M.ApplyAimGameUpper(api)
   M.ApplySlide(api)
   M.ApplyOrientWarp(api)
+  M.ApplySelectionGuards(api)
   M.ApplyPelvisYawTrim(api)
   M.ApplyShoulderNarrow(api)
   M.ApplyBodyYawOffset(api)
@@ -422,6 +426,34 @@ function M.SetOrientWarp(on, api)
   M.want.orientWarp = v
   M.ApplyOrientWarp(api)
   return M.want.orientWarp
+end
+
+-- Selection churn guards as a group (developer option, A/B tests): a process-lifetime DLL flag that defaults to ON, so nothing is called
+-- while the wanted value is on (the default).
+function M.ApplySelectionGuards(api)
+  if not M.want.enabled then return false end
+  local v = M.want.selectionGuards
+  if M.rt.selectionGuardsApplied == v then return true end
+  api = api or M.api
+  local ok, accepted
+  if api and api.setSelectionGuards then
+    ok, accepted = pcall(api.setSelectionGuards, v)
+  else
+    ok, accepted = pcall(function() return Game.UTPPSetMotionSelectionGuards(v) end)
+  end
+  if not ok or accepted == false then
+    M.rt.errors = M.rt.errors + 1
+    if M.rt.errors <= 3 then log("mm.selectionGuards: native call failed") end
+    return false
+  end
+  M.rt.selectionGuardsApplied = v
+  log("mm.selectionGuards -> " .. tostring(v) .. " (native call accepted)")
+  return true
+end
+function M.SetSelectionGuards(on, api)
+  M.want.selectionGuards = on ~= false
+  M.ApplySelectionGuards(api)
+  return M.want.selectionGuards
 end
 
 -- Run pelvis yaw trim: a process-lifetime DLL value (default 0), same contract as the orientation warp: nothing is called while the
@@ -838,6 +870,10 @@ function M.RegisterSettings(core)
     label = "motion: lean head amount",
     desc = "Amount of the head lean (1 = full strength, applies to the head layer only; lean amount scales the torso).",
     apply = function(v) M.SetLeanHeadScale(v) end })
+  core.Register({ key = "mm.selectionGuards", section = "motion", type = "bool", default = true,
+    label = "motion: clip selection guards",
+    desc = "Keeps the motion matcher from switching animation clips back and forth on tiny differences (loops, young starts, dodges, short stick dips). Off = every such guard off, for comparison tests.",
+    apply = function(v) M.SetSelectionGuards(v ~= false) end })
   core.Register({ key = "mm.debug", section = "motion", type = "bool", default = false,
     label = "motion: debug status line",
     desc = "Shows the motion status line (body, database, fallback, last pick, feed time) on screen.",

@@ -35,7 +35,7 @@ local EXPECTED = {
   -- Animation v2
   ["mm.motionDriver"] = true, ["mm.pistol1h"] = true, ["mm.pistolAuto"] = true, ["mm.aimGameUpper"] = false,
   ["mm.slide"] = true, ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.85,
-  ["mm.leanHeadScale"] = 0.9, ["mm.debug"] = false,
+  ["mm.leanHeadScale"] = 0.9, ["mm.selectionGuards"] = true, ["mm.debug"] = false,
   -- Crosshair (2026-10-30): the UTPP crosshair is on by default
   ["crosshair.impl"] = true, ["crosshair.color"] = "standard",
 }
@@ -93,6 +93,7 @@ local function boot(stored, dbList)
     setAimGameUpper = function(on) t.aim[#t.aim + 1] = on; return true end,
     setSlide = function(on) t.slide[#t.slide + 1] = on; return true end,
     setOrientWarp = function(on) t.orient[#t.orient + 1] = on; return true end,
+    setSelectionGuards = function() return true end,
     setLean = function(on) t.lean[#t.lean + 1] = on; return true end,
     setLeanHead = function(on) t.leanHead[#t.leanHead + 1] = on; return true end,
     setLeanParams = function(s, h) t.leanParams[#t.leanParams + 1] = { s, h }; return true end,
@@ -268,7 +269,7 @@ local USER_SETTINGS = {
   ["perspective.log"] = true, ["perspective.userWantsTpp"] = true, ["mm.motionDriver"] = true, ["mm.pistol1h"] = true,
   ["mm.pistolAuto"] = true, ["mm.aimGameUpper"] = false, ["mm.slide"] = true, ["mm.orientWarp"] = true,
   ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.85, ["mm.leanHeadScale"] = 0.9,
-  ["mm.debug"] = false, ["mm.enabled"] = true, ["mm.trace"] = false,
+  ["mm.selectionGuards"] = true, ["mm.debug"] = false, ["mm.enabled"] = true, ["mm.trace"] = false,
   ["mm.footReplant"] = "crouch", ["mm.feedDump"] = false, ["mm.weaponUpper"] = false, ["mm.grip"] = true,
   ["mm.shootTransfer"] = true, ["mm.aimUpperFade"] = true, ["mm.idleHold"] = true, ["mm.kneeFix"] = true,
   ["mm.kneeHold"] = true, ["mm.headLead"] = true, ["mm.air"] = "auto", ["mm.airProbe"] = true, ["mm.airSteer"] = true,

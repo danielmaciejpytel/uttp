@@ -353,7 +353,8 @@ endforeach()
 # Selection churn guard (2026-11-11): clip changes per second of the real driver on slices of the 2026-11-11 10:29 game feed dump (the harness windows that failed
 # motion_transitions_per_s <= 3.0) and the release / stop latency check; src/mm/ChooserMatcher.hpp MatcherConfig "SELECTION CHURN GUARD", MotionAdapter.hpp
 # MapConfig::gaitReturnHoldS. Run-time mutants (src/MutationSelect.hpp, family JUMPPICK): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
-# 27 no gait return hold, 28 no start upshift hold (MatcherConfig::startUpshiftHoldS), 29 reface starts held as long as plain starts (0.35 s; check C), 30 no start restart / stalled dwell (check D); each must print a FAIL line of the churn checks. Arguments: <data dir> <v1 database> <slice dir>.
+# 27 no gait return hold, 28 no start upshift hold (MatcherConfig::startUpshiftHoldS), 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell (check D),
+# 31 the gait return hold's rise test per feed instead of per second (check F, uneven frame times); each must print a FAIL line of the churn checks. Arguments: <data dir> <v1 database> <slice dir>.
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/data" _utpp_churn_slices)
 add_executable(utpp_mm_loco_churn_rt tests/MMChurnTest.cpp src/MotionHost.cpp src/MotionDriver.cpp src/MutationSelect.hpp)
 target_compile_features(utpp_mm_loco_churn_rt PRIVATE cxx_std_20)
@@ -361,12 +362,14 @@ target_compile_options(utpp_mm_loco_churn_rt PRIVATE ${UTPP_WARNINGS} /EHsc)
 target_compile_definitions(utpp_mm_loco_churn_rt PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV UTPP_RUNTIME_MUTATION_JUMPPICK)
 target_link_libraries(utpp_mm_loco_churn_rt PRIVATE bcrypt)
 add_test(NAME utpp_mm_loco_churn_test COMMAND utpp_mm_loco_churn_rt "${_utpp_mdmotion_data_native}" "${_utpp_capbrake_v1db}" "${_utpp_churn_slices}")
-foreach(_m 24 25 26 27 28 29 30)
+foreach(_m 24 25 26 27 28 29 30 31)
     add_test(NAME utpp_mm_loco_churn_mut${_m} COMMAND utpp_mm_loco_churn_rt "${_utpp_mdmotion_data_native}" "${_utpp_capbrake_v1db}" "${_utpp_churn_slices}")
     if(_m EQUAL 29)
         set(_utpp_churn_fail "FAIL reface swap not delayed")
     elseif(_m EQUAL 30)
         set(_utpp_churn_fail "FAIL start restart")
+    elseif(_m EQUAL 31)
+        set(_utpp_churn_fail "FAIL gait return hold (does not flicker|lasts as long) under uneven frame times")
     else()
         set(_utpp_churn_fail "FAIL churn")
     endif()

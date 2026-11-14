@@ -275,6 +275,8 @@ do
     { __index = function() return function() return true end end })
   v2.RegisterSettings(core)
   check("real modules: Motion set and Shooter mode follow the registry on the mod's animations", v2.want.enabled == true and bt.shooterMode.on == false)
+  check("real modules: 'clip selection guards' is developer level (not in Mod Settings)", core.settings.defs["mm.selectionGuards"] ~= nil
+    and core.MenuPlacement("mm.selectionGuards") == "developer")
   core.Set("bodyturn.shooterMode", true)
   check("real modules: Shooter mode on (stored choice)", bt.shooterMode.on == true)
   core.Set("animation.pack", "game")

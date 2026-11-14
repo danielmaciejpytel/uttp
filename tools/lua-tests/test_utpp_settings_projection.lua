@@ -102,7 +102,7 @@ end
 local MM_API = { "setFootReplant", "setFeedDump", "setIdleHold", "setAimUpperFade", "setWeaponUpper",
   "setMotionGrip", "setMotionShootTransfer", "setMotionMagTap", "setKneeFix", "setHeadLead", "setAir", "setAirProbe", "setAirSteer", "setAirRobust",
   "setClimbRelease" }
-local MOTION_API = { "setEnabledGlobal", "setAimGameUpper", "setSlide", "setOrientWarp", "setLean", "setLeanHead", "setLeanParams",
+local MOTION_API = { "setEnabledGlobal", "setAimGameUpper", "setSlide", "setOrientWarp", "setSelectionGuards", "setLean", "setLeanHead", "setLeanParams",
   "setWeaponPoseOverride" }
 
 local coreLines = {}

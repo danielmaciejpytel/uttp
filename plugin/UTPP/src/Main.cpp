@@ -2286,6 +2286,18 @@ void Native_SetMotionOrientWarp(RED4ext::IScriptable*, RED4ext::CStackFrame* aFr
         *aOut = ok;
 }
 
+// ---- v2 selection churn guards as a group (motiondriver::SetSelectionGuards; CET mm.selectionGuards, developer option, default on)
+void Native_SetMotionSelectionGuards(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = true;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = motiondriver::SetSelectionGuards(on);
+    LogInfo("UTPPSetMotionSelectionGuards(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
+
 // ---- v2 motion lean (motiondriver::SetLean / SetLeanHead / SetLeanParams; CET mm.lean, mm.leanHead, default off)
 void Native_SetMotionLean(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -3769,6 +3781,15 @@ void PostRegisterTypes()
         ow->AddParam("Bool", "on");
         ow->SetReturnType("Bool");
         rtti->RegisterFunction(ow);
+    }
+
+    // v2 selection churn guards as a group
+    {
+        auto* sg = RED4ext::CGlobalFunction::Create("UTPPSetMotionSelectionGuards", "UTPPSetMotionSelectionGuards", &Native_SetMotionSelectionGuards);
+        sg->flags = flags;
+        sg->AddParam("Bool", "on");
+        sg->SetReturnType("Bool");
+        rtti->RegisterFunction(sg);
     }
 
     // v2 motion lean

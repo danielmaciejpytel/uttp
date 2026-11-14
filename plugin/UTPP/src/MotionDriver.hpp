@@ -170,6 +170,11 @@ float WalkSpeedTarget();
 bool SetMinAnalogWalk(float aMs);
 float MinAnalogWalkSetting();
 float AnalogFloorMul(float aMoveX, float aMoveY, int32_t aDetailed, bool aWalk);
+// Selection churn guards as a group (CET mm.selectionGuards, developer option, DLL default ON): off = every clip selection guard of the
+// matcher (ChooserMatcher::SetSelectionGuards) and the gait return hold of the speed map (MapConfig::gaitReturnHoldS 0) are off, for A/B tests.
+// Read on every Step, for both bodies and every bundle loaded later. Always true. Status: selGuards=.
+bool SetSelectionGuards(bool aOn);
+bool SelectionGuards();
 // Tier2 Slow flag (GameplayRestriction.Tier2LocomotionSlow; reds UTPPFeedMotionTier2Slow, sent right before every UTPPFeedLocomotion): the next
 // v2 Steps lower the stand run cap by 1.3 m/s (MotionFeed::tier2Slow). Process-lifetime atomic, false at start. Status: tier2Slow=.
 void FeedTier2Slow(bool aSlow);
