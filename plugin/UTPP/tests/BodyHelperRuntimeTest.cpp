@@ -35,7 +35,7 @@ namespace br=utpp::bodyhelperruntime;
 namespace
 {
 constexpr int kBodyWoman=0,kBodyMan=1;
-constexpr uint32_t kOwned=68; // helper records of an approved bundle (the same list for both bodies)
+uint32_t g_required=0; // required-helper count of the armed catalog (the union of the loaded bundles' owned helpers)
 int g_checks=0,g_failures=0;
 void check(bool ok,const std::string& label){++g_checks;if(!ok){++g_failures;std::printf("FAIL %s\n",label.c_str());}}
 
@@ -91,7 +91,7 @@ struct Body
     const char* label="";const char* folder="";int bodyType=0;
     std::string dir,program,binding;
     Fixture fx;std::vector<float> original;
-    uint32_t count=0;uint64_t rig=0x1234567890ull;
+    uint32_t count=0,owned=0;uint64_t rig=0x1234567890ull;
     uint8_t desc[64]{};uint64_t tag=0xABCDEF01ull;
     std::vector<uint64_t> names;
 };
@@ -101,6 +101,7 @@ bool Init(Body& b,const char* label,const char* folder,int bodyType,const std::s
     if(!LoadFixture(dir,b.fx,"stand_armed.s1"))return false;
     b.program=ReadAll(fs::path(dir)/"program.ir");b.binding=ReadAll(fs::path(dir)/"binding.dat");
     b.count=uint32_t(b.fx.hashes.size());b.original=b.fx.bones;b.names=b.fx.hashes;
+    {std::istringstream in(b.binding);std::string line;while(std::getline(in,line))if(line.rfind("OWNED ",0)==0)++b.owned;}
     return !b.program.empty()&&!b.binding.empty();
 }
 // Point the descriptor, the hot state and the buffer identity at this body's live buffer (call while disarmed, then arm).
@@ -124,7 +125,7 @@ int64_t Publish(const Body& b,bool tpp,int bodyType,float weight,int64_t offset)
 mm::mappingcycle::Receipt ReceiptAt(int64_t now,bool complete)
 {
     mm::mappingcycle::Receipt r;r.status=mm::mappingcycle::ConsumeStatus::Complete;r.complete=complete;
-    r.required=r.covered=r.equal=complete?kOwned:kOwned-1;r.startedTicks=now-20;r.lastTicks=now-10;return r;
+    r.required=r.covered=r.equal=complete?g_required:g_required-1;r.startedTicks=now-20;r.lastTicks=now-10;return r;
 }
 uint32_t Changed(const Body& b,const std::vector<float>& bones)
 {
@@ -175,7 +176,7 @@ void CheckReference(const Body& b,const std::vector<float>& written,const std::s
         mq=std::fmax(mq,AngleDeg(r+4,e.data()+3));
     }
     std::printf("%s: %u records, max translation %.2e m, rotation %.4f deg, scale %.2e\n",what.c_str(),matched,mt,mq,ms);
-    check(matched==kOwned,what+": every written record has a reference value");
+    check(matched==b.owned,what+": every written record has a reference value");
     check(mt<2e-5&&mq<0.005&&ms<2e-5,what+": records written by Evaluate equal the offline reference (< 0.002 cm, < 0.005 deg)");
 }
 
@@ -213,7 +214,8 @@ void Suite(Body& S,const Body& O,const fs::path& work)
     Install(work,"APPLY\n",S.folder==std::string("man")?Of(S):kNone,S.folder==std::string("woman")?Of(S):kNone);
     check(br::Load(work.wstring()),L+"reload APPLY");
     const auto catalog=br::RequiredCatalog();
-    check(catalog.size()==kOwned,L+"required-helper catalog = the 68 owned helpers of the approved bundle");
+    g_required=uint32_t(catalog.size());
+    check(catalog.size()==S.owned,L+"required-helper catalog = the owned helpers of the approved bundle");
     const uint64_t rig=S.rig;
     std::vector<uint64_t> names(S.names);
     const uint32_t rigCount=S.count;
@@ -275,13 +277,13 @@ void Suite(Body& S,const Body& O,const fs::path& work)
     Bind(S,bones.data(),rigCount);g_hot.armed.store(true);
     check(earlyruntime::CurrentOwner()==earlyruntime::Owner::FK,L+"session owner is FK (shipped default, no early-pose experiment)");
 
-    // 1) the shipped situation: FK owner, this body, third person, complete receipt -> exactly the 68 helper records are written
+    // 1) the shipped situation: FK owner, this body, third person, complete receipt -> exactly the owned helper records are written
     {
         int64_t now=publish(true,S.bodyType,1.f,-1);
         const bool ok=call(ReceiptAt(now,true),now);
-        check(ok&&changed()==kOwned,L+"FK owner, TPP, complete receipt: 68 helper records written");
+        check(ok&&changed()==S.owned,L+"FK owner, TPP, complete receipt: the owned helper records written");
         CheckReference(S,bones,L+"Evaluate vs reference");
-        check(br::ReadCounters().applied>=1&&br::ReadCounters().appliedRecords>=kOwned,L+"applied counters report the write");
+        check(br::ReadCounters().applied>=1&&br::ReadCounters().appliedRecords>=S.owned,L+"applied counters report the write");
         // a second Evaluate of the already corrected buffer: the patch is built from it, so it must not change anything further
         std::vector<float> once=bones;now=publish(true,S.bodyType,1.f,-1);
         check(call(ReceiptAt(now,true),now)&&std::memcmp(once.data(),bones.data(),once.size()*4)==0,L+"idempotent: re-running on the corrected pose changes nothing");
@@ -355,13 +357,13 @@ void Suite(Body& S,const Body& O,const fs::path& work)
         check(afterCtl.applied==before.applied,L+"no identity / permission control produced a write");
         // and with everything restored the same call writes
         now=publish(true,S.bodyType,1.f,-1);
-        check(call(ReceiptAt(now,true),now)&&changed()==kOwned,L+"descriptor restored: writes again");
+        check(call(ReceiptAt(now,true),now)&&changed()==S.owned,L+"descriptor restored: writes again");
         restore();
     }
     // 3) the same state writes again once the guards are satisfied (the controls did not latch anything)
     {
         int64_t now=publish(true,S.bodyType,1.f,-1);
-        check(call(ReceiptAt(now,true),now)&&changed()==kOwned,L+"guards satisfied again: writes again");
+        check(call(ReceiptAt(now,true),now)&&changed()==S.owned,L+"guards satisfied again: writes again");
         restore();
     }
     // 4) PROBE computes a proposal but never writes
@@ -396,10 +398,10 @@ void Suite(Body& S,const Body& O,const fs::path& work)
         check(br::PrepareArm(rig,S.fx.parents,names,br::RequiredCatalog()),L+"re-arm with the real rig after a refusal");
         g_hot.armed.store(true);
         now=publish(true,S.bodyType,1.f,-1);
-        check(call(ReceiptAt(now,true),now)&&changed()==kOwned,L+"a refusal does not latch: the approved rig writes again");
+        check(call(ReceiptAt(now,true),now)&&changed()==S.owned,L+"a refusal does not latch: the approved rig writes again");
         restore();
     }
-    // 7) the same rig with 26 extra bones (hair-like chains): it arms and writes the same 68 records (equipment / customisation independence)
+    // 7) the same rig with 26 extra bones (hair-like chains): it arms and writes the same records (equipment / customisation independence)
     {
         const uint32_t extra=26,extCount=rigCount+extra;
         std::vector<uint64_t> extNames(names);std::vector<int16_t> extParents(S.fx.parents);
@@ -416,7 +418,7 @@ void Suite(Body& S,const Body& O,const fs::path& work)
         int64_t now=publish(true,S.bodyType,1.f,-1);
         const bool ok=br::Evaluate(S.desc,reinterpret_cast<uint8_t*>(ext.data()),extCount,rig,ReceiptAt(now,true),now);
         ext.resize(size_t(rigCount)*12);
-        check(ok&&Changed(S,ext)==kOwned,L+"rig with 26 extra bones: the same 68 helper records are written");
+        check(ok&&Changed(S,ext)==S.owned,L+"rig with 26 extra bones: the same helper records are written");
         CheckReference(S,ext,L+"extra-bones rig vs reference");
         g_hot.armed.store(false);
         Bind(S,bones.data(),rigCount);
@@ -445,12 +447,13 @@ void Cross(Body& man,Body& woman,const fs::path& work)
             if(!loaded||!br::ApplyEnabled())return false;
             Bind(R,bones.data(),R.count);
             if(!br::PrepareArm(R.rig,R.fx.parents,R.names,br::RequiredCatalog()))return false;
+            g_required=uint32_t(br::RequiredCatalog().size());
             g_hot.armed.store(true);
             reset();
             const int64_t now=Publish(R,true,bodyType,1.f,-1);
             const bool ok=Call(R,bones,R.count,ReceiptAt(now,true),now);
             out=bones;reset();
-            return ok&&Changed(R,out)==kOwned;
+            return ok&&Changed(R,out)==(bodyType==kBodyMan?man.owned:woman.owned);
         };
         std::vector<float> onlyMan,onlyWoman,both,none;
         check(run(Of(man),kNone,kBodyMan,onlyMan),L+"man bundle only, man body: writes");
@@ -476,13 +479,14 @@ void Cross(Body& man,Body& woman,const fs::path& work)
             check(run(Of(man),Of(man),kBodyMan,both)&&both==onlyMan,L+"man bundle also in the woman folder: that copy is refused, the man bundle works");
             check(Has(loadStatus,"wrong folder"),L+"load status says wrong folder");
         }
-        // the required-helper catalog is the same list for either bundle, so one list serves both
+        // the required-helper catalog is the union of the loaded bundles: the woman list is part of the man list, so one list serves both
         {
             g_hot.armed.store(false);
             Install(work,"APPLY\n",Of(man),kNone);br::Load(work.wstring());const auto cm=br::RequiredCatalog();
             Install(work,"APPLY\n",kNone,Of(woman));br::Load(work.wstring());const auto cw=br::RequiredCatalog();
             Install(work,"APPLY\n",Of(man),Of(woman));br::Load(work.wstring());const auto cb=br::RequiredCatalog();
-            check(cm.size()==kOwned&&cm==cw&&cm==cb,L+"required-helper catalog: same 68 helpers for the man bundle, the woman bundle and both");
+            bool womanInMan=true;for(const uint64_t h:cw)if(std::find(cm.begin(),cm.end(),h)==cm.end())womanInMan=false;
+            check(cm.size()==man.owned&&cw.size()==woman.owned&&womanInMan&&cb.size()==cm.size(),L+"required-helper catalog: the man list, the woman list (part of it) and their union for both bundles");
         }
         reset();
     }
@@ -515,6 +519,7 @@ void HostPublished(Body& man,Body& woman,const fs::path& work)
             g_hot.armed.store(false);Install(work,"APPLY\n",m,w);
             const bool ok=br::Load(work.wstring())&&br::ApplyEnabled();
             bones=R.original;Bind(R,bones.data(),R.count);
+            g_required=uint32_t(br::RequiredCatalog().size()); // the receipt covers the armed catalog (the loaded bundles' union)
             const bool armed=ok&&br::PrepareArm(R.rig,R.fx.parents,R.names,br::RequiredCatalog());
             g_hot.armed.store(true);g_hot.mmActive.store(true);
             return armed;
@@ -543,7 +548,7 @@ void HostPublished(Body& man,Body& woman,const fs::path& work)
         {
             mm::integ::SetKnownBody(R.bodyType);
             const auto before=br::ReadCoverage();
-            check(evaluateHost(1.f,host)&&Changed(R,bones)==kOwned,L+"host pose, body reported: 68 helper records written");
+            check(evaluateHost(1.f,host)&&Changed(R,bones)==R.owned,L+"host pose, body reported: the owned helper records written");
             CheckReference(R,bones,L+"host pose vs reference");
             const auto after=br::ReadCoverage();
             check(after.byWriter[cw::kHost][size_t(br::Outcome::Committed)]==before.byWriter[cw::kHost][size_t(br::Outcome::Committed)]+1,
@@ -570,10 +575,10 @@ void HostPublished(Body& man,Body& woman,const fs::path& work)
         {
             std::vector<float> asR,asO,again;
             mm::integ::SetKnownBody(R.bodyType);
-            check(evaluateHost(1.f,host)&&Changed(R,bones)==kOwned,L+"both bundles, body reported as this body: writes");
+            check(evaluateHost(1.f,host)&&Changed(R,bones)==R.owned,L+"both bundles, body reported as this body: writes");
             asR=bones;
             mm::integ::SetKnownBody(O.bodyType);
-            check(evaluateHost(1.f,host)&&Changed(R,bones)==kOwned,L+"both bundles, body changed to the other body: writes");
+            check(evaluateHost(1.f,host)&&Changed(R,bones)==O.owned,L+"both bundles, body changed to the other body: that body's helper records written");
             asO=bones;
             check(asR!=asO,L+"the body change switches the bundle (different records on the same pose)");
             mm::integ::SetKnownBody(R.bodyType);

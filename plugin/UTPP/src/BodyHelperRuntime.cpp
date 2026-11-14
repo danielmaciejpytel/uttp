@@ -442,7 +442,8 @@ std::vector<uint64_t> RequiredCatalog()
     {
         std::lock_guard<std::mutex> lock(g_coldMutex);
         if(g_mode.load(std::memory_order_relaxed)==Mode::Off)return out;
-        // Union over the approved bundles (the same hashes for the man and the woman bundle: they own the same 40 helper bones).
+        // Union over the approved bundles (the man bundle owns the woman bundle's helper bones plus the two right lower-leg helpers,
+        // so the union is the man bundle's list).
         for(const auto& bundle:g_bundles)
         {
             if(!bundle->approved)continue;

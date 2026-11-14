@@ -50,14 +50,14 @@ int main()
         check(a::Admit(a::Mode::Apply,manProgram,manBinding,man.owned,man.children+1).decision==a::Decision::RefuseApply,"changed child count: APPLY refused");
         check(a::Admit(a::Mode::Apply,manBinding,manProgram,man.owned,man.children).decision==a::Decision::RefuseApply,"swapped file hashes: APPLY refused");
         check(a::Admit(a::Mode::Apply,"","",man.owned,man.children).decision==a::Decision::RefuseApply,"empty hashes: APPLY refused");
-        const std::array<a::Approved,1> emptyTable{{{a::kBodyMan,"","",68,0,619,143,0xbfad5496d7938ec0ull}}};
-        check(a::Admit(a::Mode::Apply,"","",68,0,emptyTable).decision==a::Decision::RefuseApply,"table entry without a hash approves nothing");
+        const std::array<a::Approved,1> emptyTable{{{a::kBodyMan,"","",78,0,619,151,0x75142735bc53fb92ull}}};
+        check(a::Admit(a::Mode::Apply,"","",78,0,emptyTable).decision==a::Decision::RefuseApply,"table entry without a hash approves nothing");
         // bundles of the two bodies are not interchangeable: another body's program with this binding (and the reverse) is refused
-        check(a::Admit(a::Mode::Apply,womanBundleProgram,manBinding,68,0).decision==a::Decision::RefuseApply,"woman program + man binding: APPLY refused");
-        check(a::Admit(a::Mode::Apply,manProgram,womanBundleBinding,68,0).decision==a::Decision::RefuseApply,"man program + woman binding: APPLY refused");
-        const auto wm=a::Admit(a::Mode::Apply,manProgram,manBinding,68,0);
+        check(a::Admit(a::Mode::Apply,womanBundleProgram,manBinding,78,0).decision==a::Decision::RefuseApply,"woman program + man binding: APPLY refused");
+        check(a::Admit(a::Mode::Apply,manProgram,womanBundleBinding,76,0).decision==a::Decision::RefuseApply,"man program + woman binding: APPLY refused");
+        const auto wm=a::Admit(a::Mode::Apply,manProgram,manBinding,78,0);
         check(wm.body==a::kBodyMan&&!a::BodyMatches(wm.approved,wm.body,a::kBodyWoman),"man bundle is never accepted for the woman body");
-        const auto ww=a::Admit(a::Mode::Apply,womanBundleProgram,womanBundleBinding,68,0);
+        const auto ww=a::Admit(a::Mode::Apply,womanBundleProgram,womanBundleBinding,76,0);
         check(ww.body==a::kBodyWoman&&!a::BodyMatches(ww.approved,ww.body,a::kBodyMan),"woman bundle is never accepted for the man body");
         // the compiled-in table has exactly one entry per body
         int men=0,women=0;for(const auto& e:a::kApproved){if(e.body==a::kBodyMan)++men;if(e.body==a::kBodyWoman)++women;}
@@ -112,10 +112,10 @@ int main()
         check(admits(zeroFp,names,parents)!=a::RigCheck::Ok,"approved entry with fingerprint 0 accepts no rig");
         a::Verdict unapproved;
         check(admits(unapproved,hairNames,hairParents)==a::RigCheck::Ok,"unapproved (PROBE-only) bundle: no rig restriction, it never writes");
-        // the table: both bodies need the 619-bone base and the 143-bone closure; the closure is the same for both (the woman rig is the
-        // man rig plus hair bones), so the rig can NOT tell the bodies apart - the live pose snapshot does (BodyMatches, every call)
-        check(man.baseMinBones==619&&man.closureBones==143&&man.closureFingerprint!=0,"man entry: 619-bone base, 143-bone closure");
-        check(woman.baseMinBones==619&&woman.closureBones==143&&woman.closureFingerprint==man.closureFingerprint,"woman entry: same base and the same closure as the man entry");
+        // the table: both bodies need the 619-bone base; the man bundle reads and writes a 151-bone closure, the woman bundle a 149-bone one
+        // (the same bones minus the two right lower-leg helpers); the rig does not tell the bodies apart - the live pose snapshot does (BodyMatches, every call)
+        check(man.baseMinBones==619&&man.closureBones==151&&man.closureFingerprint!=0,"man entry: 619-bone base, 151-bone closure");
+        check(woman.baseMinBones==619&&woman.closureBones==149&&woman.closureFingerprint!=0&&woman.closureFingerprint!=man.closureFingerprint,"woman entry: same base, its own 149-bone closure");
         const auto manVerdict=a::Admit(a::Mode::Apply,manProgram,manBinding,man.owned,man.children);
         std::vector<uint64_t> loadingNames;std::vector<int16_t> loadingParents;makeRig(294,loadingNames,loadingParents);
         check(a::CheckRig<int16_t>(manVerdict,loadingNames,loadingParents,roots)==a::RigCheck::TooFewBones,"294-bone loading rig is smaller than the approved base");

@@ -94,25 +94,29 @@ struct Approved
 };
 
 // Entries are added only together with the offline evidence listed above. Both bundles are valid for the same rig layout: the
-// closure of the 143 bones they read and write is identical by name and parent name for the man and the woman rig (the woman rig
-// is the man rig plus hair bones), so the rig can not tell the two bodies apart. The body is told apart by the live pose snapshot
-// (BodyMatches) on every call, and each bundle was generated from the deformer graph of its own body.
+// closure of the bones they read and write (151 for the man bundle, 149 for the woman bundle: the same bones without the two right
+// lower-leg helpers) is identical by name and parent name in the man and the woman rig (the woman rig is the man rig plus hair bones), so
+// the rig can not tell the two bodies apart. The body is told apart by the live pose snapshot (BodyMatches) on every call, and each bundle
+// was generated from the deformer graph of its own body.
 // Both: 68 helpers = 40 chest / scapula / deltoid / latissimus / butterfly / trapezius / upper-arm muscle and shoulder-twist helpers,
 // 16 thigh / groin / knee / buttock / leg-back / calf helpers, 6 elbow helpers (rotation bounce) and 6 wrist muscle helpers. Every one of
 // them reproduced the engine's recorded value on the raw engine pose on every frame of the 8 man and 7 woman sessions of 2026-11-12 (about
 // 74 000 frames: position <= 0.02 cm; rotation <= 0.5 deg except one frame at 0.59 deg), apart from the documented car-exit episode (only the
 // woman recordings contain a car ride; tests/BodyHelperBundleTest.cpp, exit frames). One engine frame with a degenerate elbow record is refused.
+// Both also own the forearm twist helpers l/r_Wrist_0..2 and l_lowLeg_back_A/B; the man bundle also owns r_lowLeg_back_A/B. On every frame of
+// 17 man and 28 woman sessions (about 330 000 frames) these reproduce the engine on the raw engine pose within 0.0002 cm and 0.06 deg. The
+// woman's r_lowLeg_back_A/B do not (short excursions of the engine value up to 0.26 deg) and are not part of the woman bundle.
 // baseMinBones 619 = the bare merged player rig (14 recorded sessions, 6 man + 8 woman; the woman rig is it plus hair bones); the
 // 294-bone loading rig is smaller and is refused by the count even though its helper bones form the same closure.
 inline constexpr std::array<Approved,2> kApproved{{
     {kBodyMan,
-     "4f39df9fee9977fb947854ce93d99e7e93facf4d4871ba80ac9ac0d21f964fe4",
-     "5ff8f71e0561756a1b9971818d9219d57532c02632ddda3f00660f600128b6c5",
-     68, 0, 619, 143, 0xbfad5496d7938ec0ull},
+     "0725185854349c283ab3c8fedbd0e4c59b3e7f0879856af14cbbcd2911d3b49b",
+     "b13265285f1310b40b29a0bf94d20b06156e4b5e07542ff218d14949873f4e46",
+     78, 0, 619, 151, 0x75142735bc53fb92ull},
     {kBodyWoman,
-     "a89e2673d0238697ed7d5f6a66b64b0a71a14c2cc4ad0568f434dd041b5edc79",
-     "0ef0482b4d36dcde6e73beed2c8c01ba8a6dfa2cdc1b7b7f80ce97f8f7220413",
-     68, 0, 619, 143, 0xbfad5496d7938ec0ull},
+     "826e7417e1b230da28d9bc7d9eaab85a496b8b769a294eaa0515c234fe9a4261",
+     "d85610e034e84804653438daa29d6fbc9589a945765e9fa7bcb3192ee408fb63",
+     76, 0, 619, 149, 0xd6940ae390b64977ull},
 }};
 
 enum class Mode : uint32_t { Off, Probe, Apply };

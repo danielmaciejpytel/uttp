@@ -6,9 +6,14 @@ offline reference, validated against engine recordings) node for node, in the sa
 interpreter supports are exported. Output nodes are the owned helper bones; everything that does not feed them is pruned.
 
 Usage: export_player_helper_bundle.py --body man --owned owned.txt --out-dir DIR [--manifest manifest.json]
-  owned.txt: one helper bone name per line (non-core bones of the deformer rig). The set must be closed under rig
-  descendants (a frozen child would keep a stale model transform); the exporter refuses an open set unless the
-  missing children are listed in --compensate (hashes of unowned direct children in the merged player rig).
+         [--merged-rig merged_rig.json [--expect-closure BONES FINGERPRINT]]
+  owned.txt: one helper bone name per line (non-core bones of the deformer rig). The set must be closed under descendants:
+  every non-core child of an owned bone in the deformer rig, and every child in the merged player rig that is a non-core bone of
+  the deformer rig, must be owned too (an unowned helper child would be compensated, i.e. frozen at its stale model transform).
+  Other direct children in the merged rig (bones the deformer graph does not drive) are compensated (CHILD records).
+  With --merged-rig the rig signature of the bundle (helper_rig_signature.closure_signature: closure bones and fingerprint, the
+  values of the approved table entry) is computed and written to the manifest; --expect-closure refuses the bundle, before any
+  file is written, when the signature differs from the expected one.
 Inputs (graph/rig JSON written by WolvenKit from the installed game, core clip name list, the owned list and the merged rig) and the tool itself
 are hashed into the manifest. The output is deterministic: the same inputs give byte-identical program.ir / binding.dat.
 """
@@ -23,6 +28,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluate_body_deformer_graph as E  # noqa: E402
+import helper_rig_signature as S  # noqa: E402
 
 KIND_REFERENCE, KIND_CORE, KIND_LOGICAL = 0, 1, 2
 OP_INIT, OP_SET, OP_POINT, OP_ORIENT, OP_AIMOBJ, OP_AIMROT, OP_SPLINE, OP_TWIST, OP_BOUNCE, OP_LIMIT, OP_TRACKBOUNCE, OP_SPLINETRACK = range(12)
@@ -395,6 +401,35 @@ def merged_children(ev, owned, merged_names_hash, merged_parents, merged_hashes_
     return sorted(set(out))
 
 
+def check_closure(ev, owned, merged=None):
+    """Closure rule for descendants. Raises ValueError for an open owned set; returns the compensated merged-rig children (hashes).
+    merged: (hashes, parents) of the merged player rig or None."""
+    owned_set = set(owned)
+    for n in owned:
+        if n not in ev.names or n in ev.coreNames:
+            raise ValueError('Not a non-core rig bone: ' + n)
+    rig_parent = {n: (ev.names[ev.parents[i]] if ev.parents[i] >= 0 else None) for i, n in enumerate(ev.names)}
+    for n in ev.names:
+        if n not in owned_set and rig_parent[n] in owned_set and n not in ev.coreNames:
+            raise ValueError('Owned set not closed under descendants: %s is a child of %s' % (n, rig_parent[n]))
+    if merged is None:
+        return []
+    hashes, parents = merged
+    children = merged_children(ev, owned, hashes, parents, None)
+    helpers = {fnv64(n): n for n in ev.names if n not in ev.coreNames}
+    for h in children:
+        if h in helpers:
+            parent = parents[hashes.index(h)]
+            raise ValueError('Owned set not closed under descendants in the merged rig: helper %s (a child of %016X) is not owned'
+                             % (helpers[h], hashes[parent]))
+    return children
+
+
+def bundle_roots(ev, owned, children, anchor_name='Spine3'):
+    """Bone hashes the bundle reads and writes, as listed in binding.dat (CORE, OWNED, CHILD, ANCHOR): the roots of the rig signature."""
+    return [fnv64(n) for n in ev.coreNames] + [fnv64(n) for n in owned] + list(children) + [fnv64(anchor_name)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--body', default='man')
@@ -402,24 +437,33 @@ def main():
     ap.add_argument('--out-dir', required=True)
     ap.add_argument('--merged-rig', help='json {hashes:[..hex..], parents:[..]} of the player merged rig (children detection)')
     ap.add_argument('--manifest')
+    ap.add_argument('--expect-closure', nargs=2, metavar=('BONES', 'FINGERPRINT'),
+                    help='refuse the bundle unless its rig signature in --merged-rig is exactly this (closure bones, hex fingerprint)')
     a = ap.parse_args()
+    if a.expect_closure and not a.merged_rig:
+        raise SystemExit('--expect-closure needs --merged-rig')
     ev = E.Evaluator(body=a.body)
     owned = [x.strip() for x in Path(a.owned).read_text().splitlines() if x.strip() and not x.startswith('#')]
-    for n in owned:
-        if n not in ev.names or n in ev.coreNames:
-            raise SystemExit('Not a non-core rig bone: ' + n)
-    prog, cur = flatten(ev)
-    # closure check in the deformer rig
-    owned_set = set(owned)
-    rig_parent = {n: (ev.names[ev.parents[i]] if ev.parents[i] >= 0 else None) for i, n in enumerate(ev.names)}
-    for n in ev.names:
-        if n not in owned_set and rig_parent[n] in owned_set and n not in ev.coreNames:
-            raise SystemExit('Owned set not closed under descendants: %s is a child of %s' % (n, rig_parent[n]))
-    children = []
+    if len(set(owned)) != len(owned):
+        raise SystemExit('Duplicate name in the owned list')
+    merged = None
     if a.merged_rig:
         m = json.loads(Path(a.merged_rig).read_text())
-        hashes = [int(x, 16) for x in m['hashes']]
-        children = merged_children(ev, owned, hashes, m['parents'], None)
+        merged = ([int(x, 16) for x in m['hashes']], [int(p) for p in m['parents']])
+    try:
+        children = check_closure(ev, owned, merged)
+    except ValueError as ex:
+        raise SystemExit(str(ex))
+    signature = None
+    if merged:
+        bones, fingerprint = S.closure_signature(merged[0], merged[1], bundle_roots(ev, owned, children))
+        signature = {'rig_bones': len(merged[0]), 'closure_bones': bones, 'closure_fingerprint': '0x%016x' % fingerprint}
+        if a.expect_closure:
+            want = (int(a.expect_closure[0]), int(a.expect_closure[1], 16))
+            if (bones, fingerprint) != want:
+                raise SystemExit('Bundle refused: rig signature %d bones 0x%016x differs from the expected %d bones 0x%016x'
+                                 % (bones, fingerprint, want[0], want[1]))
+    prog, cur = flatten(ev)
     inputs = [ev.graphPath, ev.rigPath, ev.coreClipPath]
     idh = hashlib.sha256()
     for p in inputs:
@@ -432,6 +476,8 @@ def main():
                 'inputs': [{'path': str(Path(p).resolve()), 'sha256': sha256_bytes(Path(p).read_bytes())} for p in inputs] +
                           [{'path': str(Path(p).resolve()), 'sha256': sha256_bytes(Path(p).read_bytes()), 'role': role} for role, p in extra],
                 'merged_rig_children': [('%016X' % h) for h in children]}
+    if signature:
+        manifest['rig_signature'] = signature
     manifest.update({k: v for k, v in info.items() if k not in ('node_names',)})
     if a.manifest:
         Path(a.manifest).write_text(json.dumps(manifest, indent=1))
