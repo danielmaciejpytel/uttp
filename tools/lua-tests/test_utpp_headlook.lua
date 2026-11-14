@@ -225,7 +225,10 @@ do
   t.frames(2)
   check("native: running releases the layer (weight 0 once)", weightCalls(W, false) == rel + 1 and C.hl.state == "off")
   t.player.vel = { x = 0, y = 0, z = 0 }
-  t.frames(30)
+  t.frames(28) -- 0.93 s: after a release by speed the look waits HL.MOVING_ENGAGE_DELAY (1.5 s) at walking speed or below
+  check("native: stopped after running -> still released before the delay", C.hl.state == "off" and W.calls[#W.calls].w == 0)
+  t.frames(32)
+  check("native: stopped for 2 s -> engaged again with weight 1", C.hl.state == "on" and W.calls[#W.calls].w == 1)
   -- the setting off
   local rel2 = weightCalls(W, false)
   C.Set("headLook.impl", "off")

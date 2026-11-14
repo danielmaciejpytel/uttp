@@ -16,7 +16,9 @@
 // Checks: no non-finite output; every bone outside the chain (Spine3, Neck, Neck1, Head, LeftEye, RightEye) bit-identical; bone
 // lengths kept; frames the layer did not write are bit-identical; the head + eyes reach the gaze once the gaze has been steady for
 // 0.8 s (within 4 deg, outside the chain limit); the frame-to-frame change of the applied turn stays below 600 deg/s; chest share
-// and eye limits; the layer is at rest again after the last release.
+// and eye limits; the layer is at rest again after the last release. Gate pass: the same frames stepped three times each (about
+// 60 Hz, uneven) with a layer gate that switches in single steps; no step may move the applied head / chest turn by more than 30 %
+// of the turn held before the edge.
 #define _CRT_SECURE_NO_WARNINGS
 #include <cmath>
 #include <cstdint>
@@ -284,6 +286,113 @@ int main(int argc, char** argv)
     }
     if (csv)
         std::fclose(csv);
+
+    // Gate pass: the same frames, the layer stepped three times per recorded frame (about 60 Hz with the uneven intervals of the
+    // recording), the layer gate switched in single steps: closed for 0.5 s, a one-step dropout, held at 0.4 for 0.6 s, closed for
+    // 0.3 s. Measured at every gate edge (the 20 following steps): the largest single-step change of the applied head / chest turn
+    // relative to the turn held before the edge, and the peak angular speed of the applied head turn.
+    struct GateEvent
+    {
+        double t0, t1;
+        float gate;
+    };
+    const double tStart = fx.frames.front().t;
+    const GateEvent gates[] = {{3.0, 3.5, 0.0f}, {6.6, 6.6, 0.0f}, {8.0, 8.6, 0.4f}, {11.6, 11.9, 0.0f}};
+    auto gateAt = [&](double aT, double aDt) {
+        const double rel = aT - tStart;
+        for (const GateEvent& g : gates)
+            if ((g.t1 > g.t0 && rel >= g.t0 && rel < g.t1) || (g.t1 == g.t0 && rel >= g.t0 && rel < g.t0 + aDt))
+                return g.gate;
+        return 1.0f;
+    };
+    Layer gl;
+    float gPrevGate = 1.0f, gPrevHead = 0.0f, gPrevChest = 0.0f, gHeld = 0.0f, gHeldChest = 0.0f;
+    double gWorstRel = 0.0, gWorstRelChest = 0.0, gWorstSpeed = 0.0, gWorstStep = 0.0;
+    int gEdges = 0, gWindow = 0;
+    bool gFinite = true;
+    for (size_t f = 0; f < fx.frames.size(); ++f)
+    {
+        const Frame& fr = fx.frames[f];
+        for (uint32_t b = 0; b < n; ++b)
+        {
+            float* r = reinterpret_cast<float*>(base.data() + size_t(b) * integ::kGameBoneStride);
+            r[0] = r[1] = r[2] = r[3] = 0.0f;
+            r[4] = r[5] = r[6] = 0.0f;
+            r[7] = 1.0f;
+            r[8] = r[9] = r[10] = r[11] = 1.0f;
+        }
+        for (size_t k = 0; k < fx.recorded.size(); ++k)
+        {
+            float* r = reinterpret_cast<float*>(base.data() + size_t(fx.recorded[k]) * integ::kGameBoneStride);
+            const float* v = &fr.rec[k * 7];
+            r[0] = v[0], r[1] = v[1], r[2] = v[2];
+            r[4] = v[3], r[5] = v[4], r[6] = v[5], r[7] = v[6];
+        }
+        aim::Xf mIn[aim::kMaxFkBones], mOut[aim::kMaxFkBones];
+        aim::ComputeModel(base.data(), n, rig.parents, n, mIn);
+        const float yIn = YawOfBone(mIn, rig.head), cIn = YawOfBone(mIn, rig.spine3);
+        Input in;
+        in.targetValid = fr.weight > 0.0f;
+        {
+            const float y = fr.yawDeg / kR2D, p = fr.pitchDeg / kR2D;
+            in.target = mIn[rig.head].p + Vec3{-std::sin(y) * std::cos(p) * fr.dist, std::cos(y) * std::cos(p) * fr.dist, std::sin(p) * fr.dist};
+        }
+        in.weight = fr.weight;
+        in.mode = fr.mode;
+        in.chest = 0.5f;
+        in.maxYawDeg = kDefaultMaxYawDeg;
+        in.chestAllowed = fr.chestAllowed != 0;
+        const double frameDt = f == 0 ? 0.0 : fr.t - fx.frames[f - 1].t;
+        for (int s = 0; s < 3; ++s)
+        {
+            const double sdt = frameDt / 3.0;
+            const double ts = (f == 0 ? fr.t : fx.frames[f - 1].t) + sdt * (s + 1);
+            in.dt = static_cast<float>(sdt);
+            in.gate = gateAt(ts, sdt);
+            work = base;
+            if (!gl.Run(work.data(), n, rig, in, out))
+                gFinite = false;
+            aim::ComputeModel(work.data(), n, rig.parents, n, mOut);
+            const float head = WrapPi(YawOfBone(mOut, rig.head) - yIn) * kR2D;
+            const float chest = WrapPi(YawOfBone(mOut, rig.spine3) - cIn) * kR2D;
+            gFinite = gFinite && std::isfinite(head) && std::isfinite(chest);
+            if (in.gate != gPrevGate)
+            {
+                ++gEdges;
+                gWindow = 20;
+                gHeld = std::fabs(gPrevHead);
+                gHeldChest = std::fabs(gPrevChest);
+            }
+            else if (gWindow > 0 && sdt > 1e-4)
+            {
+                const double d = std::fabs(head - gPrevHead), dc = std::fabs(chest - gPrevChest);
+                gWorstStep = std::fmax(gWorstStep, d);
+                gWorstSpeed = std::fmax(gWorstSpeed, d / sdt);
+                if (gHeld > 2.0f)
+                    gWorstRel = std::fmax(gWorstRel, d / gHeld);
+                if (gHeldChest > 1.0f)
+                    gWorstRelChest = std::fmax(gWorstRelChest, dc / gHeldChest);
+                --gWindow;
+            }
+            if (in.gate != gPrevGate && sdt > 1e-4)
+            {
+                // the edge step itself
+                const double d = std::fabs(head - gPrevHead), dc = std::fabs(chest - gPrevChest);
+                gWorstStep = std::fmax(gWorstStep, d);
+                gWorstSpeed = std::fmax(gWorstSpeed, d / sdt);
+                if (gHeld > 2.0f)
+                    gWorstRel = std::fmax(gWorstRel, d / gHeld);
+                if (gHeldChest > 1.0f)
+                    gWorstRelChest = std::fmax(gWorstRelChest, dc / gHeldChest);
+            }
+            gPrevGate = in.gate;
+            gPrevHead = head;
+            gPrevChest = chest;
+        }
+    }
+    std::printf("gate pass: %d edges, largest step %.2f deg, peak %.0f deg/s, largest step / held turn: head %.2f chest %.2f\n", gEdges,
+                gWorstStep, gWorstSpeed, gWorstRel, gWorstRelChest);
+
     Expect("replay: every output record finite, the layer never failed", finite);
     Expect("replay: bones outside the chain are bit-identical in every frame", untouched);
     Expect("replay: bone lengths (parent -> child) of the chain unchanged", lengths);
@@ -295,6 +404,11 @@ int main(int argc, char** argv)
            Fmt("settled frames %g, worst error %.2f deg, bad %g", settledFrames, worstTrack, settledBad));
     Expect("replay: the applied turn never changes faster than 600 deg/s between frames", jumpFrames == 0, Fmt("worst %.0f deg/s, frames above %g", worstRate, jumpFrames));
     Expect("replay: the layer is at rest again at the end (the last frames are released)", layer.Idle() || fx.frames.back().weight > 0.0f);
+    Expect("replay, gate pass: finite output; the gate edges were reached", gFinite && gEdges >= 6, Fmt("edges %g", gEdges));
+    Expect("replay, gate pass: a gate stepping in one frame never moves the applied head / chest turn by more than 30 % of the turn held "
+           "before the edge in one step",
+           gWorstRel <= 0.30 && gWorstRelChest <= 0.30,
+           Fmt("head %.2f chest %.2f, peak %.0f deg/s, largest step %.2f deg", gWorstRel, gWorstRelChest, gWorstSpeed, gWorstStep));
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -1293,9 +1293,14 @@ HL.DEFAULTS = {
 -- the floor while she stands), only the excess tilts the head (camera mode only). Not a setting: kept out of cfg (cfg.neutralPitch
 -- overrides it for tests).
 HL.NEUTRAL_PITCH = 15
+-- After a release by speed the look comes back only below RESUME_SPEED (m/s, a hysteresis band below walkSpeed) and after
+-- MOVING_ENGAGE_DELAY (s) at that speed, so that stop-and-go does not turn the head away and back at every short stop. Not settings:
+-- kept out of cfg (cfg.resumeSpeed / cfg.movingEngageDelay override them for tests).
+HL.RESUME_SPEED = 2.0
+HL.MOVING_ENGAGE_DELAY = 1.5
 function HL.New(cfg)
   local c = { cfg = copy(HL.DEFAULTS), state = "off", reason = "init", face = false, target = nil, lastApply = -1e9,
-              freeSince = nil, applies = 0, clears = 0 }
+              freeSince = nil, movedOff = false, applies = 0, clears = 0 }
   for k, v in pairs(cfg or {}) do c.cfg[k] = v end
   return c
 end
@@ -1373,12 +1378,19 @@ function HL.Target(c, obs)
   if pc ~= pitch then dz = math.tan(pc) * flat; clamped = true end
   return { x = hx + dx, y = hy + dy, z = hz + dz }, mode, clamped, raw
 end
+-- speed below which the look may come back after a release by speed (whileWalking: the hysteresis band below walkSpeed)
+function HL.ResumeSpeed(cfg)
+  if not cfg.whileWalking then return cfg.stillSpeed end
+  return math.min(cfg.resumeSpeed or HL.RESUME_SPEED, cfg.walkSpeed)
+end
 -- returns nil | { op = "apply", target } | { op = "clear" }
 function HL.Step(c, t, obs)
   local why = HL.Blocked(obs, c.cfg)
+  if not why and c.movedOff and (obs.speed or 0) > HL.ResumeSpeed(c.cfg) then why = "moving" end
   if why then
     c.freeSince = nil
     c.reason = why
+    if why == "moving" then c.movedOff = true end
     if c.state == "on" then
       c.state, c.target = "off", nil
       c.clears = c.clears + 1
@@ -1388,9 +1400,11 @@ function HL.Step(c, t, obs)
   end
   c.freeSince = c.freeSince or t
   if c.state == "off" then
-    if t - c.freeSince < c.cfg.engageDelay then c.reason = "settling"; return nil end
+    local delay = c.movedOff and (c.cfg.movingEngageDelay or HL.MOVING_ENGAGE_DELAY) or c.cfg.engageDelay
+    if t - c.freeSince < delay then c.reason = "settling"; return nil end
     local target, mode = HL.Target(c, obs)
     c.state, c.target, c.mode, c.lastApply, c.reason = "on", target, mode, t, mode
+    c.movedOff = false
     c.applies = c.applies + 1
     return { op = "apply", target = target, mode = mode }
   end
@@ -1407,6 +1421,7 @@ end
 -- forced release (setting off, shutdown)
 function HL.Release(c, why)
   c.freeSince = nil
+  c.movedOff = false
   c.reason = why or "release"
   if c.state == "on" then
     c.state, c.target = "off", nil

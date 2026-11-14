@@ -15,6 +15,8 @@
 //   delta  = (gaze - head) * weight, smoothed by a critically damped spring (frame-rate independent, no pop when the target
 //            switches between camera and face mode, when the gate closes, when the weight goes to 0). The spring smooths the
 //            DELTA, so the natural sway of the clip above the spring bandwidth stays in the pose (the low part follows the target).
+//            The output is scaled by the layer gate through a critically damped spring (kGateCloseOmega / kGateOpenOmega): a gate
+//            that steps from one frame to the next fades the turn instead of snapping it.
 //   distribution of the delta: the chest (Spine3) takes chest * kChestShareMax of the yaw (not at all while a weapon is held: the
 //            arms, WeaponRight and the hand helpers sit under Spine3), Neck / Neck1 / Head take the rest 0.25 / 0.25 / 0.5 about ONE
 //            axis (they compose to the demanded rotation), limited to kChainMaxYawDeg / +30 / -35 deg;
@@ -67,6 +69,11 @@ inline constexpr float kShare[3] = {0.25f, 0.25f, 0.5f}; // Neck, Neck1, Head (s
 inline constexpr float kHeadOmega = 8.0f;
 inline constexpr float kEyeOmega = 22.0f;
 inline constexpr float kChestOmega = 8.0f;
+// The layer gate (MM ownership x melee fade) is followed by a critically damped spring (exact solution, starts and ends without a
+// velocity step) before it scales the output, so that a gate that steps in one frame cannot snap the head: closing (the game takes
+// the head over) 95 % in 0.24 s, opening 95 % in 0.4 s. While the springs are at rest the filter is set to the gate directly.
+inline constexpr float kGateCloseOmega = 20.0f;
+inline constexpr float kGateOpenOmega = 12.0f;
 inline constexpr float kMaxDt = 0.1f;              // s: one step is capped (pause, loading)
 inline constexpr float kMaxTargetAge = 0.25f;      // s: the CET module sends the target every tick (heartbeat)
 
@@ -352,7 +359,8 @@ struct Input
     int32_t mode = kModeCamera;
     float chest = 0.5f;       // 0..1
     float maxYawDeg = kDefaultMaxYawDeg;
-    float gate = 0.0f;        // 0..1 MM ownership of the pose x (1 - melee fade); 0 = the layer is not allowed to touch the pose
+    float gate = 0.0f;        // 0..1 MM ownership of the pose x (1 - melee fade); scales the output through a filter (kGate*Omega):
+                              // a gate held at 0 writes nothing
     bool chestAllowed = false;// no weapon in the hands (Spine3 carries the arms, the weapon and the hand helpers)
     float dt = 0.0f;          // s since the previous step (0 = first step after a reset)
 };
@@ -379,6 +387,7 @@ public:
         m_eyeYaw.Reset();
         m_eyePitch.Reset();
         m_chest = 0.0f;
+        m_gate.Reset();
     }
     bool Idle() const { return m_yaw.Rest() && m_pitch.Rest() && m_eyeYaw.Rest() && m_eyePitch.Rest() && m_chest == 0.0f; }
     float Yaw() const { return m_yaw.x; }
@@ -394,7 +403,14 @@ public:
         aOut.mode = aIn.mode;
         const float gate = std::isfinite(aIn.gate) ? Clampf(aIn.gate, 0.0f, 1.0f) : 0.0f;
         const float weight = std::isfinite(aIn.weight) ? Clampf(aIn.weight, 0.0f, 1.0f) : 0.0f;
-        const bool want = aIn.targetValid && weight > 0.0f && gate > 0.0f && aRig.ok;
+        // The gate does not stop the look itself: the springs and the chest share keep following the target and only the output is
+        // scaled by the filtered gate, so a gate that closes and opens again fades the turn out and back without a step.
+        const bool want = aIn.targetValid && weight > 0.0f && aRig.ok;
+        if (Idle())
+        {
+            m_gate.x = gate; // nothing is applied at rest: the gate filter starts from the current gate
+            m_gate.v = 0.0f;
+        }
         if (!want && Idle())
         {
             aOut.flags |= kFlagNoTarget;
@@ -403,6 +419,13 @@ public:
         if (!aRig.ok || !aBones || aRig.fkCount == 0 || aRig.fkCount > aCount)
             return false;
         const float dt = (std::isfinite(aIn.dt) && aIn.dt > 0.0f) ? (aIn.dt > kMaxDt ? kMaxDt : aIn.dt) : 0.0f;
+        m_gate.Step(gate, gate < m_gate.x ? kGateCloseOmega : kGateOpenOmega, dt);
+        if (std::fabs(m_gate.x - gate) < 1e-4f && std::fabs(m_gate.v) < 1e-3f)
+        {
+            m_gate.x = gate; // settled: exactly the gate (a closed gate writes nothing at all)
+            m_gate.v = 0.0f;
+        }
+        const float outGate = Clampf(m_gate.x, 0.0f, 1.0f);
         Xf model[aim::kMaxFkBones];
         if (!aim::ComputeModel(aBones, aCount, aRig.parents, aRig.fkCount, model))
             return false;
@@ -431,8 +454,8 @@ public:
             m_chest += (chestTarget - m_chest) * (1.0f - std::exp(-kChestOmega * dt));
         if (m_chest < 1e-5f && chestTarget == 0.0f)
             m_chest = 0.0f;
-        const float yaw = m_yaw.x * gate, pitch = m_pitch.x * gate;
-        const float chestYaw = m_yaw.x * m_chest * gate;
+        const float yaw = m_yaw.x * outGate, pitch = m_pitch.x * outGate;
+        const float chestYaw = m_yaw.x * m_chest * outGate;
         const float chainYaw = yaw - chestYaw;
         bool capped = false;
         const bool headWrite = chestYaw != 0.0f || chainYaw != 0.0f || pitch != 0.0f;
@@ -470,7 +493,7 @@ public:
         }
         m_eyeYaw.Step(eY, kEyeOmega, dt);
         m_eyePitch.Step(eP, kEyeOmega, dt);
-        const float ey = m_eyeYaw.x * gate, ep = m_eyePitch.x * gate;
+        const float ey = m_eyeYaw.x * outGate, ep = m_eyePitch.x * outGate;
         if (ey != 0.0f || ep != 0.0f)
         {
             if (ApplyEyes(aBones, aCount, aRig, ey, ep, model))
@@ -502,6 +525,7 @@ public:
 private:
     Spring m_yaw, m_pitch, m_eyeYaw, m_eyePitch;
     float m_chest = 0.0f;
+    Spring m_gate; // filtered layer gate (kGateCloseOmega / kGateOpenOmega)
 };
 
 // Weight of the layer for one FK call: the share of the upper body the motion pose owns (snapshot weight x upper scale; during an

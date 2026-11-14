@@ -308,6 +308,49 @@ do
   local l1 = HL.Step(cl, 1, obs({ loot = { x = 0.5, y = 1.0, z = 0.0 } }))
   check("loot: looks at the item", l1 and l1.mode == "loot" and near(l1.target.y, 1.0, 1e-6))
   check("forced release", (HL.Release(cl, "x") or {}).op == "clear" and HL.Release(cl, "x") == nil)
+  -- speed gate: hysteresis and a minimum off time after a release by speed (60 Hz ticks)
+  local function drive(cc, t0, t1, speedAt)
+    local ops = { apply = 0, clear = 0 }
+    local t = t0
+    while t < t1 - 1e-9 do
+      local x = HL.Step(cc, t, obs({ speed = speedAt(t) }))
+      if x then ops[x.op] = (ops[x.op] or 0) + 1 end
+      t = t + 1 / 60
+    end
+    return ops
+  end
+  local co = HL.New()
+  drive(co, 0, 1, function() return 0 end)
+  local osc = drive(co, 1, 6, function(t) return (math.floor((t - 1) / 0.5) % 2 == 0) and 2.5 or 2.3 end)
+  check("speed gate: speed switching between 2.3 and 2.5 m/s every 0.5 s for 5 s -> one release, no re-engage",
+    osc.clear == 1 and osc.apply == 0 and co.state == "off", string.format("clears %d applies %d", osc.clear, osc.apply))
+  local cs = HL.New()
+  drive(cs, 0, 1, function() return 0 end)
+  local sg = drive(cs, 1, 1 + 4 * 1.2, function(t) return ((t - 1) % 1.2) < 0.6 and 3.85 or 0 end)
+  check("speed gate: stop-and-go (0.6 s running, 0.6 s stops, 4 times) -> one release, the look does not come back in the stops",
+    sg.clear == 1 and sg.apply == 0, string.format("clears %d applies %d", sg.clear, sg.apply))
+  local back = drive(cs, 5.8, 5.2 + HL.MOVING_ENGAGE_DELAY + 0.5, function() return 0 end)
+  check("speed gate: standing still after it -> the look comes back once, MOVING_ENGAGE_DELAY (>= 1 s) after the last stop began",
+    back.apply == 1 and cs.state == "on" and HL.MOVING_ENGAGE_DELAY >= 1.0 and cs.lastApply >= 5.2 + HL.MOVING_ENGAGE_DELAY - 1e-6,
+    string.format("applies %d at %.2f", back.apply, cs.lastApply or -1))
+  local cwk = HL.New()
+  drive(cwk, 0, 1, function() return 0 end)
+  drive(cwk, 1, 2, function() return 3.85 end)
+  local wk1 = drive(cwk, 2, 2 + HL.MOVING_ENGAGE_DELAY - 0.1, function() return 1.6 end)
+  local wk2 = drive(cwk, 2 + HL.MOVING_ENGAGE_DELAY - 0.1, 2 + HL.MOVING_ENGAGE_DELAY + 0.3, function() return 1.6 end)
+  check("speed gate: running, then walking at 1.6 m/s -> the look comes back while walking after the delay",
+    wk1.apply == 0 and wk2.apply == 1 and cwk.state == "on", string.format("%d %d", wk1.apply, wk2.apply))
+  local cb = HL.New()
+  drive(cb, 0, 1, function() return 0 end)
+  drive(cb, 1, 1.5, function() return 3.85 end)
+  local band = drive(cb, 1.5, 4, function() return 2.2 end)
+  check("speed gate: after a release by speed, 2.2 m/s (inside the hysteresis band) keeps it released", band.apply == 0 and cb.state == "off")
+  local ca = HL.New()
+  drive(ca, 0, 1, function() return 0 end)
+  HL.Step(ca, 1.1, obs({ aim = true }))
+  HL.Step(ca, 1.2, obs())
+  local a2 = HL.Step(ca, 1.56, obs())
+  check("speed gate: a release by another block (aim) keeps the short engage delay", a2 and a2.op == "apply")
 end
 
 -- ---------------------------------------------------------------- loot assist selection

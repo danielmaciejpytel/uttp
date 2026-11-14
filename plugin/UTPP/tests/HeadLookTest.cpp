@@ -655,9 +655,9 @@ static void TestModeSwitch()
     Input gi = MakeInput(base, 50, 0, 1.0f / 60.0f);
     prev = HeadYawDeg(p);
     worst = 0.0f;
-    for (int i = 0; i < 12; ++i) // the mask fades in 0.2 s
+    for (int i = 0; i < 12 + 30; ++i) // the mask fades in 0.2 s, then stays closed for 0.5 s (the gate filter ends the fade)
     {
-        gi.gate = 1.0f - float(i + 1) / 12.0f;
+        gi.gate = i < 12 ? 1.0f - float(i + 1) / 12.0f : 0.0f;
         p = base;
         g.Run(p.bytes.data(), kN, rig, gi, o);
         const float y = HeadYawDeg(p);
@@ -666,6 +666,159 @@ static void TestModeSwitch()
     }
     Expect("switch: the gate closing over 0.2 s fades the turn out smoothly (largest frame step <= 6 deg) and ends at the clip pose",
            worst <= 6.0f && std::fabs(prev - HeadYawDeg(base)) < 0.2f, Fmt("worst %g end %g", worst, prev));
+}
+
+// Deterministic uneven frame times between 1/60 and 1/43 s (the frame pacing of an unlocked frame rate).
+static float UnevenDt(uint32_t& aSeed)
+{
+    aSeed = aSeed * 1664525u + 1013904223u;
+    const float u = float(aSeed >> 8) / float(1u << 24);
+    return 1.0f / 60.0f + u * (1.0f / 43.0f - 1.0f / 60.0f);
+}
+
+// A gate that steps in one frame (an upper-body mask switched on or off, a one-frame dropout) must not snap the head or the chest.
+static void TestGateStep()
+{
+    const Rig rig = RealRig();
+    const Pose base = MakePose();
+    const float baseHead = HeadYawDeg(base), baseChest = BoneYawDeg(base, kSpine3);
+    // scenario: look 60 deg left for 1.5 s, gate 1 -> 0 in one frame for 0.6 s, back 0 -> 1 in one frame for 1 s, then a one-frame
+    // dropout; even 60 Hz and uneven 43..60 Hz. Measured: the largest single-frame change of the applied head / chest turn relative to
+    // the turn held before the edge, and the peak angular speed of the head.
+    for (int uneven = 0; uneven < 2; ++uneven)
+    {
+        Layer layer;
+        Pose p;
+        Input in = MakeInput(base, 60, 0, 1.0f / 60.0f);
+        in.chestAllowed = true;
+        uint32_t seed = 12345u;
+        Output o;
+        float t = 0.0f, prevHead = 0.0f, prevChest = 0.0f, held = 0.0f, heldChest = 0.0f;
+        float worstRel = 0.0f, worstRelChest = 0.0f, worstSpeed = 0.0f, worstEdgeStep = 0.0f;
+        bool first = true;
+        int edgeFrames = 0;
+        auto step = [&](float aGate) {
+            in.dt = uneven ? UnevenDt(seed) : 1.0f / 60.0f;
+            in.gate = aGate;
+            p = base;
+            layer.Run(p.bytes.data(), kN, rig, in, o);
+            t += in.dt;
+            const float head = HeadYawDeg(p) - baseHead, chest = BoneYawDeg(p, kSpine3) - baseChest;
+            if (!first && edgeFrames > 0)
+            {
+                const float d = std::fabs(head - prevHead), dc = std::fabs(chest - prevChest);
+                worstEdgeStep = std::fmax(worstEdgeStep, d);
+                if (held > 1.0f)
+                    worstRel = std::fmax(worstRel, d / held);
+                if (heldChest > 1.0f)
+                    worstRelChest = std::fmax(worstRelChest, dc / heldChest);
+                worstSpeed = std::fmax(worstSpeed, d / in.dt);
+                --edgeFrames;
+            }
+            first = false;
+            prevHead = head;
+            prevChest = chest;
+        };
+        auto edge = [&]() {
+            held = std::fmax(std::fabs(prevHead), 1e-3f);
+            heldChest = std::fmax(std::fabs(prevChest), 1e-3f);
+            edgeFrames = 20;
+        };
+        while (t < 1.5f)
+            step(1.0f);
+        const float lookHead = prevHead, lookChest = prevChest;
+        edge();
+        while (t < 2.1f)
+            step(0.0f);
+        const float closedHead = prevHead;
+        edge();
+        while (t < 3.1f)
+            step(1.0f);
+        const float reopenedHead = prevHead;
+        edge();
+        step(0.0f); // one-frame dropout
+        for (int i = 0; i < 30; ++i)
+            step(1.0f);
+        const char* tag = uneven ? "uneven 43..60 Hz" : "60 Hz";
+        Expect(std::string("gate step (").append(tag).append("): the look turned the head and the chest before the step").c_str(),
+               lookHead > 40.0f && lookChest > 4.0f, Fmt("head %g chest %g", lookHead, lookChest));
+        Expect(std::string("gate step (").append(tag).append("): no frame moves the head or the chest by more than 30 % of the turn held "
+                                                            "before a gate edge (a stepping gate fades instead of snapping)").c_str(),
+               worstRel <= 0.30f && worstRelChest <= 0.30f,
+               Fmt("head %.2f chest %.2f of the held turn, largest step %.1f deg", worstRel, worstRelChest, worstEdgeStep));
+        Expect(std::string("gate step (").append(tag).append("): peak head speed at the gate edges <= 900 deg/s").c_str(), worstSpeed <= 900.0f,
+               Fmt("%.0f deg/s", worstSpeed));
+        Expect(std::string("gate step (").append(tag).append("): closed for 0.6 s -> back at the clip pose; reopened for 1 s -> the look is back").c_str(),
+               std::fabs(closedHead) < 0.5f && reopenedHead > 0.9f * lookHead, Fmt("closed %g reopened %g", closedHead, reopenedHead));
+    }
+    // the gate filter is frame-rate independent: the head after the same gate history is the same at 30 / 60 / 144 fps and uneven dt
+    float at[4] = {};
+    for (int k = 0; k < 4; ++k)
+    {
+        const float fps[3] = {30.0f, 60.0f, 144.0f};
+        Layer layer;
+        Pose p;
+        Input in = MakeInput(base, 60, 0, 1.0f / 60.0f);
+        in.chestAllowed = true;
+        uint32_t seed = 777u;
+        float t = 0.0f;
+        Output o;
+        while (t < 1.6f - 1e-4f)
+        {
+            float dt = k < 3 ? 1.0f / fps[k] : UnevenDt(seed);
+            if (t < 1.5f && t + dt > 1.5f)
+                dt = 1.5f - t; // the gate edge at exactly 1.5 s for every partition
+            if (t + dt > 1.6f)
+                dt = 1.6f - t;
+            in.dt = dt;
+            in.gate = t + 0.5f * dt < 1.5f ? 1.0f : 0.0f;
+            p = base;
+            layer.Run(p.bytes.data(), kN, rig, in, o);
+            t += dt;
+        }
+        at[k] = HeadYawDeg(p) - baseHead;
+    }
+    const float lo = std::fmin(std::fmin(at[0], at[1]), std::fmin(at[2], at[3]));
+    const float hi = std::fmax(std::fmax(at[0], at[1]), std::fmax(at[2], at[3]));
+    Expect("gate step: 0.1 s after the gate closed the head is the same at 30 / 60 / 144 fps and uneven 43..60 Hz (within 1 deg)",
+           hi - lo < 1.0f && at[1] > 5.0f, Fmt("%g %g %g %g", at[0], at[1], at[2], at[3]));
+}
+
+// The springs and the gate filter use exact exponentials: a look with uneven frame times reaches the same head as with even ones.
+static void TestUnevenDt()
+{
+    const Rig rig = RealRig();
+    const Pose base = MakePose();
+    float yaw[2] = {};
+    float worstSpeed[2] = {};
+    for (int uneven = 0; uneven < 2; ++uneven)
+    {
+        Layer layer;
+        Pose p;
+        Input in = MakeInput(base, 70, 10, 1.0f / 60.0f);
+        in.chestAllowed = true;
+        uint32_t seed = 4242u;
+        float t = 0.0f, prev = HeadYawDeg(base);
+        Output o;
+        while (t < 0.8f - 1e-4f)
+        {
+            float dt = uneven ? UnevenDt(seed) : 1.0f / 60.0f;
+            if (t + dt > 0.8f)
+                dt = 0.8f - t;
+            in.dt = dt;
+            p = base;
+            layer.Run(p.bytes.data(), kN, rig, in, o);
+            t += dt;
+            const float y = HeadYawDeg(p);
+            worstSpeed[uneven] = std::fmax(worstSpeed[uneven], std::fabs(y - prev) / dt);
+            prev = y;
+        }
+        yaw[uneven] = HeadYawDeg(p);
+    }
+    Expect("uneven dt: after 0.8 s of a 70 deg look the head is the same with 60 Hz and uneven 43..60 Hz frames (within 0.5 deg), "
+           "same peak speed (within 10 %)",
+           std::fabs(yaw[0] - yaw[1]) < 0.5f && std::fabs(worstSpeed[0] - worstSpeed[1]) < 0.1f * worstSpeed[0],
+           Fmt("yaw %g %g, speed %g %g", yaw[0], yaw[1], worstSpeed[0], worstSpeed[1]));
 }
 
 static void TestHeadLeadComposition()
@@ -844,6 +997,8 @@ int main()
     TestIdentity();
     TestEasing();
     TestModeSwitch();
+    TestGateStep();
+    TestUnevenDt();
     TestHeadLeadComposition();
     TestGate();
     TestReapply();
