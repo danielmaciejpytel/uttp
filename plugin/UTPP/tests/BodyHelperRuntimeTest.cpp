@@ -6,6 +6,7 @@
 #include "../src/BodyHelperRuntime.hpp"
 #include "../src/EarlyPoseRuntime.hpp"
 #include "../src/State.hpp"
+#include "../src/mm/CoreWriteRecord.hpp"
 #include "../src/ragdoll/RagdollEpisode.hpp"
 
 #include <Windows.h>
@@ -486,6 +487,133 @@ void Cross(Body& man,Body& woman,const fs::path& work)
         reset();
     }
 }
+
+// Host (v1) publishes carry the body the script reported (mm::integ::SetKnownBody, sent by motiondriver::SetRigBody) through the same
+// stamp the host uses (mm::integ::StampHostIdentity). The recompute is admitted on them exactly like on a driver pose; an unknown body
+// stays rejected. The coverage counters attribute every call to the writers of its core write record (mm/CoreWriteRecord.hpp).
+int64_t PublishHost(const Body& b,float weight)
+{
+    LARGE_INTEGER now{};QueryPerformanceCounter(&now);
+    g_hot.perspectiveWrite.Publish(true,now.QuadPart);
+    mm::integ::PoseSnapshot snap;snap.rig=b.rig;snap.weight=weight;snap.publishTicks=now.QuadPart-1;
+    snap.bodyType=7;snap.source=mm::integ::kPoseSourceDriver; // a reused snapshot: the stamp must replace both
+    mm::integ::StampHostIdentity(snap);
+    g_mmPose.Publish(snap);
+    return now.QuadPart;
+}
+void HostPublished(Body& man,Body& woman,const fs::path& work)
+{
+    namespace cw=mm::corewrite;
+    for(Body* live:{&man,&woman})
+    {
+        Body& R=*live;Body& O=live==&man?woman:man;
+        const std::string L=std::string("host publish, live body ")+R.label+": ";
+        std::vector<float>& bones=R.fx.bones;
+        // arm with the given bundles on R's rig
+        auto arm=[&](Files m,Files w)
+        {
+            g_hot.armed.store(false);Install(work,"APPLY\n",m,w);
+            const bool ok=br::Load(work.wstring())&&br::ApplyEnabled();
+            bones=R.original;Bind(R,bones.data(),R.count);
+            const bool armed=ok&&br::PrepareArm(R.rig,R.fx.parents,R.names,br::RequiredCatalog());
+            g_hot.armed.store(true);g_hot.mmActive.store(true);
+            return armed;
+        };
+        auto evaluateHost=[&](float weight,uint32_t writers)
+        {
+            bones=R.original;
+            cw::Begin();cw::MarkPlayerCall();
+            for(uint32_t w=0;w<cw::kWriterCount;++w)if(writers&(1u<<w))cw::Mark(cw::Writer(w));
+            const int64_t now=PublishHost(R,weight);
+            const bool ok=Call(R,bones,R.count,ReceiptAt(now,true),now);
+            check((cw::Current()&cw::kEvaluated)!=0,L+"Evaluate marks the call as evaluated in the core write record");
+            return ok;
+        };
+        const uint32_t host=cw::Bit(cw::kHost);
+        // the stamp itself
+        {
+            mm::integ::SetKnownBody(R.bodyType);
+            mm::integ::PoseSnapshot s;s.bodyType=-1;s.source=mm::integ::kPoseSourceDriver;mm::integ::StampHostIdentity(s);
+            check(s.bodyType==R.bodyType&&s.source==mm::integ::kPoseSourceHost,L+"host stamp: reported body, host source");
+            mm::integ::SetKnownBody(5);mm::integ::StampHostIdentity(s);
+            check(mm::integ::KnownBody()==-1&&s.bodyType==-1,L+"an invalid reported body is stored as unknown (-1)");
+        }
+        // 1) only R's bundle loaded, R reported: the host pose is admitted and commits the reference records
+        check(arm(R.folder==std::string("man")?Of(R):kNone,R.folder==std::string("woman")?Of(R):kNone),L+"arm with this body's bundle");
+        {
+            mm::integ::SetKnownBody(R.bodyType);
+            const auto before=br::ReadCoverage();
+            check(evaluateHost(1.f,host)&&Changed(R,bones)==kOwned,L+"host pose, body reported: 68 helper records written");
+            CheckReference(R,bones,L+"host pose vs reference");
+            const auto after=br::ReadCoverage();
+            check(after.byWriter[cw::kHost][size_t(br::Outcome::Committed)]==before.byWriter[cw::kHost][size_t(br::Outcome::Committed)]+1,
+                  L+"coverage: the commit is counted under the host writer");
+            check(after.calls==before.calls+1,L+"coverage: one call counted");
+        }
+        // 2) negative controls on host poses: unknown body, the other body (its bundle is not loaded), weight 0
+        {
+            const auto before=br::ReadCoverage();
+            mm::integ::SetKnownBody(-1);
+            check(!evaluateHost(1.f,host)&&Changed(R,bones)==0,L+"host pose, body not reported (-1): no write");
+            mm::integ::SetKnownBody(O.bodyType);
+            check(!evaluateHost(1.f,host)&&Changed(R,bones)==0,L+"host pose, the other body reported (no bundle for it): no write");
+            mm::integ::SetKnownBody(R.bodyType);
+            check(!evaluateHost(0.f,host)&&Changed(R,bones)==0,L+"host pose at weight 0: no write");
+            const auto after=br::ReadCoverage();
+            check(after.byWriter[cw::kHost][size_t(br::Outcome::Body)]==before.byWriter[cw::kHost][size_t(br::Outcome::Body)]+3,
+                  L+"coverage: the three refusals are counted as 'body' under the host writer");
+            check(after.byWriter[cw::kHost][size_t(br::Outcome::Committed)]==before.byWriter[cw::kHost][size_t(br::Outcome::Committed)],
+                  L+"coverage: no commit counted for the refusals");
+        }
+        // 3) both bundles loaded, the reported body changes during the session: each host pose gets exactly the bundle of the reported body
+        check(arm(Of(man),Of(woman)),L+"arm with both bundles");
+        {
+            std::vector<float> asR,asO,again;
+            mm::integ::SetKnownBody(R.bodyType);
+            check(evaluateHost(1.f,host)&&Changed(R,bones)==kOwned,L+"both bundles, body reported as this body: writes");
+            asR=bones;
+            mm::integ::SetKnownBody(O.bodyType);
+            check(evaluateHost(1.f,host)&&Changed(R,bones)==kOwned,L+"both bundles, body changed to the other body: writes");
+            asO=bones;
+            check(asR!=asO,L+"the body change switches the bundle (different records on the same pose)");
+            mm::integ::SetKnownBody(R.bodyType);
+            check(evaluateHost(1.f,host)&&bones==asR,L+"body changed back: exactly the first bundle's records again");
+            // the host records equal those of a driver pose of the same body (the existing driver path)
+            const int64_t now=Publish(R,true,R.bodyType,1.f,-1);bones=R.original;
+            check(Call(R,bones,R.count,ReceiptAt(now,true),now)&&bones==asR,L+"host and driver pose of the same body write the same records");
+        }
+        // 4) coverage per writer: several writers in one call, no writer, weight-0 writers with MM inactive, calls that never reach Evaluate
+        {
+            mm::integ::SetKnownBody(R.bodyType);
+            auto at=[](const br::Coverage& c,size_t w,br::Outcome o){return c.byWriter[w][size_t(o)];};
+            auto before=br::ReadCoverage();
+            check(evaluateHost(1.f,host|cw::Bit(cw::kNeckGuard)),L+"host + neck guard in one call: commits");
+            auto after=br::ReadCoverage();
+            check(at(after,cw::kHost,br::Outcome::Committed)==at(before,cw::kHost,br::Outcome::Committed)+1&&
+                  at(after,cw::kNeckGuard,br::Outcome::Committed)==at(before,cw::kNeckGuard,br::Outcome::Committed)+1&&
+                  after.calls==before.calls+1,L+"coverage: one call with two writers is counted once per writer and once in calls");
+            before=after;
+            check(evaluateHost(1.f,0),L+"no writer marked: still commits (the recompute does not depend on the record)");
+            after=br::ReadCoverage();
+            check(at(after,br::kNoWriter,br::Outcome::Committed)==at(before,br::kNoWriter,br::Outcome::Committed)+1,
+                  L+"coverage: a call without a core write is counted under 'none'");
+            before=after;
+            g_hot.mmActive.store(false);
+            check(!evaluateHost(0.f,cw::Bit(cw::kVaultTorso)),L+"vault torso at weight 0 (MM inactive): no write");
+            g_hot.mmActive.store(true);
+            after=br::ReadCoverage();
+            check(at(after,cw::kVaultTorso,br::Outcome::Gate)==at(before,cw::kVaultTorso,br::Outcome::Gate)+1,
+                  L+"coverage: the weight-0 writer is counted under 'gate'");
+            before=after;
+            br::NoteNotEvaluated(cw::Bit(cw::kVehicleGuards)|cw::kPlayerCall);
+            after=br::ReadCoverage();
+            check(at(after,cw::kVehicleGuards,br::Outcome::NotEvaluated)==at(before,cw::kVehicleGuards,br::Outcome::NotEvaluated)+1&&
+                  after.calls==before.calls+1,L+"coverage: a call that never reached Evaluate is counted under 'noeval'");
+        }
+        mm::integ::SetKnownBody(-1);
+        bones=R.original;g_hot.armed.store(false);
+    }
+}
 } // namespace
 
 int main(int argc,char** argv)
@@ -502,6 +630,7 @@ int main(int argc,char** argv)
     Suite(man,woman,root/"man");
     Suite(woman,man,root/"woman");
     Cross(man,woman,root/"both");
+    HostPublished(man,woman,root/"both");
     std::error_code ec;fs::remove_all(root,ec);
     std::printf("%d checks, %d failures\n",g_checks,g_failures);
     return g_failures?1:0;

@@ -306,6 +306,11 @@ uint64_t SnapHash(const mm::integ::PoseSnapshot& aS)
     s.publishTicks = 0; // wall clock
     s.sequence = 0;     // global publish counter
     s.rig = s.rig == RigPtr() ? 1u : 2u; // RigPtr() = address of this exe's g_rigDummy: differs between two builds (v1 identity vs a reference exe)
+    // Pose identity fields, not pose data: host poses carry the reported body and every pose its source. They are hashed as the layout
+    // without them (host body -1, source 0), so pinned digests (kBarrelLoopOffDigest) keep covering the pose bytes unchanged.
+    if (s.source != mm::integ::kPoseSourceDriver)
+        s.bodyType = -1;
+    s.source = 0;
     // 2026-11-09 melee full body / aim tilt: lowerScale and meleeAimWeight were appended to PoseSnapshot. At their defaults (1 / 0) the
     // hash covers the layout before them (the bytes up to lowerScale + the former tail padding, zero), so digests pinned before the
     // change (kBarrelLoopOffDigest) stay comparable; other values are mixed in after it.

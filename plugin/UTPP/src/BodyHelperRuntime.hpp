@@ -20,6 +20,21 @@ struct Counters
     std::array<uint64_t,7> rejectReason{};
 };
 
+// Coverage of the recompute by core writer (mm/CoreWriteRecord.hpp): every player FK call is counted once under its outcome, for each
+// writer that wrote core bones in it, and under the row kNoWriter when no layer wrote. Outcome 0 = committed; 1..6 = the hot-gate
+// rejection reasons (same numbering as Counters::rejectReason); then build failure, commit refusal, not evaluated (the call never
+// reached Evaluate: no mapping-cycle policy for the rig, ragdoll, helpers disabled) and proposed only (PROBE).
+enum class Outcome : uint32_t { Committed, Ragdoll, Gate, Identity, Perspective, Receipt, Body, Build, Commit, NotEvaluated, ProposedOnly, Count };
+inline constexpr const char* kOutcomeNames[size_t(Outcome::Count)] = {
+    "commit", "ragdoll", "gate", "identity", "perspective", "receipt", "body", "build", "commitrej", "noeval", "probe"};
+inline constexpr size_t kWriterRows = 7; // mm::corewrite::kWriterCount writers + kNoWriter
+inline constexpr size_t kNoWriter = 6;
+struct Coverage
+{
+    uint64_t calls = 0; // player FK calls counted (evaluated or not)
+    std::array<std::array<uint64_t,size_t(Outcome::Count)>,kWriterRows> byWriter{};
+};
+
 // Load reads the private <directoryDll>/skin_helpers folder: mode.txt plus one bundle per body in man/ and woman/
 // (program.ir + binding.dat each). The bundles are admitted independently; a missing, broken or unapproved bundle of one body
 // never disables the other (Load returns false only when no bundle is usable). PROBE only computes. APPLY is admitted only for
@@ -38,9 +53,13 @@ bool PrepareArm(uint64_t rig,std::span<const int16_t> parents,
 
 // Builds a bounded proposal; APPLY performs guarded commit. Caller must pass the receipt
 // consumed for this exact FK invocation after validating its descriptor/bones
-// identity; Receipt itself does not carry those pointers.
+// identity; Receipt itself does not carry those pointers. The core write record of the calling thread (mm/CoreWriteRecord.hpp) says
+// which layers wrote core bones in this call; the outcome is counted for each of them (Coverage).
 bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
               const mm::mappingcycle::Receipt& receipt,int64_t now) noexcept;
+// A player FK call that did not reach Evaluate (aRecord = its core write record). No-op while the helpers are disabled.
+void NoteNotEvaluated(uint32_t aRecord) noexcept;
+Coverage ReadCoverage() noexcept;
 // Atomic fail-closed switch for callback fault handlers. Active storage remains
 // retained until DLL shutdown, so a concurrent animation callback cannot UAF.
 void Disable() noexcept;

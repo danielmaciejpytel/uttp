@@ -363,6 +363,9 @@ public class UTPPMotionGlue extends ScriptableSystem {
     this.ResetRecoilWeapon();
     this.ResetReloadGrip();
     this.UnregisterAll();
+    // the next player may have the other body: no body is known until RefreshBody reports it again
+    UTPPSetMMRigBody(-1);
+    this.m_sentBody = -100;
     if this.m_enabled {
       UTPPSetMMWeaponAction(0);
     }

@@ -1661,8 +1661,12 @@ bool Enabled()
 bool SetRigBody(int32_t aBody)
 {
     if (aBody != kBodyWoman && aBody != kBodyMan)
+    {
+        integ::SetKnownBody(-1); // "unknown" (sent when the player detaches): host poses carry no body until the next report
         return false;
+    }
     mm::meleebase::SetArmedBody(aBody == kBodyMan ? 1 : 0); // the melee chest base correction picks its clip table from this (0 Female, 1 Male)
+    integ::SetKnownBody(aBody); // the body of every host publish too (mm/GameIntegration.hpp StampHostIdentity), so the skin helper recompute runs on v1 poses
     std::lock_guard lock(g_m);
     const Body b = aBody == kBodyMan ? Body::Man : Body::Woman;
     if (b != g_body)
@@ -5113,6 +5117,7 @@ bool GetUpGapPoseLocked(integ::PoseSnapshot& aSnap)
         b.getup.Find(rag::kGuClipNames[g_gu.Plan().clip]) == nullptr) // the checks of GetUpApplyLocked, before aSnap is touched
         return false;
     aSnap.bodyType = b.body == Body::Woman ? kBodyWoman : kBodyMan;
+    aSnap.source = integ::kPoseSourceDriver;
     aSnap.numBones = n;
     aSnap.firstBone = kFirstBone;
     for (uint32_t i = 0; i < integ::kMaxMMBones; ++i)
@@ -5201,6 +5206,7 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
     const Bundle& b = *g_bundle;
     const uint32_t n = static_cast<uint32_t>(b.pose.size());
     aSnap.bodyType = b.body == Body::Woman ? kBodyWoman : kBodyMan;
+    aSnap.source = integ::kPoseSourceDriver;
     aSnap.traceAction = g_weaponAction;
     aSnap.reloadContactsEligible = g_reloadContactsEligible && (g_weaponAction == 2 || g_weaponAction == 0);
     aSnap.reloadAuthoredClip = aSnap.reloadContactsEligible && g_authoredReload;
@@ -6041,6 +6047,12 @@ Fallback Reason()
 {
     std::lock_guard lock(g_m);
     return ResolveLocked();
+}
+
+const char* LastSkipReason()
+{
+    std::lock_guard lock(g_m);
+    return g_lastSkip;
 }
 
 namespace

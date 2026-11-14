@@ -1872,7 +1872,7 @@ void PublishLocked(float aWeight)
     {
         g_snap.weight = 0.0f;
     }
-    g_snap.bodyType = -1; // reused snapshot must not retain a prior body/bundle identity
+    integ::StampHostIdentity(g_snap); // reported body (-1 until the script reports one) + host source; v2 replaces both below
     g_snap.overlayArms = 0; // UTPP-MOTION SEAM motionfix item 6: v1 frames never claim both hands on the weapon
     if (g_motion && g_motion->apply) // UTPP-MOTION SEAM
         g_motion->apply(g_snap); // UTPP-MOTION SEAM: replaces pose + bone map only while v2 runs; weight / fade stay v1's
@@ -7562,6 +7562,12 @@ bool FeedDumpFlushForTest(int aTimeoutMs)
     }
 }
 #endif
+
+int32_t LastPsmDetail()
+{
+    std::lock_guard lock(g_mutex);
+    return g_lastDetail;
+}
 
 void Shutdown()
 {

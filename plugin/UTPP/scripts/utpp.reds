@@ -29,6 +29,8 @@ public native func UTPPBodyPoseTraceContinuous(on: Bool) -> Bool
 // (call Stop first); the same window again = true, no change. Stop returns the session's files (paths
 // relative to the game folder, joined with '|'; empty when nothing was written); Status = state, frames, lost frames, bytes, file.
 public native func UTPPPoseCaptureStart(keepMinutes: Int32) -> Bool
+// Asks the captures started afterwards for the helper bones after the mod's helper commit as a second stream (this game session only).
+public native func UTPPSetPostHelperStream(on: Bool) -> Bool
 public native func UTPPPoseCaptureStop() -> String
 public native func UTPPPoseCaptureStatus() -> String
 // Writes red4ext\logs\utpp-report-<time>.txt for a bug report: mod and game version, `body`, then the mod's files of the last 30 minutes with the

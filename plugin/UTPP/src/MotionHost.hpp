@@ -579,6 +579,7 @@ void SetSlowWalkLoop(bool aOn);
 bool SetStanceSmooth(float aSmoothTime);
 
 std::string Status();
+int32_t LastPsmDetail(); // PSM LocomotionDetailed of the last feed (-1 = not reported); diagnostics
 void Shutdown();
 
 // UTPP-MOTION SEAM: optional motion v2 driver hooks (MotionDriver.hpp). Null (default) = v1 only, nothing below is called.

@@ -51,6 +51,7 @@
 #include "mm/HeadLookRuntime.hpp" // head look layer
 #include "mm/VaultTorso.hpp" // vault torso limiter (2026-11-10)
 #include "mm/BodyDeformerTrace.hpp"
+#include "mm/CoreWriteRecord.hpp"
 #include "mm/RearmProbe.hpp"
 #include "render/ItemPlane.hpp"
 #include "world/LootHead.hpp"
@@ -331,9 +332,11 @@ void BodyTraceContinuousLog(const char* aLine) { LogInfo("%s", aLine); }
 // The post-helper stream (records after the helper commit, a second file per capture) is developer-only: it exists only when the helper
 // recompute writes (APPLY) AND the marker file <diagnostic folder>\post-helper-trace.txt exists, like pose-text-csv.txt for the text CSV.
 // Player-facing diagnostic logs therefore stay the same size with APPLY on. Control path only (file system access).
+std::atomic<bool> g_postHelperStreamRequested{false}; // UTPPSetPostHelperStream: the same request as the marker file, for one session
 bool PostHelperStreamWanted()
 {
     if (!bodyhelperruntime::ApplyEnabled() || g_bodyTraceFolder.empty()) return false;
+    if (g_postHelperStreamRequested.load(std::memory_order_relaxed)) return true;
     std::error_code ec;
     return std::filesystem::exists(std::filesystem::path(g_bodyTraceFolder) / L"post-helper-trace.txt", ec);
 }
@@ -490,6 +493,16 @@ void Native_BodyTraceContinuous(RED4ext::IScriptable*, RED4ext::CStackFrame* fra
         ok = bodytraceruntime::Enable(false);
     LogInfo("UTPPBodyPoseTraceContinuous(%d)", on ? 1 : 0);
     if (out) *out = ok;
+}
+// UTPPSetPostHelperStream(on): asks the captures started afterwards for the post-helper stream (the helper bones after the commit),
+// like the marker file but for this game session only. Needs the helper recompute in APPLY mode; returns whether the stream will be written.
+void Native_SetPostHelperStream(RED4ext::IScriptable*, RED4ext::CStackFrame* frame, bool* out, int64_t)
+{
+    bool on = false; RED4ext::GetParameter(frame, &on); frame->code++;
+    g_postHelperStreamRequested.store(on, std::memory_order_relaxed);
+    const bool wanted = PostHelperStreamWanted();
+    LogInfo("UTPPSetPostHelperStream(%d) -> %d", on ? 1 : 0, wanted ? 1 : 0);
+    if (out) *out = wanted;
 }
 // UTPPPoseCaptureStart(keepMinutes): compact capture of all helper bones (PoseCaptureRuntime.cpp). keepMinutes 0 = the whole session in one
 // file per rig; > 0 = one-minute segments, only the last keepMinutes minutes stay on disk. Refused (false) while the text capture or an
@@ -947,6 +960,61 @@ void LogReloadContactCountersIfDue()
             v(g_hot.rcFinishWritten), v(g_hot.rcHoldOnly), v(g_hot.rcLockLost));
 }
 
+// Skin helper coverage by core writer (BodyHelperRuntime.hpp Coverage): one line about once per second while player FK calls are
+// counted, only while mm.trace is on (held on by "Diagnostic logs"). Cumulative counts (a reader takes differences of consecutive
+// lines): calls = player FK calls; w[...] = calls in which the writer wrote core bones (none = no writer); c[...] = of those, calls
+// with a helper commit; o.<writer>[...] = outcomes of that writer's calls other than a commit (only the non-zero ones); state[...] =
+// the last published pose (source, weight, body), the motion driver's fallback and last hand-over reason, PSM LocomotionDetailed.
+// tools/analysis/helper_coverage_report.py reads it.
+void LogHelperCoverageIfDue()
+{
+    if (!g_hot.timing.load(std::memory_order_relaxed) || !bodyhelperruntime::Enabled())
+        return;
+    static ULONGLONG s_last = 0;
+    static uint64_t s_prevCalls = 0;
+    const ULONGLONG nowMs = GetTickCount64();
+    if (s_last != 0 && nowMs - s_last < 1000)
+        return;
+    const auto cov = bodyhelperruntime::ReadCoverage();
+    if (cov.calls == s_prevCalls)
+        return;
+    s_last = nowMs;
+    s_prevCalls = cov.calls;
+    namespace cw = mm::corewrite;
+    namespace br = bodyhelperruntime;
+    const char* rowNames[br::kWriterRows];
+    for (size_t w = 0; w < cw::kWriterCount; ++w)
+        rowNames[w] = cw::kWriterNames[w];
+    rowNames[br::kNoWriter] = "none";
+    std::string line = "UTPP skin helpers coverage: calls=" + std::to_string(cov.calls);
+    std::string written = " w[", committed = " c[", outcomes;
+    for (size_t w = 0; w < br::kWriterRows; ++w)
+    {
+        const auto& row = cov.byWriter[w];
+        uint64_t total = 0;
+        for (const uint64_t n : row)
+            total += n;
+        written += std::string(w ? " " : "") + rowNames[w] + "=" + std::to_string(total);
+        committed += std::string(w ? " " : "") + rowNames[w] + "=" + std::to_string(row[size_t(br::Outcome::Committed)]);
+        std::string other;
+        for (size_t o = 1; o < size_t(br::Outcome::Count); ++o)
+            if (row[o])
+                other += std::string(other.empty() ? "" : " ") + br::kOutcomeNames[o] + "=" + std::to_string(row[o]);
+        if (!other.empty())
+            outcomes += std::string(" o.") + rowNames[w] + "[" + other + "]";
+    }
+    line += written + "]" + committed + "]" + outcomes;
+    mm::integ::PoseSnapshot snap;
+    char state[256];
+    const bool haveSnap = g_mmPose.Read(snap);
+    std::snprintf(state, sizeof state, " state[src=%s w=%.2f body=%d fallback=%s skip=%s detail=%d]",
+                  !haveSnap ? "-" : (snap.source == mm::integ::kPoseSourceDriver ? "driver" : "host"), haveSnap ? snap.weight : 0.0f,
+                  haveSnap ? snap.bodyType : -1, mm::adapter::FallbackName(utpp::motiondriver::Reason()),
+                  utpp::motiondriver::LastSkipReason(), motionhost::LastPsmDetail());
+    line += state;
+    LogInfo("%s", line.c_str());
+}
+
 // RED4ext Running-state update: at most once per second, re-arm if not armed or the player changed.
 bool OnRunningEnter(RED4ext::CGameApplication*)
 {
@@ -961,6 +1029,7 @@ bool OnRunningUpdate(RED4ext::CGameApplication*)
     utpp::loothead::Tick(); // Phase 5N step 5: LootRange / HeadGuard (reverts when the TPP heartbeat stops)
     LogFkCountersIfDue(); // 2.5 port proof: FK counters, <= 1 line / 10 s, TPP only
     LogReloadContactCountersIfDue();
+    LogHelperCoverageIfDue();
     static ULONGLONG s_last = 0;
     const ULONGLONG now = GetTickCount64();
     // 2026-10-28 bike jump-out (mm/RearmProbe.hpp): the hooks still run but the player's calls stopped - the game replaced the animated
@@ -3151,6 +3220,8 @@ void PostRegisterTypes()
     bodyContinuous->flags = flags; bodyContinuous->AddParam("Bool", "on"); bodyContinuous->SetReturnType("Bool"); rtti->RegisterFunction(bodyContinuous);
     auto* poseCaptureStart = RED4ext::CGlobalFunction::Create("UTPPPoseCaptureStart", "UTPPPoseCaptureStart", &Native_PoseCaptureStart);
     poseCaptureStart->flags = flags; poseCaptureStart->AddParam("Int32", "keepMinutes"); poseCaptureStart->SetReturnType("Bool"); rtti->RegisterFunction(poseCaptureStart);
+    auto* postHelperStream = RED4ext::CGlobalFunction::Create("UTPPSetPostHelperStream", "UTPPSetPostHelperStream", &Native_SetPostHelperStream);
+    postHelperStream->flags = flags; postHelperStream->AddParam("Bool", "on"); postHelperStream->SetReturnType("Bool"); rtti->RegisterFunction(postHelperStream);
     auto* poseCaptureStop = RED4ext::CGlobalFunction::Create("UTPPPoseCaptureStop", "UTPPPoseCaptureStop", &Native_PoseCaptureStop);
     poseCaptureStop->flags = flags; poseCaptureStop->SetReturnType("String"); rtti->RegisterFunction(poseCaptureStop);
     auto* poseCaptureStatus = RED4ext::CGlobalFunction::Create("UTPPPoseCaptureStatus", "UTPPPoseCaptureStatus", &Native_PoseCaptureStatus);

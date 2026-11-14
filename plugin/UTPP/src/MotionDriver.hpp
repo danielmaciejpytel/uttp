@@ -581,6 +581,7 @@ GripProbe ProbeGrip();
 
 // ---- diagnostics / tests
 adapter::Fallback Reason();
+const char* LastSkipReason();         // why the last feed was handed to v1 / the game ("none" while v2 runs); static string
 bool LoadedBody(int32_t& aBody);      // false = no bundle installed
 uint64_t Loads();                     // bundles loaded so far (body switch reload check)
 void WaitLoader();                    // blocks until the worker finished (tests, shutdown)

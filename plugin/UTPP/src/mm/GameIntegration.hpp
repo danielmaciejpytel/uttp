@@ -604,7 +604,7 @@ struct PoseSnapshot
     float weight = 0.0f;
     uint32_t numBones = 0;       // database bones carried
     uint32_t firstBone = 2;      // first bone ever written
-    uint32_t pad = 0;
+    uint32_t source = 0;         // who supplied the pose: kPoseSourceHost (0) or kPoseSourceDriver (1); diagnostics only
     uint64_t rig = 0;            // game metaRig the map belongs to (FK R must equal it)
     int64_t publishTicks = 0;    // QueryPerformanceCounter at publish (0 offline)
     uint64_t sequence = 0;       // publish counter (diagnostics)
@@ -618,7 +618,9 @@ struct PoseSnapshot
     bool reloadContactsEligible = false; // v2 stationary pistol / rifle on the ground; same-cycle correction at early mapping only
     bool reloadAuthoredClip = false; // verified local reload episode; never inferred from PSM alone
     float reloadContactsWeight = 0.0f;
-    int32_t bodyType = -1; // 0 woman / 1 man only on an actively supplied v2 pose; -1 unknown
+    // 0 woman / 1 man: the body the script reported (UTPPSetMMRigBody, KnownBody below), on host and driver poses alike; -1 = not
+    // reported yet. The skin helper recompute admits only the bundle of this body (mm/BodyHelperAdmission.hpp BodyMatches).
+    int32_t bodyType = -1;
     // UTPP-MOTION SEAM motionfix item 6 (agreed with the runtime): 1 = the published v2 pose has BOTH hands on the weapon
     // (Pistol2H / Rifle in Ready / Aiming, steady: no overlay or aim crossfade, no v1 <-> v2 blend, upper body not handed
     // back to the game, no reload/weapon-action handback; Pistol1H only if its left hand is within kOverlayArmsMaxHandDist of
@@ -635,6 +637,23 @@ struct PoseSnapshot
 };
 static_assert(std::is_trivially_copyable_v<PoseSnapshot>);
 static_assert(sizeof(PoseSnapshot) % 4 == 0);
+
+inline constexpr uint32_t kPoseSourceHost = 0, kPoseSourceDriver = 1;
+
+// The player's body as reported by the script (UTPPSetMMRigBody -> motiondriver::SetRigBody): 0 woman, 1 man, -1 not reported yet.
+// Any other value is stored as -1. A later report replaces it (another save, another body).
+inline std::atomic<int32_t> g_knownBody{-1};
+inline void SetKnownBody(int32_t aBody) noexcept
+{ g_knownBody.store((aBody == 0 || aBody == 1) ? aBody : -1, std::memory_order_release); }
+inline int32_t KnownBody() noexcept { return g_knownBody.load(std::memory_order_acquire); }
+
+// Identity of a host publish (the reused snapshot must not keep the identity of an earlier publish): the reported body and the host
+// as the source. The motion driver replaces both when it supplies the pose.
+inline void StampHostIdentity(PoseSnapshot& aSnap) noexcept
+{
+    aSnap.bodyType = KnownBody();
+    aSnap.source = kPoseSourceHost;
+}
 
 // Two slots, each protected by a sequence counter; the payload is stored as relaxed atomic 32-bit words so there is
 // no data race in the C++ sense. Single writer. Readers never block and never allocate; a torn read returns false.

@@ -34,6 +34,8 @@
 #include "mm/GamePoseCapture.hpp"
 #include "mm/PoseTrace.hpp"
 #include "mm/BodyDeformerTrace.hpp"
+#include "mm/CoreWriteRecord.hpp"
+#include "BodyHelperRuntime.hpp"
 #include "mm/NativeReloadContactsRuntime.hpp"
 #include "mm/VaultTorso.hpp"
 #include "mm/VehicleTransition.hpp"
@@ -77,6 +79,9 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
         g_hot.mmStaleSkips.value.fetch_add(1, std::memory_order_relaxed);
         return 0;
     }
+    // From here on the published pose and the layers on top of it (aim offset, melee, head look, reload contacts) write core bones; a
+    // fully masked blend (n == 0 below) can still be followed by those layers, so the writer is recorded here.
+    mm::corewrite::Mark(snap.source == mm::integ::kPoseSourceDriver ? mm::corewrite::kDriver : mm::corewrite::kHost);
     mm::integ::CaptureGamePoseSample(bones, aCount, aMergedRig, aNow);
     mm::reload_contacts_runtime::Prepared reloadConfig;
     mm::reload_contacts_runtime::Cycle reloadCycle;
@@ -276,17 +281,19 @@ void ApplyMotionMatching(uint8_t* aDesc, void* aRig, uint32_t aCount, int64_t aN
         return;
     // Seated neck cut (mm/VehicleTransition.hpp SEATED NECK CUT): the game adds the seating-edge upper-body pop after the early
     // mapping job, so the guard runs on the pose the FK pass receives, for every write owner (armed only by a mount).
-    if (mm::vehtrans::Wanted())
-        mm::vehtrans::NeckGuard(*reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff), aCount, reinterpret_cast<uint64_t>(aRig), aNow);
+    if (mm::vehtrans::Wanted() &&
+        mm::vehtrans::NeckGuard(*reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff), aCount, reinterpret_cast<uint64_t>(aRig), aNow))
+        mm::corewrite::Mark(mm::corewrite::kNeckGuard);
     // Vault torso limiter (mm/VaultTorso.hpp): a released vault over a vehicle with a ranged weapon in hand shows the game's own pose with the
     // weapon layer's rigid spine (MM weight 0, so no MM / aim offset layer runs). Same stage and rules as the seated neck cut: the pose the FK
     // pass receives, every write owner, TPP only. NOT gated by mmActive: the vault is the game's pose and the MM weight is 0 there (hard-out
     // within ~0.12 s of the release). One relaxed load while idle (the weight is 0 outside the episode).
     {
         const int64_t vaultTps = util::QpcFrequency();
-        if (mm::vaulttorso::rt::Active(aNow, vaultTps))
+        if (mm::vaulttorso::rt::Active(aNow, vaultTps) &&
             mm::vaulttorso::rt::FkPass(*reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff), aCount, aRig, aNow, vaultTps,
-                                       g_hot.perspectiveWrite.Allows(aNow, g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed)));
+                                       g_hot.perspectiveWrite.Allows(aNow, g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed))))
+            mm::corewrite::Mark(mm::corewrite::kVaultTorso);
     }
     // Ownership is session-scoped, not a per-frame fallback. A rejected early
     // mapping pass must never reopen the late FK write path.
@@ -358,6 +365,7 @@ void ApplyUnguarded(uint8_t* aDesc, void* aRig, int64_t aNow)
 
     g_hot.matchedCalls.value.fetch_add(1, std::memory_order_relaxed);
     g_hot.lastMatchedCount.store(count, std::memory_order_relaxed);
+    mm::corewrite::MarkPlayerCall();
 
     // Motion matching first; the Test A rotation below (if enabled) applies on top of it.
     // Explicit helper capture also works with MM disabled; this is not pose ownership.
@@ -420,6 +428,7 @@ void* FkDetour(void* aDesc, void* aRig)
 {
     LARGE_INTEGER t0, t1{};
     QueryPerformanceCounter(&t0);
+    mm::corewrite::Begin(); // core write record of this call (mm/CoreWriteRecord.hpp): marked by the layers, read by the helper recompute
     // Own-cost timing (two more QPC readings and shared counters per call) only while the detailed diagnostics are on.
     const bool timing = g_hot.timing.load(std::memory_order_relaxed);
     g_hot.totalCalls.value.fetch_add(1, std::memory_order_relaxed);
@@ -428,6 +437,10 @@ void* FkDetour(void* aDesc, void* aRig)
         ApplyGuarded(static_cast<uint8_t*>(aDesc), aRig, t0.QuadPart);
     // Final LOCAL observation/candidate evaluation, after any permitted core writes.
     posediag::NoteBeforeFK(aDesc, aRig, t0.QuadPart);
+    // A player call the helper recompute did not see (no mapping-cycle policy for this rig, ragdoll, helpers disabled) is still counted.
+    if (const uint32_t record = mm::corewrite::Current();
+        (record & mm::corewrite::kPlayerCall) && !(record & mm::corewrite::kEvaluated))
+        bodyhelperruntime::NoteNotEvaluated(record);
     if (timing)
     {
         QueryPerformanceCounter(&t1);

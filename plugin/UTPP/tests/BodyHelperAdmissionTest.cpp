@@ -1,5 +1,6 @@
 // Pure admission and hot-gate rules of the helper recompute path (mm/BodyHelperAdmission.hpp): what may write, for which body.
 #include "../src/mm/BodyHelperAdmission.hpp"
+#include "../src/mm/GameIntegration.hpp"
 
 #include <algorithm>
 #include <array>
@@ -156,6 +157,25 @@ int main()
         g=ok;g.bodyOk=false;check(a::Gate(g)==a::Reject::Body,"wrong body: no write");
         g=ok;g.ragdollGameOwned=true;g.perspectiveOk=false;g.receiptComplete=false;g.bodyOk=false;
         check(a::Gate(g)==a::Reject::Ragdoll,"ragdoll wins over every other reason");
+    }
+    // --- host (v1) publishes carry the body the script reported (mm/GameIntegration.hpp SetKnownBody / StampHostIdentity)
+    {
+        namespace gi=utpp::mm::integ;
+        gi::PoseSnapshot s;
+        check(gi::KnownBody()==a::kBodyNone,"no body reported at start: unknown (-1)");
+        gi::StampHostIdentity(s);
+        check(s.bodyType==a::kBodyNone&&s.source==gi::kPoseSourceHost,"host publish before a body is reported: unknown body, host source");
+        check(!a::BodyMatches(true,a::kBodyMan,s.bodyType)&&!a::BodyMatches(true,a::kBodyWoman,s.bodyType),"host publish, body not reported: no approved bundle admitted");
+        gi::SetKnownBody(a::kBodyMan);gi::StampHostIdentity(s);
+        check(a::BodyMatches(true,a::kBodyMan,s.bodyType)&&!a::BodyMatches(true,a::kBodyWoman,s.bodyType),"host publish, man reported: only the man bundle is admitted");
+        gi::SetKnownBody(a::kBodyWoman);gi::StampHostIdentity(s);
+        check(a::BodyMatches(true,a::kBodyWoman,s.bodyType)&&!a::BodyMatches(true,a::kBodyMan,s.bodyType),"host publish, body changed to woman: only the woman bundle is admitted");
+        s.source=gi::kPoseSourceDriver;s.bodyType=a::kBodyMan;gi::StampHostIdentity(s);
+        check(s.bodyType==a::kBodyWoman&&s.source==gi::kPoseSourceHost,"the stamp replaces the identity a reused snapshot kept from a driver pose");
+        gi::SetKnownBody(2);gi::StampHostIdentity(s);
+        check(s.bodyType==a::kBodyNone&&!a::BodyMatches(true,a::kBodyMan,s.bodyType)&&!a::BodyMatches(true,a::kBodyWoman,s.bodyType),
+              "an invalid reported body is unknown (-1): no bundle admitted");
+        gi::SetKnownBody(a::kBodyNone);
     }
     std::printf("%d checks, %d failures\n",checks,failures);
     return failures?1:0;

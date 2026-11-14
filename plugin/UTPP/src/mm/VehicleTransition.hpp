@@ -172,6 +172,7 @@
 #include <string_view>
 
 #include "../MutationSelect.hpp" // tests only: a runtime-selected mutation (UTPP_RUNTIME_MUTATION_VEHTRANS); production keeps the constexpr constant
+#include "CoreWriteRecord.hpp"
 #include "GameIntegration.hpp"
 #include "GamePoseCapture.hpp"
 
@@ -2670,8 +2671,11 @@ inline uint32_t NeckGuard(uint8_t* aBones, uint32_t aCount, uint64_t aRig, int64
 inline uint32_t MountedGuards(uint8_t* aBones, uint32_t aCount, uint64_t aRig, int64_t aNow, bool aDenied)
 {
     const uint32_t s = SeatGuard(aBones, aCount, aRig, aNow);
+    uint32_t p = 0;
     if (!aDenied || g_mountTpp.load(std::memory_order_acquire))
-        PopFilter(aBones, aCount, aRig, aNow);
+        p = PopFilter(aBones, aCount, aRig, aNow);
+    if (s || p)
+        corewrite::Mark(corewrite::kVehicleGuards); // core write record of this FK call (mm/CoreWriteRecord.hpp)
     return s;
 }
 
@@ -2948,7 +2952,10 @@ inline uint32_t FkSide(uint8_t* aBones, uint32_t aCount, uint64_t aRig, int64_t 
         {
             const uint32_t n = ApplyIfActive(aBones, aCount, aRig, aNow);
             if (n)
+            {
+                corewrite::Mark(corewrite::kVehicleTransition);
                 return n;
+            }
             // the transition expired on this frame: the guards below
         }
         else if (e)
@@ -2964,6 +2971,8 @@ inline uint32_t FkSide(uint8_t* aBones, uint32_t aCount, uint64_t aRig, int64_t 
             if (!g_exitHold.load(std::memory_order_acquire))
                 return s; // mutation 10: no capture under the denial
         const uint32_t x = ExitStep(aBones, aCount, aRig, aNow, rawHips, rawOk, false, true);
+        if (x)
+            corewrite::Mark(corewrite::kVehicleTransition);
         return x ? x : s;
     }
     const bool hold = g_rearmHold.load(std::memory_order_acquire);
@@ -2974,9 +2983,14 @@ inline uint32_t FkSide(uint8_t* aBones, uint32_t aCount, uint64_t aRig, int64_t 
         CaptureIfWanted(aBones, aCount, aRig, aNow);
     const uint32_t n = ApplyIfActive(aBones, aCount, aRig, aNow);
     if (n)
+    {
+        corewrite::Mark(corewrite::kVehicleTransition);
         return n;
+    }
     const uint32_t s = MountedGuards(aBones, aCount, aRig, aNow, false);
     const uint32_t x = ExitStep(aBones, aCount, aRig, aNow, rawHips, rawOk, true, false);
+    if (x)
+        corewrite::Mark(corewrite::kVehicleTransition);
     if (hold)
     {
         g_counters.rearmHoldFrames.fetch_add(1, std::memory_order_relaxed);

@@ -17,6 +17,7 @@
 #include "mm/BodyHelperAdmission.hpp"
 #include "mm/BodyHelperCommit.hpp"
 #include "mm/BodyDeformerTrace.hpp"
+#include "mm/CoreWriteRecord.hpp"
 
 #include <algorithm>
 #include <array>
@@ -80,6 +81,19 @@ std::string g_status="not loaded";
 std::atomic<uint64_t> g_evaluated{0},g_rejected{0},g_buildFailed{0},g_proposed{0},g_proposedRecords{0};
 std::atomic<uint64_t> g_applied{0},g_appliedRecords{0},g_commitRejected{0},g_jumpRejected{0};
 std::array<std::atomic<uint64_t>,size_t(mm::helperadmission::Reject::Count)> g_rejectReason{};
+static_assert(kWriterRows==size_t(mm::corewrite::kWriterCount)+1&&kNoWriter==size_t(mm::corewrite::kWriterCount));
+static_assert(size_t(Outcome::Body)==size_t(mm::helperadmission::Reject::Body)&&size_t(Outcome::Ragdoll)==size_t(mm::helperadmission::Reject::Ragdoll));
+std::atomic<uint64_t> g_covCalls{0};
+std::array<std::array<std::atomic<uint64_t>,size_t(Outcome::Count)>,kWriterRows> g_cov{};
+// One player FK call: its outcome under every writer of its core write record (or under kNoWriter).
+void Tally(uint32_t record,Outcome outcome) noexcept
+{
+    g_covCalls.fetch_add(1,std::memory_order_relaxed);
+    uint32_t writers=record&mm::corewrite::kWriterMask;
+    if(!writers){g_cov[kNoWriter][size_t(outcome)].fetch_add(1,std::memory_order_relaxed);return;}
+    for(uint32_t w=0;writers;++w,writers>>=1)
+        if(writers&1u)g_cov[w][size_t(outcome)].fetch_add(1,std::memory_order_relaxed);
+}
 thread_local mm::bodyhelpercandidate::Scratch g_scratch;
 thread_local mm::helperpatch::Patch g_patch;
 
@@ -295,8 +309,11 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
               const mm::mappingcycle::Receipt& receipt,int64_t now) noexcept
 {
     g_evaluated.fetch_add(1,std::memory_order_relaxed);
+    const uint32_t record=mm::corewrite::Current(); // which layers wrote core bones in this FK call
+    mm::corewrite::MarkEvaluated();
     namespace ha=mm::helperadmission;
-    auto reject=[](ha::Reject why){g_rejected.fetch_add(1,std::memory_order_relaxed);g_rejectReason[size_t(why)].fetch_add(1,std::memory_order_relaxed);return false;};
+    auto reject=[record](ha::Reject why){g_rejected.fetch_add(1,std::memory_order_relaxed);g_rejectReason[size_t(why)].fetch_add(1,std::memory_order_relaxed);
+        Tally(record,Outcome(uint32_t(why)));return false;};
     Active* active=g_active.load(std::memory_order_acquire);
     const bool approved=active&&active->anyApproved;
     // The hot gate (mm/BodyHelperAdmission.hpp Gate): ragdoll episode = the engine owns V's pose; session owner Mapping (experiment) or,
@@ -333,7 +350,7 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
         size_t(count)*mm::helperpatch::kRecordFloats);
     const auto result=mm::bodyhelpercandidate::Build(slot->plan,records,
         {active->available.data(),count},g_scratch,g_patch);
-    if(!result){g_buildFailed.fetch_add(1,std::memory_order_relaxed);return false;}
+    if(!result){g_buildFailed.fetch_add(1,std::memory_order_relaxed);Tally(record,Outcome::Build);return false;}
     g_proposed.fetch_add(1,std::memory_order_relaxed);
     g_proposedRecords.fetch_add(g_patch.count,std::memory_order_relaxed);
     if(g_mode.load(std::memory_order_acquire)==Mode::Apply)
@@ -369,9 +386,11 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
         {
             g_commitRejected.fetch_add(1,std::memory_order_relaxed);
             if(committed.error==mm::bodyhelpercommit::Error::TranslationJump)g_jumpRejected.fetch_add(1,std::memory_order_relaxed);
+            Tally(record,Outcome::Commit);
             return false;
         }
         g_applied.fetch_add(1,std::memory_order_relaxed);g_appliedRecords.fetch_add(g_patch.count,std::memory_order_relaxed);
+        Tally(record,Outcome::Committed);
         // This is the first point where the local records include the applied
         // helper correction. Keep it separate from FkHook's earlier MM/Aim pair.
         if(mm::bodytrace::g_postHelperCapture.Active())
@@ -379,7 +398,22 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
                 reinterpret_cast<uint64_t>(desc),now,GetCurrentThreadId(),receipt.generation,
                 receipt.cycle,receipt.startedTicks,receipt.lastTicks);
     }
+    else Tally(record,Outcome::ProposedOnly);
     return true;
+}
+
+void NoteNotEvaluated(uint32_t aRecord) noexcept
+{
+    if(Enabled())Tally(aRecord,Outcome::NotEvaluated);
+}
+
+Coverage ReadCoverage() noexcept
+{
+    Coverage out;
+    out.calls=g_covCalls.load(std::memory_order_relaxed);
+    for(size_t w=0;w<kWriterRows;++w)
+        for(size_t o=0;o<size_t(Outcome::Count);++o)out.byWriter[w][o]=g_cov[w][o].load(std::memory_order_relaxed);
+    return out;
 }
 
 void Disable() noexcept

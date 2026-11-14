@@ -48,7 +48,7 @@ void Native_SetMMRigBody(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, vo
     int32_t body = -1;
     RED4ext::GetParameter(aFrame, &body);
     aFrame->code++;
-    SetRigBody(body); // invalid values are ignored (status keeps the previous body)
+    SetRigBody(body); // an invalid value keeps the driver's body and clears the body reported on host poses
 }
 
 void Native_SetMMOverlayInputs(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
