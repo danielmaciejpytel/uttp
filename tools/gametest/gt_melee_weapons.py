@@ -715,6 +715,12 @@ def _remove(run: _Run) -> None:
     if w['kind'] == 'cyberware':
         ok, info = run.cmd('MW_CW_RESTORE', cyberware_restore_cmd(w, g.get('prev_hash', 0), g['how'] == 'given'), 'restore')
         state = 'removed' if ok else 'failed'
+        if g.get('prev_hash', 0):
+            # the arms item that was installed before comes back drawn (seen with a monowire): put it away, or the scenarios
+            # after this one run with a weapon in the hand
+            run.guard.wait(1.0)
+            run.cmd('MW_HOLSTER', holster_cmd(), 'holster-after-restore')
+            _wait_hand_empty(run)
     elif g['n_before'] > 0:
         run.removed = 'kept (the player owned it)'
         run.say('the player owned the item: kept, nothing removed')
