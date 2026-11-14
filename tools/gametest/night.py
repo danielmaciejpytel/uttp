@@ -2734,9 +2734,11 @@ class Night:
         self.log(f'[weapon-block] {key}: second try done, verdict {rec.get("verdict")}')
 
     def note_home(self, pad, guard) -> None:
-        """Remembers where V stands on foot when the scenarios begin: the place the session returns to (keep_near_home)."""
+        """Remembers where V stands on foot when the scenarios begin: the place the session returns to (keep_near_home).
+        Only with the positions the game logs by itself (NightAuto): a position asked through the console costs typing, and
+        the return is not worth that."""
         self.home = None
-        if float(getattr(self.args, 'home_radius', 0.0) or 0.0) <= 0.0:
+        if float(getattr(self.args, 'home_radius', 0.0) or 0.0) <= 0.0 or not self.auto_pos:
             return
         try:
             pos = self.poll_pos(guard, pad)
@@ -2754,7 +2756,7 @@ class Night:
         farther than --home-radius m from the start point (`force`: farther than 5 m), V is teleported back there, facing as
         before. True = V was put back. Each return is recorded in cycle['home_returns']."""
         radius = float(getattr(self.args, 'home_radius', 0.0) or 0.0)
-        if self.home is None or radius <= 0.0:
+        if self.home is None or radius <= 0.0 or not self.auto_pos:
             return False
         try:
             pos = self.poll_pos(guard, pad)

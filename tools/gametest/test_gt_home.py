@@ -42,6 +42,7 @@ class KeepNearHome(unittest.TestCase):
         n.lines = []
         n.log = n.lines.append
         n.scenario_deadline = None
+        n.auto_pos = True       # positions come from the log lines of the game
         n.sent = []
         n.answers = []          # positions returned by poll_pos, in order
         n.poll_pos = lambda guard, pad=None, timeout=None: n.answers.pop(0) if n.answers else None
@@ -69,6 +70,18 @@ class KeepNearHome(unittest.TestCase):
         n.note_home(None, self.Guard())
         self.assertEqual(n.home, HOME)
         self.assertEqual(n.cycle['home'], [1574.85, 2258.16, 182.53])
+
+    def test_without_logged_positions_nothing_is_done(self):
+        n = self.make()
+        n.auto_pos = False
+        n.answers = [pos(*HOME)]
+        n.note_home(None, self.Guard())
+        self.assertIsNone(n.home)
+        self.assertEqual(len(n.answers), 1)                       # no position was asked for
+        n.home = HOME
+        n.answers = [pos(HOME[0] + 500.0, HOME[1])]
+        self.assertFalse(n.keep_near_home(None, self.Guard(), {}, 'before x'))
+        self.assertEqual((n.sent, len(n.answers)), ([], 1))
 
     def test_radius_zero_switches_it_off(self):
         n = self.make('0')
