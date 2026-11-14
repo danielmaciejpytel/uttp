@@ -299,7 +299,8 @@ inline constexpr uint32_t kPsmMeleeStateFieldMask = 0x1Fu << kPsmMeleeStateShift
 // WeaponRight read result: known bit 29, drawn bit 30; never a gate reason. Missing known = older/unavailable feed.
 inline constexpr uint32_t kPsmWeaponKnown = 1u << 29;
 inline constexpr uint32_t kPsmWeaponDrawn = 1u << 30;
-// Dual wield flag (dual-wield D0, diagnostic only, never a gate reason): bit 31 (the Int32 sign bit on the reds side) is set by
+// Dual wield flag (never a gate reason; read by the driver only to pick the one-handed weapon overlay, see
+// ov::DualWieldOverlay): bit 31 (the Int32 sign bit on the reds side) is set by
 // scripts/utpp.reds UTPPPsmBlockMask exactly when its local `dualWield` is true (PSM.UpperBody DualWield 7 or PSM.IsDualWielding).
 // The 3-bit UpperBody field is NOT widened: UpperBody 7 does not fit it (7 + 1 = 8) and is still left unreported there (field 0),
 // so PsmUpperBodyOf keeps returning -1 for it and every existing consumer behaves exactly as before. Field 0 together with the

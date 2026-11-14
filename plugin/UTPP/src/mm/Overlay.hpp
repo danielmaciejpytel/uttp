@@ -434,6 +434,17 @@ enum class AimState : uint8_t
 
 inline bool CanAim(PoseOverlay o) { return o == PoseOverlay::Rifle || o == PoseOverlay::Pistol1H || o == PoseOverlay::Pistol2H; }
 
+// Dual wield, limited version: the two-handed weapon overlays pose both arms around one weapon (the right one) and the left-hand
+// grip derived from them pulls the left hand onto that weapon, while the left weapon hangs on the left hand. With two weapons
+// drawn the one-handed weapon overlay is used instead, so no left-hand grip target exists. Every other overlay, and every
+// overlay while a single weapon is drawn, is returned unchanged.
+inline PoseOverlay DualWieldOverlay(PoseOverlay aOverlay, bool aDualWield)
+{
+    if (aDualWield && (aOverlay == PoseOverlay::Pistol2H || aOverlay == PoseOverlay::Rifle))
+        return PoseOverlay::Pistol1H;
+    return aOverlay;
+}
+
 // ---- per-clip style weight by source family ----------------------------------------------
 // The style delta can be scaled per source family of the active clip: the dP weight is weight(style, family of the
 // active MM clip), crossfaded on a family change (OverlayMachine::families). The v2 database only flags ADDED clips, so the family comes from a

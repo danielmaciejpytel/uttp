@@ -1704,6 +1704,9 @@ float P95Of(const std::array<float, adapter::Budget::kWindow>& aRing)
 float P95Locked() { return P95Of(g_times); }         // the trip statistic (status feedP95us)
 float WallP95Locked() { return P95Of(g_wallTimes); } // status / log only, never per feed
 
+// Two weapons drawn (PSM UpperBody DualWield or IsDualWielding, the flag of the last feed's psmBlock).
+bool DualWieldNow() { return integ::PsmDualOf(g_feedPsmRaw.load(std::memory_order_relaxed)); }
+
 ov::PoseOverlay OverlayLocked()
 {
     ov::PoseOverlay o = ov::PoseOverlay::Default;
@@ -1715,7 +1718,14 @@ ov::PoseOverlay OverlayLocked()
         o = ov::PoseOverlay::Default; // melee weapon drawn, no melee action: the unarmed overlay (released during the action)
     if (o == ov::PoseOverlay::Default && g_injured)
         o = ov::PoseOverlay::Injured;
-    return o;
+    return ov::DualWieldOverlay(o, DualWieldNow());
+}
+
+// The overlay the aimed / hip-fire pose resolves to (g_resolvedAimPose), with the same dual wield rule as OverlayLocked.
+ov::PoseOverlay ResolvedAimOverlayLocked()
+{
+    const auto o = g_resolvedAimPose == 9 ? ov::PoseOverlay::Injured : static_cast<ov::PoseOverlay>(g_resolvedAimPose);
+    return ov::DualWieldOverlay(o, DualWieldNow());
 }
 
 void Skip(uint64_t& aCounter, const char* aWhy)
@@ -2405,7 +2415,7 @@ bool FeedMagTap()
 #endif
     const bool weaponPose = g_pose == static_cast<int32_t>(ov::PoseOverlay::Rifle) ||
         g_pose == static_cast<int32_t>(ov::PoseOverlay::Pistol1H) || g_pose == static_cast<int32_t>(ov::PoseOverlay::Pistol2H);
-    if (!g_enabled || g_release || !weaponPose || g_weaponAction == 2)
+    if (!g_enabled || g_release || !weaponPose || g_weaponAction == 2 || DualWieldNow()) // dual wield: no magazine contact of one weapon
     {
         ++g_magTapDropped;
         return false;
@@ -2680,7 +2690,8 @@ const slide_deroll::Bones& DeRollBonesLocked(const Bundle& aB);
 motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::ChooserState& cs, const adapter::MotionFeed& f, float dt)
 {
     const bool reloadDomain = (g_weaponAction == 2 || g_weaponAction == 0) && !g_release &&
-        reload_contacts_runtime::ReloadContactsOverlay(g_pose) && f.haveWeapon && f.weaponDrawn && !g_trav.active; // pistols + rifle
+        reload_contacts_runtime::ReloadContactsOverlay(g_pose) && f.haveWeapon && f.weaponDrawn && !g_trav.active &&
+        !DualWieldNow(); // pistols + rifle; not with two weapons (the contacts follow the right weapon's magazine only)
     // The episode latches this on the reload edge, so it reads the PSM stance of the feed (ChooserState::stanceRaw), not the 0.15 s
     // debounced cs.stance: a stance change shorter than the filter before the edge would otherwise decide the whole reload.
 #if defined(UTPP_RELOAD_EPISODE_STANCE_MUTATION) && UTPP_RELOAD_EPISODE_STANCE_MUTATION == 1
@@ -2764,8 +2775,7 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
         in.machine.wantsToAim = true;
         reloadAimHeld = true;
     }
-    const auto resolvedAim = g_resolvedAimPose == 9 ? ov::PoseOverlay::Injured :
-        static_cast<ov::PoseOverlay>(g_resolvedAimPose);
+    const auto resolvedAim = ResolvedAimOverlayLocked();
     const bool hipFirePose = ov::UseHipFirePose(g_aimingNow, g_weaponAction, g_hipFirePoseHold.Active(),
         g_release, f.haveWeapon, f.weaponDrawn, in.machine.overlay, resolvedAim);
     if (hipFirePose)
@@ -4725,7 +4735,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         mc.gravity = gravity;
     mc.visualStrafe = ov::UseHipFirePose(f.aiming, g_weaponAction, g_hipFirePoseHold.Active(),
         g_release, f.haveWeapon, f.weaponDrawn, OverlayLocked(),
-        static_cast<ov::PoseOverlay>(g_resolvedAimPose));
+        ResolvedAimOverlayLocked());
     const auto facingOverlay = OverlayLocked();
     const bool facingWeapon = facingOverlay == ov::PoseOverlay::Rifle || facingOverlay == ov::PoseOverlay::Pistol1H ||
                               facingOverlay == ov::PoseOverlay::Pistol2H;

@@ -8,6 +8,8 @@
 //  B  behaviour identity: the legacy consumers (PsmUpperBodyOf, PsmBlockBits, ComputeGate, the aim-offset guard) see exactly the
 //     values they saw before the flag existed - UpperBody 7 stays -1, the flag never reaches the gate bits.
 //  C  the status suffix is parseable by tools/gametest/gt_log.py FIELD_RE ('(?:^|\s)([A-Za-z|]+)=(\S+)') and carries the values.
+//  D  the limited dual wield overlay rule (ov::DualWieldOverlay, read by the driver from PsmDualOf of the feed): two-handed weapon
+//     overlays become Pistol1H only while the flag is set; every other overlay and every single-weapon state is unchanged.
 //
 // PackPsm mirrors the UpperBody / dual lines of scripts/utpp.reds UTPPPsmBlockMask (the redscript itself cannot run here; it is
 // covered by the offline redscript compile and the in-game [utpp_dual] log).
@@ -21,6 +23,7 @@
 
 #include "../src/mm/AimOffset.hpp"
 #include "../src/mm/GameIntegration.hpp"
+#include "../src/mm/Overlay.hpp"
 
 using namespace utpp::mm;
 
@@ -177,6 +180,31 @@ int main()
             }
             Expect("C status suffix parses", dual == c.dual && raw == c.raw, s);
         }
+    }
+
+    // ---- D: limited dual wield overlay rule
+    {
+        const ov::PoseOverlay all[] = {ov::PoseOverlay::Default, ov::PoseOverlay::Rifle,    ov::PoseOverlay::Pistol1H,
+                                       ov::PoseOverlay::Pistol2H, ov::PoseOverlay::Injured, ov::PoseOverlay::Game};
+        for (const ov::PoseOverlay o : all)
+        {
+            const std::string t = "overlay=" + std::to_string(static_cast<int>(o));
+            Expect(("D single weapon: unchanged " + t).c_str(), ov::DualWieldOverlay(o, false) == o);
+            const bool twoHanded = o == ov::PoseOverlay::Pistol2H || o == ov::PoseOverlay::Rifle;
+            Expect(("D dual wield: two-handed -> Pistol1H, others unchanged " + t).c_str(),
+                   ov::DualWieldOverlay(o, true) == (twoHanded ? ov::PoseOverlay::Pistol1H : o));
+            Expect(("D dual wield: idempotent " + t).c_str(),
+                   ov::DualWieldOverlay(ov::DualWieldOverlay(o, true), true) == ov::DualWieldOverlay(o, true));
+        }
+        // the driver feeds it with PsmDualOf of the psmBlock: UpperBody 7 and IsDualWielding with any other UpperBody both count,
+        // a plain Aim (6) or no flag does not
+        Expect("D flag from UpperBody 7", ov::DualWieldOverlay(ov::PoseOverlay::Pistol2H, integ::PsmDualOf(PackUpper(0, 7, true))) ==
+                                              ov::PoseOverlay::Pistol1H);
+        Expect("D flag from IsDualWielding with UpperBody 2", ov::DualWieldOverlay(ov::PoseOverlay::Rifle, integ::PsmDualOf(PackUpper(0, 2, true))) ==
+                                                                  ov::PoseOverlay::Pistol1H);
+        Expect("D Aim without the flag keeps Pistol2H", ov::DualWieldOverlay(ov::PoseOverlay::Pistol2H, integ::PsmDualOf(PackUpper(0, 6, false))) ==
+                                                           ov::PoseOverlay::Pistol2H);
+        Expect("D no psm feed yet keeps Pistol2H", ov::DualWieldOverlay(ov::PoseOverlay::Pistol2H, integ::PsmDualOf(0u)) == ov::PoseOverlay::Pistol2H);
     }
 
     std::printf("dualwield psm test: %d passed, %d failed\n", g_pass, g_fail);
