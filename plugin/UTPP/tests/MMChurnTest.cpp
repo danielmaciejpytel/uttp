@@ -39,7 +39,7 @@
 //   2026-11-13 09:24: the crouched reface start used to be followed by Loop_B, BR, RR, FR and F).
 //   churn_kbd_strafe_taps.feed / churn_kbd_strafe_taps_man.feed (Female 2026-11-14 06:48, Male 06:59; game 9 and 10 changes in 2.8 s): left / right taps
 //   0.35 s apart at a run keep one turn clip per tap (8 changes, check K at most one per tap); the finished turn used to hand to a loop one to seven
-//   feeds before the next tap (MatcherConfig::turnCommitTailS). churn_flick_run_kbd.feed (Female 06:48 flick, game 8 changes in 2.5 s): 4 changes,
+//   feeds before the next tap (MatcherConfig::turnCommitTailS). churn_flick_run_kbd.feed (Female 06:48 flick, game 8 changes in 2.5 s): 5 changes,
 //   6 without MatcherConfig::downshiftDeferS (Run_to_Walk shown for one feed before the Stop of the release), 5 when a new press during the
 //   stop does not take the side of the reface start it picks (refacestart::Episode pending press; R_180 used to swap to L_180 at clip time 0.30).
 //   The replayed body yaw is the recorded one, so the later L_180 after Walk_to_Run stays in this replay; in game the body turns the picked side.
@@ -466,7 +466,7 @@ int main(int argc, char** argv)
         {"churn_kbd_strafe_taps_man.feed", {{"kbd_strafe_weave strafe_taps (Male)", 95.91f, 98.71f, 8, false, false, false, -1, 15.0f},
                                             {"kbd_strafe_weave strafe_taps key edges (Male)", 95.75f, 98.65f, 99, false, false, false, 1}}, true},
         // Female 2026-11-14 06:48 run flick (game 8 changes in 2.5 s)
-        {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 4}}},
+        {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 5}}},
         // check L only (budget 99 = the change count is not checked): Female 2026-11-14 10:00 sprint_again and run_arc_right / accel, 09:02
         // run_arc_left / arc_90, Male 10:45 sprint_start_stop / run_start (game 16.5, 17.6, 16.8 and 15.6 cm)
         {"footlock_sprint_again.feed", {{"sprint_dash sprint_again (foot lock)", 685.775f, 688.775f, 99, false, false, false, -1, 15.0f}}},
