@@ -415,7 +415,7 @@ enum class PoseOverlay : uint8_t // UTPP subset of motion Enum_OverlayPose (0 De
     Pistol1H,
     Pistol2H,
     Injured,
-    Game, // melee / body carry: no overlay, game animations own the upper body
+    Game, // melee weapon drawn: no overlay; the game animations own the body only during a melee action or the melee guard
     Count
 };
 enum class Style : uint8_t // Enum_OverlayBase subset: 0 motion, 2 Masculine, 3 Feminine

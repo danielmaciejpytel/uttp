@@ -743,6 +743,17 @@ static void TestGuard()
         c.edit(in);
         const melee::GuardWhy w = g.Update(in);
         Expect((std::string("guard: ") + c.name).c_str(), w == c.why && g.LastWhy() == c.why, melee::GuardWhyName(w));
+        // the owner-free decision (the motion driver yields on it): only the missing ownership leaves it on
+        Expect((std::string("guard without owner: ") + c.name).c_str(), g.OnWithoutOwner() == (c.why == melee::kGuardOwner));
+    }
+    {
+        melee::GuardGate g;
+        melee::GuardInput in = GuardStanding();
+        const bool on = g.Update(in) == melee::kGuardOn && g.OnWithoutOwner();
+        in.setting = false; // melee.guard off (default): never asks the motion driver to yield
+        const bool offSetting = g.Update(in) == melee::kGuardFlag && !g.OnWithoutOwner();
+        g.Reset();
+        Expect("guard without owner: on with the guard, off with melee.guard off and after Reset", on && offSetting && !g.OnWithoutOwner());
     }
     {
         melee::GuardGate g;

@@ -38,9 +38,11 @@ SCENARIO_FILE = os.path.join(HERE, 'scenarios.json')
 
 # env switch for the arm cyberware test: it changes the cyberware loadout (restored at the end)
 ALLOW_CYBERWARE_ENV = 'UTPP_NIGHT_ALLOW_CYBERWARE'
+# s of no input after the holster request, so the holster window covers the body once the weapon has left the hand
+AFTER_HOLSTER_S = 3.0
 
 # pad parts (scenarios.json): melee_block, melee_punch_walk and melee_holster are shared with the fists macro
-PARTS = ['mw_light_combo', 'mw_light_combo_fast', 'mw_guard_idle', 'mw_strong_attack', 'melee_block', 'melee_punch_walk', 'mw_sprint_attack',
+PARTS = ['mw_light_combo', 'mw_light_combo_fast', 'mw_guard_idle', 'mw_strong_attack', 'mw_rest_after_strike', 'melee_block', 'melee_punch_walk', 'mw_sprint_attack',
          'melee_holster']
 
 # pad parts with the crouch button (R3 tap) are built here: scenarios.json keeps the crouch button to the crouch scenario
@@ -97,7 +99,8 @@ WEAPONS = {
     # coverage and the state mask are those of w_melee_fists (read from the script, not set here).
     # 'phases' = the standing phases only; 'pose' = the run needs the pose recording (diagnostic logs on) to measure the body.
     'strong_arms': {'label': 'strong arms (fists cyberware)', 'anim_var': 'w_strong_arms', 'block': True, 'kind': 'cyberware',
-                    'records': ('Items.StrongArms',), 'phases': ('light_combo', 'strong_attack', 'block'), 'pose': True},
+                    'records': ('Items.StrongArms',), 'phases': ('light_combo', 'strong_attack', 'rest_after_strike', 'block'),
+                    'pose': True},
 }
 for _tag, _w in WEAPONS.items():
     _w['tag'] = _tag
@@ -495,6 +498,8 @@ PHASES = (
     {'name': 'light_combo_fast', 'part': 'mw_light_combo_fast', 'kind': 'pad', 'strike': True, 'expect_full': 'on'},
     {'name': 'guard_idle', 'part': 'mw_guard_idle', 'kind': 'pad', 'strike': False, 'expect_full': None},
     {'name': 'strong_attack', 'part': 'mw_strong_attack', 'kind': 'pad', 'strike': True, 'expect_full': 'on'},
+    # the rest pose after a strike (weapon drawn, no input): the body is judged offline from the pose recording of this window
+    {'name': 'rest_after_strike', 'part': 'mw_rest_after_strike', 'kind': 'pad', 'strike': True, 'expect_full': None},
     {'name': 'block', 'part': 'melee_block', 'kind': 'pad', 'strike': False, 'expect_full': 'block', 'needs_block': True},
     {'name': 'walk_strikes', 'part': 'melee_punch_walk', 'kind': 'walk', 'strike': True, 'expect_full': 'off'},
     {'name': 'sprint_attack', 'part': 'mw_sprint_attack', 'kind': 'walk', 'strike': True, 'expect_full': 'off',
@@ -785,6 +790,7 @@ def _holster(run: _Run, final: bool = False) -> None:
     night, pad, guard, plan = run.night, run.pad, run.guard, run.plan
     gn = _gn()
     t0, off = datetime.now(), file_size(night.utpp_log)
+    t_request = time.monotonic()
     ok, info = run.cmd('MW_HOLSTER', holster_cmd(), 'holster')
     cleared = False
     t_end = time.monotonic() + gn.MELEE_OFF_WINDOW_S
@@ -803,7 +809,12 @@ def _holster(run: _Run, final: bool = False) -> None:
         guard.wait(0.5)
         ms = gn.melee_state([], read_since(night.utpp_log, off), run.mask_active)
         cleared = not ms['active_now']
-    run.record('holster', off, t0, {'echo': info[:160], 'mask_cleared': cleared, 'y_double_tap': used_y})
+    # no input for AFTER_HOLSTER_S after the request: the window covers the body right after the weapon leaves the hand
+    rest_left = AFTER_HOLSTER_S - (time.monotonic() - t_request)
+    if rest_left > 0:
+        guard.wait(rest_left)
+    run.record('holster', off, t0, {'echo': info[:160], 'mask_cleared': cleared, 'y_double_tap': used_y,
+                                    'after_holster_s': AFTER_HOLSTER_S})
     if ok is not True:
         run.warns.append('holster: unequip request ' + ('failed' if ok is False else 'echo lost'))
     if not cleared:

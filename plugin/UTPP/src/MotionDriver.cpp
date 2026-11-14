@@ -545,6 +545,11 @@ void RecordGripInfoLocked(const motionpose::FrameInfo& aInfo)
 uint64_t g_aoFrames = 0, g_aimHandback = 0;
 float g_aoYaw = 0.0f, g_aoU = 0.0f, g_aoW = 0.0f;
 bool g_release = false, g_injured = false;
+// g_release = g_releaseInput (script release: body carry, grenade throw) || (g_gameOverlay && g_meleeOwnsUpper).
+// g_gameOverlay: the script sent the "Game" overlay (a melee weapon drawn) without its release; the game's clip owns the upper body only
+// while the host reports a melee action or the melee guard on the feed (FeedInput::meleeOwnsUpper), so MOTION keeps the body between strikes.
+bool g_releaseInput = false, g_gameOverlay = false, g_meleeOwnsUpper = false;
+void RefreshReleaseLocked() { g_release = g_releaseInput || (g_gameOverlay && g_meleeOwnsUpper); }
 // commit C prep (air): SetAirFeed one-shot (consumed by the next Step), not-probed dead reckoning. motionfix item 5:
 // v2 owns air while mm.motionDriver is on (the runtime never claimed air frames: SetAirOwns / SetMotionOwnsAir and the 'air-owns' skip removed).
 adapter::AirFeed g_airIn;
@@ -1696,6 +1701,8 @@ ov::PoseOverlay OverlayLocked()
         o = ov::PoseOverlay::Injured;
     else if (g_pose >= 0 && g_pose < static_cast<int32_t>(ov::PoseOverlay::Count))
         o = static_cast<ov::PoseOverlay>(g_pose);
+    if (o == ov::PoseOverlay::Game)
+        o = ov::PoseOverlay::Default; // melee weapon drawn, no melee action: the unarmed overlay (released during the action)
     if (o == ov::PoseOverlay::Default && g_injured)
         o = ov::PoseOverlay::Injured;
     return o;
@@ -2288,8 +2295,11 @@ bool SetOverlayInputs(int32_t aPose, int32_t aAim, bool aRelease, bool aInjured,
     g_pose = poseOk ? aPose : 0;
     g_poseMirror.store(g_pose, std::memory_order_release); // vault torso limiter (VehicleVaultWeapon)
     g_aim = aimOk ? aAim : 0;
-    // Game (5) = no overlay, game animations own the upper body: same as release
-    g_release = aRelease || g_pose == static_cast<int32_t>(ov::PoseOverlay::Game);
+    // Game (5) = no overlay: game animations own the upper body during a melee action (RefreshReleaseLocked); between strikes MOTION
+    // keeps the body with the Default overlay (OverlayLocked)
+    g_releaseInput = aRelease;
+    g_gameOverlay = g_pose == static_cast<int32_t>(ov::PoseOverlay::Game);
+    RefreshReleaseLocked();
     g_injured = aInjured;
     TravRecheckDeferredLocked(); // UTPP-MOTION SEAM next review minor 4
     return poseOk && aimOk && resolvedOk;
@@ -4266,6 +4276,13 @@ const motion::PoseHistory* VehicleExitHistoryLocked(const Bundle& b, const integ
 
 bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 {
+    g_meleeOwnsUpper = aRaw.meleeOwnsUpper;
+    {
+        const bool wasRelease = g_release;
+        RefreshReleaseLocked();
+        if (g_release != wasRelease)
+            TravRecheckDeferredLocked(); // a deferred traversal event follows the release like a SetOverlayInputs change
+    }
     if (g_probe.Active())
         ProbeStepLocked(aRaw, aEffGate, aDt);
     // native get-up: the live entity transform of every feed (Plan reads it too), the run itself, the grace / tail clocks
@@ -5764,8 +5781,8 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
     aSnap.traceAiming = g_aimingNow ? 1 : 0;
     aSnap.traceClip = g_last.clip;
     // the v1 upper-body mask bits are database bone indices: kept only when both databases map to the same game bones.
-    // with a weapon overlay active the upper body comes from MM + overlay (upperScale 1); game actions (melee,
-    // body carry, ...) arrive as release and never reach this point. upperBits are v1's (written only by
+    // with a weapon overlay active the upper body comes from MM + overlay (upperScale 1); game actions (melee actions and the
+    // melee guard with the Game overlay, body carry, ...) arrive as release and never reach this point. upperBits are v1's (written only by
     // BuildUpperMaskLocked) and stay untouched: upperScale 1 already makes them inert, and v1 needs them after a yield.
     bool sameBones = aSnap.numBones == n;
     for (uint32_t i = 0; i < n && sameBones; ++i)

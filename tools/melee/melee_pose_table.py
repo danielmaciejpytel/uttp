@@ -33,7 +33,7 @@ VARIABLES = {
     'katana': 'w_melee_katana',
     'one_handed_blunt': 'w_melee_one_hand_blunt',
     'baton': 'w_melee_baton',
-    'mantis_blade': 'mantis_blade',
+    'mantisblade': 'mantis_blade',  # clip files p?a_mantisblade__*
     'two_handed_blunt': 'w_two_hand_blunt',
 }
 BODIES = (('female', 'pwa'), ('male', 'pma'))

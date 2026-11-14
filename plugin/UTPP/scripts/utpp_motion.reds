@@ -6,10 +6,12 @@
 // Every vanilla API below is cited as file:line of the vanilla scripts.
 //
 // Inputs sent to UTPPSetMMOverlayInputs(pose, aim, release, injured, resolvedAimPose):
-//   pose    = Overlay.hpp PoseOverlay value, only 0 Default, 1 Rifle, 2 Pistol1H, 3 Pistol2H (Injured and the
-//             game-owned case travel as the separate Bools, so the C++ enum numbering of Injured / Game is not used);
+//   pose    = Overlay.hpp PoseOverlay value: 0 Default, 1 Rifle, 2 Pistol1H, 3 Pistol2H, or 5 Game for a drawn melee weapon
+//             (fists and arm cyberware included; Injured travels as the separate Bool). With 5 the DLL hands the body to the
+//             game only while a melee action (the melee gate and its release hold) or the melee guard holds it, and keeps the
+//             body between strikes and once the weapon state leaves the melee weapon states;
 //   aim     = Overlay.hpp AimState: 0 Relaxed, 1 Ready, 2 Aiming;
-//   release = true while the upper body stays on game animations (melee incl. Mantis / Gorilla / Monowire, body carry,
+//   release = true while the upper body stays on game animations (body carry,
 //             the grenade throw itself) - motion hands control back to the game like base's release;
 //   injured = health <= the game's own low-health threshold, or Bleeding.
 // Cadence: change events only (PSM blackboard listeners, active weapon record, health / status effect events); no
@@ -111,8 +113,10 @@ public func UTPPMotionPoseDefault() -> Int32 { return 0; }
 public func UTPPMotionPoseRifle() -> Int32 { return 1; }
 public func UTPPMotionPosePistol1H() -> Int32 { return 2; }
 public func UTPPMotionPosePistol2H() -> Int32 { return 3; }
-// table value: weapon stays on game animations (release = true); never sent as a pose
+// table value: weapon stays on game animations (sent as UTPPMotionPoseGameOverlay, or release = true with the guard pose)
 public func UTPPMotionPoseGame() -> Int32 { return -1; }
+// Overlay.hpp PoseOverlay::Game: melee weapon drawn, the game owns the upper body only during a melee action
+public func UTPPMotionPoseGameOverlay() -> Int32 { return 5; }
 // table value: handgun row, resolved by the Pistol1H option (Pistol2H default)
 public func UTPPMotionPoseHandgun() -> Int32 { return -2; }
 public func UTPPMotionAimRelaxed() -> Int32 { return 0; }
@@ -700,7 +704,9 @@ public class UTPPMotionGlue extends ScriptableSystem {
         aim = UTPPMotionAimAiming();
         return;
       }
-      release = true;
+      // every melee weapon (fists and arm cyberware included) sends the Game overlay: the DLL releases the body only while a
+      // melee action or the melee guard holds it and keeps the body between strikes and after the weapon leaves the hand
+      pose = UTPPMotionPoseGameOverlay();
       return;
     }
     resolvedAimPose = rowPose;

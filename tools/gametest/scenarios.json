@@ -370,6 +370,14 @@
         {"name": "idle", "duration": 2.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false}
       ]
     },
+    "mw_rest_after_strike": {
+      "description": "melee weapon macro part (gt_melee_weapons.py): standing, one RT tap 0.15 s (light strike), then no input for 10 s (the body after the strike while the weapon rests; the melee states reached are read from the log)",
+      "steps": [
+        {"name": "settle", "duration": 0.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "strike", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": {"keys": [[0, 0], [0.2, 1], [0.35, 0]], "interp": "step"}, "metrics": false},
+        {"name": "rest", "duration": 10.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false}
+      ]
+    },
     "mw_strong_attack": {
       "description": "melee weapon macro part (gt_melee_weapons.py): standing, RT held 1.2 s (strong / charged attack), released, 1.8 s idle",
       "steps": [

@@ -254,6 +254,58 @@ SkipRun SkipScenario()
     return r;
 }
 
+// Melee rest pose: a drawn melee weapon sends the Game overlay (5) without the release. The host's melee gate (melee bits of the feed,
+// debounce, release hold) is the only thing that makes the driver yield: rel=1 during the action, rel=0 between strikes, after the
+// release hold and on the first feed whose PSM.MeleeWeapon state is no longer a melee weapon state (holster / removal).
+struct MeleeRun
+{
+    std::string idle, strike;
+    int holdFeeds = -1;   // feeds after the melee bits clear (state Idle) until rel=0
+    int holsterFeeds = -1; // feeds after the melee bits clear with the state NotReady until rel=0
+    std::string guardOff;
+};
+
+MeleeRun MeleeScenario()
+{
+    MeleeRun r;
+    motionhost::FeedInput f;
+    f.dt = 1.0f / 60.0f;
+    f.tppActive = true;
+    f.haveAir = true;
+    const auto state = [](int aState) { return static_cast<uint32_t>(aState + 1) << mm::integ::kPsmMeleeStateShift; };
+    auto feed = [&](uint32_t aPsm) {
+        f.onGround = true;
+        f.distToGround = -2.0f;
+        f.velWorld[2] = 0.0f;
+        f.locoState = 0;
+        f.psmBlock = aPsm;
+        motiondriver::FeedAirFromInput(f);
+        motionhost::Feed(f);
+        return StatusField(motiondriver::Status(), "rel=");
+    };
+    const uint32_t idle = state(2), attack = mm::integ::kPsmMeleeAttack | state(6), notReady = state(0);
+    motiondriver::SetOverlayInputs(5, 0, false, false); // PoseOverlay::Game
+    for (int i = 0; i < 30; ++i) feed(idle);
+    r.idle = motiondriver::Status();
+    for (int i = 0; i < 30; ++i) feed(attack);
+    r.strike = motiondriver::Status();
+    for (int i = 0; i < 120 && r.holdFeeds < 0; ++i)
+        if (feed(idle) == "0") r.holdFeeds = i + 1;
+    for (int i = 0; i < 30; ++i) feed(idle);
+    for (int i = 0; i < 30; ++i) feed(attack);
+    for (int i = 0; i < 120 && r.holsterFeeds < 0; ++i)
+        if (feed(notReady) == "0") r.holsterFeeds = i + 1;
+    for (int i = 0; i < 60; ++i) feed(notReady); // the melee gate's release hold of the last attack runs out
+    // the guard flag with melee.guard off (default): the driver keeps the body between strikes
+    motionhost::SetMeleeGuard(true);
+    for (int i = 0; i < 30; ++i) feed(idle);
+    r.guardOff = motiondriver::Status();
+    motionhost::SetMeleeGuard(false);
+    for (int i = 0; i < 10; ++i) feed(0u);
+    motiondriver::SetOverlayInputs(0, 0, false, false);
+    return r;
+}
+
 // Review (A): a jump into a climb. The leg layer of the weapon pose still composes over the traversal montage (overlayWeight 1), so
 // the air weight must hand over like a landing (hold 0.15 s, fall 0.25 s) and not be reset on the first montage frame (a one-frame
 // pop of the legs from the clip to the weapon stance). The first montage of the version 2 traversal file that is a climb (FrontLedge
@@ -528,6 +580,22 @@ int main(int argc, char** argv)
     std::printf("INFO skip: %s\n", sd);
     Check(sk.inAir >= 0.999f, "skip: the air weight is 1 before the skip", sd);
     Check(sk.afterSkip == 0.0f && sk.firstGround == 0.0f, "skip: frames handed to the game / base reset the air weight (the re-entry on the ground starts at 0)", sd);
+
+    // melee rest pose: the host's melee gate drives the Game overlay release
+    {
+        const MeleeRun m = MeleeScenario();
+        char md[200];
+        std::snprintf(md, sizeof md, "release hold feeds %d, holster feeds %d", m.holdFeeds, m.holsterFeeds);
+        std::printf("INFO melee: %s\n", md);
+        Check(StatusField(m.idle, "rel=") == "0" && StatusField(m.idle, "skip=") == "none",
+              "melee: Game overlay, weapon state Idle, no melee bits -> motion keeps the body", m.idle.substr(0, 200));
+        Check(StatusField(m.strike, "rel=") == "1", "melee: melee bits (attack) -> the driver yields (release)", m.strike.substr(0, 200));
+        // release hold 0.55 s at 60 Hz = 33 feeds; the full-body layer is off in this host (no flag), so no fade on top
+        Check(m.holdFeeds >= 30 && m.holdFeeds <= 40, "melee: the release ends with the melee gate's release hold (0.55 s)", md);
+        Check(m.holsterFeeds >= 1 && m.holsterFeeds <= 1, "melee: weapon state NotReady (holster / removal) -> the driver owns the body on the first feed", md);
+        Check(StatusField(m.guardOff, "rel=") == "0" && StatusField(m.guardOff, "skip=") == "none",
+              "melee: guard flag on with melee.guard off -> motion keeps the body between strikes", m.guardOff.substr(0, 200));
+    }
 
     // review (A): a jump into a climb hands the weight over like a landing, without a reset on the first montage frame
     const TravRun tr = TravFromAirScenario(data, rig);

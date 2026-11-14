@@ -703,6 +703,7 @@ bool g_meleeGuardFullSetting = false;   // UTPPSetMeleeGuardFullSetting (melee.g
 bool g_meleeGuardTiltSetting = false;   // UTPPSetMeleeGuardAimTiltSetting (melee.guardAimTilt, default off)
 mm::melee::GuardGate g_meleeGuardGate;  // decision + air debounce
 bool g_meleeGuardWant = false;          // last feed: guard wanted
+bool g_meleeGuardTail = false;          // last feed: the guard was on and the upper mask has not faded out yet
 uint64_t g_meleeGuardSwitches = 0;      // guard off -> on
 uint32_t g_effGate = kGateMMDisabled | kGateDbNotLoaded | kGateNotMapped; // gate the MM weight follows (g_gate minus g_maskCovered)
 bool g_getUpBaseSeen = false; // ragdoll native get-up: the first get-up feed was handled (its gate check ran)
@@ -1588,6 +1589,12 @@ const MotionSetFrame* MotionStepLocked(const FeedInput& aRaw, float aDt, float c
     // mutation 23: v2 sees the closed exit window only (the jump-out state does not reach the chooser after a false contact)
     raw.vehicleExitWindow = g_exitLeft > 0.0f || (UTPP_AND_NOT(VEHEXIT, 23) g_jumpOutExit); // r3 landing: the jump-out state outlives the closed window until the touchdown
     raw.vehicleJumpOut = g_jumpOutExit;
+    // a melee action (gate incl. its release hold), the melee full-body layer still fading, or the melee guard (on, or would be on
+    // if the base pose owned the body, or its upper mask still fading out) - only while PSM.MeleeWeapon is a melee weapon state:
+    // once the weapon is holstered / removed the motion driver owns the body on this feed. The full-body weight, the guard
+    // decision and the guard tail are the ones of the previous feed.
+    raw.meleeOwnsUpper = g_meleeState >= kPsmMeleeWeaponIdle &&
+                         (g_meleeActive || g_meleeFullBlend.Weight() > 0.0f || g_meleeGuardGate.OnWithoutOwner() || g_meleeGuardTail);
     raw.vehicleExitPose = g_vtExitSeedFeed != 0 && g_vtExitSeedFeed == g_feedCalls ? &g_vtExitSeedSnap : nullptr;
     raw.rootFeedSequence = g_feedCalls;
     raw.capsuleDeltaCurrent[0] = capX * aDt;
@@ -2383,6 +2390,7 @@ void ResetRuntimeLocked()
     g_meleeFullGround = -1;
     g_meleeGuardGate.Reset(); // melee guard (flag, settings and the full-body state mask are settings: kept)
     g_meleeGuardWant = false;
+    g_meleeGuardTail = false;
 }
 
 // b5 testorder: playback state that refers to the previous database's clips / pose stream (a playing clip's turn sign / commit,
@@ -5135,6 +5143,7 @@ void Feed(const FeedInput& aRawIn)
         g_log(line);
     }
     g_meleeGuardWant = guardWanted;
+    g_meleeGuardTail = guardWanted || (g_meleeGuardTail && g_meleeGuardFlag && g_meleeGuardSetting && g_maskBlend.Weight() > 0.0f);
     if (g_maskBlend.Progress() <= 0.0f)
         g_maskFadeFromAim = false;
     // melee full body (2026-11-09, mm/MeleeFullBody.hpp): standing melee with a covered weapon -> the lower-body bones fade to

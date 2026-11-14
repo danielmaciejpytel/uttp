@@ -231,10 +231,25 @@ class Registration(unittest.TestCase):
         self.assertLess(gw.time_limit_s('melee_knife'), gw.time_limit_s('melee_weapons'))
 
     def test_phase_plan(self):
-        self.assertEqual(gw.phase_plan('katana'), ['equip', 'draw', 'light_combo', 'light_combo_fast', 'guard_idle', 'strong_attack', 'block',
+        self.assertEqual(gw.phase_plan('katana'), ['equip', 'draw', 'light_combo', 'light_combo_fast', 'guard_idle', 'strong_attack', 'rest_after_strike', 'block',
                                                    'walk_strikes', 'sprint_attack', 'crouch_attack', 'holster', 'remove'])
         self.assertNotIn('block', gw.phase_plan('knife'))
         self.assertNotIn('LT', json.dumps(gw.dry_run_lines('knife')[:2]))
+
+    def test_rest_after_strike_is_one_strike_then_a_long_rest(self):
+        phase = next(p for p in gw.PHASES if p['name'] == 'rest_after_strike')
+        self.assertEqual((phase['kind'], phase['strike'], phase['expect_full']), ('pad', True, None))
+        raw = json.load(open(gw.SCENARIO_FILE, encoding='utf-8'))
+        steps = raw['scenarios']['mw_rest_after_strike']['steps'] if 'scenarios' in raw else raw['mw_rest_after_strike']['steps']
+        presses = [k for st in steps if isinstance(st.get('rt'), dict) for k in st['rt']['keys'] if k[1] > 0]
+        self.assertEqual(len(presses), 1)
+        rest = steps[-1]
+        self.assertGreaterEqual(rest['duration'], 10.0)
+        self.assertEqual((rest['ls'], rest['rs'], rest['lt'], rest['rt'], rest.get('buttons', [])),
+                         ([[0, 0, 0]], [[0, 0, 0]], [[0, 0]], [[0, 0]], []))
+        self.assertIn('rest_after_strike', gw.phase_plan('mantis'))
+        self.assertIn('rest_after_strike', gw.phase_plan('knife'))
+        self.assertIn('rest_after_strike', gw.phase_plan('strong_arms'))   # fists cyberware rests on the same path
 
 
 class Commands(unittest.TestCase):
@@ -441,7 +456,8 @@ class Macro(unittest.TestCase):
         self.assertEqual(res['verdict'], 'PASS', res['fails'])
         self.assertEqual(n.calls, [
             ('cmd', 'MW_COUNT'), ('cmd', 'MW_GIVE'), ('cmd', 'MW_INHAND'),
-            ('play', 'mw_light_combo'), ('play', 'mw_light_combo_fast'), ('play', 'mw_guard_idle'), ('play', 'mw_strong_attack'), ('play', 'melee_block'),
+            ('play', 'mw_light_combo'), ('play', 'mw_light_combo_fast'), ('play', 'mw_guard_idle'), ('play', 'mw_strong_attack'), ('play', 'mw_rest_after_strike'),
+            ('play', 'melee_block'),
             ('walk', 'melee_punch_walk', True),
             ('cmd', 'MW_INHAND'), ('walk', 'mw_sprint_attack', True),
             ('cmd', 'MW_INHAND'), ('play', 'mw_crouch_attack'),
@@ -694,7 +710,12 @@ class Macro(unittest.TestCase):
         self.assertEqual(r['expected_states'], gw.load_script_tables()['states']['w_melee_fists'])
         self.assertEqual([p['phase'] for p in r['phases']], gw.phase_plan('strong_arms'))
         self.assertEqual([c for c in n.calls if c[0] in ('play', 'walk')],
-                         [('play', 'mw_light_combo'), ('play', 'mw_strong_attack'), ('play', 'melee_block')])
+                         [('play', 'mw_light_combo'), ('play', 'mw_strong_attack'), ('play', 'mw_rest_after_strike'),
+                          ('play', 'melee_block')])
+        # the holster window covers the body for AFTER_HOLSTER_S after the request (weapon out of the hand)
+        holster = next(p for p in r['phases'] if p['phase'] == 'holster')
+        self.assertEqual(holster['after_holster_s'], gw.AFTER_HOLSTER_S)
+        self.assertEqual(gw.AFTER_HOLSTER_S, 3.0)
         self.assertIn(('cmd', 'MW_CW_RESTORE'), n.calls)
         self.assertNotIn(('cmd', 'MW_REMOVE'), n.calls)
         self.assertEqual(r['removed'], 'removed')
@@ -909,7 +930,7 @@ class DryRun(unittest.TestCase):
         self.assertIn('pose    : needs the pose recording', text)
         self.assertIn('walk_strikes  : not run for this weapon', text)
         self.assertIn('script covers it: True', text)
-        self.assertIn('phases  : equip -> draw -> light_combo -> strong_attack -> block -> holster -> remove', text)
+        self.assertIn('phases  : equip -> draw -> light_combo -> strong_attack -> rest_after_strike -> block -> holster -> remove', text)
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(gw.main(['--dry-run', '--weapons', 'knife,katana,blunt,baton']), 0)
         self.assertIn('== melee_baton', out.getvalue())

@@ -330,6 +330,7 @@ public:
         m_airT = 0.0f;
         m_why = kGuardFlag;
         m_soft = false;
+        m_onWithoutOwner = false;
     }
     // Once per feed (the air timer is tracked on every call).
     GuardWhy Update(const GuardInput& aIn)
@@ -346,8 +347,13 @@ public:
                 : air                               ? kGuardAir
                                                     : kGuardOn;
         m_soft = m_why == kGuardState || m_why == kGuardStance || (m_why == kGuardDetail && SoftGuardDetail(aIn.psmDetail));
+        // the same decision without the ownership term: whether the guard would hold the body if the base pose owned it (the
+        // motion driver yields on this, so the guard can take the body without an ownership loop)
+        m_onWithoutOwner = aIn.flag && aIn.setting && aIn.maskOk && aIn.gateOpen && GuardMeleeState(aIn.meleeState) &&
+                           GuardUpperBody(aIn.upperBody) && aIn.stance == kStanceStand && StandingDetail(aIn.psmDetail) && !air;
         return m_why;
     }
+    bool OnWithoutOwner() const { return m_onWithoutOwner; }
     GuardWhy LastWhy() const { return m_why; }
     // The guard is off for a soft reason (the weapon state left the guard states: holstered / drawn anew, or a crouch / sprint
     // stance): the mask may ease out slowly. False for on and for every hard reason (flag, mask, owner, closed gate, UpperBody
@@ -359,6 +365,7 @@ private:
     float m_airT = 0.0f;
     GuardWhy m_why = kGuardFlag;
     bool m_soft = false;
+    bool m_onWithoutOwner = false;
 };
 
 // ------------------------------------------------------------------------------------------------ driver terms

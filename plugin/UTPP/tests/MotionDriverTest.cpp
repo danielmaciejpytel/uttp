@@ -29,6 +29,7 @@
 #include "../src/MotionDriver.hpp"
 #include "../src/mm/MotionDatabase.hpp"
 #include "../src/mm/MotionTraversal.hpp" // trav 8g (StartResult)
+#include "../src/mm/Overlay.hpp"         // PoseOverlay::Game
 #include "TestFailFast.hpp"
 
 #include <windows.h>
@@ -652,6 +653,72 @@ int main(int argc, char** argv)
     n = RunFrames(30, kRigPtr, rw, 0, 0, finite, mapOk);
     Check(n == 30 && finite && mapOk, "injured (Default -> Injured overlay) -> motion pose", std::to_string(n));
     motiondriver::SetOverlayInputs(0, 0, false, false);
+    // a drawn melee weapon (Game overlay 5 without the release): motion keeps the body between strikes, yields while the host reports a
+    // melee action on the feed (melee gate, its release hold or the full-body layer), and takes the body back on the next feed after it
+    {
+        constexpr int32_t kGame = static_cast<int32_t>(mm::ov::PoseOverlay::Game);
+        motiondriver::SetOverlayInputs(kGame, 0, false, false);
+        n = RunFrames(30, kRigPtr, rw, 0, 0, finite, mapOk);
+        const std::string idle = motiondriver::Status();
+        Check(n == 30 && finite && mapOk && StatusField(idle, "skip=") == "none" && StatusField(idle, "rel=") == "0",
+              "Game overlay without a melee action -> motion pose (no overlay-release)", std::to_string(n) + " " + idle);
+        motionhost::FeedInput f = WalkFeed();
+        f.meleeOwnsUpper = true;
+        int yielded = 0;
+        for (int i = 0; i < 5; ++i)
+        {
+            const bool stepped = motiondriver::Step(f, 0, f.dt);
+            const mm::integ::PoseSnapshot ref = MarkedSnapshot(kRigPtr);
+            mm::integ::PoseSnapshot s = ref;
+            const bool ap = motiondriver::ApplyToSnapshot(s);
+            yielded += (!stepped && !ap && SameBytes(s, ref)) ? 1 : 0;
+        }
+        const std::string strike = motiondriver::Status();
+        Check(yielded == 5 && StatusField(strike, "skip=") == "overlay-release" && StatusField(strike, "rel=") == "1",
+              "Game overlay during a melee action -> no motion pose (overlay-release)", std::to_string(yielded) + "/5 " + strike);
+        // the strike start is a handover (the held motion pose fades out), the strike end a hand-in (blended back in)
+        const auto counter = [](const std::string& aStatus, const char* aKey) { return std::strtoll(StatusField(aStatus, aKey).c_str(), nullptr, 10); };
+        Check(counter(strike, "handover=") > counter(idle, "handover="), "melee action start -> handover blend",
+              StatusField(idle, "handover=") + " -> " + StatusField(strike, "handover="));
+        n = RunFrames(10, kRigPtr, rw, 0, 0, finite, mapOk);
+        const std::string after = motiondriver::Status();
+        Check(n == 10 && finite && mapOk && StatusField(after, "rel=") == "0",
+              "Game overlay after the melee action -> motion pose again", std::to_string(n));
+        Check(counter(after, "handin=") > counter(strike, "handin="), "melee action end -> hand-in blend",
+              StatusField(strike, "handin=") + " -> " + StatusField(after, "handin="));
+        // a drawn melee weapon between strikes never enters the ranged-weapon paths (hip-fire pose, shot route, shooter-mode rest)
+        {
+            const uint32_t drawn = mm::integ::kPsmWeaponKnown | mm::integ::kPsmWeaponDrawn;
+            n = RunFrames(20, kRigPtr, rw, 0, drawn, finite, mapOk);
+            const std::string st = motiondriver::Status();
+            Check(n == 20 && finite && mapOk && StatusField(st, "rel=") == "0" && StatusField(st, "hipFirePose=") == "0" &&
+                      StatusField(st, "shootRoute=") == "0" && StatusField(st, "shooterModeLive=") == "0" &&
+                      StatusField(st, "shotTurn=") == "0",
+                  "Game overlay + drawn weapon -> motion pose, no ranged-weapon path", std::to_string(n) + " " + st);
+        }
+        // the plain release (body carry, grenade throw) yields with or without a melee action
+        motiondriver::SetOverlayInputs(kGame, 0, true, false);
+        Check(NoMotionPose(kRigPtr, 0, 0), "Game overlay + release -> no motion pose");
+        motiondriver::SetOverlayInputs(0, 0, true, false);
+        Check(NoMotionPose(kRigPtr, 0, 0), "Default + release (body carry) -> no motion pose");
+        // the melee flag alone (no Game overlay) never releases: unarmed / ranged paths are unchanged
+        motiondriver::SetOverlayInputs(0, 0, false, false);
+        bool all = true;
+        for (int i = 0; i < 5 && all; ++i)
+            all = motiondriver::Step(f, 0, f.dt);
+        Check(all && StatusField(motiondriver::Status(), "rel=") == "0", "melee flag without the Game overlay -> motion keeps the body");
+        // injured V with a melee weapon drawn: the Game overlay maps to Injured between strikes and still yields during a melee action
+        motiondriver::SetOverlayInputs(kGame, 0, false, true);
+        n = RunFrames(20, kRigPtr, rw, 0, 0, finite, mapOk);
+        const std::string inj = motiondriver::Status();
+        Check(n == 20 && finite && mapOk && StatusField(inj, "rel=") == "0" && StatusField(inj, "skip=") == "none",
+              "injured + Game overlay without a melee action -> motion pose", std::to_string(n) + " " + inj);
+        bool injYield = true;
+        for (int i = 0; i < 3; ++i)
+            injYield = !motiondriver::Step(f, 0, f.dt) && injYield;
+        Check(injYield && StatusField(motiondriver::Status(), "rel=") == "1", "injured + Game overlay during a melee action -> no motion pose");
+        motiondriver::SetOverlayInputs(0, 0, false, false);
+    }
 
     // ---- 7. live topology mismatch -> rig-mismatch
     {
