@@ -984,5 +984,17 @@ add_custom_target(utpp_package_runtime ALL
   VERBATIM)
 add_dependencies(utpp_package_runtime utpp_package) # package folders and the DLL staged first
 
+# ---- Test-only host plugin UTPPTestHost (background pad input for automated test runs; test installs only) ----
+# Never part of a release package and not in the default build: build it explicitly (target UTPPTestHost).
+add_library(UTPPTestHost SHARED EXCLUDE_FROM_ALL testhost/TestHost.cpp testhost/TestHostCore.hpp)
+target_link_libraries(UTPPTestHost PRIVATE utpp_red4ext_sdk version)
+target_compile_definitions(UTPPTestHost PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+target_compile_options(UTPPTestHost PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_link_options(UTPPTestHost PRIVATE /INCREMENTAL:NO /PDBALTPATH:%_PDB%)
+set_target_properties(UTPPTestHost PROPERTIES OUTPUT_NAME "UTPPTestHost")
+add_executable(utpp_testhost_site_test tests/TestHostSiteTest.cpp testhost/TestHostCore.hpp)
+target_compile_options(utpp_testhost_site_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_testhost_site_test COMMAND utpp_testhost_site_test "${UTPP_EXE_COPY}")
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

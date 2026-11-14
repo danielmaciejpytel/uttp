@@ -484,6 +484,21 @@ class ReleaseTexts(unittest.TestCase):
         mr.scan_text(mr.P_CET + "utpp_core/init.lua", 'local t = GetMod("utpp_testcmd")', F, True)
         self.assertTrue([i for i in F.items if i["check"] == "probe-name" and i["level"] == "FAIL"])
 
+    def test_test_host_plugin_is_never_shipped(self):
+        for rel in ("red4ext/plugins/UTPPTestHost/UTPPTestHost.dll", mr.P_DLL + "UTPPTestHost.dll"):
+            F = mr.Findings()
+            mr.check_forbidden_names([rel], True, F)
+            self.assertEqual([i["check"] for i in F.items if i["level"] == "FAIL"], ["forbidden-file"], rel)
+        for line in ('Game.UTPPTestBackgroundInput(true)', 'local s = Game.UTPPTestBackgroundInputStatus()'):
+            F = mr.Findings()
+            mr.scan_text(mr.P_CET + "utpp_core/init.lua", line, F, True)
+            self.assertTrue([i for i in F.items if i["check"] == "probe-name" and i["level"] == "FAIL"], line)
+        for p in ShipLists().all_paths():
+            self.assertNotIn("utpptesthost", p)
+        F = mr.Findings()   # the release plugin itself stays allowed
+        mr.check_forbidden_names([mr.P_DLL + "UTPP.dll"], True, F)
+        self.assertEqual([i for i in F.items if i["level"] == "FAIL"], [])
+
     def test_stage_dir_must_be_inside_the_project_stages(self):
         import contextlib
         import io

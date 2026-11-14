@@ -10,6 +10,8 @@ Run with the game at gameplay (V on foot, open ground ahead and behind) and the 
   bg_no_throttle   bg + Windows power throttling (EcoQoS, timer resolution) switched off for the game process
   bg_priority      bg + game process priority class ABOVE_NORMAL
   bg_activate_msg  bg + posted WM_NCACTIVATE / WM_ACTIVATE / WM_ACTIVATEAPP / WM_SETFOCUS to the game window
+  bg_testhost      bg with the background pad input of the test-only host plugin UTPPTestHost switched on for this push
+                   (Game.UTPPTestBackgroundInput(true) / (false) through the utpp_testcmd file channel; not in the defaults)
   fg_control       game in the foreground again (control run)
 
 Each mitigation is applied for its variant only and restored afterwards (original priority class, power throttling back
@@ -49,8 +51,10 @@ import gt_night as gn  # noqa: E402
 from gt_scenario import Frame  # noqa: E402
 from gt_win32 import ForegroundGuard, GuardError  # noqa: E402
 
-ALL_VARIANTS = ('fg', 'bg', 'bg_cover', 'bg_no_throttle', 'bg_priority', 'bg_activate_msg', 'fg_control')
-DEFAULT_VARIANTS = ','.join(ALL_VARIANTS)
+ALL_VARIANTS = ('fg', 'bg', 'bg_cover', 'bg_no_throttle', 'bg_priority', 'bg_activate_msg', 'bg_testhost', 'fg_control')
+DEFAULT_VARIANTS = ','.join(v for v in ALL_VARIANTS if v != 'bg_testhost')
+TESTHOST_ON = 'Game.UTPPTestBackgroundInput(true)'     # test-only host plugin UTPPTestHost
+TESTHOST_OFF = 'Game.UTPPTestBackgroundInput(false)'
 NIGHTAUTO_HINT = 'GetMod("utpp_core").NightAuto(true, 0.2)'
 
 WM_ACTIVATE, WM_SETFOCUS, WM_CLOSE, WM_QUIT = 0x0006, 0x0007, 0x0010, 0x0012
@@ -111,6 +115,11 @@ def verdict(name: str, moved: float | None, base: float | None, min_move: float,
     if name.startswith('fg') or base is None:
         return moved >= min_move
     return moved >= max(min_move, min_ratio * base)
+
+
+def testhost_answer_ok(ok, text: str, on: bool) -> bool:
+    """ACK of a UTPPTestBackgroundInput call: ok and the plugin's status prefix ("UTPPTestHost on" / "UTPPTestHost off")."""
+    return bool(ok) and str(text or '').startswith('UTPPTestHost on' if on else 'UTPPTestHost off')
 
 
 def format_line(name: str, moved: float | None, ok: bool, pos_lines: int, fg: str, note: str = '',
@@ -379,6 +388,17 @@ class Probe:
                 return
         raise GuardError('could not make the probe window the foreground window')
 
+    def testhost(self, on: bool) -> bool:
+        """Switch the UTPPTestHost background pad input through the utpp_testcmd file channel; prints the plugin's
+        answer (status and counters)."""
+        from gt_input import TESTCMD_FILE, FileCommandChannel
+        try:
+            res = FileCommandChannel(TESTCMD_FILE).send(TESTHOST_ON if on else TESTHOST_OFF, log_path=self.log_path)
+        except (GuardError, OSError, ValueError) as e:
+            res = {'ok': False, 'result': f'not sent: {e}'}
+        print(f'[focus_probe] testhost {"on" if on else "off"}: ok={res.get("ok")} {res.get("result") or ""}', flush=True)
+        return testhost_answer_ok(res.get('ok'), res.get('result'), on)
+
     # -- variants --
     def push(self) -> tuple[datetime, datetime, str, str]:
         fr = Frame(0.0, (0.0, self.sign * self.args.stick), (0.0, 0.0), 0.0, 0.0, 0)
@@ -402,10 +422,13 @@ class Probe:
         tweak = ProcessTweak(self.w, self.game_pid)
         notes = []
         background = name.startswith('bg')
+        testhost = name == 'bg_testhost'
         self.focus_game()
         p0 = self.fresh_pos(3.0)
         try:
             if background:
+                if testhost and not self.testhost(True):
+                    notes.append('testhost_not_on')
                 self.focus_probe(cover=(name == 'bg_cover'))
                 if name == 'bg_no_throttle':
                     tweak.apply_no_throttle()
@@ -425,6 +448,8 @@ class Probe:
             after = pos_window(text, t0, datetime.now())
             p1 = after[-1][1] if after else None
         finally:
+            if testhost and not self.testhost(False):
+                notes.append('testhost_off_failed')
             if name == 'bg_activate_msg':
                 self.w.unclip_cursor()
             notes += tweak.restore()
@@ -440,6 +465,8 @@ class Probe:
         ok = verdict(name, moved, base, self.args.min_move, self.args.min_ratio)
         if fg0 != expected or fg1 != expected:
             notes.append('foreground_mismatch')
+            ok = False
+        if 'testhost_not_on' in notes:
             ok = False
         print(format_line(name, moved, ok, len(during), fg, ','.join(notes), stale_flag(text, t0, t1)), flush=True)
         return moved, ok
@@ -512,6 +539,10 @@ def dry_run() -> int:
         ('stale_walk', stale_flag(text, t0, t1) == '0'),
         ('stale_paused', stale_flag(text, t, t + timedelta(seconds=0.9)) == '1'),
         ('stale_none', stale_flag(text, t1 + timedelta(seconds=1), t1 + timedelta(seconds=2)) == '-'),
+        ('testhost_on', testhost_answer_ok(True, 'UTPPTestHost on gate=open hooks=8/8', True)),
+        ('testhost_refused', not testhost_answer_ok(True, 'UTPPTestHost refused: exe file version', True)),
+        ('testhost_missing', not testhost_answer_ok(False, "attempt to call a nil value", True)),
+        ('testhost_off', testhost_answer_ok(True, 'UTPPTestHost off gate=original', False)),
         ('format', format_line('bg', None, False, 0, 'probe', 'x') ==
          'variant=bg moved_m=nan ok=False pos_lines=0 stale=- fg=probe note=x'),
     ]

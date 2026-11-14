@@ -54,7 +54,10 @@ utpp_testcmd and waits for its "[testcmd] ACK seq=<n>" line in the UTPP log (no 
 file the runner writes in the game folder besides the CET overlay state fix of the console mode); auto picks file when
 the session log has the module's READY line. --background (file / auto only): the game may stay behind other windows;
 no focusing, no focus-loss abort, keyboard / mouse input refused (scenarios that need keys are skipped as "needs
-keyboard"), pad reports still sent, ESC/Pause still stop the run.
+keyboard"), pad reports still sent, ESC/Pause still stop the run. The game reads the pad from behind other windows
+only through the test-only host plugin UTPPTestHost: --background switches it on after arming
+(Game.UTPPTestBackgroundInput(true), the cycle fails when the native is missing or refuses) and off again at the end of
+the cycle and at every stop.
 """
 from __future__ import annotations
 
@@ -110,6 +113,8 @@ GAME_DIR = game_dir(required=False) or ''
 GAME_EXE_PATH = os.path.join(GAME_DIR, 'bin', 'x64', GAME_EXE)
 INSTALL_CET = os.path.join(PROJECT, 'Source', 'tools', 'install', 'install_cet_mods.py')
 STEAM_URL = 'steam://rungameid/1091500'
+BG_INPUT_ON = 'Game.UTPPTestBackgroundInput(true)'     # --background: test host plugin UTPPTestHost (test installs only)
+BG_INPUT_OFF = 'Game.UTPPTestBackgroundInput(false)'
 TS = '%Y-%m-%d %H:%M:%S.%f'
 
 
@@ -370,6 +375,7 @@ class Night:
         self.overlay_stats: dict = {}
         self.channel_mode = None               # resolved --cmd-channel: 'console' | 'file' (auto: from the READY line)
         self.testcmd_path = TESTCMD_FILE       # tests point it at a scratch folder
+        self.bg_input_active = False           # --background: UTPPTestHost background pad input switched on
 
     # -- bookkeeping --
     def log(self, msg: str) -> None:
@@ -441,6 +447,34 @@ class Night:
             if ok is False:
                 self.log(f'[cmd] file channel: no ACK ok for {c[:60]!r} after {ch.last_attempts.get(c)} writes')
         return res
+
+    def bg_input(self, on: bool, why: str = '') -> dict:
+        """--background: switch the background pad input of the test-only host plugin UTPPTestHost through the file
+        channel. Plain time.sleep, never the guard (the switch-off must also go through while Pause is held). Switch-on
+        raises CycleError unless the plugin answers "UTPPTestHost on"; switch-off only logs a failure."""
+        res = {'ok': None, 'result': ''}
+        if not on and not self.bg_input_active:
+            return res
+        log = self.utpp_log or gt_log.newest_log(self.args.log_dir)
+        try:
+            if not self.pids():
+                raise GuardError('game is not running')
+            ch = FileCommandChannel(self.testcmd_path, sleep=time.sleep, clock=time.monotonic)
+            res = ch.send(BG_INPUT_ON if on else BG_INPUT_OFF, log_path=log)
+        except (GuardError, OSError, ValueError) as e:
+            res = {'ok': False, 'result': f'not sent: {e}'}
+        text = str(res.get('result') or '')
+        self.log(f'[bg-input] switch {"on" if on else "off"}{f" ({why})" if why else ""}: ok={res.get("ok")} {text[:240]}')
+        if on:
+            if not (res.get('ok') and text.startswith('UTPPTestHost on')):
+                raise CycleError('--background: the game does not read the pad from behind other windows: '
+                                 f'Game.UTPPTestBackgroundInput(true) -> {text or "no answer"} (install the test host plugin: '
+                                 'build target UTPPTestHost, tools/install/stage_test_probes.py, install_verified_stage.ps1 '
+                                 '-StageName test-probes)')
+            self.bg_input_active = True
+        else:
+            self.bg_input_active = False
+        return {'ok': res.get('ok'), 'result': text[:300]}
 
     def check_user_idle(self) -> None:
         idle = idle_seconds()
@@ -831,6 +865,12 @@ class Night:
                 info['night_auto'] = self.auto_pos
                 info['night_auto_retry'] = True
                 self.log(f'[arm] NightAuto retry: {"on" if self.auto_pos else "LOST again - console polls"}')
+            if getattr(self.args, 'background', False):
+                try:
+                    info['bg_input'] = self.bg_input(True, 'after arming')
+                except CycleError as e:
+                    self.done(st, 'failed', error=str(e), **info)
+                    raise
         except GuardError as e:
             self.done(st, 'failed', error=str(e), **info)
             raise (StopNight if is_user_stop(str(e)) else CycleError)(str(e))
@@ -3063,6 +3103,7 @@ class Night:
             self.cycle['result'] = 'ok'
         except StopNight as e:
             self.cycle['result'] = f'stopped: {e}'
+            self.bg_input(False, 'stop')
             if rec:
                 self.stop_recording(rec)
             if getattr(e, 'leave_game', False):
@@ -3088,6 +3129,10 @@ class Night:
         except (CycleError, NeedsKeyboard) as e:
             self.cycle['result'] = f'failed: {e}'
             self.log(f'[night] cycle failed: {e}')
+        finally:
+            if self.bg_input_active and self.cycle['result'] is None:   # any other exception leaves run_cycle here
+                self.bg_input(False, 'error')
+        self.bg_input(False, 'end of cycle')
         if rec:
             self.stop_recording(rec)
         if quit_game:

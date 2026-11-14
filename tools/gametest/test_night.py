@@ -3640,6 +3640,70 @@ class CommandChannelNightTests(unittest.TestCase):
         self.assertEqual([t['how'] for t in ex['tries']], ['cet_unmount'])
         self.assertTrue(ex['scripted'])
 
+    def test_background_input_switch(self):
+        """--background: UTPPTestHost switched on after arming (status checked), off at the end / stop, plain sleeps."""
+        from gt_input import parse_testcmd_lines
+        answers = {}
+
+        class Module:
+            def __init__(self, cmd_path, log_path):
+                self.cmd_path, self.log_path, self.last, self.ran = cmd_path, log_path, 0, []
+
+            def tick(self):
+                if not os.path.isfile(self.cmd_path):
+                    return
+                with open(self.cmd_path, encoding='utf-8') as f:
+                    entries = parse_testcmd_lines(f.read())
+                for seq, chunk in entries:
+                    if seq > self.last:
+                        self.last = seq
+                        self.ran.append(chunk)
+                        ok, text = answers[chunk]
+                        with open(self.log_path, 'a', encoding='utf-8') as f:
+                            f.write(f'[2026-11-14 10:00:00.000] [info] [1] [UTPP] UTPP CET [testcmd] ACK seq={seq} '
+                                    f'ok={"true" if ok else "false"} {text}\n')
+
+        class TickTime(FakeTime):
+            def __init__(self, mod):
+                super().__init__()
+                self.mod = mod
+
+            def sleep(self, s):
+                super().sleep(s)
+                self.mod.tick()
+
+        n, g, api, _ = self.make('--cmd-channel', 'file', '--background')
+        mod = Module(n.testcmd_path, n.utpp_log)
+        night.time = TickTime(mod)
+        api.on_sleep.clear()                                     # only the plain sleep may drive the module
+        n.cycle = {'steps': []}
+        off = {'ok': None, 'result': ''}
+        self.assertEqual(n.bg_input(False, 'nothing on'), off)   # never switched on: nothing is sent
+        self.assertEqual(mod.ran, [])
+        answers[night.BG_INPUT_ON] = (True, 'UTPPTestHost on gate=open hooks=8/8 fg=0')
+        answers[night.BG_INPUT_OFF] = (True, 'UTPPTestHost off gate=original')
+        res = n.bg_input(True, 'after arming')
+        self.assertTrue(res['ok'])
+        self.assertTrue(n.bg_input_active)
+        api.keys_down = {0x13}                                   # Pause held: the switch-off still goes through
+        self.assertTrue(n.bg_input(False, 'stop')['ok'])
+        self.assertFalse(n.bg_input_active)
+        self.assertEqual(mod.ran, [night.BG_INPUT_ON, night.BG_INPUT_OFF])
+        for ok, text, want in ((False, "[string \"testcmd\"]:1: attempt to call a nil value (field 'UTPPTestBackgroundInput')",
+                                'nil value'),
+                               (True, 'UTPPTestHost refused: gate bytes at RVA 0x20849AA differ', 'refused')):
+            answers[night.BG_INPUT_ON] = (ok, text)
+            with self.assertRaises(night.CycleError) as cm:
+                n.bg_input(True, 'after arming')
+            self.assertIn(want, str(cm.exception))
+            self.assertIn('UTPPTestHost', str(cm.exception))
+            self.assertFalse(n.bg_input_active)
+        api.running = False                                      # no game: the switch-on fails without writing
+        before = len(mod.ran)
+        with self.assertRaises(night.CycleError):
+            n.bg_input(True)
+        self.assertEqual(len(mod.ran), before)
+
 
 if __name__ == '__main__':
     unittest.main()
