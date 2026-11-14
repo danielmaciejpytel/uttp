@@ -643,12 +643,12 @@ if not WRITE then
       and select(2, core.MenuPlacement("perspective.toggleOverrides")) == "debug")
     local function placeOf(k) local lv, g, r = core.MenuPlacement(k); return lv .. "/" .. g .. "/" .. tostring(r) end
     -- General: Use Ultimate Third Person, Animation pack, automatic perspective, (motion matching: developer level), Shooter mode,
-    -- Start in the last used view, Diagnostic logs
-    check("layout: General = Use Ultimate Third Person, Animation pack, Use automatic perspective, Shooter mode, Start in the last used view, Diagnostic logs (no Start in third person; motion matching is developer level)",
+    -- (hidden: Start in the last used view), Diagnostic logs
+    check("layout: General = Use Ultimate Third Person, Animation pack, Use automatic perspective, Shooter mode, (hidden: Start in the last used view), Diagnostic logs (no Start in third person; motion matching is developer level)",
       placeOf("camera.impl") == "player/start/10" and placeOf("animation.pack") == "player/start/20"
       and placeOf("perspective.impl") == "advanced/start/30"
       and placeOf("mm.enabled") == "developer/start/40" and placeOf("bodyturn.shooterMode") == "player/start/50"
-      and placeOf("perspective.startInLastView") == "player/start/60" and placeOf("core.diagnosticLogs") == "player/start/70"
+      and placeOf("perspective.startInLastView") == "hidden/start/60" and placeOf("core.diagnosticLogs") == "player/start/70"
       and core.MenuPlacement("perspective.defaultTpp") == "developer" and core.MenuPlacement("camera.startTpp") == "developer"
       and core.settings.defs["camera.impl"].label == "Use Ultimate Third Person",
       placeOf("camera.impl") .. " " .. placeOf("bodyturn.shooterMode"))
@@ -751,7 +751,7 @@ if not WRITE then
       and core.settings.defs["camera.startTpp"].label == "Start in third person")
     check("standard: building calls no apply / native and no Save", #LOG == 0 and saves.save == 0, table.concat(LOG, "; "))
     check("standard: settings file and values unchanged by the build", readFile(tmpSettings) == before and valuesOf(core) == valsBefore)
-    -- registry flag hidden = true: four head look tuning options and 23 more options are registered
+    -- registry flag hidden = true: four head look tuning options and 24 more options are registered
     -- and working on their defaults, listed in no view; HIDDEN is the exact set (the head look switch and "Look at the camera"
     -- are visible since 2026-11-13: they keep their defaults, DEFAULTS lists them too, but HIDDEN does not)
     do
@@ -763,7 +763,7 @@ if not WRITE then
                          ["vehicle.keepTpp"] = true, ["vehicle.pullOut"] = true, ["vehicle.rideWatchdog"] = true,
                          ["vehicle.safeTeleportExit"] = true, ["camera.mouseScale"] = 0, ["perspective.minGap"] = 0.5,
                          ["camera.aim.range"] = 60, ["camera.zoomUnarmed.fov"] = 45, ["camera.zoomUnarmed.lastFov"] = 25,
-                         ["perspective.blend"] = 0.8, ["mm.headLead"] = true }
+                         ["perspective.blend"] = 0.8, ["mm.headLead"] = true, ["perspective.startInLastView"] = true }
       local HIDDEN = {}
       for key in pairs(DEFAULTS) do HIDDEN[key] = true end
       HIDDEN["headLook.impl"], HIDDEN["headLook.faceCamera"] = nil, nil
@@ -774,7 +774,7 @@ if not WRITE then
         if (def.hidden == true) ~= (HIDDEN[key] == true) then bad[#bad + 1] = key end
       end
       for _, s in ipairs(list) do if HIDDEN[string.match(s, "|(.*)$")] then listed[#listed + 1] = s end end
-      check("hidden: exactly the 27 listed options carry the flag (4 head look + 23 more)", flagged == 27 and #bad == 0, table.concat(bad, ", "))
+      check("hidden: exactly the 28 listed options carry the flag (4 head look + 24 more)", flagged == 28 and #bad == 0, table.concat(bad, ", "))
       check("hidden: level 'hidden' (kept layout group), no widget, not in the standard list", #listed == 0
         and core.MenuPlacement("headLook.maxYaw") == "hidden" and select(2, core.MenuPlacement("headLook.maxYaw")) == "world"
         and core.settings.widgets["headLook.whileWalking"] == nil and core.settings.widgets["headLook.lookAtLoot"] == nil
@@ -812,6 +812,24 @@ if not WRITE then
       check("hidden: 'Transition time (s)' (perspective.blend) has no widget; key, label, default and range are unchanged", not blendShown
         and core.MenuPlacement("perspective.blend") == "hidden" and blend.label == "Transition time (s)" and blend.default == 0.8
         and blend.min == 0.2 and blend.max == 2.5 and core.settings.widgets["perspective.blend"] == nil)
+      -- the remembered-view switch is hidden (nothing in the controls or the menu changes the remembered view): key, label, type,
+      -- default and description unchanged; it stays registered, readable and written to the settings file
+      local lastShown = false
+      for _, s in ipairs(list) do if s == "g_start|perspective.startInLastView" then lastShown = true end end
+      local last = core.settings.defs["perspective.startInLastView"]
+      check("hidden: 'Start in the last used view' (perspective.startInLastView) has no widget; key, label, type, default and text are unchanged",
+        not lastShown and last ~= nil and core.MenuPlacement("perspective.startInLastView") == "hidden" and last.hidden == true
+        and last.label == "Start in the last used view" and last.type == "bool" and last.default == true
+        and core.settings.widgets["perspective.startInLastView"] == nil
+        and last.desc == "On: the game starts in the view you used last. Off: the game always starts in third person (default: on).")
+      core.Set("perspective.startInLastView", false)
+      check("hidden: perspective.startInLastView is readable, settable and written to the settings file",
+        core.Get("perspective.startInLastView") == false and core.Effective("perspective.startInLastView") == false
+        and string.find(readFile(tmpSettings) or "", "perspective.startInLastView=false", 1, true) ~= nil)
+      core.Set("perspective.startInLastView", true)
+      check("hidden: perspective.startInLastView set back to its default is written to the settings file",
+        core.Get("perspective.startInLastView") == true
+        and string.find(readFile(tmpSettings) or "", "perspective.startInLastView=true", 1, true) ~= nil)
       local dflt = {}
       for key, v in pairs(DEFAULTS) do
         if core.settings.defs[key].default ~= v or core.Get(key) ~= v or core.Effective(key) ~= v then dflt[#dflt + 1] = key end
@@ -1598,6 +1616,67 @@ do
     newer.Save(tmpSettings)
     check("T03 defaults revision: a higher revision in the file is kept and no move happens", newer.Get("melee.guard") == false
       and string.find(readFile(tmpSettings), "core.defaultsRevision=7", 1, true) ~= nil)
+    -- second entry (revision 2): body.shadowProxy true -> false; the same cases as for melee.guard (revision 1), per key
+    local function loggedLine()
+      local line = ""
+      for _, l in ipairs(coreLines) do if string.find(l, "settings defaults revision", 1, true) then line = l end end
+      return line
+    end
+    local sp0 = bootWithFile("body.shadowProxy=true\nmm.headLead=false\n")
+    local sp0Disk = readFile(tmpSettings) or ""
+    local sp0Log = loggedLine()
+    check("T03 defaults revision (body.shadowProxy): a file without a revision with the old default stored (true) moves to the new default (once)",
+      sp0.Get("body.shadowProxy") == false and sp0.settings.defs["body.shadowProxy"].default == false and defaultsLines() == 1,
+      tostring(sp0.Get("body.shadowProxy")) .. " lines=" .. defaultsLines())
+    check("T03 defaults revision (body.shadowProxy): the log line names the revisions and the key",
+      string.find(sp0Log, "0 -> 2", 1, true) ~= nil and string.find(sp0Log, "body.shadowProxy true -> false", 1, true) ~= nil, sp0Log)
+    check("T03 defaults revision (body.shadowProxy): the moved value is written back at once with the revision; another key stays",
+      count(sp0Disk, "core.defaultsRevision=2") == 1 and string.find(sp0Disk, "body.shadowProxy=false", 1, true) ~= nil
+      and string.find(sp0Disk, "body.shadowProxy=true", 1, true) == nil and string.find(sp0Disk, "mm.headLead=false", 1, true) ~= nil
+      and sp0.Get("mm.headLead") == false)
+    local sp0Again = bootWithFile(sp0Disk)
+    check("T03 defaults revision (body.shadowProxy): loading the file written after the move changes nothing and logs nothing",
+      sp0Again.Get("body.shadowProxy") == false and defaultsLines() == 0)
+
+    local sp1 = bootWithFile("core.defaultsRevision=1\nbody.shadowProxy=true\nmelee.guard=false\n")
+    local sp1Log = loggedLine()
+    check("T03 defaults revision (body.shadowProxy): a file of revision 1 with the old default stored moves it once; the revision-1 key is not moved again",
+      sp1.Get("body.shadowProxy") == false and sp1.Get("melee.guard") == false and defaultsLines() == 1
+      and string.find(sp1Log, "1 -> 2", 1, true) ~= nil and string.find(sp1Log, "body.shadowProxy true -> false", 1, true) ~= nil
+      and string.find(sp1Log, "melee.guard", 1, true) == nil, sp1Log)
+    check("T03 defaults revision (body.shadowProxy): the file of revision 1 is rewritten with revision 2",
+      count(readFile(tmpSettings) or "", "core.defaultsRevision=2") == 1 and count(readFile(tmpSettings) or "", "core.defaultsRevision=1") == 0)
+
+    local spBoth = bootWithFile("melee.guard=false\nbody.shadowProxy=true\n")
+    local spBothLog = loggedLine()
+    check("T03 defaults revision (body.shadowProxy): a file without a revision moves both listed defaults in one pass",
+      spBoth.Get("melee.guard") == true and spBoth.Get("body.shadowProxy") == false and defaultsLines() == 1
+      and string.find(spBothLog, "melee.guard false -> true", 1, true) ~= nil
+      and string.find(spBothLog, "body.shadowProxy true -> false", 1, true) ~= nil, spBothLog)
+
+    local sp2 = bootWithFile(REV .. "\nbody.shadowProxy=true\n")
+    check("T03 defaults revision (body.shadowProxy): a file already at revision 2 keeps a stored true (a choice)",
+      sp2.Get("body.shadowProxy") == true and defaultsLines() == 0
+      and string.find(readFile(tmpSettings) or "", "body.shadowProxy=true", 1, true) ~= nil)
+    local sp2Save = bootWithFile(REV .. "\nbody.shadowProxy=true\n")
+    sp2Save.Save(tmpSettings)
+    local sp2Restart = bootWithFile(readFile(tmpSettings))
+    check("T03 defaults revision (body.shadowProxy): a stored true at revision 2 survives a save and a restart",
+      sp2Restart.Get("body.shadowProxy") == true and defaultsLines() == 0 and count(readFile(tmpSettings) or "", "core.defaultsRevision=") == 1)
+
+    local spFalse0 = bootWithFile("body.shadowProxy=false\n")
+    check("T03 defaults revision (body.shadowProxy): a stored false in a file without a revision stays false, nothing logged",
+      spFalse0.Get("body.shadowProxy") == false and defaultsLines() == 0)
+    local spFalse2 = bootWithFile(REV .. "\nbody.shadowProxy=false\n")
+    check("T03 defaults revision (body.shadowProxy): a stored false at revision 2 stays false, nothing logged",
+      spFalse2.Get("body.shadowProxy") == false and defaultsLines() == 0)
+    local spAbsent = bootWithFile("mm.headLead=false\n")
+    check("T03 defaults revision (body.shadowProxy): key absent from an old file: the new default applies, nothing logged",
+      spAbsent.Get("body.shadowProxy") == false and defaultsLines() == 0)
+    local spNewer = bootWithFile("core.defaultsRevision=7\nbody.shadowProxy=true\n")
+    check("T03 defaults revision (body.shadowProxy): a higher revision in the file keeps a stored true, no move",
+      spNewer.Get("body.shadowProxy") == true and defaultsLines() == 0)
+
     -- an old default that was a number is compared by value
     check("T03 defaults revision: every listed change names a registered key with a valid new default", (function()
       for _, change in ipairs(oldFile.DEFAULT_CHANGES or {}) do

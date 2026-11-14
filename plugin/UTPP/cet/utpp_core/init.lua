@@ -151,12 +151,14 @@ local orderIndex = {}
 -- values, the settings file and the console are unchanged); only their menu entries are left out. The layout entries stay.
 -- perspective.blend: nothing reads the value (the camera's own enter / exit times set the transition length).
 -- mm.headLead: the lean head layer takes the head in the default configuration, so the switch changes nothing there.
+-- perspective.startInLastView: the remembered view changes only through console calls (nothing in the controls or the menu
+-- sets it), so the switch changes nothing for a player; a stored value is still read and written.
 M.HIDDEN_KEYS = {}
 for _, k in ipairs({ "camera.aim.occlusion", "mm.pelvisYawTrim", "mm.bodyYawOffset", "mm.minWalkSpeed", "camera.body",
   "camera.collision", "mm.aimAtCrosshair", "perspective.sceneTier", "interactRange.scale", "lootRange.scale", "lootView.zoom",
   "lootView.radius", "vehicle.keepTpp", "vehicle.pullOut", "vehicle.rideWatchdog", "vehicle.safeTeleportExit", "camera.mouseScale",
   "perspective.minGap", "camera.aim.range", "camera.zoomUnarmed.fov", "camera.zoomUnarmed.lastFov",
-  "perspective.blend", "mm.headLead" }) do M.HIDDEN_KEYS[k] = true end
+  "perspective.blend", "mm.headLead", "perspective.startInLastView" }) do M.HIDDEN_KEYS[k] = true end
 
 -- Options that follow another option: vehicle.keepTpp holds the same behaviour as perspective.vehicleKeepTpp, which is the
 -- option of the menu and the single authority. A follower takes the value of its authority whenever either is registered, read
@@ -486,7 +488,7 @@ for i, g in ipairs(M.MENU_GROUPS) do GROUP_INDEX[g.id] = i end
 local LAYOUT = {
   --   General: "Use Ultimate Third Person" first, "Animation pack" second, then "Shooter mode"; "Diagnostic logs" last
   --   no "Start in third person" option: the mod always starts in third person (perspective.defaultTpp and
-  -- camera.startTpp are in the Debug developer list below, kept only so stored values load; Start in the last used view stays)
+  -- camera.startTpp are in the Debug developer list below, kept only so stored values load; Start in the last used view is hidden)
   --   "Use motion matching" (mm.enabled) is developer level: the animation pack decides which animations play
   { "player", "start", { "camera.impl", "animation.pack" } },
   { "advanced", "start", { "perspective.impl" } },
@@ -2745,7 +2747,7 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
       .. "play unchanged.",
     apply = applyMeleeAimTilt })
   M.Register({ key = "melee.guard", section = "animation", type = "bool", default = true,
-    label = "Melee guard",
+    label = "Melee guard (experimental)",
     desc = "With fists drawn V keeps the fighting guard between strikes (and while walking) instead of lowering the arms "
       .. "after every hit (not with Gorilla Arms). Off: the arms return to the walking pose about 1 second after the last strike.",
     apply = applyMeleeGuard })

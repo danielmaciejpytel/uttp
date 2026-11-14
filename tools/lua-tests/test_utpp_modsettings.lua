@@ -451,12 +451,12 @@ local ok, err = pcall(function()
                        "mm_aimAtCrosshair", "perspective_sceneTier", "interactRange_scale", "lootRange_scale", "lootView_zoom",
                        "lootView_radius", "vehicle_keepTpp", "vehicle_pullOut", "vehicle_rideWatchdog", "vehicle_safeTeleportExit",
                        "camera_mouseScale", "perspective_minGap", "camera_aim_range", "camera_zoomUnarmed_fov",
-                       "camera_zoomUnarmed_lastFov", "perspective_blend", "mm_headLead" }) do
+                       "camera_zoomUnarmed_lastFov", "perspective_blend", "mm_headLead", "perspective_startInLastView" }) do
     if string.find(redsText, "public let " .. f .. ":", 1, true) or string.find(redsText, '"' .. f .. '="', 1, true) then
       leaked[#leaked + 1] = f
     end
   end
-  check("T17 generated class: no field, snapshot line or listing for the 23 options flagged hidden by utpp_core", #redsText > 1000 and #leaked == 0,
+  check("T17 generated class: no field, snapshot line or listing for the 24 options flagged hidden by utpp_core", #redsText > 1000 and #leaked == 0,
     table.concat(leaked, ", "))
   os.remove(settingsFile)
   os.remove(baseFile)

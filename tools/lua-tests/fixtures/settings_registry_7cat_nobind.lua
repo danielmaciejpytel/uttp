@@ -3741,7 +3741,6 @@ other.module=42\r\
     "/utpp/camera_placement|float|camera.fov",
     "/utpp/camera_placement|float|camera.framingSens",
     "/utpp/perspective|switch|perspective.impl",
-    "/utpp/perspective|switch|perspective.startInLastView",
     "/utpp/perspective|switch|perspective.defaultTpp",
     "/utpp/perspective|switch|perspective.scene",
     "/utpp/perspective|selector|perspective.combat",
