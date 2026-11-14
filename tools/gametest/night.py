@@ -21,6 +21,10 @@ One cycle (Research\\logs\\night\\<cycle-ts>\\cycle.json records every step with
  5 record         ffmpeg gdigrab desktop cropped to the game client rect (physical px, re-read at record start;
                   fallback ddagrab + crop=), h264_nvenc (fallback libx264), fragmented mp4 rec_<YYYYmmdd-HHMMSS.fff>.mp4
                   + rec_<ts>.json; marker Game.UTPPLogLine("[night] UTPP_MARK ...") at start and end.
+                  --capture window records the game window's own picture (gt_capture.py: Windows.Graphics.Capture
+                  through an ffmpeg 8.x build, at most 1920x1080) and works while other windows cover the game;
+                  --background selects it automatically unless --capture is given explicitly. If it cannot start the
+                  run falls back to the desktop modes with a warning (the video then shows what covers the game).
  6 scenarios      run.py machinery (run_scenario / padd pad / CET overlay). Macros here: weapon_draw_aim_holster (draw
                   = Y tap, aim = LT, holster = Y double tap, each verified by NightPos w= or utpp_perspective lines)
                   melee_fists (fists by script RequestEquipFists, RT tap, punches standing/walking, LT block, UnequipWeapon
@@ -77,6 +81,7 @@ from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import gt_capture  # noqa: E402
 import gt_log  # noqa: E402
 import gt_night as gn  # noqa: E402
 import run as gt_run  # noqa: E402
@@ -877,11 +882,20 @@ class Night:
         self.done(st, **info)
 
     # -- 5: record --
-    def ffmpeg_ok(self, encoder: str) -> bool:
-        p = self.runner([self.args.ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+    def ffmpeg_ok(self, encoder: str, ffmpeg: str | None = None) -> bool:
+        p = self.runner([ffmpeg or self.args.ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
                          'color=size=256x256:duration=0.2', '-c:v', encoder, '-f', 'null', '-'],
                         capture_output=True, text=True, errors='replace')
         return p.returncode == 0
+
+    def window_ffmpeg(self) -> tuple[str | None, str]:
+        """(ffmpeg build with the gfxcapture filter, reason when there is none) for --capture window."""
+        return gt_capture.find_ffmpeg(getattr(self.args, 'capture_ffmpeg', '') or '', runner=self.runner)
+
+    def encoders_for(self, ffmpeg: str) -> list[str]:
+        if self.args.encoder != 'auto':
+            return [self.args.encoder]
+        return (['h264_nvenc'] if self.ffmpeg_ok('h264_nvenc', ffmpeg) else []) + ['libx264']
 
     def start_recording(self) -> dict:
         st = self.step('record_start')
@@ -891,35 +905,75 @@ class Night:
         if rect is None:
             self.done(st, 'failed', error='no game window')
             raise CycleError('no game window to record')
-        encoders = [self.args.encoder] if self.args.encoder != 'auto' else \
-            (['h264_nvenc'] if self.ffmpeg_ok('h264_nvenc') else []) + ['libx264']
-        modes = [self.args.capture] + [m for m in gn.CAPTURE_MODES if m != self.args.capture]
+        background = bool(getattr(self.args, 'background', False))
+        modes = gt_capture.mode_order(self.args.capture, background, bool(getattr(self.args, 'capture_explicit', False)))
+        wanted = modes[0]
+        why_not = ''
         for mode in modes:
-            for enc in encoders:
+            window = mode == gt_capture.MODE
+            ffmpeg = self.args.ffmpeg
+            if window:
+                ffmpeg, why = self.window_ffmpeg()
+                if not ffmpeg:
+                    why_not = why_not or why
+                    self.log(f'[record] {mode} capture not available: {why}')
+                    continue
+            for enc in self.encoders_for(ffmpeg):
                 start = datetime.now()
                 path = os.path.join(self.cycle_dir, f'rec_{file_ts(start)}.mp4')
-                cmd = gn.build_ffmpeg_cmd(self.args.ffmpeg, path, mode, rect, screen, self.args.fps, enc)
+                if window:
+                    try:
+                        cmd = gt_capture.build_cmd(ffmpeg, path, g.game_hwnd, (rect[2] - rect[0], rect[3] - rect[1]),
+                                                   self.args.fps, enc)
+                    except ValueError as e:       # no usable client area (a minimised window)
+                        why_not = why_not or str(e)
+                        self.log(f'[record] {mode}/{enc} not started: {e}')
+                        break
+                else:
+                    cmd = gn.build_ffmpeg_cmd(ffmpeg, path, mode, rect, screen, self.args.fps, enc)
                 errp = path[:-4] + '.ffmpeg.log'
                 errf = open(errp, 'w', encoding='utf-8', errors='replace')
                 spawn = datetime.now()
-                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errf)
-                time.sleep(3.0)
-                if proc.poll() is None:
-                    x, y, w, h = gn.even_rect(gn.clamp_rect(rect, screen))
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE if window else subprocess.DEVNULL,
+                                        stderr=errf)
+                reader = gt_capture.ProgressReader(proc.stdout) if window else None
+                if window:      # alive and frames reach the encoder (a window that delivers nothing is no recording)
+                    for _ in range(int(gt_capture.START_TIMEOUT_S / 0.1)):
+                        if proc.poll() is not None or reader.delivering():
+                            break
+                        time.sleep(0.1)
+                    ok = proc.poll() is None and reader.delivering()
+                else:
+                    time.sleep(3.0)
+                    ok = proc.poll() is None
+                if ok:
+                    if window:
+                        w, h = gt_capture.expected_size(cmd)
+                    else:
+                        x, y, w, h = gn.even_rect(gn.clamp_rect(rect, screen))
                     rec = {'path': path, 'json': path[:-4] + '.json', 'cmd': cmd, 'mode': mode, 'encoder': enc,
-                           'rect': rect, 'screen': screen, 'expected_wh': (w, h), 'spawn_wall': spawn, 'proc': proc, 'errf': errf, 'errp': errp, 'markers': [],
-                           'finalized': False}
+                           'rect': rect, 'screen': screen, 'expected_wh': (w, h), 'spawn_wall': spawn, 'proc': proc,
+                           'errf': errf, 'errp': errp, 'markers': [], 'finalized': False, 'progress': reader}
+                    info = {}
+                    if wanted == gt_capture.MODE and not window:
+                        rec['warning'] = gt_capture.fallback_warning(mode, background, why_not or 'no frames')
+                        info['warning'] = rec['warning']
+                        self.log('[record] !!! WARNING: ' + rec['warning'])
                     self.write_rec_json(rec)
                     self.log(f'[record] {mode}/{enc} rect {rect} screen {screen} -> {path}')
-                    self.done(st, path=path, mode=mode, encoder=enc, cmd=subprocess.list2cmdline(cmd))
+                    self.done(st, path=path, mode=mode, encoder=enc, cmd=subprocess.list2cmdline(cmd), **info)
                     return rec
+                if proc.poll() is None:
+                    proc.kill()
                 errf.close()
+                if window:
+                    why_not = why_not or f'{enc}: the window delivered no frames'
                 self.log(f'[record] {mode}/{enc} failed (see {errp})')
         self.done(st, 'failed')
         raise CycleError('ffmpeg could not start in any capture mode')
 
     def write_rec_json(self, rec: dict) -> None:
-        keep = {k: v for k, v in rec.items() if k not in ('proc', 'errf')}
+        keep = {k: v for k, v in rec.items() if k not in ('proc', 'errf', 'progress')}
         with open(rec['json'], 'w', encoding='utf-8') as f:
             json.dump(gt_run.serialise_plan(keep), f, indent=1, default=str)
 
@@ -1024,6 +1078,12 @@ class Night:
             return info
         stderr = open(rec['errp'], encoding='utf-8', errors='replace').read() if os.path.isfile(rec['errp']) else ''
         rec['input_start'] = gn.parse_input_start(stderr)
+        reader = rec.get('progress')
+        if reader is not None:      # window capture: the input banner has no wall clock, the progress stream has
+            reader.join()
+            rec['input_start'] = reader.input_start() or rec['input_start']
+            rec['progress_info'] = reader.summary()
+            info['problems'] += gt_capture.frozen_check(stderr)
         p = self.runner([self.args.ffmpeg, '-hide_banner', '-i', path, '-map', '0:v:0', '-f', 'null', '-'],
                         capture_output=True, text=True, errors='replace', timeout=3600)
         decoded = gn.parse_decoded_seconds(p.stderr)
@@ -1048,6 +1108,8 @@ class Night:
                 if m:
                     yavg.append(float(m[0]))
         info['yavg'] = yavg
+        if reader is not None and rec.get('stop_wall'):
+            info['problems'] += gt_capture.short_check(rec['duration'], (rec['stop_wall'] - rec['spawn_wall']).total_seconds())
         info['problems'] += gn.recording_check(frame_size, rec.get('expected_wh'), yavg, self.args.min_luma)
         if not info['decode_ok']:
             info['problems'].append('decode failed: ' + p.stderr.strip()[-300:])
@@ -3254,6 +3316,12 @@ def dry_run(args) -> int:
         item('ffmpeg gdigrab device (desktop capture)', 'gdigrab' in dev.stdout + dev.stderr)
         flt = subprocess.run([args.ffmpeg, '-hide_banner', '-filters'], capture_output=True, text=True, errors='replace')
         item('ffmpeg ddagrab filter (fallback)', 'ddagrab' in flt.stdout, '')
+        ff8, why = gt_capture.find_ffmpeg(args.capture_ffmpeg)
+        label = 'ffmpeg with the gfxcapture filter (--capture window, automatic with --background)'
+        if gt_capture.resolve_mode(args.capture, args.background, args.capture_explicit) == gt_capture.MODE:
+            item(label, bool(ff8), ff8 or why)
+        else:
+            print(f'[--] {label}: {ff8 or "not available: " + why}')
         for enc in ('h264_nvenc', 'libx264'):
             p = subprocess.run([args.ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
                                 'color=size=256x256:duration=0.2', '-c:v', enc, '-f', 'null', '-'],
@@ -3281,10 +3349,22 @@ def dry_run(args) -> int:
         else:
             rect = screen = None
             print('[--] game not running: capture rect and console point are read at the first live cycle')
-        cmd = gn.build_ffmpeg_cmd(args.ffmpeg, r'<cycle>\rec_<ts>.mp4', args.capture,
-                                  rect or (0, 0, 1920, 1080), screen, args.fps, 'h264_nvenc')
-        print('[--] ffmpeg command' + ('' if rect else ' (example rect 0,0,1920,1080)') + ': ' +
-              subprocess.list2cmdline(cmd))
+        mode = gt_capture.resolve_mode(args.capture, args.background, args.capture_explicit)
+        if mode == gt_capture.MODE:
+            ff8, why = gt_capture.find_ffmpeg(args.capture_ffmpeg)
+            if ff8:
+                cmd = gt_capture.build_cmd(ff8, r'<cycle>\rec_<ts>.mp4', g.game_hwnd or 1,
+                                           (rect[2] - rect[0], rect[3] - rect[1]) if rect else (1920, 1080), args.fps)
+            else:
+                cmd = None
+                print(f'[!!] window capture selected but unavailable: {why}; the run falls back to the desktop modes '
+                      '(the video shows what covers the game)')
+        else:
+            cmd = gn.build_ffmpeg_cmd(args.ffmpeg, r'<cycle>\rec_<ts>.mp4', mode,
+                                      rect or (0, 0, 1920, 1080), screen, args.fps, 'h264_nvenc')
+        if cmd:
+            print(f'[--] ffmpeg command ({mode})' + ('' if rect else ' (example rect 0,0,1920,1080)') + ': ' +
+                  subprocess.list2cmdline(cmd))
         idle = idle_seconds()
         print(f'[--] user idle {idle:.0f} s (--min-idle {args.min_idle:.0f})')
     ovk = read_cet_overlay_key()
@@ -3321,6 +3401,15 @@ def dry_run(args) -> int:
 
 # ---------------------------------------------------------------------------------------------- CLI
 
+class _ExplicitCapture(argparse.Action):
+    """--capture <mode>: store the mode and remember that it was given (a given mode is never replaced by the
+    background default)."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        namespace.capture_explicit = True
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--go', action='store_true', help='really run (input, launch, quit, install, record)')
@@ -3338,8 +3427,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--cet', default='', help='extra CET commands after arming, ";;"-separated')
     p.add_argument('--cet-file', default='', help='file with extra CET commands (";;"-separated), added after --cet')
     p.add_argument('--cet-mods', default='', help='run install_cet_mods.py with these mods (comma list)')
-    p.add_argument('--capture', default='desktop', choices=list(gn.CAPTURE_MODES),
-                   help='desktop = gdigrab desktop cropped to the game client rect; ddagrab = Desktop Duplication + crop=')
+    p.add_argument('--capture', default='desktop', choices=list(gn.CAPTURE_MODES) + [gt_capture.MODE],
+                   action=_ExplicitCapture,
+                   help='desktop = gdigrab desktop cropped to the game client rect; ddagrab = Desktop Duplication + crop=; '
+                        'window = the game window\'s own picture, also while other windows cover it (needs an ffmpeg '
+                        '8.x build, see --capture-ffmpeg; at most 1920x1080). With --background the default switches '
+                        'to window; an explicit value is kept.')
+    p.add_argument('--capture-ffmpeg', default='',
+                   help='ffmpeg with the gfxcapture filter for --capture window (default: the newest '
+                        'Tools\\ffmpeg-<version>\\ffmpeg.exe that has it)')
+    p.set_defaults(capture_explicit=False)
     p.add_argument('--encoder', default='auto', choices=['auto', 'h264_nvenc', 'libx264'])
     p.add_argument('--fps', type=int, default=30)
     p.add_argument('--min-luma', type=float, default=2.0, help='mean luma below this = black recording (failed step)')
