@@ -2461,7 +2461,7 @@ class Night:
         """Newest camera pitch (deg) from the utpp_camera trace lines (written only with the diagnostic logs on)."""
         return gn.latest_cam_pitch(self.log_tail(60000))
 
-    def level_camera(self, pad, guard, plan: dict, tol: float = 12.0, pulses: int = 6) -> None:
+    def level_camera(self, pad, guard, plan: dict, tol: float = 12.0, pulses: int = 10) -> None:
         """A save can start with the camera looking steeply down (Male V save: -65 deg, 2026-11-12) and every frame of
         the run is then shot from above. Right-stick pulses bring the pitch within `tol` deg of level. Needs the
         camera trace in the log; without it nothing is done."""

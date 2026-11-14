@@ -85,7 +85,7 @@ WEAPONS = {
     'monowire': {'label': 'monowire (rig probe)', 'anim_var': 'monowire', 'block': False, 'kind': 'cyberware',
                  'records': ('Items.NanoWires',), 'covered': False, 'states_default': True, 'phases': ()},
     'launcher': {'label': 'projectile launcher (rig probe)', 'anim_var': 'launcher', 'block': False, 'kind': 'cyberware',
-                 'records': ('Items.ProjectileLauncher',), 'covered': False, 'states_default': True, 'phases': ()},
+                 'records': ('Items.AdvancedProjectileLauncherLegendary',), 'covered': False, 'states_default': True, 'phases': ()},
     # arm cyberware: needs the cyberware loadout change, see cyberware_equip_cmd
     'mantis': {'label': 'mantis blades', 'anim_var': 'mantis_blade', 'block': True, 'kind': 'cyberware',
                'records': ('Items.MantisBlades',)},
