@@ -263,11 +263,15 @@ DAYOF_DATA = [
     # clips and the default / StrongArms sets are unchanged.
     # Re-pinned 2026-11-14 (was 844d00f6..., 4534272 bytes): knife, katana, one-handed blunt and baton sets for both bodies added; the
     # six fists / default / StrongArms sets are byte-identical to 844d00f6...
-    ("melee", P_ARC + "utpp_melee.archive", 22454272, "770bb02a4c952ff55bbcee589d410c9e81f03ae550e115d9d472dcf373a75c6d"),
+    # Re-pinned 2026-11-14 (was 770bb02a..., 22454272 bytes): knife, katana, one-handed blunt and baton final attacks start from the
+    # attack before them; knife combo attacks hold their pose through the combo window; two-handed blunt sets for both bodies added.
+    # The six fists / default / StrongArms sets are byte-identical to 770bb02a...
+    ("melee", P_ARC + "utpp_melee.archive", 26632192, "b978453a91c3240c5b2e999f61ccee19710cfe439ffeff662dc25ebb6f7fbb4b"),
     # Melee full pose tables (hips, spine and legs of every packed melee clip, one file per body; generated from the clip inputs of
-    # the archive above by tools\melee\melee_pose_table.py): fists, knife, katana, one-handed blunt and baton, 312 clips each.
-    ("melee", P_DATA + "utpp_melee_pose_female.bin", 1830568, "38c014b0fdf73ea4d4d494433997d0511e38028089d1f4c8e5041b786d743505"),
-    ("melee", P_DATA + "utpp_melee_pose_male.bin", 1830568, "a3c6e5c47ed426de35375df4f27ad7c339a74ac4f655ab02c6cf9c6e834a368a"),
+    # the archive above by tools\melee\melee_pose_table.py): fists, knife, katana, one-handed blunt, baton and two-handed blunt,
+    # 368 clips each.
+    ("melee", P_DATA + "utpp_melee_pose_female.bin", 2127612, "882ba64ae582f829b5a990a3b4989b922b9940d6a2c9f2af43caa24fb3f5227b"),
+    ("melee", P_DATA + "utpp_melee_pose_male.bin", 2127612, "abb21addbf3d25f4186aa50eedd67f12e7f59a80175ac6768b06f9d44665aa2a"),
     # stage Build\stages\vehexit6-20261109 (game copy of 2026-11-09 15:30 is identical)
     ("car", P_ARC + "utpp_vehicle_car.archive", 7102464, "3843163c100787fc0669c6f5091e58597e83a312cc1f21da1542fc09771119d5"),
 ]
@@ -292,11 +296,14 @@ DAYOF_DATA = [
 #   utpp_melee.reds           6c0dd8f3... -> 9018f613...  FUNCTIONAL: two native declarations and one call that sends the drawn
 #                                                           weapon's anim variable with the state mask; the UTPP_STATES_TABLE lines
 #                                                           are unchanged
+# Re-pinned 2026-11-14 (two-handed blunt sets):
+#   utpp_melee.reds           9018f613... -> e18d48f0...  FUNCTIONAL: one covered name and one state line added (w_two_hand_blunt)
+#   utpp_melee_tpp.archive.xl 31a76cca... -> b3340155...  FUNCTIONAL: two entries added; the existing entries are unchanged
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "9018f61332b5b912418c1e3a25f6e737e357ad84ebf2e7b755294d085be9f303"),
+     "e18d48f062b9c73bc351925f29c35db4f0a9b9af2e725c45e7b7054ff2b6c7da"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
-     "31a76cca00cf288af9c9a2d107dc7f95e6f0991706a6ce2e855b0ea0b4a9251b"),
+     "b334015537bc013eb17d925f607306442c4a5edd3f4de256028584cf214b4de9"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",
      "2dd3b9017b668236a21e6e7cb2b604fbf2a3f199a57f413856fecbae8f0f905e"),
     ("car", P_REDS + "utpp_vehicle_approach_table.reds", "scripts/utpp_vehicle_approach_table.reds",
@@ -333,6 +340,11 @@ PARRIED_CLIPS = {
     "770bb02a4c952ff55bbcee589d410c9e81f03ae550e115d9d472dcf373a75c6d": {
         "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
         "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike"},
+    # the same sets with rebuilt final attacks (per-strike parried clips kept) + two-handed blunt sets (parried_<left|right>_<strike>
+    # for every strike type of the set)
+    "b978453a91c3240c5b2e999f61ccee19710cfe439ffeff662dc25ebb6f7fbb4b": {
+        "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
+        "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike", "w_two_hand_blunt": "per-strike"},
 }
 STATES_RX = re.compile(r'^if\s+Equals\(n,\s*n"([A-Za-z0-9_]+)"\)\s*\{\s*return\s+(\d+);\s*\}$')
 

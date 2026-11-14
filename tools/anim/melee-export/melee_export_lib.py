@@ -64,15 +64,17 @@ VANILLA_DEPOT = {
 # than WEAPON_HELPER_LIMIT_CM (build_melee_set.snap_weapon_helpers) and the verify gates it.  Frames within the limit are not touched.
 #   hammer (sliding two-hand grip), one-handed blunt and baton (NPC grip: another local WeaponRight than the game's, helpers up to 7 cm / 46 cm
 #   on throws off the joint), and the two default sets (game convention is <= 1.4 cm; the fists-based exports
-#   reached 99.8 cm there).
+#   reached 99.8 cm there), knife and katana (7.2 / 8.1 cm off the weapon joint), two-handed blunt (arm_right_ik_weapon up to 2.2 cm off
+#   WeaponRight on parried clips).
 # NOT in the list (their exports stay byte-identical to the accepted / installed ones; the distance is only reported, ik_weapon_vs_weapon_joint_cm):
-#   pwa_fists / pma_fists (accepted in game), knife (<= vanilla + 0.27 cm), katana, two_handed_blunt, StrongArms, mantis blades (the game's
+#   pwa_fists / pma_fists (accepted in game), StrongArms, mantis blades (the game's
 #   own mantis clips keep arm_*_ik_weapon about 10 cm off the weapon joints: the helpers follow the clip, not the joint).
 WEAPON_HELPERS = {'arm_right_ik_weapon': 'WeaponRight', 'arm_left_ik_weapon': 'WeaponLeft'}
 WEAPON_HELPER_SETS = ('pwa_two_handed_hammer', 'pma_two_handed_hammer',
                       'pwa_one_handed_blunt', 'pma_one_handed_blunt', 'pwa_baton', 'pma_baton',
                       'default_melee_weapon', 'pma_default_melee_weapon',
-                      'pwa_knife', 'pma_knife', 'pwa_katana', 'pma_katana')
+                      'pwa_knife', 'pma_knife', 'pwa_katana', 'pma_katana',
+                      'pwa_two_handed_blunt', 'pma_two_handed_blunt')
 WEAPON_HELPER_LIMIT_CM = 1.5
 UTPP_DEPOT_DIR = r'utpp\melee'
 

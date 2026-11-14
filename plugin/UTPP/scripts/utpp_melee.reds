@@ -47,11 +47,11 @@ public native func UTPPSetMeleeFullPoseSetting(on: Bool) -> Void
 // registered (standing lower body, planted feet, behind utpp_foot_tpp) get the full body; the item type is not enough (batons
 // share Wea_OneHandedClub with w_melee_one_hand_blunt but use w_melee_baton; long blades use w_melee_one_hand_blunt).
 // The list follows the installed clip export: only the variables packed for both rigs. The pack has fists, knife, katana,
-// one-handed blunt and baton sets for both bodies. Other melee variables (two-handed blunt, hammer, ...) take the upper body
+// one-handed blunt, baton and two-handed blunt sets for both bodies. Other melee variables (hammer, ...) take the upper body
 // from the game and keep the legs on motion matching.
 public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
   return Equals(n, n"w_melee_fists") || Equals(n, n"w_melee_knife") || Equals(n, n"w_melee_katana")
-    || Equals(n, n"w_melee_one_hand_blunt") || Equals(n, n"w_melee_baton");
+    || Equals(n, n"w_melee_one_hand_blunt") || Equals(n, n"w_melee_baton") || Equals(n, n"w_two_hand_blunt");
 }
 
 // PSM.MeleeWeapon states (gamePSMMeleeWeapon, bit = 1 << state) that may take the full body, per weapon: a table keyed by the
@@ -75,10 +75,10 @@ public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
 // pack. With a pack that keeps any of them vanilla, set the fists line back to 3667968 (or drop that bit). The two-body pack
 // (pwa_fists + pma_fists) covers the same states for Male V; the female-only pack (pwa_fists) leaves
 // Male V fists on the vanilla first-person clips.
-// Knife: the default + Parried 5 + Hold 6 + ChargedHold 7 (no block for the knife) = 3668192. Katana, one-handed blunt and
-// baton: the same states as the fists = 3669472. The per-strike parried clips of these weapons (parried_left_<strike> /
-// parried_right_<strike>) are picked by the melee parried graph archive; without that archive drop Parried 5 (knife 3668160,
-// the other three 3669440).
+// Knife: the default + Parried 5 + Hold 6 + ChargedHold 7 (no block for the knife) = 3668192. Katana, one-handed blunt,
+// baton and two-handed blunt: the same states as the fists = 3669472. The per-strike parried clips of these weapons
+// (parried_left_<strike> / parried_right_<strike>) are picked by the melee parried graph archive; without that archive drop
+// Parried 5 (knife 3668160, the other four 3669440).
 // Format: one line per variable between the UTPP_STATES_TABLE markers (read by the melee stage installer).
 public func UTPPMeleeStatesDefault() -> Int32 {
   return 3667968;
@@ -91,6 +91,7 @@ public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
   if Equals(n, n"w_melee_katana") { return 3669472; }
   if Equals(n, n"w_melee_one_hand_blunt") { return 3669472; }
   if Equals(n, n"w_melee_baton") { return 3669472; }
+  if Equals(n, n"w_two_hand_blunt") { return 3669472; }
   // UTPP_STATES_TABLE end
   return UTPPMeleeStatesDefault();
 }

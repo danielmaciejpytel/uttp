@@ -75,9 +75,11 @@ WEAPONS = {
     'baton': {'label': 'baton', 'anim_var': 'w_melee_baton', 'block': True, 'kind': 'weapon',
               'records': ('Items.Preset_Baton_Alpha', 'Items.Preset_Baton_Beta', 'Items.Preset_Baton_Gamma',
                           'Items.Base_Baton')},
-    # no set of its own in the pack: full body is expected to stay off (control)
     'bat': {'label': 'two-handed bat', 'anim_var': 'w_two_hand_blunt', 'block': True, 'kind': 'weapon',
             'records': ('Items.Preset_Baseball_Bat_Default',)},
+    # no set of its own in the pack: full body is expected to stay off (control)
+    'hammer': {'label': 'two-handed hammer', 'anim_var': 'w_melee_hammer', 'block': True, 'kind': 'weapon',
+               'records': ('Items.Preset_Hammer_Default', 'Items.Preset_Hammer_Sasquatch')},
     # arm cyberware: needs the cyberware loadout change, see cyberware_equip_cmd
     'mantis': {'label': 'mantis blades', 'anim_var': 'mantis_blade', 'block': True, 'kind': 'cyberware',
                'records': ('Items.MantisBlades',)},
@@ -86,18 +88,18 @@ for _tag, _w in WEAPONS.items():
     _w['tag'] = _tag
     _w['set'] = 'melee_' + _tag
 
-PACK_WEAPONS = ['knife', 'katana', 'blunt', 'baton']
+PACK_WEAPONS = ['knife', 'katana', 'blunt', 'baton', 'bat']
 WEAPON_SETS = {w['set']: [t] for t, w in WEAPONS.items()}
 WEAPON_SETS['melee_weapons'] = list(PACK_WEAPONS)
-# registered as scenario sets (gt_night.SETS); 'melee_weapons' = the four pack weapons in one launch
+# registered as scenario sets (gt_night.SETS); 'melee_weapons' = the pack weapons in one launch
 SET_MEMBERS = {name: [name] for name in WEAPON_SETS}
 SECONDS_PER_WEAPON = 150.0
 
 # PSM.MeleeWeapon states (bit = 1 << state)
-STATE_NAMES = {0: 'Default', 1: 'Equipping', 2: 'Idle', 3: 'Safe', 4: 'PublicSafe', 5: 'Parried', 6: 'Hold', 7: 'ChargedHold',
-               8: 'Block', 9: 'Deflect', 10: 'Deflect2', 11: 'ComboAttack', 12: 'StrongAttack', 13: 'ChargedAttack',
-               14: 'SafeAttack', 15: 'SprintAttack', 16: 'CrouchAttack', 17: 'JumpAttack', 18: 'FinalAttack',
-               19: 'ThrowAttack', 20: 'BlockAttack', 21: 'EquipAttack'}
+STATE_NAMES = {0: 'NotReady', 1: 'Equipping', 2: 'Idle', 3: 'Safe', 4: 'PublicSafe', 5: 'Parried', 6: 'Hold', 7: 'ChargedHold',
+               8: 'Block', 9: 'Targeting', 10: 'Deflect', 11: 'ComboAttack', 12: 'FinalAttack', 13: 'StrongAttack',
+               14: 'SafeAttack', 15: 'BlockAttack', 16: 'SprintAttack', 17: 'CrouchAttack', 18: 'JumpAttack',
+               19: 'ThrowAttack', 20: 'DeflectAttack', 21: 'EquipAttack'}
 BLOCK_STATE_BIT = 1 << 8
 
 

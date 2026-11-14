@@ -90,9 +90,9 @@ Weapon IK helpers (2026-11-10): vanilla melee sets keep arm_right_ik_weapon on W
     p?a_two_handed_hammer (sliding two-hand grip), p?a_one_handed_blunt and p?a_baton (NPC grip: helpers up to 7 cm, on throws 46 cm off the joint),
     default_melee_weapon and pma_default_melee_weapon (game convention <= 1.4 cm; the fists-based default sets
     reached 99.8 cm), p?a_knife and p?a_katana (the b1 builds measured 7.2 / 8.1 cm off the weapon joint,
-    vanilla ~1 cm).
+    vanilla ~1 cm), p?a_two_handed_blunt (arm_right_ik_weapon up to 2.2 cm off WeaponRight on parried clips).
   NOT in the list: p?a_fists and p?a_strongarms_melee_fists (accepted in game; their exports are byte-identical to the installed ones: the build GLBs
-    of the six combined-fists sets, rebuilt with these tools, equal the recorded run; see "Merge 2026-11-10" below), two_handed_blunt, p?a_mantisblade (the game's mantis clips keep the helpers ~10 cm off the joints). There the distance is only reported (ik_weapon_vs_weapon_joint_cm). Adding a set = one name in WEAPON_HELPER_SETS;
+    of the six combined-fists sets, rebuilt with these tools, equal the recorded run; see "Merge 2026-11-10" below), p?a_mantisblade (the game's mantis clips keep the helpers ~10 cm off the joints). There the distance is only reported (ik_weapon_vs_weapon_joint_cm). Adding a set = one name in WEAPON_HELPER_SETS;
     that changes the bytes of that set's export (the installed default sets of the combined fists archive are therefore rebuilt by design).
 
 UTPP-only clip names (2026-11-10; replaces the earlier per-run vanilla-aug folders): the pipeline works per clip name of the vanilla set, a name

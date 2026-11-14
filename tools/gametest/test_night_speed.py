@@ -93,7 +93,7 @@ class ArgsTests(unittest.TestCase):
         self.assertEqual(names, ['melee_fists', 'melee_fists_target', 'melee_weapons'])
         self.assertEqual(gn.MACROS['melee_weapons'] if 'melee_weapons' in gn.MACROS else None,
                          list(night.gw.PARTS))
-        self.assertEqual(night.gw.WEAPON_SETS['melee_weapons'], ['knife', 'katana', 'blunt', 'baton'])    # the four pack weapons
+        self.assertEqual(night.gw.WEAPON_SETS['melee_weapons'], ['knife', 'katana', 'blunt', 'baton', 'bat'])    # the pack weapons
         self.assertEqual(gn.resolve_sets('bg_probe'), ['slow_walk_half_stick', 'run_arc_left', 'run_arc_right'])
 
 

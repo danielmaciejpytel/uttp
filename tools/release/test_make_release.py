@@ -125,8 +125,8 @@ class DayOfBuild(unittest.TestCase):
         for g, files in want.items():
             have = {p for p, v in data.items() if v[0] == g} | {p for p, v in code.items() if v[0] == g}
             self.assertEqual(have, files)
-        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (22454272,
-                         "770bb02a4c952ff55bbcee589d410c9e81f03ae550e115d9d472dcf373a75c6d"))  # fists + knife, katana, blunt, baton
+        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (26632192,
+                         "b978453a91c3240c5b2e999f61ccee19710cfe439ffeff662dc25ebb6f7fbb4b"))  # fists + knife, katana, blunt, baton, two-handed blunt
         # the bike archive was checked in game (2026-11-10) and is pinned in the core DATA list, not in a day-of group
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", [r for r, _ in mr.DATA_PENDING])
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", data)
@@ -225,14 +225,17 @@ class ParriedGraph(unittest.TestCase):
         # the combined fists archive of the game copy (d683748f..., to be pinned): fists generic too
         combined = "d683748f5339f7b6955f7f79c9a39a5f1a7602016967881dc0df64d4258656cf"
         self.assertEqual(mr.parried_graph_rule(t(("w_melee_fists", 3669472)), combined), (False, []))
-        # the real script of the tree with the pinned pack: knife, katana, blunt and baton have per-strike parried clips -> graph
+        # the real script of the tree with the pinned pack: knife, katana, blunt, baton and two-handed blunt have per-strike parried
+        # clips -> graph
         real =(mr.ROOT / "Source" / "plugin" / "UTPP" / "scripts" / "utpp_melee.reds").read_text(encoding="utf-8")
         self.assertEqual(mr.parried_graph_rule(real, MELEE_SHA), (True, []))
         self.assertEqual(mr.parse_states_table(real), ({"w_melee_fists": 3669472, "w_melee_knife": 3668192, "w_melee_katana": 3669472,
-                                                        "w_melee_one_hand_blunt": 3669472, "w_melee_baton": 3669472}, []))
+                                                        "w_melee_one_hand_blunt": 3669472, "w_melee_baton": 3669472,
+                                                        "w_two_hand_blunt": 3669472}, []))
         # the same lines without the Parried bit (graph-less fallback): not needed
         self.assertEqual(mr.parried_graph_rule(t(("w_melee_knife", 3668160), ("w_melee_katana", 3669440),
-                                                 ("w_melee_one_hand_blunt", 3669440), ("w_melee_baton", 3669440)), MELEE_SHA), (False, []))
+                                                 ("w_melee_one_hand_blunt", 3669440), ("w_melee_baton", 3669440),
+                                                 ("w_two_hand_blunt", 3669440)), MELEE_SHA), (False, []))
         from unittest import mock
         with mock.patch.dict(mr.PARRIED_CLIPS, {MELEE_SHA: self.KNIFE}):
             self.assertEqual(mr.parried_graph_rule(t(("w_melee_knife", 3668192)), MELEE_SHA), (True, []))
@@ -242,8 +245,8 @@ class ParriedGraph(unittest.TestCase):
             # katana with the bit but only generic clips (kind says so): not needed
             self.assertEqual(mr.parried_graph_rule(t(("w_melee_katana", 3669472)), MELEE_SHA), (False, []))
             # a weapon with the bit that is not classified: plan error
-            needed, problems = mr.parried_graph_rule(t(("w_two_hand_blunt", 3669472)), MELEE_SHA)
-            self.assertTrue(problems and "w_two_hand_blunt" in problems[0])
+            needed, problems = mr.parried_graph_rule(t(("w_melee_hammer", 3669472)), MELEE_SHA)
+            self.assertTrue(problems and "w_melee_hammer" in problems[0])
         # an unknown melee archive with a Parried line: plan error (fists too: the pin and the table move together)
         needed, problems = mr.parried_graph_rule(t(("w_melee_fists", 3669472)), "0" * 64)
         self.assertTrue(problems)
@@ -269,7 +272,7 @@ class ParriedGraph(unittest.TestCase):
         ents, errs = self.plan([state_line("w_melee_knife", 3668192)], {"melee": "skip", "car": "skip"})
         self.assertEqual((errs, mr.GRAPH_REL in {e.rel for e in ents}), ([], False))
         # unclassified Parried-bit weapon: plan error, no graph guessed
-        ents, errs = self.plan([state_line("w_two_hand_blunt", 3669472)], shipped)
+        ents, errs = self.plan([state_line("w_melee_hammer", 3669472)], shipped)
         self.assertEqual(len(errs), 1)
         self.assertNotIn(mr.GRAPH_REL, {e.rel for e in ents})
 

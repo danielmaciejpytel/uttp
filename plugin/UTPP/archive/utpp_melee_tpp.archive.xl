@@ -38,6 +38,8 @@
 #   utpp\melee\utpp_pma_one_handed_blunt.anims | root | [w_melee_one_hand_blunt, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
 #   utpp\melee\utpp_pwa_baton.anims | root | [w_melee_baton, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
 #   utpp\melee\utpp_pma_baton.anims | root | [w_melee_baton, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_two_handed_blunt.anims | root | [w_two_hand_blunt, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_two_handed_blunt.anims | root | [w_two_hand_blunt, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
 # Not mirrored (the clips of these paths stay vanilla): paths gated by a modifier variable of the vanilla entities - the fists set gated by
 #   StrongArms on the root component (the ep1 entities add the Gorilla Arms set at the same priority on an extension component; a mirrored entry
 #   would outrank or tie with it), the one-handed blunt set gated by additives (an extra
@@ -166,4 +168,18 @@ animations:
     component: root
     set: utpp\melee\utpp_pma_baton.anims
     vars: [w_melee_baton, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pwa_two_handed_blunt.anims
+    vars: [w_two_hand_blunt, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_two_handed_blunt.anims
+    vars: [w_two_hand_blunt, utpp_melee_tpp]
     priority: 127

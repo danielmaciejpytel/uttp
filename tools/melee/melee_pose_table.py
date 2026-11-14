@@ -31,8 +31,8 @@ VARIABLES = {
     'katana': 'w_melee_katana',
     'one_handed_blunt': 'w_melee_one_hand_blunt',
     'baton': 'w_melee_baton',
-    'mantis_blade': 'w_melee_mantis_blade',
-    'two_handed_blunt': 'w_melee_two_hand_blunt',
+    'mantis_blade': 'mantis_blade',
+    'two_handed_blunt': 'w_two_hand_blunt',
 }
 BODIES = (('female', 'pwa'), ('male', 'pma'))
 MAGIC = b'UTPPMPOS'

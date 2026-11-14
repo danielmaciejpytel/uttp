@@ -143,11 +143,12 @@ class ScriptTables(unittest.TestCase):
         t = gw.load_script_tables()
         self.assertIsNotNone(t, 'plugin/UTPP/scripts/utpp_melee.reds not readable from the tools folder')
         self.assertTrue({'w_melee_fists', 'w_melee_knife', 'w_melee_katana', 'w_melee_one_hand_blunt',
-                         'w_melee_baton'} <= t['covered'])
+                         'w_melee_baton', 'w_two_hand_blunt'} <= t['covered'])
         self.assertEqual(t['states']['w_melee_knife'], 3668192)
         self.assertEqual(t['states']['w_melee_katana'], 3669472)
-        self.assertEqual(gw.expected_states(t, 'w_two_hand_blunt'), t['default_states'])
-        self.assertFalse(gw.is_covered(t, 'w_two_hand_blunt'))
+        self.assertEqual(t['states']['w_two_hand_blunt'], 3669472)
+        self.assertEqual(gw.expected_states(t, 'w_melee_hammer'), t['default_states'])
+        self.assertFalse(gw.is_covered(t, 'w_melee_hammer'))
         self.assertFalse(gw.is_covered(t, 'mantis_blade'))
         for tag in gw.PACK_WEAPONS:
             self.assertTrue(gw.is_covered(t, gw.WEAPONS[tag]['anim_var']), tag)
@@ -183,11 +184,12 @@ public func UTPPMeleeGuardCoveredName(n: CName) -> Bool {
 class Registration(unittest.TestCase):
     def test_sets_resolve_and_validate(self):
         scen = load_scenarios(gw.SCENARIO_FILE)
-        for name in ('melee_knife', 'melee_katana', 'melee_blunt', 'melee_baton', 'melee_bat', 'melee_mantis', 'melee_weapons'):
+        for name in ('melee_knife', 'melee_katana', 'melee_blunt', 'melee_baton', 'melee_bat', 'melee_hammer', 'melee_mantis',
+                     'melee_weapons'):
             names = gn.resolve_sets(name)
             self.assertEqual(names, [name])
             self.assertEqual(gn.validate_sets(names, scen), [], name)
-        self.assertEqual(gw.WEAPON_SETS['melee_weapons'], ['knife', 'katana', 'blunt', 'baton'])
+        self.assertEqual(gw.WEAPON_SETS['melee_weapons'], ['knife', 'katana', 'blunt', 'baton', 'bat'])
         self.assertNotIn('melee_weapons', gn.SETS['all'])
         self.assertTrue(all(not n.startswith('melee_k') for n in gn.SETS['all']))
         self.assertIn('melee_fists', gn.SETS['all'])                # the fists macro is untouched
@@ -353,9 +355,9 @@ class Evidence(unittest.TestCase):
         self.assertTrue(any('differs from the script table' in x for x in r['own_clip']))
 
     def test_control_weapon_must_not_switch_the_full_body_on(self):
-        r = self.evaluate('bat', [MASK_ON.format(why='flag'), FULL.format(onoff='on', why='on', speed='0', state=11, states=3667968)])
+        r = self.evaluate('hammer', [MASK_ON.format(why='flag'), FULL.format(onoff='on', why='on', speed='0', state=11, states=3667968)])
         self.assertTrue(any('does not cover' in f for f in r['fails']))
-        r = self.evaluate('bat', [MASK_ON.format(why='flag'), FULL.format(onoff='off', why='flag', speed='0', state=11, states=3667968)])
+        r = self.evaluate('hammer', [MASK_ON.format(why='flag'), FULL.format(onoff='off', why='flag', speed='0', state=11, states=3667968)])
         self.assertEqual((r['fails'], r['own_clip']), ([], []))
 
     def test_walk_phase_expects_the_full_body_off(self):
@@ -452,10 +454,10 @@ class Macro(unittest.TestCase):
                 current['tag'] = re.search(r"MW_COUNT ok='..tostring\(ok\)..' (\w+) ", cmd).group(1)
             return scripts[current['tag']](event, cmd)
         n, res = self.run_macro(script, 'melee_weapons')
-        self.assertEqual(list(res['weapons']), ['knife', 'katana', 'blunt', 'baton'])
+        self.assertEqual(list(res['weapons']), ['knife', 'katana', 'blunt', 'baton', 'bat'])
         self.assertEqual(res['verdict'], 'PASS', res['fails'])
-        self.assertEqual([c for c in n.calls if c == ('cmd', 'MW_GIVE')], [('cmd', 'MW_GIVE')] * 4)
-        self.assertEqual(sum(1 for c in n.calls if c == ('cmd', 'MW_REMOVE')), 4)
+        self.assertEqual([c for c in n.calls if c == ('cmd', 'MW_GIVE')], [('cmd', 'MW_GIVE')] * 5)
+        self.assertEqual(sum(1 for c in n.calls if c == ('cmd', 'MW_REMOVE')), 5)
 
     def test_wrong_anim_variable_is_skipped_and_cleaned_up(self):
         base = good_script('katana')
@@ -640,9 +642,9 @@ class Macro(unittest.TestCase):
         self.assertEqual(n.calls, [])
 
     def test_control_weapon_keeps_the_full_body_off(self):
-        n, res = self.run_macro(good_script('bat', full_on_standing=False), 'melee_bat')
+        n, res = self.run_macro(good_script('hammer', full_on_standing=False), 'melee_hammer')
         self.assertEqual(res['verdict'], 'PASS', res['fails'])
-        self.assertFalse(res['weapons']['bat']['covered'])
+        self.assertFalse(res['weapons']['hammer']['covered'])
         self.assertEqual(res['own_clip_phases'], [])
 
 

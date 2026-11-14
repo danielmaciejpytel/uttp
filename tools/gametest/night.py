@@ -1,7 +1,7 @@
 """Unattended overnight runner: quit -> (install) -> launch -> arm MM -> record -> scenarios -> quit -> collect.
 
   python Source\\tools\\gametest\\night.py --dry-run [--set loco,sprint_dash,weapon_draw_aim_holster,vehicle_mount_exit]   (also: --set aim_probe and --set melee_fists_target, not in 'all')
-  python Source\\tools\\gametest\\night.py --dry-run --set melee_weapons   (melee_knife, melee_katana, melee_blunt, melee_baton, melee_bat, melee_mantis; see gt_melee_weapons.py; not in 'all')
+  python Source\\tools\\gametest\\night.py --dry-run --set melee_weapons   (melee_knife, melee_katana, melee_blunt, melee_baton, melee_bat, melee_hammer, melee_mantis; see gt_melee_weapons.py; not in 'all')
   python Source\\tools\\gametest\\night.py --go --cycles 3 --set all --db utpp_base
          [--install 0.5.8 "note" --cet-mods utpp_core,utpp_body] [--cet "Game.UTPPSetMMTurnCommit(true)"]
 
