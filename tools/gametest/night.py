@@ -1723,15 +1723,28 @@ class Night:
             raise CycleError(f'unknown --vehicle-spawn mode {mode!r}')
         ep['events'].append({'spawn': mode, 'at': datetime.now()})
 
+    def vehicle_spawn_modes(self) -> list[str]:
+        """--vehicle-spawn in order. With --background the keyboard modes (vtap, vhold) are left out and the pad's own vehicle
+        call (dpad) comes first: the run sends no key."""
+        modes = [m.strip() for m in self.args.vehicle_spawn.split(',') if m.strip()]
+        if getattr(self.args, 'background', False):
+            kept = [m for m in modes if m not in ('vtap', 'vhold')]
+            if 'dpad' not in kept:
+                kept.insert(0, 'dpad')
+            if kept != modes:
+                self.log(f'[vehicle] --background: keyboard spawn modes left out, order {",".join(kept)}')
+            modes = kept
+        return modes
+
     def locate_vehicle(self, pad, guard, plan: dict, ep: dict) -> dict | None:
         """Spawn by the configured modes in order until a vehicle position is reported (entity verified)."""
-        modes = [m.strip() for m in self.args.vehicle_spawn.split(',') if m.strip()]
+        modes = self.vehicle_spawn_modes()
         if modes and modes[0] != 'codeware':
             # a Codeware car from an earlier attempt would be reported first (src=tag): remove it
             self.console(pad, guard, [gn.DESPAWN_CMD])
         for mode in modes:
             self.spawn_vehicle(pad, guard, plan, mode, ep)
-            if mode in ('vtap', 'vhold', 'summon'):   # these spawn far away and DRIVE in: wait for a real arrival
+            if mode in ('vtap', 'vhold', 'summon', 'dpad'):   # these spawn far away and DRIVE in: wait for a real arrival
                 pos = self.wait_arrival(pad, guard, ep, mode)
                 if pos is not None:
                     return pos

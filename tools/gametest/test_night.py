@@ -1579,6 +1579,18 @@ class MacroTests(unittest.TestCase):
         self.assertNotIn(gn.UNMOUNT_CMD, self.typed)
         self.assertEqual(r['verdict'], 'FAIL')
 
+    def test_background_run_calls_the_vehicle_without_a_key(self):
+        n = self.n
+        n.logged = []
+        n.log = n.logged.append
+        n.args.vehicle_spawn, n.args.background = 'vtap,vhold,summon,codeware', False
+        self.assertEqual(n.vehicle_spawn_modes(), ['vtap', 'vhold', 'summon', 'codeware'])      # a foreground run: as configured
+        n.args.background = True
+        self.assertEqual(n.vehicle_spawn_modes(), ['dpad', 'summon', 'codeware'])               # no key: the pad's call first
+        self.assertTrue(any('keyboard spawn modes left out' in m for m in n.logged), n.logged)
+        n.args.vehicle_spawn = 'codeware,dpad'
+        self.assertEqual(n.vehicle_spawn_modes(), ['codeware', 'dpad'])                         # an order without keys is kept
+
     def test_summon_first_far_goes_to_vhold(self):
         n = self.n
         self.assertEqual(night.build_parser().parse_args([]).vehicle_spawn, 'vtap,vhold,summon,codeware')
