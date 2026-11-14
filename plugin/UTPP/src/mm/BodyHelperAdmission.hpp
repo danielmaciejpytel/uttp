@@ -125,6 +125,76 @@ inline constexpr std::array<Approved,2> kApproved{{
      76, 0, 619, 149, 0xd6940ae390b64977ull},
 }};
 
+// Name hash of a bone (FNV-1a 64 of the name, the hash the merged rig and binding.dat use).
+inline constexpr uint64_t NameHash(std::string_view aName)
+{
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (const char c : aName) { h ^= static_cast<uint8_t>(c); h *= 0x100000001b3ull; }
+    return h;
+}
+
+// Further rig layouts an approved bundle may run on. Arm cyberware merges its own rig into the player rig and can hang some owned
+// helpers under an extra group bone (the group's parent is the helper's usual parent). Such a layout has its own closure signature;
+// a rig is accepted only when its closure equals the base layout of the approved entry or one of these layouts of the same body
+// exactly. Every other layout is refused.
+// Per regrouped helper the layout says how it is written:
+//   written = true   the helper's LOCAL is computed relative to the group's parent (the usual parent), not relative to the group, and
+//                    written under the group. That is what the engine itself does on that rig: on recorded frames of 2026-11-14
+//                    (stage before the mod writes, both bodies, strong arms installed) the engine's own elbow helper locals under the
+//                    group equal the deformer graph's locals relative to the forearm within 0.001 cm and 0.08 deg, while the graph
+//                    target re-expressed through the group's rest rotation is 17.78 deg and up to 2.7 cm away.
+//   written = false  the helper is left to the engine on that rig (not owned there); every other helper is recomputed.
+struct Regroup
+{
+    uint64_t helper = 0, group = 0;
+    bool written = false;
+};
+inline constexpr uint32_t kMaxRegroup = 8;
+struct Layout
+{
+    int32_t body = kBodyNone;
+    std::string_view label;
+    uint32_t closureBones = 0;
+    uint64_t closureFingerprint = 0;
+    uint32_t regroupCount = 0;
+    std::array<Regroup, kMaxRegroup> regroup{};
+    uint32_t leftCount = 0;                       // further owned helpers left to the engine on this layout (they carry the cyberware's own bones)
+    std::array<uint64_t, kMaxRegroup> left{};
+};
+inline constexpr Layout StrongArmsLayout(int32_t aBody, uint32_t aBones, uint64_t aFingerprint)
+{
+    Layout l{aBody, "strong arms", aBones, aFingerprint, 6, {}};
+    l.regroup[0] = {NameHash("l_elbow_bend_A_mscl_JNT"), NameHash("l_elbow_bend_A_mscl_Offset_GRP"), true};
+    l.regroup[1] = {NameHash("l_elbow_bend_B_mscl_JNT"), NameHash("l_elbow_bend_A_mscl_Offset_GRP"), true};
+    l.regroup[2] = {NameHash("l_elbow_back_mscl_JNT"), NameHash("l_elbow_back_mscl_Offset_GRP"), true};
+    l.regroup[3] = {NameHash("r_elbow_bend_A_mscl_JNT"), NameHash("r_elbow_bend_A_mscl_Offset_GRP"), true};
+    l.regroup[4] = {NameHash("r_elbow_bend_B_mscl_JNT"), NameHash("r_elbow_bend_A_mscl_Offset_GRP"), true};
+    l.regroup[5] = {NameHash("r_elbow_back_mscl_JNT"), NameHash("r_elbow_back_mscl_Offset_GRP"), true};
+    return l;
+}
+// The projectile launcher hangs the three left wrist muscle helpers under groups that carry their own translation and rotation (how the
+// engine writes them there is not measured yet) and its own plate bones under the left forearm twist helpers l_Wrist_0_JNT and
+// l_Wrist_2_JNT. These six helpers are left to the engine on that rig; every other helper is recomputed.
+inline constexpr Layout LauncherLayout(int32_t aBody, uint32_t aBones, uint64_t aFingerprint)
+{
+    Layout l{aBody, "projectile launcher", aBones, aFingerprint, 3, {}, 3, {}};
+    l.regroup[0] = {NameHash("l_wrist_A_mscl_JNT"), NameHash("l_wrist_A_mscl_Offset_GRP"), false};
+    l.regroup[1] = {NameHash("l_wrist_B_mscl_JNT"), NameHash("l_wrist_B_mscl_Offset_GRP"), false};
+    l.regroup[2] = {NameHash("l_wrist_C_mscl_JNT"), NameHash("l_wrist_C_mscl_Offset_GRP"), false};
+    l.left[0] = NameHash("l_Wrist_0_JNT");
+    l.left[1] = NameHash("l_Wrist_1_JNT");
+    l.left[2] = NameHash("l_Wrist_2_JNT");
+    return l;
+}
+// Strong arms: closure recorded in game on both bodies (2026-11-14). Projectile launcher: closure predicted from the game's rig of the
+// launcher (the same rule reproduces the recorded strong-arms closure of both bodies); not yet recorded in game.
+inline constexpr std::array<Layout, 4> kRigLayouts{{
+    StrongArmsLayout(kBodyMan, 183, 0x3d893df371a36a43ull),
+    StrongArmsLayout(kBodyWoman, 153, 0x750ae635e1cc85d7ull),
+    LauncherLayout(kBodyMan, 182, 0x7e58ef7218df88dfull),
+    LauncherLayout(kBodyWoman, 152, 0x3bca2b35fb4e9007ull),
+}};
+
 enum class Mode : uint32_t { Off, Probe, Apply };
 enum class Decision : uint32_t { LoadOff, LoadProbe, LoadApply, RefuseApply };
 struct Verdict
@@ -175,18 +245,65 @@ inline bool BodyMatches(bool bundleApproved, int32_t approvedBody, int32_t liveB
 // and the closure of the bundle's bones (binding.dat CORE, OWNED, CHILD, ANCHOR plus ancestors) must have the approved signature.
 // Extra bones elsewhere (hair, accessories, garment dangles) are fine. A verdict that is not approved has nothing to check
 // (PROBE-only bundles never write); an entry with a zero count or fingerprint accepts no rig.
+// The closure may also equal a further layout of the same body (kRigLayouts): `layout` then points at it (null = the base layout).
 enum class RigCheck : uint32_t { Ok, TooFewBones, SignatureMismatch };
 template <class Parent>
 inline RigCheck CheckRig(const Verdict& v, std::span<const uint64_t> names, std::span<const Parent> parents,
-                         std::span<const uint64_t> bundleBones, RigSignature* signature = nullptr)
+                         std::span<const uint64_t> bundleBones, RigSignature* signature = nullptr, const Layout** layout = nullptr,
+                         std::span<const Layout> layouts = std::span<const Layout>(kRigLayouts))
 {
+    if (layout) *layout = nullptr;
     if (!v.approved) return RigCheck::Ok;
     if (v.baseMinBones == 0 || v.closureBones == 0 || v.closureFingerprint == 0 || names.size() != parents.size() ||
         names.size() < v.baseMinBones)
         return RigCheck::TooFewBones;
     const RigSignature sig = ComputeRigSignature<Parent>(names, parents, bundleBones);
     if (signature) *signature = sig;
-    return sig.ok && sig.bones == v.closureBones && sig.fingerprint == v.closureFingerprint ? RigCheck::Ok : RigCheck::SignatureMismatch;
+    if (!sig.ok) return RigCheck::SignatureMismatch;
+    if (sig.bones == v.closureBones && sig.fingerprint == v.closureFingerprint) return RigCheck::Ok;
+    for (const auto& l : layouts)
+        if (l.body == v.body && l.closureBones != 0 && l.closureFingerprint != 0 && l.closureBones == sig.bones &&
+            l.closureFingerprint == sig.fingerprint)
+        {
+            if (layout) *layout = &l;
+            return RigCheck::Ok;
+        }
+    return RigCheck::SignatureMismatch;
+}
+
+// The regrouped helpers of a layout, checked against the rig being armed: every helper and group is in the rig, the helper's parent is
+// the group and the group has a parent. Fills, per written helper, the pair (helper, group) for the patch plan
+// (helperpatch::Prepare) and the hashes of the helpers left to the engine. False on any mismatch (the rig is then refused).
+template <class Parent>
+inline bool ResolveRegroup(const Layout& aLayout, std::span<const uint64_t> aNames, std::span<const Parent> aParents,
+                           std::array<std::pair<uint64_t, uint64_t>, kMaxRegroup>& aWritten, uint32_t& aWrittenCount,
+                           std::array<uint64_t, kMaxRegroup>& aLeft, uint32_t& aLeftCount)
+{
+    aWrittenCount = aLeftCount = 0;
+    if (aLayout.regroupCount > kMaxRegroup || aLayout.leftCount > kMaxRegroup || aLayout.regroupCount + aLayout.leftCount > kMaxRegroup ||
+        aNames.size() != aParents.size())
+        return false;
+    auto find = [&](uint64_t name) -> int32_t {
+        for (size_t i = 0; i < aNames.size(); ++i) if (aNames[i] == name) return static_cast<int32_t>(i);
+        return -1;
+    };
+    for (uint32_t k = 0; k < aLayout.regroupCount; ++k)
+    {
+        const Regroup& r = aLayout.regroup[k];
+        const int32_t helper = find(r.helper), group = find(r.group);
+        if (!r.helper || !r.group || helper < 0 || group < 0) return false;
+        const int32_t parent = static_cast<int32_t>(aParents[static_cast<size_t>(helper)]);
+        const int32_t groupParent = static_cast<int32_t>(aParents[static_cast<size_t>(group)]);
+        if (parent != group || groupParent < 0 || groupParent >= static_cast<int32_t>(aNames.size())) return false;
+        if (r.written) aWritten[aWrittenCount++] = {r.helper, r.group};
+        else aLeft[aLeftCount++] = r.helper;
+    }
+    for (uint32_t k = 0; k < aLayout.leftCount; ++k)
+    {
+        if (!aLayout.left[k] || find(aLayout.left[k]) < 0) return false;
+        aLeft[aLeftCount++] = aLayout.left[k];
+    }
+    return true;
 }
 
 // Rejection reasons of the hot gate, in evaluation order (counters in the runtime use the same numbering).
@@ -230,6 +347,14 @@ inline void ZeroRouteInputs(GateInputs& g, bool aPerspectiveWriteAllows, uint32_
 {
     g.mmActive = true;
     g.perspectiveOk = aPerspectiveWriteAllows || (aRecord & corewrite::kVehicleThirdPerson) != 0;
+}
+// Status of the mapping-cycle receipt of the call. The receipt is consumed with the camera's pose-write permission, which the mounted
+// vehicle camera withholds (status Denied, decided only after the identity, order and age checks passed). On a zero route the vehicle
+// camera showing the third-person body stands in for that permission (ZeroRouteInputs), so a Denied receipt is accepted there; the
+// helper copies must still be complete (Receipt::complete). Every other status, and Denied on any other call, is refused.
+inline bool ReceiptStatusOk(bool aComplete, bool aDenied, Route aRoute, uint32_t aRecord)
+{
+    return aComplete || (aDenied && aRoute != Route::Published && (aRecord & corewrite::kVehicleThirdPerson) != 0);
 }
 // The published pose snapshot identifies the body. The published path also needs a positive weight; a zero route only a fresh snapshot
 // of the same rig (the weight is 0 there by definition).

@@ -6,6 +6,7 @@
 #include "BodyDeformerOffline.hpp"
 #include <cstring>
 #include <span>
+#include <utility>
 
 namespace utpp::mm::helperpatch
 {
@@ -17,6 +18,7 @@ struct Plan
 {
     uint32_t count=0,ownedCount=0,outputCount=0;
     std::array<int32_t,kMaxRecords> parents{},order{};
+    std::array<int32_t,kMaxRecords> frame{}; // bone whose MODEL an output's LOCAL is relative to: its parent, or the parent's parent for a regrouped helper
     std::array<uint64_t,kMaxRecords> names{};
     std::array<bool,kMaxRecords> core{},owned{},needed{};
     std::array<uint32_t,kMaxOutputs> outputs{};
@@ -42,9 +44,14 @@ inline int32_t Find(std::span<const uint64_t> names,uint64_t name)
 }
 // Cold path only. Missing names, cycles and an owned helper with a protected
 // direct child invalidate the whole catalog. Numeric bone counts are not IDs.
+// `regrouped` lists (owned helper, group) pairs: the helper's parent in this rig is the group, and its LOCAL is computed relative to
+// the group's parent (the helper's usual parent) and written as the local under the group. The group must be neither core nor owned.
+// `groups` lists group bones (neither core nor owned) that may hang under an owned bone without a compensating record: they follow the
+// recomputed owned bone, as the helpers under them do on the rig without the group.
 inline Result Prepare(std::span<const int32_t> parents,std::span<const uint64_t> names,
                       std::span<const uint64_t> core,std::span<const uint64_t> owned,
-                      std::span<const uint64_t> compensatable,Plan& out)
+                      std::span<const uint64_t> compensatable,Plan& out,
+                      std::span<const std::pair<uint64_t,uint64_t>> regrouped={},std::span<const uint64_t> groups={})
 {
     if(parents.empty()||parents.size()>kMaxRecords||parents.size()!=names.size()||
        core.empty()||owned.empty()||owned.size()>kMaxOutputs||compensatable.size()>kMaxOutputs)return {Error::Bounds};
@@ -67,7 +74,21 @@ inline Result Prepare(std::span<const int32_t> parents,std::span<const uint64_t>
         if(i<0||next.core[i]||next.owned[i])return {Error::Catalog,i};
         next.owned[i]=true;++next.ownedCount;
     }
-    std::array<bool,kMaxRecords> allowedBoundary{};
+    for(uint32_t i=0;i<next.count;++i)next.frame[i]=next.parents[i];
+    for(const auto& [helper,group]:regrouped)
+    {
+        const int32_t i=Find(names,helper),g=Find(names,group);
+        if(i<0||g<0||!next.owned[i]||next.core[g]||next.owned[g]||next.parents[i]!=g||next.parents[g]<0||next.frame[i]!=g)
+            return {Error::Catalog,i};
+        next.frame[i]=next.parents[g];
+    }
+    std::array<bool,kMaxRecords> allowedBoundary{},freeGroup{};
+    for(uint64_t n:groups)
+    {
+        const int32_t i=Find(names,n);
+        if(i<0||next.core[i]||next.owned[i])return {Error::Catalog,i};
+        freeGroup[i]=true;
+    }
     for(uint64_t n:compensatable)
     {
         const int32_t i=Find(names,n);
@@ -89,7 +110,7 @@ inline Result Prepare(std::span<const int32_t> parents,std::span<const uint64_t>
     for(uint32_t k=0;k<next.count;++k)
     {
         const uint32_t i=uint32_t(next.order[k]);const int32_t parent=next.parents[i];
-        const bool boundary=parent>=0&&next.owned[parent]&&!next.owned[i];
+        const bool boundary=parent>=0&&next.owned[parent]&&!next.owned[i]&&!freeGroup[i];
         if(boundary&&next.core[i])return {Error::ProtectedChild,int32_t(i)};
         if(boundary&&!allowedBoundary[i])return {Error::Catalog,int32_t(i)};
         if(boundary)++boundaries;
@@ -132,7 +153,8 @@ inline Result Emit(const Plan& plan,std::span<const float> records,Scratch& scra
     {
         const uint32_t i=plan.outputs[k];
         if(plan.core[i]||!scratch.ready[i]||(plan.owned[i]&&!scratch.targeted[i]))return {Error::Target,int32_t(i)};
-        const int32_t p=plan.parents[i];
+        const int32_t p=plan.frame[i];
+        if(p>=0&&!scratch.ready[p])return {Error::Target,int32_t(i)};
         const d::Transform parent=p>=0?scratch.desired[p]:d::Transform{};
         d::Transform roundtrip;
         if(!Relative(parent,scratch.desired[i],scratch.local[k])||!Compose(parent,scratch.local[k],roundtrip)||

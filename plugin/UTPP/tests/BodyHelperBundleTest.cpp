@@ -24,10 +24,12 @@
 #include <cstring>
 #include <algorithm>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace c=utpp::mm::bodyhelpercandidate;
@@ -157,6 +159,56 @@ d::Vec3 Apply(const d::Transform& m,const std::array<double,3>& q)
 }
 bool Contains(const std::string& s,const char* part){ return s.find(part)!=std::string::npos; }
 } // namespace
+
+// Merged rig of a recording: {"hashes": ["<hex>", ...], "parents": [int, ...]} (tools/analysis/helper_rig_signature.py).
+struct RigFile { std::vector<uint64_t> hashes; std::vector<int16_t> parents; };
+bool LoadRigFile(const std::string& path,RigFile& rig)
+{
+    const std::string text=ReadFile(path);
+    const size_t h=text.find("\"hashes\""),p=text.find("\"parents\"");
+    if(h==std::string::npos||p==std::string::npos)return false;
+    rig={};
+    const size_t hb=text.find('[',h),he=text.find(']',hb);
+    for(size_t at=text.find('"',hb);at!=std::string::npos&&at<he;)
+    {
+        const size_t end=text.find('"',at+1);
+        rig.hashes.push_back(std::strtoull(text.substr(at+1,end-at-1).c_str(),nullptr,16));
+        at=text.find('"',end+1);
+    }
+    const size_t pb=text.find('[',p),pe=text.find(']',pb);
+    std::istringstream in(text.substr(pb+1,pe-pb-1));std::string item;
+    while(std::getline(in,item,','))rig.parents.push_back(static_cast<int16_t>(std::atoi(item.c_str())));
+    return !rig.hashes.empty()&&rig.hashes.size()==rig.parents.size();
+}
+// Appends the group bone (when absent) under `groupParent` and hangs `children` under it; existing bone indices do not change.
+bool RegroupRig(RigFile& rig,const char* group,const char* groupParent,std::initializer_list<const char*> children)
+{
+    namespace ha=utpp::mm::helperadmission;
+    auto find=[&](uint64_t n)->int32_t{for(size_t i=0;i<rig.hashes.size();++i)if(rig.hashes[i]==n)return int32_t(i);return -1;};
+    int32_t g=find(ha::NameHash(group));
+    if(g<0)
+    {
+        const int32_t gp=find(ha::NameHash(groupParent));if(gp<0)return false;
+        rig.hashes.push_back(ha::NameHash(group));rig.parents.push_back(int16_t(gp));g=int32_t(rig.hashes.size()-1);
+    }
+    for(const char* child:children){const int32_t c=find(ha::NameHash(child));if(c<0)return false;rig.parents[size_t(c)]=int16_t(g);}
+    return true;
+}
+bool RegroupStrongArms(RigFile& rig)
+{
+    return RegroupRig(rig,"l_elbow_bend_A_mscl_Offset_GRP","LeftForeArm",{"l_elbow_bend_A_mscl_JNT","l_elbow_bend_B_mscl_JNT"})&&
+           RegroupRig(rig,"l_elbow_back_mscl_Offset_GRP","LeftForeArm",{"l_elbow_back_mscl_JNT"})&&
+           RegroupRig(rig,"r_elbow_bend_A_mscl_Offset_GRP","RightForeArm",{"r_elbow_bend_A_mscl_JNT","r_elbow_bend_B_mscl_JNT"})&&
+           RegroupRig(rig,"r_elbow_back_mscl_Offset_GRP","RightForeArm",{"r_elbow_back_mscl_JNT"});
+}
+bool RegroupLauncher(RigFile& rig)
+{
+    return RegroupRig(rig,"l_wrist_A_mscl_Offset_GRP","l_Wrist_2_JNT",{"l_wrist_A_mscl_JNT"})&&
+           RegroupRig(rig,"l_wrist_B_mscl_Offset_GRP","l_Wrist_2_JNT",{"l_wrist_B_mscl_JNT"})&&
+           RegroupRig(rig,"l_wrist_C_mscl_Offset_GRP","l_Wrist_2_JNT",{"l_wrist_C_mscl_JNT"})&&
+           // two of the launcher's plate bones under the forearm twist helpers (outside the closure, children of owned bones on the base layout)
+           RegroupRig(rig,"launcher_base","l_Wrist_0_JNT",{})&&RegroupRig(rig,"up_wrist_left_plate","l_Wrist_2_JNT",{});
+}
 
 int main(int argc,char** argv)
 {
@@ -379,6 +431,147 @@ int main(int argc,char** argv)
         auto unavailable=fr.avail;unavailable[plan->helperPlan.outputs[0]]=0;
         auto r4=c::Build(*plan,{reinterpret_cast<const float*>(fr.rec.data()),fr.rec.size()*h::kRecordFloats},unavailable,scratch,untouched);
         check(!r4,"unavailable helper record: Build fails");
+    }
+
+    // Arm cyberware rig layouts (mm/BodyHelperAdmission.hpp kRigLayouts) on rigs recorded in game (<fixture dir>/rigs/*.json, required).
+    if(!bench)
+    {
+        namespace ha=utpp::mm::helperadmission;
+        std::vector<uint64_t> roots(bd.physicalCore);
+        for(const auto* group:{&bd.programCore,&bd.owned,&bd.children})roots.insert(roots.end(),group->begin(),group->end());
+        roots.push_back(bd.anchor);
+        const auto verdict=ha::Admit(ha::Mode::Apply,bundle.programHash,Sha256(bindingBytes),uint32_t(bd.owned.size()),uint32_t(bd.children.size()));
+        const ha::Layout* layout=nullptr;
+        auto checkRig=[&](const RigFile& r){return ha::CheckRig<int16_t>(verdict,r.hashes,r.parents,roots,nullptr,&layout);};
+        auto signature=[&](const RigFile& r){return ha::ComputeRigSignature<int16_t>(r.hashes,r.parents,roots);};
+        RigFile base;base.hashes=fx.hashes;for(const int32_t p:fx.parents)base.parents.push_back(int16_t(p));
+        check(checkRig(base)==ha::RigCheck::Ok&&!layout,"base rig: accepted with the base layout");
+        RigFile strong,strongBuilt=base,launcher=base;
+        check(LoadRigFile(dir+"/rigs/strong_arms.json",strong),"recorded strong-arms rig fixture loads (rigs/strong_arms.json)");
+        check(checkRig(strong)==ha::RigCheck::Ok&&layout&&layout->label==std::string_view("strong arms")&&layout->body==expectedBody,
+              "recorded strong-arms rig: accepted with the strong-arms layout of this body");
+        {
+            std::array<std::pair<uint64_t,uint64_t>,ha::kMaxRegroup> written{};std::array<uint64_t,ha::kMaxRegroup> left{};uint32_t nw=0,nl=0;
+            check(layout&&ha::ResolveRegroup<int16_t>(*layout,strong.hashes,strong.parents,written,nw,left,nl)&&nw==6&&nl==0,
+                  "recorded strong-arms rig: the six elbow helpers hang under the groups the layout names");
+            check(layout&&!ha::ResolveRegroup<int16_t>(*layout,base.hashes,base.parents,written,nw,left,nl),"base rig does not show the strong-arms regrouping");
+        }
+        if(bodyName=="woman")
+        {
+            RigFile blades;
+            check(LoadRigFile(dir+"/rigs/mantis_blades.json",blades),"recorded mantis-blades rig fixture loads (rigs/mantis_blades.json)");
+            check(checkRig(blades)==ha::RigCheck::Ok&&!layout,"recorded mantis-blades rig: accepted with the base layout");
+        }
+        RigFile extra=strong;
+        check(RegroupRig(extra,"r_wrist_A_mscl_Offset_GRP","r_Wrist_2_JNT",{"r_wrist_A_mscl_JNT"})&&checkRig(extra)==ha::RigCheck::SignatureMismatch,
+              "strong-arms rig with one more regrouped helper: refused");
+        RigFile otherBody=strong;  // the same regrouping is never accepted with the other body's layout
+        {
+            ha::Verdict v=verdict;v.body=expectedBody==ha::kBodyMan?ha::kBodyWoman:ha::kBodyMan;
+            check(ha::CheckRig<int16_t>(v,otherBody.hashes,otherBody.parents,roots)!=ha::RigCheck::Ok,"strong-arms closure of this body is not a layout of the other body");
+        }
+        check(RegroupStrongArms(strongBuilt),"strong-arms regrouping applied to the base rig");
+        const auto sa=signature(strong),sb=signature(strongBuilt);
+        check(sa.ok&&sb.ok&&sa.bones==sb.bones&&sa.fingerprint==sb.fingerprint,"the regrouping rule rebuilds the recorded strong-arms closure from the base rig");
+        check(RegroupLauncher(launcher)&&checkRig(launcher)==ha::RigCheck::Ok&&layout&&layout->label==std::string_view("projectile launcher"),
+              "launcher rig predicted from the base rig: accepted with the launcher layout");
+        const auto ls=signature(launcher);
+        std::printf("closures: strong arms %u bones %016llx, launcher (predicted) %u bones %016llx\n",sa.bones,static_cast<unsigned long long>(sa.fingerprint),
+                    ls.bones,static_cast<unsigned long long>(ls.fingerprint));
+
+        // Patch plans on the regrouped rigs, recorded frames: the groups are appended, so every recorded record keeps its index.
+        auto prepare=[&](const RigFile& r,const ha::Layout* l,std::unique_ptr<c::Plan>& out)
+        {
+            std::array<std::pair<uint64_t,uint64_t>,ha::kMaxRegroup> written{};std::array<uint64_t,ha::kMaxRegroup> left{};uint32_t nw=0,nl=0;
+            if(l&&!ha::ResolveRegroup<int16_t>(*l,r.hashes,r.parents,written,nw,left,nl))return false;
+            std::vector<uint64_t> owned=bd.owned;std::vector<c::HelperOutput> outputs=bd.outputs;
+            for(uint32_t k=0;k<nl;++k)
+            {
+                const auto o=std::find(owned.begin(),owned.end(),left[k]);if(o==owned.end())continue;
+                outputs.erase(outputs.begin()+(o-owned.begin()));owned.erase(o);
+            }
+            std::vector<uint64_t> groups;
+            if(l)for(uint32_t k=0;k<l->regroupCount;++k)if(std::find(groups.begin(),groups.end(),l->regroup[k].group)==groups.end())groups.push_back(l->regroup[k].group);
+            std::vector<int32_t> p32(r.parents.begin(),r.parents.end());
+            out=std::make_unique<c::Plan>();
+            return bool(c::Prepare(*bundle.program,{bundle.names.data(),bundle.program->nodeCount},p32,r.hashes,bd.programCore,bd.physicalCore,
+                                   bd.locals,protectedTranslations,owned,bd.children,outputs,bd.anchor,*out,{written.data(),nw},groups));
+        };
+        const ha::Layout* strongLayout=nullptr;const ha::Layout* launcherLayout=nullptr;
+        for(const auto& l:ha::kRigLayouts)if(l.body==expectedBody)(l.label==std::string_view("strong arms")?strongLayout:launcherLayout)=&l;
+        std::unique_ptr<c::Plan> strongPlan,unchangedPlan,launcherPlan;
+        check(strongLayout&&prepare(strongBuilt,strongLayout,strongPlan),"Prepare accepts the bundle on the strong-arms rig with its layout");
+        check(prepare(strongBuilt,nullptr,unchangedPlan),"mutation control: Prepare without the layout's regrouping");
+        check(launcherLayout&&prepare(launcher,launcherLayout,launcherPlan),"Prepare accepts the bundle on the launcher rig with its layout");
+        {
+            std::unique_ptr<c::Plan> recorded;
+            check(strongLayout&&prepare(strong,strongLayout,recorded)&&recorded->helperPlan.outputCount==plan->helperPlan.outputCount,
+                  "Prepare accepts the bundle on the recorded strong-arms rig with its layout (every owned helper written)");
+            if(bodyName=="woman")
+            {
+                RigFile blades;
+                check(LoadRigFile(dir+"/rigs/mantis_blades.json",blades)&&prepare(blades,nullptr,recorded),"Prepare accepts the bundle on the recorded mantis-blades rig");
+            }
+        }
+        const std::array<std::string,6> elbows{"l_elbow_bend_A_mscl_JNT","l_elbow_bend_B_mscl_JNT","l_elbow_back_mscl_JNT",
+                                               "r_elbow_bend_A_mscl_JNT","r_elbow_bend_B_mscl_JNT","r_elbow_back_mscl_JNT"};
+        std::vector<uint8_t> isElbow(strongBuilt.hashes.size(),0);
+        for(const auto& n:elbows)for(size_t i=0;i<strongBuilt.hashes.size();++i)if(strongBuilt.hashes[i]==ha::NameHash(n))isElbow[i]=1;
+        if(strongPlan&&unchangedPlan&&launcherPlan&&strongPlan->valid&&unchangedPlan->valid&&launcherPlan->valid)
+        {
+            check(strongPlan->helperPlan.outputCount==plan->helperPlan.outputCount&&launcherPlan->helperPlan.outputCount+6==plan->helperPlan.outputCount,
+                  "strong arms: every owned helper is written; launcher: all but the three left wrist muscle and three left forearm twist helpers");
+            // group records: the rig's rest rotation (17.8 deg about z) and an arbitrary rotation with a translation
+            const std::array<Record,2> groupRecords{{{0,0,0,0, 0,0,0.15451f,0.98799f, 1,1,1,0},{0.01f,-0.02f,0.03f,0, 0.3f,-0.2f,0.1f,0.92736185f, 1,1,1,0}}};
+            h::Patch basePatch,cyberPatch;
+            double worstSame=0,worstLauncher=0,mutationMinDeg=1e9;uint32_t frames=0;bool built=true,launcherSkips=true;
+            for(const std::string& label:fx.order)
+            {
+                const Frame& fr=fx.frames[label];
+                if(!c::Build(*plan,{reinterpret_cast<const float*>(fr.rec.data()),fr.rec.size()*h::kRecordFloats},fr.avail,scratch,basePatch)){built=false;continue;}
+                std::map<uint32_t,Record> want;for(uint32_t o=0;o<basePatch.count;++o)want[basePatch.indices[o]]=basePatch.after[o];
+                auto diff=[&](const h::Patch& p,uint32_t o)
+                {
+                    const auto& a=p.after[o];const auto& w=want[p.indices[o]];
+                    double dt=0,dq=0,dqn=0;
+                    for(int x=0;x<3;++x)dt=std::max(dt,std::fabs(double(a[x])-w[x]));
+                    for(int x=4;x<8;++x){dq=std::max(dq,std::fabs(double(a[x])-w[x]));dqn=std::max(dqn,std::fabs(double(a[x])+w[x]));}
+                    return std::max(dt,std::min(dq,dqn));
+                };
+                for(const auto& g:groupRecords)
+                {
+                    std::vector<Record> rec=fr.rec;std::vector<uint8_t> avail=fr.avail;
+                    rec.resize(strongBuilt.hashes.size(),g);avail.resize(strongBuilt.hashes.size(),1);
+                    if(!c::Build(*strongPlan,{reinterpret_cast<const float*>(rec.data()),rec.size()*h::kRecordFloats},avail,scratch,cyberPatch)){built=false;continue;}
+                    for(uint32_t o=0;o<cyberPatch.count;++o)worstSame=std::max(worstSame,diff(cyberPatch,o));
+                    if(!c::Build(*unchangedPlan,{reinterpret_cast<const float*>(rec.data()),rec.size()*h::kRecordFloats},avail,scratch,cyberPatch)){built=false;continue;}
+                    for(uint32_t o=0;o<cyberPatch.count;++o)
+                        if(isElbow[cyberPatch.indices[o]])
+                        {
+                            const auto& a=cyberPatch.after[o];const auto& w=want[cyberPatch.indices[o]];
+                            double dot=0;for(int x=4;x<8;++x)dot+=double(a[x])*w[x];
+                            mutationMinDeg=std::min(mutationMinDeg,2.0*std::acos(std::min(1.0,std::fabs(dot)))*57.29577951308232);
+                        }
+                    std::vector<Record> lrec=fr.rec;std::vector<uint8_t> lavail=fr.avail;
+                    lrec.resize(launcher.hashes.size(),g);lavail.resize(launcher.hashes.size(),1);
+                    if(!c::Build(*launcherPlan,{reinterpret_cast<const float*>(lrec.data()),lrec.size()*h::kRecordFloats},lavail,scratch,cyberPatch)){built=false;continue;}
+                    for(uint32_t o=0;o<cyberPatch.count;++o)
+                    {
+                        worstLauncher=std::max(worstLauncher,diff(cyberPatch,o));
+                        const uint64_t n=launcher.hashes[cyberPatch.indices[o]];
+                        for(const char* left:{"l_wrist_A_mscl_JNT","l_wrist_B_mscl_JNT","l_wrist_C_mscl_JNT","l_Wrist_0_JNT","l_Wrist_1_JNT","l_Wrist_2_JNT"})
+                            if(n==ha::NameHash(left))launcherSkips=false;
+                    }
+                }
+                ++frames;
+            }
+            std::printf("cyberware layouts on %u recorded frames: strong arms max record difference to the base rig %.2e, launcher %.2e; "
+                        "without the regrouping the elbow helpers turn by at least %.2f deg\n",frames,worstSame,worstLauncher,mutationMinDeg);
+            check(built&&frames>0,"Build succeeds on every recorded frame on the regrouped rigs");
+            check(worstSame<=1e-6,"strong arms: every written record equals the base rig's, whatever the group record holds");
+            check(worstLauncher<=1e-6&&launcherSkips,"launcher: every written record equals the base rig's; the six left helpers are not written");
+            check(mutationMinDeg>17.0,"mutation: without the layout's regrouping the elbow helpers are written about 17.8 deg off");
+        }
     }
 
     if(bench)

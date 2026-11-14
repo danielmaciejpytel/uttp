@@ -125,6 +125,33 @@ int main()
     check(!h::Prepare(parents,names,core,owned,{},*plan),"unexpected unowned child cannot be added to write set");
     check(plan->valid&&plan->outputCount==2,"failed cold preparation preserves prior immutable plan");
     check(!h::Build(*plan,std::span<const float>(records.data(),12),available,std::span(&target,1),*scratch,*patch),"short record buffer rejected");
+    // Regrouped helper: owned helper 55 hangs under group 66 (its usual parent is core bone 11). Its LOCAL is relative to 11 whatever
+    // the group holds, and is written into its own record; without the regrouping (mutation) the group's rotation enters the LOCAL.
+    {
+        const std::array<int32_t,3> gp{-1,2,0};const std::array<uint64_t,3> gn{11,55,66};
+        const std::array<uint64_t,1> gcore{11},gowned{55};const std::array<std::pair<uint64_t,uint64_t>,1> regroup{{{55,66}}};
+        auto gplan=std::make_unique<h::Plan>(),plain=std::make_unique<h::Plan>();
+        check(bool(h::Prepare(gp,gn,gcore,gowned,{},*gplan,regroup)),"regrouped helper: plan prepared");
+        check(bool(h::Prepare(gp,gn,gcore,gowned,{},*plain)),"mutation control: plan without the regrouping");
+        const std::array<std::pair<uint64_t,uint64_t>,1> wrongGroup{{{55,11}}};
+        check(!h::Prepare(gp,gn,gcore,gowned,{},*plain,wrongGroup),"a core bone is never a group");
+        const std::array<std::pair<uint64_t,uint64_t>,1> notParent{{{55,77}}};
+        check(!h::Prepare(gp,gn,gcore,gowned,{},*plain,notParent),"a group that is not the helper's parent is refused");
+        check(bool(h::Prepare(gp,gn,gcore,gowned,{},*plain)),"mutation control: plan without the regrouping (again)");
+        std::vector<float> grec(3*12,0.f);
+        for(int i=0;i<3;++i){grec[i*12+7]=1;grec[i*12+8]=grec[i*12+9]=grec[i*12+10]=1;}
+        grec[0]=0.5f;                                                       // core 11 at x = 0.5
+        const float s=std::sin(0.3f),c=std::cos(0.3f);grec[24+6]=s;grec[24+7]=c;grec[24+1]=0.2f; // group 66: 34 deg about z, y = 0.2
+        const std::array<uint8_t,3> gav{1,1,1};
+        h::Target gt;gt.name=55;gt.model.t={0.5f,0.1f,0};gt.model.q={0,0,0,1};
+        auto gscratch=std::make_unique<h::Scratch>();auto gpatch=std::make_unique<h::Patch>(),ppatch=std::make_unique<h::Patch>();
+        check(bool(h::Build(*gplan,grec,gav,std::span(&gt,1),*gscratch,*gpatch))&&gpatch->count==1&&gpatch->indices[0]==1,"regrouped helper: only its own record is written");
+        const auto& r=gpatch->after[0];
+        check(std::fabs(r[0])<1e-6f&&std::fabs(r[1]-0.1f)<1e-6f&&std::fabs(r[2])<1e-6f&&std::fabs(std::fabs(r[7])-1.f)<1e-6f,
+              "regrouped helper: LOCAL relative to the usual parent (the group record is ignored)");
+        check(bool(h::Build(*plain,grec,gav,std::span(&gt,1),*gscratch,*ppatch))&&std::fabs(std::fabs(ppatch->after[0][7])-c)<1e-5f,
+              "mutation: without the regrouping the LOCAL is relative to the group");
+    }
     // The SSE2 Compose / Relative / Valid / Decode equal the scalar definitions bit for bit: same return value and the same bytes in
     // the output (both outputs start from the same filler, so a write the scalar form does not make also shows), on ordinary and edge inputs.
     // The only allowed difference is the sign / payload of a NaN, which appears only in the output of a failed call on non-finite input.

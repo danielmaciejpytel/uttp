@@ -120,6 +120,39 @@ int main()
         const auto manVerdict=a::Admit(a::Mode::Apply,manProgram,manBinding,man.owned,man.children);
         std::vector<uint64_t> loadingNames;std::vector<int16_t> loadingParents;makeRig(294,loadingNames,loadingParents);
         check(a::CheckRig<int16_t>(manVerdict,loadingNames,loadingParents,roots)==a::RigCheck::TooFewBones,"294-bone loading rig is smaller than the approved base");
+
+        // further layouts (arm cyberware): a group bone 2000 between bundle bone 1003 and its parent 1002
+        auto grouped=names;auto groupedParents=parents;grouped.push_back(2000);groupedParents.push_back(2);groupedParents[3]=int16_t(grouped.size()-1);
+        const auto gsig=a::ComputeRigSignature<int16_t>(grouped,groupedParents,roots);
+        a::Layout layout{a::kBodyMan,"test group",gsig.bones,gsig.fingerprint,1,{}};layout.regroup[0]={1003,2000,true};
+        const std::array<a::Layout,1> layouts{{layout}};
+        const a::Layout* inForce=&layout;
+        check(a::CheckRig<int16_t>(v,names,parents,roots,nullptr,&inForce,layouts)==a::RigCheck::Ok&&!inForce,"base rig: base layout in force");
+        check(a::CheckRig<int16_t>(v,grouped,groupedParents,roots,nullptr,&inForce,layouts)==a::RigCheck::Ok&&inForce==&layouts[0],
+              "regrouped rig: accepted with the matching layout of the same body");
+        check(a::CheckRig<int16_t>(v,grouped,groupedParents,roots,nullptr,&inForce)==a::RigCheck::SignatureMismatch&&!inForce,
+              "regrouped rig: refused when no layout of the table matches");
+        a::Verdict other=v;other.body=a::kBodyWoman;
+        check(a::CheckRig<int16_t>(other,grouped,groupedParents,roots,nullptr,&inForce,layouts)==a::RigCheck::SignatureMismatch,"layout of another body: refused");
+        auto twice=grouped;auto twiceParents=groupedParents;twice.push_back(2001);twiceParents.push_back(1);twiceParents[2]=int16_t(twice.size()-1);
+        check(a::CheckRig<int16_t>(v,twice,twiceParents,roots,nullptr,&inForce,layouts)==a::RigCheck::SignatureMismatch,"one more regrouped bundle bone: refused");
+        std::array<std::pair<uint64_t,uint64_t>,a::kMaxRegroup> written{};std::array<uint64_t,a::kMaxRegroup> left{};uint32_t nw=0,nl=0;
+        check(a::ResolveRegroup<int16_t>(layout,grouped,groupedParents,written,nw,left,nl)&&nw==1&&nl==0&&written[0].first==1003&&written[0].second==2000,
+              "regroup resolves on the regrouped rig");
+        check(!a::ResolveRegroup<int16_t>(layout,names,parents,written,nw,left,nl),"regroup does not resolve on the base rig");
+        a::Layout leftLayout=layout;leftLayout.regroup[0].written=false;
+        check(a::ResolveRegroup<int16_t>(leftLayout,grouped,groupedParents,written,nw,left,nl)&&nw==0&&nl==1&&left[0]==1003,"a helper left to the engine is reported as such");
+        // the compiled-in layouts: one strong-arms and one launcher layout per body, distinct from the base closures
+        check(a::NameHash("LeftForeArm")==0xAF6C21B281382FF0ull&&a::NameHash("LeftForeArm")==utpp::mm::integ::CNameHash("LeftForeArm"),"layout name hash = rig name hash");
+        int strongArms=0,launchers=0;
+        for(const auto& l:a::kRigLayouts)
+        {
+            check(l.closureBones&&l.closureFingerprint&&l.regroupCount<=a::kMaxRegroup&&l.closureFingerprint!=man.closureFingerprint&&
+                  l.closureFingerprint!=woman.closureFingerprint,"compiled-in layout has a closure distinct from the base");
+            if(l.label==std::string_view("strong arms"))++strongArms;
+            if(l.label==std::string_view("projectile launcher"))++launchers;
+        }
+        check(strongArms==2&&launchers==2,"compiled-in layouts: strong arms and projectile launcher for each body");
     }
     // --- owner and body rules
     {

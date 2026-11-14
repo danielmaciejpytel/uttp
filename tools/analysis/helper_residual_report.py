@@ -65,6 +65,14 @@ from export_player_helper_bundle import fnv64  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 BODY_OF_RIG = {619: 'man', 645: 'woman'}
+# Group bones some arm cyberware rigs put between an owned helper and its usual parent (src/mm/BodyHelperAdmission.hpp kRigLayouts). The
+# engine writes such a helper's local relative to the usual parent into its record under the group, so the helper is composed through the
+# group's parent here (the group's own transform is not recorded and does not enter).
+REGROUP_GROUPS = ('l_elbow_bend_A_mscl_Offset_GRP', 'l_elbow_back_mscl_Offset_GRP', 'r_elbow_bend_A_mscl_Offset_GRP',
+                  'r_elbow_back_mscl_Offset_GRP', 'l_wrist_A_mscl_Offset_GRP', 'l_wrist_B_mscl_Offset_GRP', 'l_wrist_C_mscl_Offset_GRP')
+# Helpers the runtime leaves to the engine on a rig that has the given group (the projectile launcher layout): reported, never gated.
+LEFT_ON_GROUP = {'l_wrist_A_mscl_Offset_GRP': ('l_wrist_A_mscl_JNT', 'l_wrist_B_mscl_JNT', 'l_wrist_C_mscl_JNT',
+                                               'l_Wrist_0_JNT', 'l_Wrist_1_JNT', 'l_Wrist_2_JNT')}
 DEFAULT_POS_CM = 0.05
 DEFAULT_ROT_DEG = 0.5
 WRITE_THRESHOLD = 0.002
@@ -221,11 +229,21 @@ class Engine:
     def __init__(self, rec, owned, extra=True):
         h = rec.header
         self.rec, self.owned = rec, list(owned)
+        present = {int(x) for x in rec.header.hashes}
+        for group, left in LEFT_ON_GROUP.items():
+            if fnv64(group) in present:
+                self.owned = [n for n in self.owned if n not in left]
         self.ev = evaluator_for(rec.body)
         self.names = rec.names
         self.nidx = {n: i for i, n in enumerate(self.names)}
         self.parents = [int(p) for p in h.parents]
         merged = {int(x): i for i, x in enumerate(h.hashes)}
+        groups = {fnv64(n) for n in REGROUP_GROUPS}
+        self.regrouped = []
+        for i, p in enumerate(list(self.parents)):
+            if p >= 0 and int(h.hashes[p]) in groups:
+                self.parents[i] = self.parents[p]
+                self.regrouped.append(i)
         self.rig_of = [int(h.game_index[i]) for i in h.mapped()]               # catalogue bone -> rig index
         self.rec_rig = {r: b for b, r in enumerate(self.rig_of)}               # rig index -> catalogue bone
         self.order = sorted(self.rec_rig)                                        # rig order: parents come first
@@ -508,6 +526,8 @@ def analyze_recording(args_dict, group):
     a = args_dict
     limits = dict(pos_cm=a['limit_pos_cm'], rot_deg=a['limit_rot_deg'])
     rec = Recording(group)
+    if rec.body is None and a.get('body'):
+        rec.body = a['body']
     res = dict(file=os.path.basename(rec.path), files=rec.files, body=rec.body, rig_count=rec.header.rig_count, day=rec.day,
                frames=rec.n, post_frames=getattr(rec, 'post_frames', 0), post_matched=rec.matched if rec.n else 0,
                duration_s=round(float(rec.sec[-1] - rec.sec[0]), 2) if rec.n else 0.0, limits=limits, write_threshold=WRITE_THRESHOLD, notes=rec.notes)
@@ -678,7 +698,7 @@ def run(inputs, out_dir, a, log=print, prefix='helper_residual'):
 def build_args(ns):
     return dict(bundle_dir=ns.bundle_dir, plan=ns.plan, clock_offset=ns.clock_offset, window_seconds=ns.window_seconds,
                 limit_pos_cm=ns.limit_pos_cm, limit_rot_deg=ns.limit_rot_deg, min_written=ns.min_written, worst=ns.worst,
-                detail=ns.detail, jobs=ns.jobs, extra_helpers=not ns.bundle_bones_only)
+                detail=ns.detail, jobs=ns.jobs, extra_helpers=not ns.bundle_bones_only, body=ns.body)
 
 
 def main(argv=None):
@@ -686,6 +706,7 @@ def main(argv=None):
     ap.add_argument('inputs', nargs='+', help='.utpppose file, folder or wildcard; each argument is one recording')
     ap.add_argument('--out-dir', required=True, help='output folder (required; never next to the inputs)')
     ap.add_argument('--prefix', default='helper_residual')
+    ap.add_argument('--body', choices=['man', 'woman'], help='body of a rig whose bone count does not tell it (arm cyberware adds bones)')
     ap.add_argument('--bundle-dir', help='folder with owned.txt (default Build\\test-data\\body_helper_<body>)')
     ap.add_argument('--plan', help='plan.json of a harness run: one window per scenario step')
     ap.add_argument('--clock-offset', type=float, default=0.0, help='log time minus plan time [s]')

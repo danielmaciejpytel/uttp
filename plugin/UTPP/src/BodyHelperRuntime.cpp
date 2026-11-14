@@ -56,6 +56,7 @@ struct Slot
 {
     std::shared_ptr<const Bundle> bundle;
     mm::bodyhelpercandidate::Plan plan;
+    const mm::helperadmission::Layout* layout=nullptr; // rig layout in force (null = the approved base layout)
 };
 struct Active
 {
@@ -290,12 +291,13 @@ bool PrepareArm(uint64_t rig,std::span<const int16_t> parents,
         // the bundle reads and writes have the approved layout (mm/BodyHelperAdmission.hpp CheckRig); other bones (hair, accessories,
         // garment dangles) do not matter. The 294-bone loading rig and a changed game layout publish no plan; the previous plan was
         // already withdrawn above. The man and woman bundles share one layout, so the body is chosen per call from the live pose.
-        std::string notes;char text[256];
+        std::string notes;char text[512];
         for(const auto& bundle:g_bundles)
         {
             const auto skip=[&](const std::string& why){notes+=std::string(notes.empty()?"":"; ")+bundle->label+": "+why;};
             mm::helperadmission::RigSignature sig;
-            const auto check=mm::helperadmission::CheckRig<int16_t>(bundle->verdict,names,parents,bundle->bones,&sig);
+            const mm::helperadmission::Layout* layout=nullptr;
+            const auto check=mm::helperadmission::CheckRig<int16_t>(bundle->verdict,names,parents,bundle->bones,&sig,&layout);
             if(check==mm::helperadmission::RigCheck::TooFewBones)
             {
                 std::snprintf(text,sizeof text,"arm refused: rig of %u bones is smaller than the merged player rig the approved helper bundle is valid for (at least %u bones)",
@@ -304,29 +306,58 @@ bool PrepareArm(uint64_t rig,std::span<const int16_t> parents,
             }
             if(check==mm::helperadmission::RigCheck::SignatureMismatch)
             {
-                std::snprintf(text,sizeof text,"arm refused: the bones the approved helper bundle reads and writes (%u bones, fingerprint %016llx, %s) differ from the approved layout (%u bones, %016llx; rig of %u bones)",
+                std::string others;
+                for(const auto& l:mm::helperadmission::kRigLayouts)
+                    if(l.body==bundle->body)
+                    {
+                        char one[96];std::snprintf(one,sizeof one,", %.*s %u bones %016llx",static_cast<int>(l.label.size()),l.label.data(),l.closureBones,
+                            static_cast<unsigned long long>(l.closureFingerprint));
+                        others+=one;
+                    }
+                std::snprintf(text,sizeof text,"arm refused: the bones the approved helper bundle reads and writes (%u bones, fingerprint %016llx, %s) differ from the approved layouts (base %u bones %016llx%s; rig of %u bones)",
                     sig.bones,static_cast<unsigned long long>(sig.fingerprint),sig.ok?"complete":"incomplete or malformed",bundle->verdict.closureBones,
-                    static_cast<unsigned long long>(bundle->verdict.closureFingerprint),static_cast<uint32_t>(parents.size()));
+                    static_cast<unsigned long long>(bundle->verdict.closureFingerprint),others.c_str(),static_cast<uint32_t>(parents.size()));
                 skip(text);continue;
             }
             Slot& slot=active->slots[active->slotCount];
             const auto& b=bundle->binding;
+            // A further layout (arm cyberware): its regrouped helpers are either written relative to the group's parent or left to the
+            // engine on this rig (then not owned here). The layout is refused when the rig does not show the regrouping it names.
+            std::array<std::pair<uint64_t,uint64_t>,mm::helperadmission::kMaxRegroup> regrouped{};
+            std::array<uint64_t,mm::helperadmission::kMaxRegroup> left{},groups{};
+            uint32_t regroupedCount=0,leftCount=0,groupCount=0;
+            std::vector<uint64_t> owned=b.owned;
+            std::vector<mm::bodyhelpercandidate::HelperOutput> outputs=b.outputs;
+            if(layout)
+            {
+                if(!mm::helperadmission::ResolveRegroup<int16_t>(*layout,names,parents,regrouped,regroupedCount,left,leftCount))
+                { skip("arm refused: the rig does not hang the helpers of layout "+std::string(layout->label)+" under its groups");continue; }
+                for(uint32_t k=0;k<layout->regroupCount;++k)
+                    if(!Contains({groups.data(),groupCount},layout->regroup[k].group))groups[groupCount++]=layout->regroup[k].group;
+                for(uint32_t k=0;k<leftCount;++k)
+                {
+                    const auto o=std::find(owned.begin(),owned.end(),left[k]);
+                    if(o==owned.end())continue;
+                    outputs.erase(outputs.begin()+(o-owned.begin()));owned.erase(o);
+                }
+            }
             auto result=mm::bodyhelpercandidate::Prepare(*bundle->program,
                 {bundle->programNames.data(),bundle->program->nodeCount},
                 {converted.data(),parents.size()},names,b.programCore,b.physicalCore,b.locals,
-                protectedTranslations,b.owned,b.children,b.outputs,b.anchor,slot.plan);
+                protectedTranslations,owned,b.children,outputs,b.anchor,slot.plan,{regrouped.data(),regroupedCount},{groups.data(),groupCount});
             if(!result){skip("skin helpers Prepare rejected catalog, code="+std::to_string(uint32_t(result.error))+" index="+std::to_string(result.index));continue;}
             bool catalogOk=true;
             for(uint32_t k=0;k<slot.plan.helperPlan.outputCount;++k)
                 if(!Contains(requiredHelpers,names[slot.plan.helperPlan.outputs[k]]))catalogOk=false;
             if(!catalogOk){skip("skin helper output is absent from mapping-cycle required helper catalog");continue;}
-            slot.bundle=bundle;++active->slotCount;
+            slot.bundle=bundle;slot.layout=layout;++active->slotCount;
             if(bundle->approved)active->anyApproved=true;
         }
         if(!active->slotCount){g_status=notes;return false;}
         std::string armed;
         for(uint32_t i=0;i<active->slotCount;++i)
-            armed+=std::string(i?", ":"")+active->slots[i].bundle->label+" (body "+std::to_string(active->slots[i].bundle->body)+")";
+            armed+=std::string(i?", ":"")+active->slots[i].bundle->label+" (body "+std::to_string(active->slots[i].bundle->body)+", rig layout "+
+                (active->slots[i].layout?std::string(active->slots[i].layout->label):std::string("base"))+")";
         auto* published=active.get();g_retained.push_back(std::move(active));
         g_active.store(published,std::memory_order_release);
         g_status="arm plan prepared: "+armed+(notes.empty()?"":"; skipped - "+notes);return true;
@@ -367,7 +398,9 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
     const bool zeroRoute=route!=ha::Route::Published;
     if(zeroRoute)ha::ZeroRouteInputs(gi,gi.perspectiveOk,record);
     gi.perspectiveOk=gi.perspectiveOk&&maxAge>0;
-    gi.receiptComplete=active&&receipt.status==mm::mappingcycle::ConsumeStatus::Complete&&receipt.complete&&
+    // A receipt the mounted vehicle camera's write veto marked Denied counts on a zero route with the vehicle third-person flag (ReceiptStatusOk).
+    gi.receiptComplete=active&&ha::ReceiptStatusOk(receipt.status==mm::mappingcycle::ConsumeStatus::Complete,
+        receipt.status==mm::mappingcycle::ConsumeStatus::Denied,route,record)&&receipt.complete&&
         receipt.required==active->requiredCount&&receipt.covered==active->requiredCount&&
         receipt.equal==active->requiredCount&&receipt.startedTicks>0&&
         receipt.lastTicks>=receipt.startedTicks&&now>=receipt.lastTicks&&now-receipt.lastTicks<=maxAge;

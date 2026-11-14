@@ -6,6 +6,7 @@
 #include "../src/BodyHelperRuntime.hpp"
 #include "../src/EarlyPoseRuntime.hpp"
 #include "../src/State.hpp"
+#include "../src/mm/BodyHelperAdmission.hpp"
 #include "../src/mm/BodyHelperCarry.hpp"
 #include "../src/mm/CoreWriteRecord.hpp"
 #include "../src/mm/GameIntegration.hpp"
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <sstream>
 #include <string>
@@ -276,6 +278,40 @@ void Suite(Body& S,const Body& O,const fs::path& work)
             const size_t parent=size_t(S.fx.parents[owned]);
             std::vector<int16_t> grand(S.fx.parents);grand[parent]=int16_t(grand[parent]==0?1:0);
             refused(grand,names,"the parent of an owned helper bone has another parent: arm refused","differ from the approved layout");
+        }
+        // arm cyberware layouts (mm/BodyHelperAdmission.hpp kRigLayouts): extra group bones above some owned helpers
+        {
+            namespace ha=utpp::mm::helperadmission;
+            auto regroup=[](std::vector<uint64_t>& n,std::vector<int16_t>& p,const char* group,const char* groupParent,std::initializer_list<const char*> kids)
+            {
+                auto find=[&](uint64_t h)->int32_t{for(size_t i=0;i<n.size();++i)if(n[i]==h)return int32_t(i);return -1;};
+                int32_t g=find(ha::NameHash(group));
+                if(g<0){const int32_t gp=find(ha::NameHash(groupParent));if(gp<0)return false;n.push_back(ha::NameHash(group));p.push_back(int16_t(gp));g=int32_t(n.size()-1);}
+                for(const char* k:kids){const int32_t c=find(ha::NameHash(k));if(c<0)return false;p[size_t(c)]=int16_t(g);}
+                return true;
+            };
+            std::vector<uint64_t> strong(names);std::vector<int16_t> strongParents(S.fx.parents);
+            const bool built=regroup(strong,strongParents,"l_elbow_bend_A_mscl_Offset_GRP","LeftForeArm",{"l_elbow_bend_A_mscl_JNT","l_elbow_bend_B_mscl_JNT"})&&
+                regroup(strong,strongParents,"l_elbow_back_mscl_Offset_GRP","LeftForeArm",{"l_elbow_back_mscl_JNT"})&&
+                regroup(strong,strongParents,"r_elbow_bend_A_mscl_Offset_GRP","RightForeArm",{"r_elbow_bend_A_mscl_JNT","r_elbow_bend_B_mscl_JNT"})&&
+                regroup(strong,strongParents,"r_elbow_back_mscl_Offset_GRP","RightForeArm",{"r_elbow_back_mscl_JNT"});
+            check(built,L+"test setup: strong-arms regrouping of the rig");
+            accepted(strongParents,strong,"strong-arms rig (six elbow helpers under group bones): arm accepted");
+            check(Has(br::Status(),"rig layout strong arms"),L+"status names the rig layout in force (strong arms)");
+            std::vector<uint64_t> launcher(names);std::vector<int16_t> launcherParents(S.fx.parents);
+            check(regroup(launcher,launcherParents,"l_wrist_A_mscl_Offset_GRP","l_Wrist_2_JNT",{"l_wrist_A_mscl_JNT"})&&
+                  regroup(launcher,launcherParents,"l_wrist_B_mscl_Offset_GRP","l_Wrist_2_JNT",{"l_wrist_B_mscl_JNT"})&&
+                  regroup(launcher,launcherParents,"l_wrist_C_mscl_Offset_GRP","l_Wrist_2_JNT",{"l_wrist_C_mscl_JNT"})&&
+                  regroup(launcher,launcherParents,"launcher_base","l_Wrist_0_JNT",{})&&regroup(launcher,launcherParents,"up_wrist_left_plate","l_Wrist_2_JNT",{}),
+                  L+"test setup: launcher regrouping of the rig (with two plate bones under the forearm twist helpers)");
+            accepted(launcherParents,launcher,"launcher rig (three left wrist helpers under group bones): arm accepted");
+            check(Has(br::Status(),"rig layout projectile launcher"),L+"status names the rig layout in force (projectile launcher)");
+            std::vector<uint64_t> extra(strong);std::vector<int16_t> extraParents(strongParents);
+            check(regroup(extra,extraParents,"r_wrist_A_mscl_Offset_GRP","r_Wrist_2_JNT",{"r_wrist_A_mscl_JNT"}),L+"test setup: one more regrouped helper");
+            refused(extraParents,extra,"strong-arms rig with one more regrouped helper: arm refused","differ from the approved layouts");
+            check(Has(br::Status(),"strong arms")&&Has(br::Status(),"projectile launcher"),L+"refusal status lists the approved layouts of the body");
+            accepted(S.fx.parents,names,"base rig after a cyberware rig: arm accepted");
+            check(Has(br::Status(),"rig layout base"),L+"status names the base rig layout");
         }
         std::vector<int16_t> parentsOutOfRange(S.fx.parents);parentsOutOfRange[5]=int16_t(rigCount);
         check(!br::PrepareArm(rig,parentsOutOfRange,names,catalog),L+"a parent index outside the rig: arm refused");
@@ -695,7 +731,9 @@ void ZeroWeightWriters(Body& man,Body& woman,const fs::path& work)
             if(window)cw::MarkZeroWindow(vehicle);
             g_hot.mmActive.store(false);
             PublishAt(R,tpp,R.bodyType,0.f,now-1,now);
-            const bool ok=Call(R,bones,R.count,ReceiptAt(now,true),now);
+            // as in game: the receipt is consumed with the camera's write permission, which the mounted vehicle camera withholds (Denied)
+            auto receipt=ReceiptAt(now,true);if(!tpp)receipt.status=mm::mappingcycle::ConsumeStatus::Denied;
+            const bool ok=Call(R,bones,R.count,receipt,now);
             g_hot.mmActive.store(true);
             return ok;
         };
@@ -760,6 +798,34 @@ void ZeroWeightWriters(Body& man,Body& woman,const fs::path& work)
             const auto before=br::ReadCounters();
             check(!zcall(writtenIn1,vt,true,false,false,advance(hz/10))&&bones==writtenIn1,L+"no vehicle third-person flag, first-person camera: nothing written");
             check(br::ReadCounters().rejectReason[4]==before.rejectReason[4]+1,L+"counted as a perspective rejection");
+        }
+        // 6b) receipt: a Denied receipt counts only with the vehicle third-person flag on a zero route, and only when complete
+        {
+            check(zcall(restIn1,0,true,true,false,advance(hz/10)),L+"reference call (Denied receipt, vehicle third person)");
+            auto before=br::ReadCounters();
+            bones=writtenIn1;cw::Begin();cw::MarkPlayerCall();cw::Mark(cw::kVehicleTransition);cw::MarkZeroWindow(true);
+            g_hot.mmActive.store(false);
+            int64_t now=advance(hz/10);PublishAt(R,false,R.bodyType,0.f,now-1,now);
+            auto incomplete=ReceiptAt(now,false);incomplete.status=mm::mappingcycle::ConsumeStatus::Denied;
+            check(!Call(R,bones,R.count,incomplete,now)&&bones==writtenIn1,L+"Denied and incomplete receipt: nothing written");
+            check(br::ReadCounters().rejectReason[5]==before.rejectReason[5]+1,L+"counted as a receipt rejection");
+            for(const auto status:{mm::mappingcycle::ConsumeStatus::Stale,mm::mappingcycle::ConsumeStatus::MissingMain,
+                                   mm::mappingcycle::ConsumeStatus::IdentityMismatch,mm::mappingcycle::ConsumeStatus::Incomplete})
+            {
+                bones=writtenIn1;cw::Begin();cw::MarkPlayerCall();cw::Mark(cw::kVehicleTransition);cw::MarkZeroWindow(true);
+                now=advance(hz/100);PublishAt(R,false,R.bodyType,0.f,now-1,now);
+                auto r=ReceiptAt(now,true);r.status=status;before=br::ReadCounters();
+                check(!Call(R,bones,R.count,r,now)&&bones==writtenIn1&&br::ReadCounters().rejectReason[5]==before.rejectReason[5]+1,
+                      L+"zero route: a stale, unmatched or incomplete receipt is refused");
+            }
+            g_hot.mmActive.store(true);
+            // a published call with a Denied receipt: refused (the camera veto stands outside the zero route)
+            bones=writtenIn0;cw::Begin();cw::MarkPlayerCall();cw::Mark(cw::kDriver);cw::MarkZeroWindow(true);
+            now=advance(hz/10);PublishAt(R,true,R.bodyType,1.f,now-1,now);
+            auto denied=ReceiptAt(now,true);denied.status=mm::mappingcycle::ConsumeStatus::Denied;
+            before=br::ReadCounters();
+            check(!Call(R,bones,R.count,denied,now)&&bones==writtenIn0&&br::ReadCounters().rejectReason[5]==before.rejectReason[5]+1,
+                  L+"published call with a Denied receipt: refused as before");
         }
         // 7) every weight-0 writer is counted under its own row; the vault torso passes by the third-person camera
         for(const auto w:{cw::kVehicleTransition,cw::kVehicleGuards,cw::kNeckGuard,cw::kVaultTorso})

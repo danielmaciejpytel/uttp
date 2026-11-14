@@ -81,6 +81,7 @@ inline int32_t Find(std::span<const uint64_t> names,uint64_t value)
 // translationProtectedHashes (Root/Hips/Trajectory) may never be overridden.
 // `outputs` must enumerate the 33 owned helper outputs, with the matching
 // program node index. Program storage must outlive Plan and remain immutable.
+// `regrouped`, `groups`: owned helpers that hang under a group bone in this rig, and those groups (helperpatch::Prepare).
 inline Result Prepare(const d::Program& program,
     std::span<const uint64_t> programNames,
     std::span<const int32_t> mergedParents,
@@ -92,7 +93,8 @@ inline Result Prepare(const d::Program& program,
     std::span<const uint64_t> ownedHashes,
     std::span<const uint64_t> compensatableHashes,
     std::span<const HelperOutput> outputs,
-    uint64_t spine3Hash, Plan& out)
+    uint64_t spine3Hash, Plan& out,
+    std::span<const std::pair<uint64_t,uint64_t>> regrouped={},std::span<const uint64_t> groups={})
 {
     if(program.nodeCount==0||program.nodeCount>kMaxProgramNodes||
        programNames.size()!=program.nodeCount||mergedNames.empty()||
@@ -172,7 +174,7 @@ inline Result Prepare(const d::Program& program,
     next.spine3Merged=uint32_t(anchorMerged); next.spine3Program=uint32_t(anchorProgram);
 
     auto helperResult=h::Prepare(mergedParents,mergedNames,physicalCoreHashes,ownedHashes,
-                                 compensatableHashes,next.helperPlan);
+                                 compensatableHashes,next.helperPlan,regrouped,groups);
     if(!helperResult||next.helperPlan.ownedCount!=next.outputCount)return {Error::Catalog,uint32_t(helperResult.bone<0?0:helperResult.bone)};
 
     // Actual-space transfer needs all core locals and the real ancestry of the
