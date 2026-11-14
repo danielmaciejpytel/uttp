@@ -728,7 +728,7 @@ void LoadEarlyPoseExperiment(const std::wstring& dir)
     const bool hasHeader = bool(std::getline(input, line));
     if (hasHeader && line == "UTPP_EARLY_POSE_OFF") return;
     earlyruntime::SelectOwner(earlyruntime::Owner::Mapping);
-    bool valid = hasHeader && line == "UTPP_EARLY_POSE_V1";
+    bool valid = hasHeader && (line == "UTPP_EARLY_POSE_HELPERS" || line == "UTPP_EARLY_POSE_V1"); // the earlier header is still read
     std::vector<uint64_t> hashes;
     while (valid && std::getline(input, line))
     {

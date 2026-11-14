@@ -794,7 +794,7 @@ class SkinHelperAudit(unittest.TestCase):
 
 class EarlyPoseOption(unittest.TestCase):
     """--early-pose FILE --early-pose-sha HEX packs the pose owner switch file; without it the package is unchanged."""
-    GOOD = b"UTPP_EARLY_POSE_V1\n0123456789abcdef\nFEDCBA9876543210\n\n"
+    GOOD = b"UTPP_EARLY_POSE_HELPERS\n0123456789abcdef\nFEDCBA9876543210\n\n"
 
     def setUp(self):
         import argparse
@@ -854,21 +854,22 @@ class EarlyPoseOption(unittest.TestCase):
         self.assertEqual(mr.check_early_pose_bytes(self.GOOD.replace(b"\n", b"\r\n")), [])
         bad = {
             "header": b"UTPP_EARLY_POSE_V2\n0123456789abcdef\n",
-            "bom": b"\xef\xbb\xbfUTPP_EARLY_POSE_V1\n0123456789abcdef\n",
+            "earlier header": b"UTPP_EARLY_POSE_V1\n0123456789abcdef\n",
+            "bom": b"\xef\xbb\xbfUTPP_EARLY_POSE_HELPERS\n0123456789abcdef\n",
             "off switch": b"UTPP_EARLY_POSE_OFF\n",
-            "short": b"UTPP_EARLY_POSE_V1\n0123456789abcde\n",
-            "not hex": b"UTPP_EARLY_POSE_V1\n0123456789abcdeg\n",
-            "repeat (case)": b"UTPP_EARLY_POSE_V1\n0123456789abcdef\n0123456789ABCDEF\n",
-            "zero": b"UTPP_EARLY_POSE_V1\n0000000000000000\n",
-            "empty": b"UTPP_EARLY_POSE_V1\n",
-            "too many": b"UTPP_EARLY_POSE_V1\n" + b"".join(b"%016x\n" % (i + 1) for i in range(mr.EARLY_POSE_MAX_HASHES + 1)),
+            "short": b"UTPP_EARLY_POSE_HELPERS\n0123456789abcde\n",
+            "not hex": b"UTPP_EARLY_POSE_HELPERS\n0123456789abcdeg\n",
+            "repeat (case)": b"UTPP_EARLY_POSE_HELPERS\n0123456789abcdef\n0123456789ABCDEF\n",
+            "zero": b"UTPP_EARLY_POSE_HELPERS\n0000000000000000\n",
+            "empty": b"UTPP_EARLY_POSE_HELPERS\n",
+            "too many": b"UTPP_EARLY_POSE_HELPERS\n" + b"".join(b"%016x\n" % (i + 1) for i in range(mr.EARLY_POSE_MAX_HASHES + 1)),
         }
         for what, data in bad.items():
             self.assertTrue(mr.check_early_pose_bytes(data), what)
             F = mr.Findings()
             mr.check_early_pose(data, F, True)
             self.assertIn("FAIL", [i["level"] for i in F.items], what)
-        at_limit = b"UTPP_EARLY_POSE_V1\n" + b"".join(b"%016x\n" % (i + 1) for i in range(mr.EARLY_POSE_MAX_HASHES))
+        at_limit = b"UTPP_EARLY_POSE_HELPERS\n" + b"".join(b"%016x\n" % (i + 1) for i in range(mr.EARLY_POSE_MAX_HASHES))
         self.assertEqual(mr.check_early_pose_bytes(at_limit), [])
 
     def test_arguments_come_together(self):

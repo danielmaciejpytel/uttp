@@ -435,11 +435,11 @@ def dayof_shipped(args):
 
 DLL_REL = P_DLL + "UTPP.dll"
 # Pose owner switch (optional, --early-pose): the plugin reads this file once at load. Present = the pose is written in the early
-# mapping stage (first line UTPP_EARLY_POSE_V1, then one 16-digit hex bone name hash per line); absent (the default package) = the
+# mapping stage (first line UTPP_EARLY_POSE_HELPERS, then one 16-digit hex bone name hash per line); absent (the default package) = the
 # pose is written in the FK stage. A file whose list does not parse still selects the early owner and then writes no pose at all,
 # so the packer checks the content exactly as the plugin parses it (check_early_pose_bytes).
 EARLY_POSE_REL = P_DLL + "early-pose.txt"
-EARLY_POSE_HEADER = "UTPP_EARLY_POSE_V1"
+EARLY_POSE_HEADER = "UTPP_EARLY_POSE_HELPERS"   # a packed file carries this header (the plugin also reads the earlier one)
 EARLY_POSE_MAX_HASHES = 1024   # the plugin's rig bone limit
 EARLY_POSE_README = ("\nPose write stage: red4ext\\plugins\\UTPP\\early-pose.txt selects the earlier of the two pose write stages of the\n"
                      "plugin. Delete it with the game closed to use the later stage; the change applies at the next game start.")
@@ -1143,7 +1143,7 @@ REQUIRED_TEXT = {  # shipped file -> strings that must be in it (menu entries an
 
 
 def check_early_pose_bytes(data):
-    """Problems of an early pose switch file, parsed as the plugin parses it ([] = valid): first line exactly UTPP_EARLY_POSE_V1, then
+    """Problems of an early pose switch file, parsed as the plugin parses it ([] = valid): first line exactly UTPP_EARLY_POSE_HELPERS, then
     1..1024 lines of exactly 16 hex digits (empty lines skipped), each a non-zero hash that occurs once."""
     try:
         text = data.decode("ascii")
