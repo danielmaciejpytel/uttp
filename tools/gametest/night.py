@@ -659,6 +659,7 @@ class Night:
             except NeedsKeyboard as e:   # --background: the exit needs keys -> ExitGame anyway (taskkill follows if needed)
                 res['exit_skipped'] = str(e)
                 self.log(f'[quit] vehicle exit skipped: {e}')
+            self.send_final_commands(pad, g, res)
             if not res.get('still_mounted'):
                 quit_echo = self.console_verified(pad, g, gn.QUIT_CMD, lambda t: '[night] QUIT exitgame' in t, 'quit',
                                                   timeout=2.0)
@@ -671,6 +672,33 @@ class Night:
             if pad is not None:
                 pad.close()
         return None
+
+    def final_commands(self) -> list[str]:
+        """--cet-final / --cet-final-file: commands that undo what the session switched on (";;"-separated)."""
+        cet = getattr(self.args, 'cet_final', '') or ''
+        path = getattr(self.args, 'cet_final_file', '') or ''
+        if path:
+            with open(path, encoding='utf-8') as f:
+                cet = (cet + ';;' if cet else '') + f.read().strip()
+        return [c.strip() for c in cet.split(';;') if c.strip()]
+
+    def send_final_commands(self, pad, guard, res: dict) -> None:
+        """Sent before every ExitGame, so the game never closes with a test setting left on. A failure here is logged
+        and never blocks the quit."""
+        try:
+            cmds = self.final_commands()
+            if not cmds:
+                return
+            log = self.utpp_log or gt_log.newest_log(self.args.log_dir)
+            off = file_size(log)
+            self.console(pad, guard, cmds)
+            guard.wait(0.5)
+            res['final_commands'] = len(cmds)
+            echo = [l.split('[night]', 1)[1].strip()[:120] for l in read_since(log, off).splitlines() if '[night]' in l]
+            self.log(f'[quit] final commands sent: {len(cmds)}' + (f' ({"; ".join(echo)})' if echo else ''))
+        except Exception as e:  # noqa: BLE001 - the quit must go on
+            res['final_commands_error'] = repr(e)
+            self.log(f'[quit] final commands NOT sent: {e!r}')
 
     def _close_crash_reporter(self, res: dict) -> None:
         """After the game ends (ExitGame crashes the game on quit at times), close the
@@ -3426,6 +3454,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--db', default='utpp_base', help='UTPPLoadDatabase name')
     p.add_argument('--cet', default='', help='extra CET commands after arming, ";;"-separated')
     p.add_argument('--cet-file', default='', help='file with extra CET commands (";;"-separated), added after --cet')
+    p.add_argument('--cet-final', default='', help='CET commands sent before every ExitGame (";;"-separated): undo what '
+                                                   'the session switched on, e.g. the diagnostic logs')
+    p.add_argument('--cet-final-file', default='', help='file with --cet-final commands, added after --cet-final')
     p.add_argument('--cet-mods', default='', help='run install_cet_mods.py with these mods (comma list)')
     p.add_argument('--capture', default='desktop', choices=list(gn.CAPTURE_MODES) + [gt_capture.MODE],
                    action=_ExplicitCapture,

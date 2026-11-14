@@ -347,6 +347,34 @@ class EnsureClosedTests(unittest.TestCase):
         self.assertIn('GetSystemRequestsHandler():ExitGame()', typed)
         self.assertTrue(all(c[2] == 11 for c in api.calls if c[0] in ('char', 'keys')))  # all into the game window
 
+    def test_final_commands_are_typed_before_exit_game(self):
+        api = FakeApi()
+        api.on_scan.append(lambda scans: setattr(api, 'running', False)
+                           if scans == (0x1C,) and ''.join(c[1] for c in api.calls if c[0] == 'char').endswith(gn.QUIT_CMD)
+                           else None)
+        n = self.make(api, lambda c, **k: None)
+        n.args.cet_final = "Game.UTPPLogLine('[night] final one');;Game.UTPPLogLine('[night] final two')"
+        res = n.ensure_closed('quit')
+        self.assertEqual(res['path'], 'cet_exitgame')
+        self.assertEqual(res['final_commands'], 2)
+        typed = ''.join(c[1] for c in api.calls if c[0] == 'char')
+        self.assertLess(typed.index('final one'), typed.index('final two'))
+        self.assertLess(typed.index('final two'), typed.index('ExitGame()'))    # the game closes after them
+        # no final commands: nothing extra is typed
+        api2 = FakeApi()
+        api2.on_scan.append(lambda scans: setattr(api2, 'running', False) if scans == (0x1C,) else None)
+        res2 = self.make(api2, lambda c, **k: None).ensure_closed('quit')
+        self.assertNotIn('final_commands', res2)
+
+    def test_final_commands_failure_does_not_block_the_quit(self):
+        api = FakeApi()
+        api.on_scan.append(lambda scans: setattr(api, 'running', False) if scans == (0x1C,) else None)
+        n = self.make(api, lambda c, **k: None)
+        n.args.cet_final_file = os.path.join(tempfile.mkdtemp(), 'missing.txt')
+        res = n.ensure_closed('quit')
+        self.assertEqual(res['path'], 'cet_exitgame')
+        self.assertIn('final_commands_error', res)
+
     def test_quit_command_lost_three_times_goes_to_taskkill(self):
         self.quit_echo = False
         api = FakeApi()
