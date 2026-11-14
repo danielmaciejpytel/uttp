@@ -47,12 +47,20 @@
 //   bodies), the unarmed walk start, the Male sprint flick and the footlock_*.feed windows (run starts from standing, a start over a capsule that
 //   does not move, a walk-to-run transition: 15.2 - 17.7 cm without the bound; the soft slip lagged a toe running away at 3 - 8 m/s while the lock
 //   point already slid at about 90 % of its speed).
+//   M (swept heading step, MapConfig::headingSweepS, and the dip hold, MatcherConfig::headingDipHoldS; churn_dash_sweep_*.feed): a stick swung
+//   90 deg at a run within 0.11 s is one heading step (>= 35 deg within 0.1 s) and its dip into the Walk band keeps the Run gait for the
+//   search: one turn clip instead of Walk pivot -> Run pattern -> loop -> start -> loop (dash_left 7 -> 3, dash_back 6 -> 4; from the swing
+//   to the dodge impulse 5 -> 1 and 3 -> 2). With the dodge clips loaded the replay shows a clip from the impulse for 0.38 s (left) and
+//   0.62 s (back); the changes inside that span are not on screen. The first 10 % of the turn is reached as early as before.
 //   UTPP_CHURN_TRACE=1 prints each window's clip changes, the replay foot lock peak between them and the reaction to each heading step;
 //   UTPP_CHURN_TRACE=2 also prints every frame around each window's foot lock peak (capsule velocity, lock state, weight and correction per foot).
+//   UTPP_CHURN_TRACE=3 prints the trace of 1 and the selection state of every frame of each window (gait, pivot / start flags, interrupt,
+//   jump, costs, drawn yaw).
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
 // (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets),
-// 33 no heading catch-up (check K), 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered).
+// 33 no heading catch-up (check K), 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered),
+// 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered).
 // Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
@@ -467,6 +475,11 @@ int main(int argc, char** argv)
                                             {"kbd_strafe_weave strafe_taps key edges (Male)", 95.75f, 98.65f, 99, false, false, false, 1}}, true},
         // Female 2026-11-14 06:48 run flick (game 8 changes in 2.5 s)
         {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 5}}},
+        // Female 2026-11-14 12:47 and 11:35, sprint_dash from its settle: the stick swings 90 deg at a run in 0.11 s (at most 32 deg per feed,
+        // its length dips to 0.66 = the Walk gait for one or two feeds), then the dodge. Game 7 and 9 changes; replay 7 and 6 without check M
+        // (the swing alone: from its first feed to the dodge impulse, at most two changes; main 5 and 3)
+        {"churn_dash_sweep_left.feed", {{"sprint_dash dash_left (stick sweep)", 573.001f, 575.001f, 3}, {"sprint_dash dash_left (swing to the dodge)", 573.05f, 573.50f, 2}}},
+        {"churn_dash_sweep_back.feed", {{"sprint_dash dash_back (stick sweep)", 713.182f, 715.182f, 4}, {"sprint_dash dash_back (swing to the dodge)", 713.20f, 713.65f, 2}}},
         // check L only (budget 99 = the change count is not checked): Female 2026-11-14 10:00 sprint_again and run_arc_right / accel, 09:02
         // run_arc_left / arc_90, Male 10:45 sprint_start_stop / run_start (game 16.5, 17.6, 16.8 and 15.6 cm)
         {"footlock_sprint_again.feed", {{"sprint_dash sprint_again (foot lock)", 685.775f, 688.775f, 99, false, false, false, -1, 15.0f}}},
@@ -478,10 +491,12 @@ int main(int argc, char** argv)
     char* traceEnv = nullptr;
     size_t traceEnvLen = 0;
     _dupenv_s(&traceEnv, &traceEnvLen, "UTPP_CHURN_TRACE");
+    const bool trace3 = traceEnv && std::strcmp(traceEnv, "3") == 0;
     const bool trace2 = traceEnv && std::strcmp(traceEnv, "2") == 0;
-    const bool trace = trace2 || (traceEnv && std::strcmp(traceEnv, "1") == 0);
+    const bool trace = trace2 || trace3 || (traceEnv && std::strcmp(traceEnv, "1") == 0);
     std::free(traceEnv);
     g_dumpFeet = trace2;
+    g_dumpDiag = trace3;
     for (const Slice& s : slices)
     {
         // check L needs the per-frame foot lock correction of its slice
@@ -522,6 +537,20 @@ int main(int argc, char** argv)
                     peak = 0.0f;
                 }
                 std::printf("  end foot lock peak %.1f cm\n", static_cast<double>(peak));
+                // UTPP_CHURN_TRACE=3: the selection state of every frame from 0.2 s before the window start to the window end
+                for (size_t i = 0; trace3 && i < f.fr.size() && i < run.size() && i < g_diag.size(); ++i)
+                    if (f.fr[i].t >= w.t0 - 0.2f && f.fr[i].t < w.t1)
+                    {
+                        const motiondriver::SelectionDiag& d = g_diag[i];
+                        std::printf("    %.3f mv %.2f tgt %.0f %s ct %.3f g=%d ms=%d piv=%d st=%d int=%d se=%d ju=%d c=%.3f cc=%.3f th=%d v=%.0f vis %.1f\n",
+                                    static_cast<double>(f.fr[i].t), static_cast<double>(std::hypot(f.fr[i].mvx, f.fr[i].mvy)),
+                                    static_cast<double>(f.fr[i].targetYawDeg),
+                                    run[i].clip >= 0 ? std::string(sdb.ClipName(static_cast<uint32_t>(run[i].clip))).c_str() : "-",
+                                    static_cast<double>(run[i].clipTime), d.gait, d.movementState, d.isPivoting ? 1 : 0, d.isStarting ? 1 : 0,
+                                    d.interrupt, d.searched ? 1 : 0, d.jumped ? 1 : 0, static_cast<double>(d.cost),
+                                    static_cast<double>(d.continuingCost), d.turnHold ? 1 : 0, static_cast<double>(d.speedCmS),
+                                    static_cast<double>(run[i].haveVisual ? run[i].visualYawDeg : -999.0f));
+                    }
                 // UTPP_CHURN_TRACE=2: every frame from 0.6 s before to 0.2 s after the window's foot lock peak
                 size_t pk = SIZE_MAX;
                 float pv = 0.0f;

@@ -430,6 +430,10 @@ foreach(_m 24 25 26 27 28 29 30 31 32 33)
         set(_utpp_churn_fail "FAIL start restart")
     elseif(_m EQUAL 33)
         set(_utpp_churn_fail "FAIL changes per heading step")
+    elseif(_m EQUAL 27)
+        # the heading rules now search a swing's short gait dip in the playing gait, so no churn window needs the hold any more;
+        # the hold's own checks still catch the mutation
+        set(_utpp_churn_fail "FAIL gait return hold keeps Run")
     elseif(_m EQUAL 31)
         set(_utpp_churn_fail "FAIL gait return hold (does not flicker|lasts as long) under uneven frame times")
     else()

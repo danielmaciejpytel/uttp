@@ -589,6 +589,10 @@ struct MatcherConfig
     // band to a release showed the transition for one feed before the Stop; a release within this time picks its Stop directly. A
     // downshift that stays reaches its new clip up to this much later. 0 = off.
     float downshiftDeferS = 0.04f;
+    // headingDipHoldS: for this long after a heading step (ChooserState::headingStepAgeS) a gait downshift while moving is searched in the
+    // gait of the playing clip. A thumbstick swung to a new direction at a run passes inside its rim for one or two feeds (the stick
+    // length dips below the Run threshold); a Walk pivot / turn picked there was replaced by a Run clip one feed later. 0 = off.
+    float headingDipHoldS = 0.1f;
 
     // HEADING CATCH-UP. A direction key changes the wanted run direction in one feed: the capsule velocity follows within one or two
     // feeds while the actor facing turns at its own rate (about 0.3-0.5 s for 90 deg). In that time the velocity points sideways or
@@ -1080,6 +1084,15 @@ public:
         {
             m_last = res;
             return m_last;
+        }
+        // MatcherConfig::headingDipHoldS: the stick dip of a swing to a new direction keeps the gait of the playing clip
+        if (UTPP_AND_NOT(JUMPPICK, 39) m_guardsOn && m_cfg.headingDipHoldS > 0.0f && aState.headingStepAgeS < m_cfg.headingDipHoldS && m_cur.valid && !aForce &&
+            aState.gait < m_holdGait && aState.movementState == 1 && m_holdMovementState == 1 && aState.movementMode == 0 && aState.stance == 0 &&
+            m_holdStance == 0)
+        {
+            ChooserState held = aState;
+            held.gait = m_holdGait;
+            return Update(aDt, aTraj, aNumTraj, held, aHist, aForce);
         }
         m_now += aDt;
         const bool holdWasActive = m_slideExitHoldLeft > 0.0f;

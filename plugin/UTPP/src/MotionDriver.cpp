@@ -4882,6 +4882,20 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             g_dodgeSt.noContactLeft = std::fmax(0.0f, g_dodgeSt.noContactLeft - dt);
         g_dodgeSt.clips += dodgeFr.active && dodgeFr.start ? 1u : 0u;
         g_dodgeSt.held = g_dodgeSt.held && dodgeFr.active; // the next dodge takes its own upper body
+        // diagnostic logging (own token, not a MOTION line): the dodge clip covers the motion pose from the start line to the end line (the
+        // MOTION lines between them name the clip searched underneath, which is not shown); from the end line the motion pose blends back
+        // in over dodge::kBlendOutS
+        if (g_trace && g_log && ((dodgeFr.active && dodgeFr.start) || dodgeFr.handback))
+        {
+            char line[128];
+            if (dodgeFr.handback)
+                std::snprintf(line, sizeof line, "UTPP MOTIONDODGE end t=%.3f blend=%.2f", static_cast<double>(g_traceClock + dt),
+                              static_cast<double>(dodge::kBlendOutS));
+            else
+                std::snprintf(line, sizeof line, "UTPP MOTIONDODGE start t=%.3f sector=%s", static_cast<double>(g_traceClock + dt),
+                              dodge::SectorName(dodgeFr.sector));
+            g_log(line);
+        }
     }
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_dodgeProbe.active = dodgeFr.active;

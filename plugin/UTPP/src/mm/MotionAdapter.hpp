@@ -775,6 +775,10 @@ struct MapConfig
     // degrees from one feed to the next (a direction key; the camera turns 3-5 deg per feed under a fast mouse flick). 0 = never.
     // A start from rest counts as a step too when the first wanted direction is at least this far from the facing.
     float headingStepDeg = 35.0f;
+    // Swept heading step: the wanted direction counts as a step also when it turns by headingStepDeg within this many seconds over several
+    // feeds (a thumbstick swung to a new direction; the camera under a fast mouse flick turns 3-5 deg per feed, under 35 deg in 0.1 s).
+    // 0 = only the change between two feeds.
+    float headingSweepS = 0.1f;
     // G2: capsule speed (game m/s) at the FULL stick while the game walk toggle is on (CET mm.walkSpeed -> UTPPSetMotionWalkSpeed; the
     // script holds the capsule there with one MaxSpeed multiplier, utpp.reds UTPPUpdateWalkSpeed). 0 = off: nothing below changes, bit
     // for bit. > 0 (and < gameStandPoints[1]) and MotionFeed::wantsToWalk on the stand ground (EffectiveMapConfig): the first stand speed
@@ -1100,6 +1104,11 @@ struct MapState
     float headingYawDeg = 0.0f;     // heading step: that direction (game yaw convention)
     float headingStepAgeS = 1.0e9f; // heading step: seconds since the last step (ChooserState::headingStepAgeS)
     bool headingStepFromRest = false; // heading step: the last step was a start from rest (ChooserState::headingStepFromRest)
+    // swept heading step (MapConfig::headingSweepS): the wanted directions of the recent feeds and their ages (seconds), oldest first
+    static constexpr int kHeadingSweepFeeds = 16;
+    float sweepYawDeg[kHeadingSweepFeeds] = {};
+    float sweepAgeS[kHeadingSweepFeeds] = {};
+    int sweepCount = 0;
     float stopHoldCmS = 0.0f;
     float capsuleBrakeModel = 0.0f; // active grounded no-input CP deceleration; trace only
     float capsuleAccelModel = 0.0f; // active grounded full-input applied acceleration; trace only
@@ -1869,12 +1878,32 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     {
         const bool headingNow = rot == motiontraj::RotationMode::OrientToMovement && mode == 0 && !slideActive && !motiontraj::IsZero(dir);
         const float lagNow = headingNow && std::isfinite(f.playerYawDeg) ? std::fabs(motiontraj::NormalizeAxis(inputYaw - f.playerYawDeg)) : 0.0f;
+        // swept step (MapConfig::headingSweepS): the directions of the feeds of the last headingSweepS seconds (the newest kept feeds only)
+        bool swept = false;
+        if (UTPP_AND_NOT(JUMPPICK, 38) headingNow && m.headingValid && c.headingSweepS > 0.0f && c.headingStepDeg > 0.0f)
+        {
+            int keep = 0;
+            for (int k = 0; k < m.sweepCount; ++k)
+            {
+                const float age = m.sweepAgeS[k] + dt;
+                if (age > c.headingSweepS)
+                    continue;
+                swept = swept || std::fabs(motiontraj::NormalizeAxis(inputYaw - m.sweepYawDeg[k])) >= c.headingStepDeg;
+                m.sweepYawDeg[keep] = m.sweepYawDeg[k];
+                m.sweepAgeS[keep++] = age;
+            }
+            m.sweepCount = keep;
+        }
+        else
+            m.sweepCount = 0;
         if (!headingNow)
             m.headingStepAgeS = 1.0e9f;
-        else if (m.headingValid && c.headingStepDeg > 0.0f && std::fabs(motiontraj::NormalizeAxis(inputYaw - m.headingYawDeg)) >= c.headingStepDeg)
+        else if (m.headingValid && c.headingStepDeg > 0.0f &&
+                 (swept || std::fabs(motiontraj::NormalizeAxis(inputYaw - m.headingYawDeg)) >= c.headingStepDeg))
         {
             m.headingStepAgeS = 0.0f;
             m.headingStepFromRest = false;
+            m.sweepCount = 0; // one sweep is one step
         }
         // a start from rest toward a direction away from the facing: the body catches up from the start clip as after a key step
         else if (!m.headingValid && c.headingStepDeg > 0.0f && lagNow >= c.headingStepDeg)
@@ -1884,6 +1913,17 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         }
         else if (m.headingStepAgeS < 1.0e8f)
             m.headingStepAgeS += dt;
+        if (headingNow && c.headingSweepS > 0.0f)
+        {
+            if (m.sweepCount == MapState::kHeadingSweepFeeds) // full: the oldest goes
+            {
+                for (int k = 1; k < m.sweepCount; ++k)
+                    m.sweepYawDeg[k - 1] = m.sweepYawDeg[k], m.sweepAgeS[k - 1] = m.sweepAgeS[k];
+                --m.sweepCount;
+            }
+            m.sweepYawDeg[m.sweepCount] = inputYaw;
+            m.sweepAgeS[m.sweepCount++] = 0.0f;
+        }
         m.headingValid = headingNow;
         m.headingYawDeg = inputYaw;
         s.headingStepAgeS = m.headingStepAgeS;
