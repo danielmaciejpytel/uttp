@@ -2864,25 +2864,32 @@ class Night:
             rec.pop('invalid_cause', None)
             rec.pop('invalid_fails', None)
 
-    def leave_car(self, pad, guard, plan: dict, seconds: float = 4.0) -> None:
+    def leave_car(self, pad, guard, plan: dict, seconds: float = 4.0, blind: bool = False) -> None:
         """After the car scenario: turn the camera away from the car and sprint off, so the walking scenarios that
-        follow do not start next to it. Best effort (needs a position with the vehicle)."""
+        follow do not start next to it. Best effort (needs a position with the vehicle); blind=True: a position line
+        without the vehicle (V on foot) still sprints off, straight ahead."""
         pos = self.poll_pos(guard, pad)
-        if not pos or not pos.get('p') or not pos.get('cf') or not pos.get('v') or pos.get('src') == 'mounted':
-            self.log('[leave-car] no position with the car - staying')
-            return
-        away = (pos['p'][0] - pos['v'][0], pos['p'][1] - pos['v'][1])
-        n = math.hypot(*away) or 1.0
-        target = (pos['p'][0] + away[0] / n * 10.0, pos['p'][1] + away[1] / n * 10.0)
-        self.camera_align(pad, guard, plan, pos, target, {'events': []}, why='leave-car')
+        with_car = bool(pos and pos.get('p') and pos.get('cf') and pos.get('v') and pos.get('src') != 'mounted')
+        if not with_car:
+            if not blind or not pos or pos.get('src') == 'mounted' or pos.get('mounted'):
+                self.log('[leave-car] no position with the car - staying')
+                return
+            self.log('[leave-car] no position with the car - sprinting straight ahead')
+        else:
+            away = (pos['p'][0] - pos['v'][0], pos['p'][1] - pos['v'][1])
+            n = math.hypot(*away) or 1.0
+            target = (pos['p'][0] + away[0] / n * 10.0, pos['p'][1] + away[1] / n * 10.0)
+            self.camera_align(pad, guard, plan, pos, target, {'events': []}, why='leave-car')
         sc = parse_scenario('clear_probe', {'steps': [
             {'name': 'leave', 'duration': seconds + 1.5, 'interp': 'step',
              'ls': [[0, 0, 0], [0.05, 0, 1], [0.05 + seconds, 0, 0]], 'rs': [[0, 0, 0]],
              'buttons': [{'t': 0.2, 'button': 'LS', 'hold': 0.12}], 'metrics': False}]})
         self.play(pad, guard, 'clear_probe', plan, sc)
         new = self.poll_pos(guard, pad)
-        if new and new.get('p'):
+        if new and new.get('p') and with_car:
             self.log(f'[leave-car] {math.hypot(new["p"][0] - pos["v"][0], new["p"][1] - pos["v"][1]):.0f} m from the car')
+        elif new and new.get('p') and pos.get('p'):
+            self.log(f'[leave-car] {math.hypot(new["p"][0] - pos["p"][0], new["p"][1] - pos["p"][1]):.0f} m from where V stood')
 
     def extend_deadline(self, seconds: float) -> None:
         """Time spent on probes and a repeated attempt does not count against the scenario time limit."""
@@ -3782,7 +3789,7 @@ class Night:
             # metres away from it, and that place becomes the start point (the car and traversal sets need V at the car)
             if self.left_vehicle_this_cycle and not any(n in ('vehicle_mount_exit', gtv.SET_NAME) for n in self.names):
                 try:
-                    self.leave_car(pad, guard, plan, seconds=2.5)
+                    self.leave_car(pad, guard, plan, seconds=2.5, blind=True)
                     self.level_camera(pad, guard, plan)
                 except NeedsKeyboard as e:
                     self.log(f'[scenarios] walking away from the vehicle skipped: {e}')
