@@ -32,9 +32,13 @@
 //   (without the commit the Male sprint flick dropped Run_Turn_L_180 at clip time 0.80 for Run_Loop_B, then a loop / reface chain followed).
 //   H (turn commit and release, churn_turn_release.feed = Female keyboard-like strafe taps): the keys released while a committed turn clip
 //   plays end the commit at once and the Stop clip is picked on the release frame, as in check B.
+//   K (heading catch-up, MatcherConfig::headingCatchUpS; churn_kbd_*.feed = Female 2026-11-14 03:53, full-deflection direction keys): after each
+//   heading step (the wanted direction turns >= 35 deg between two feeds) at most two clip changes until the next step for a 45 / 90 deg
+//   change and at most one per flip of the left / right taps (0.35 s apart); the windows also keep 3.0 changes per second.
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
-// (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets).
+// (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets),
+// 33 no heading catch-up (check K).
 // Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
@@ -50,6 +54,7 @@ struct Window
     bool reface = false; // check C applies: the Walk reface start swaps of this window
     bool restarts = false; // check D applies: no start clip restarted from its first frame over and over
     bool turnHeld = false; // check G applies: a turn clip picked on the reversal plays through its authored root turn
+    int edgeMax = -1;      // check K applies: at most this many clip changes after each digital heading step (-1 = not checked)
 };
 
 // check G (MatcherConfig::turnCommit): pivot / moving-turn clips (steer::IsPivot / IsMoveTurn) picked in [aT0, aT1) that were replaced before their authored
@@ -200,6 +205,58 @@ int CountStartRestarts(const mm::motion::MotionDatabase& aDb, const FeedFile& aF
     return n;
 }
 constexpr int kMaxStartRestarts = 1;
+
+// check K (MatcherConfig::headingCatchUpS): clip changes after each digital heading step of the window - a feed whose wanted direction (the feed's
+// Locomotion target yaw) turned by >= 35 deg from the previous feed - counted until the next step or the key release (target gone)
+struct EdgeChanges
+{
+    int edges = 0, worst = 0;
+    float worstT = 0.0f;
+};
+EdgeChanges ChangesPerHeadingStep(const FeedFile& aFeed, const std::vector<FrameOut>& aRun, float aT0, float aT1)
+{
+    EdgeChanges r;
+    int cur = -1; // changes since the last step (-1 = no step yet)
+    float curT = 0.0f;
+    const auto close = [&] {
+        if (cur > r.worst)
+            r.worst = cur, r.worstT = curT;
+        cur = -1;
+    };
+    int32_t clip = -1, dbi = -1;
+    float ct = 0.0f, tPrev = 0.0f;
+    bool have = false;
+    for (size_t i = 1; i < aRun.size() && i < aFeed.fr.size(); ++i)
+    {
+        const Frame& p = aFeed.fr[i - 1];
+        const Frame& f = aFeed.fr[i];
+        const float t = f.t;
+        if (t >= aT1)
+            break;
+        if (!f.haveTarget)
+            close();
+        else if (t >= aT0 && p.haveTarget && std::fabs(std::remainder(f.targetYawDeg - p.targetYawDeg, 360.0f)) >= 35.0f)
+        {
+            close();
+            cur = 0;
+            curT = t;
+            ++r.edges;
+        }
+        if (!aRun[i].stepped)
+            continue;
+        const bool differs = aRun[i].clip != clip || aRun[i].db != dbi;
+        const bool relabel = differs && aRun[i].clip == clip && std::fabs((aRun[i].clipTime - ct) - (t - tPrev)) <= 0.05f;
+        if (have && differs && !relabel && cur >= 0)
+            ++cur;
+        clip = aRun[i].clip;
+        dbi = aRun[i].db;
+        ct = aRun[i].clipTime;
+        tPrev = t;
+        have = true;
+    }
+    close();
+    return r;
+}
 
 // check E (gait return hold, MapConfig::gaitReturnHoldS, no data files): a slow RISING stick (0.3 -> 0.6, below the 0.7 Walk / Run threshold) shortly after a
 // short run, the capsule still running, keeps the Run gait for gaitReturnHoldS from the last real Run frame and then returns to Walk ONCE (2 gait
@@ -373,6 +430,18 @@ int main(int argc, char** argv)
         // Male 2026-11-11 17:19: sprint flick; 9 changes in 2.5 s (3.6 per second, game 9) before the turn commit, 6 with it
         {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male)", 181.397f, 183.897f, 6, false, false, true}}, true},
         {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 3}, {"sprint_dash sprint_again", 264.284f, 267.284f, 7}}},
+        // Female 2026-11-14 03:53, keyboard-like input (full-deflection direction keys): the harness step windows keep 3.0 changes per second; check K
+        // runs over the key edges of the whole sequence (the key edge of a step reaches the feed ~0.13 s before the harness step window starts)
+        {"churn_kbd_switch90.feed", {{"kbd_switch_90 right", 36.10f, 37.50f, 4}, {"kbd_switch_90 back", 37.50f, 38.90f, 4}, {"kbd_switch_90 left", 38.90f, 40.30f, 4},
+                                     {"kbd_switch_90 fwd_again", 40.30f, 41.70f, 4}, {"kbd_switch_90 key edges", 35.9f, 41.6f, 99, false, false, false, 2}}},
+        {"churn_kbd_diagonals.feed", {{"kbd_diagonals fwd_right", 80.16f, 81.06f, 2}, {"kbd_diagonals right", 81.06f, 81.96f, 2}, {"kbd_diagonals back_right", 81.96f, 82.86f, 2},
+                                      {"kbd_diagonals back", 82.86f, 83.76f, 2}, {"kbd_diagonals back_left", 83.76f, 84.66f, 2}, {"kbd_diagonals left", 84.66f, 85.56f, 2},
+                                      {"kbd_diagonals fwd_left", 85.56f, 86.46f, 2}, {"kbd_diagonals key edges", 79.9f, 87.2f, 99, false, false, false, 2}}},
+        {"churn_kbd_strafe.feed", {{"kbd_strafe_weave weave", 100.56f, 103.76f, 9}, {"kbd_strafe_weave strafe_taps", 103.76f, 106.56f, 8},
+                                   {"kbd_strafe_weave weave key edges", 100.4f, 103.6f, 99, false, false, false, 2},
+                                   {"kbd_strafe_weave strafe_taps key edges", 103.6f, 106.5f, 99, false, false, false, 1}}},
+        {"churn_kbd_switch180.feed", {{"kbd_switch_180 back", 56.77f, 58.37f, 4}, {"kbd_switch_180 fwd_again", 58.37f, 59.97f, 4}, {"kbd_switch_180 right", 62.77f, 64.37f, 4},
+                                      {"kbd_switch_180 left_again", 64.37f, 65.97f, 4}}},
     };
     for (const Slice& s : slices)
     {
@@ -418,6 +487,14 @@ int main(int argc, char** argv)
                 const std::string tdd = std::to_string(td.picks) + " turn clips picked, " + std::to_string(td.drops) + " replaced before their turn was done" +
                                         (td.first.empty() ? std::string() : " (" + td.first + ")");
                 Check(td.picks >= 1 && td.drops == 0, std::string("turn played through ") + w.name, tdd);
+            }
+            if (w.edgeMax >= 0)
+            {
+                const EdgeChanges ec = ChangesPerHeadingStep(f, run, w.t0, w.t1);
+                char ed[160];
+                std::snprintf(ed, sizeof(ed), "%d heading steps, at most %d clip changes after one (the step at %.3f s), limit %d", ec.edges, ec.worst,
+                              static_cast<double>(ec.worstT), w.edgeMax);
+                Check(ec.edges >= 1 && ec.worst <= w.edgeMax, std::string("changes per heading step ") + w.name, ed);
             }
         }
     }

@@ -765,6 +765,9 @@ struct MapConfig
     float gaitReturnHoldS = 0.3f;
     // Gait return hold: the stick counts as rising when it grows faster than this (stick magnitude per second; 0.3 = 0.005 per feed at 60 feeds per second)
     float gaitReturnRiseRate = 0.3f;
+    // Digital heading step (ChooserState::headingStepAgeS, MatcherConfig::headingCatchUpS): the wanted run direction turns by at least this many
+    // degrees from one feed to the next (a direction key; the camera turns 3-5 deg per feed under a fast mouse flick). 0 = never.
+    float headingStepDeg = 35.0f;
     // G2: capsule speed (game m/s) at the FULL stick while the game walk toggle is on (CET mm.walkSpeed -> UTPPSetMotionWalkSpeed; the
     // script holds the capsule there with one MaxSpeed multiplier, utpp.reds UTPPUpdateWalkSpeed). 0 = off: nothing below changes, bit
     // for bit. > 0 (and < gameStandPoints[1]) and MotionFeed::wantsToWalk on the stand ground (EffectiveMapConfig): the first stand speed
@@ -1079,6 +1082,9 @@ struct MapState
     float prevStick = 0.0f;  // gait return hold: stick magnitude of the previous feed
     float sinceRunS = 1.0e9f; // gait return hold: seconds since the gait was Run (the stick's own gait, not the forced one)
     bool gaitHeld = false;    // gait return hold: the previous feed's gait was forced to Run by the hold
+    bool headingValid = false;      // heading step: the previous feed had a wanted direction (OrientToMovement on the ground)
+    float headingYawDeg = 0.0f;     // heading step: that direction (game yaw convention)
+    float headingStepAgeS = 1.0e9f; // heading step: seconds since the last step (ChooserState::headingStepAgeS)
     float stopHoldCmS = 0.0f;
     float capsuleBrakeModel = 0.0f; // active grounded no-input CP deceleration; trace only
     float capsuleAccelModel = 0.0f; // active grounded full-input applied acceleration; trace only
@@ -1809,6 +1815,20 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         m.slideDirectionOther = false;
     s.isStarting = st.isStarting;
     s.isPivoting = st.isPivoting;
+    // digital heading step (MapConfig::headingStepDeg): the wanted direction jumped from one feed to the next while it stayed valid
+    {
+        const bool headingNow = rot == motiontraj::RotationMode::OrientToMovement && mode == 0 && !slideActive && !motiontraj::IsZero(dir);
+        if (!headingNow)
+            m.headingStepAgeS = 1.0e9f;
+        else if (m.headingValid && c.headingStepDeg > 0.0f && std::fabs(motiontraj::NormalizeAxis(inputYaw - m.headingYawDeg)) >= c.headingStepDeg)
+            m.headingStepAgeS = 0.0f;
+        else if (m.headingStepAgeS < 1.0e8f)
+            m.headingStepAgeS += dt;
+        m.headingValid = headingNow;
+        m.headingYawDeg = inputYaw;
+        s.headingStepAgeS = m.headingStepAgeS;
+        s.headingLagDeg = headingNow && std::isfinite(f.playerYawDeg) ? std::fabs(motiontraj::NormalizeAxis(inputYaw - f.playerYawDeg)) : 0.0f;
+    }
     s.shouldTurnInPlace = st.shouldTurnInPlace;
     s.shouldSpinTransition = st.shouldSpin;
     s.justLandedLight = st.justLandedLight;

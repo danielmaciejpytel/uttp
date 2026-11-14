@@ -142,6 +142,12 @@ struct ChooserState
     // The game's own Dodge (PSM detail 7, on the ground): an impulse of up to 11 m/s that decays within ~0.25 s and is no motion this database
     // represents. Written by adapter::MapToChooser; MatcherConfig::dodgeHold keeps the playing clip through it.
     bool dodge = false;
+    // Digital heading step (MatcherConfig::headingCatchUpS): seconds since the wanted run direction jumped by at least
+    // MapConfig::headingStepDeg within one feed (a direction key pressed or released while moving, OrientToMovement on the ground;
+    // a large value = no step), and the absolute angle (deg) between that direction and the rendered actor facing. Written by
+    // adapter::MapToChooser; a hand-built state leaves the defaults (the catch-up rule never acts).
+    float headingStepAgeS = 1.0e9f;
+    float headingLagDeg = 0.0f;
 };
 
 inline cancelstart::State CancellationState(const ChooserState& state)
@@ -565,6 +571,18 @@ struct MatcherConfig
     // state 0, so the Stop is picked on the release frame), a stance change, air, a landing / traversal, a forced interrupt, an aim / shot /
     // spin / reface start or a missing continuing row release it in the same update. false = off.
     bool turnCommit = true;
+
+    // HEADING CATCH-UP. A direction key changes the wanted run direction in one feed: the capsule velocity follows within one or two
+    // feeds while the actor facing turns at its own rate (about 0.3-0.5 s for 90 deg). In that time the velocity points sideways or
+    // backwards relative to the lagging facing, and the search picked the clips made for a body that keeps its facing (strafe loops
+    // FR / RL / RR_offset ..., box / hourglass / prism patterns, pivots without an authored root turn), each replaced 50-200 ms later as
+    // the facing caught up (one 90 deg key change: box -> RL -> FR -> F_R_20 -> F; one 45 deg change: F -> FR -> F_R_20 -> F).
+    // headingCatchUpS: for this long after a heading step (ChooserState::headingStepAgeS), while the facing is still more than
+    // headingSettledDeg away from the wanted direction (ChooserState::headingLagDeg), moving on the stand ground, those clips are not NEW
+    // candidates: the pick is a turn or a forward / curved loop that turns with the body (a picked turn is then kept by turnCommit). The
+    // continuing pose is not affected. 0 = off.
+    float headingCatchUpS = 1.0f;
+    float headingSettledDeg = 12.0f;
 };
 #ifndef UTPP_LOCOMATCHER_MUTATION
 #define UTPP_LOCOMATCHER_MUTATION 0
@@ -802,6 +820,33 @@ public:
                 {
                     m_clipTurnEndS[c] = static_cast<float>(f) / aDb->Header().fps;
                     break;
+                }
+            }
+        }
+        // headingCatchUpS: clips made for a body that keeps its facing - pattern and side-step shuffle clips, pivots / turns with less than 45 deg of authored
+        // root yaw, and loops that run in any direction but forward (forward = Loop_F and the curved Loop_F_L_* / Loop_F_R_*)
+        m_clipKeepsFacing.assign(aDb->NumClips(), 0);
+        for (uint32_t c = 0; c < aDb->NumClips(); ++c)
+        {
+            const std::string_view name = aDb->ClipName(c);
+            const uint8_t cls = steer::ClassifyClip(name);
+            if (cls == steer::kClassPattern || name.find("_Shuffle_") != std::string_view::npos)
+                m_clipKeepsFacing[c] = 1;
+            else if (steer::IsPivot(cls) || steer::IsMoveTurn(cls))
+            {
+                const MotionClipRecord& cl = aDb->Clip(c);
+                double yaw = 0.0;
+                for (uint32_t f = 0; f < cl.numFrames; ++f)
+                    yaw += aDb->Root(cl.firstFrame + f).dyaw;
+                m_clipKeepsFacing[c] = std::fabs(yaw) < 45.0 * math::kPi / 180.0 ? 1 : 0;
+            }
+            else if (aDb->Clip(c).flags & kClipLoop)
+            {
+                const size_t p = name.find("_Loop_");
+                if (p != std::string_view::npos)
+                {
+                    const std::string_view dir = name.substr(p + 6);
+                    m_clipKeepsFacing[c] = (dir == "F" || dir.starts_with("F_L_") || dir.starts_with("F_R_")) ? 0 : 1;
                 }
             }
         }
@@ -1612,6 +1657,12 @@ public:
         if (turnHold && !contEvaluated)
             m_turnHoldClip = -1;
         res.turnHold = continueTurn;
+        // MatcherConfig::headingCatchUpS: after a digital heading step, until the facing has caught up, no clip that keeps its facing is a new candidate
+        // mutation 33: no heading catch-up rule
+        m_headingCatchUp = UTPP_AND_NOT(JUMPPICK, 33) m_guardsOn && m_cfg.headingCatchUpS > 0.0f && aState.headingStepAgeS < m_cfg.headingCatchUpS &&
+                           aState.headingLagDeg > m_cfg.headingSettledDeg && aState.movementMode == 0 && aState.movementState == 1 &&
+                           aState.stance == 0 && !aForce && !aState.justLandedLight && !aState.justLandedHeavy && !aState.justTraversed &&
+                           !aState.stationaryAimTurn && !aState.stationaryShotTurn && !aState.restTurn;
         // ---- search every chooser database
         for (uint32_t i = 0; i < numDb && !continueShotTurn && !continueAimTurn && !continueStartTurn && !continueSlideExit && !continueRise &&
                                   !continueExitClip && !continueStopClip && !continueDodge && !continueTurn; ++i)
@@ -2186,6 +2237,19 @@ private:
                 n += en.numRows;
             }
         }
+        // MatcherConfig::headingCatchUpS: the clips for a body that keeps its facing are not NEW candidates while the facing catches up with a heading step
+        if (m_headingCatchUp)
+        {
+            const DatabaseRecord& D = m_db->Db(d);
+            for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+            {
+                const EntryRecord& en = m_db->Entry(e);
+                if (!m_clipKeepsFacing[en.clip] || en.numRows == 0)
+                    continue;
+                std::memset(m_excluded.data() + (en.firstRow - D.firstRow), 1, en.numRows);
+                n += en.numRows;
+            }
+        }
         // G10 (MatcherConfig::runWalkLoopsMaxCmS): the Walk_Loops database joined the Run gait for its LOOPS only: its Run_to_Walk transitions
         // (motion: gait Walk) and Walk_Shuffle clips are not NEW candidates (measured: Run_to_Walk_Rfoot at 2.1 s won at cost -0.09 and played 4 s at 247 cm/s)
         if (m_runGaitWalkLoops && m_dbStandWalkLoops[d])
@@ -2666,6 +2730,8 @@ private:
     std::vector<uint8_t> m_clipStop;         // churn guard 2: clip index -> 1 = a Stop clip (the stop commit owns those)
     std::vector<uint8_t> m_clipRunToWalk;    // G1: clip index -> 1 = M_Neutral_Transition_Run_to_Walk_L/Rfoot
     bool m_runGaitWalkLoops = false;         // G10: this update searches the Walk_Loops database in the Run gait (runWalkLoopsMaxCmS)
+    std::vector<uint8_t> m_clipKeepsFacing;  // headingCatchUpS: clip index -> 1 a clip for a body that keeps its facing
+    bool m_headingCatchUp = false;           // headingCatchUpS: this update excludes the m_clipKeepsFacing clips from the new candidates
     float m_speedCmS = 0.0f;                 // G10: chooser speed of this update
     float m_sinceSlowS = 1.0e9f;             // G10: seconds since the last update with chooser speed <= runTransitionSlowCmS
     std::vector<uint8_t> m_dbStandRunLoops;  // G10: database index -> 1 = PSD_Dense / Sparse_Stand_Run_Loops
