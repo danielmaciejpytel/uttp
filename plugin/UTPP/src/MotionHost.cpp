@@ -4132,15 +4132,15 @@ void Feed(const FeedInput& aRawIn)
             // Vault torso limiter (mm/VaultTorso.hpp): every feed steps the fade and publishes the weight for the FK detour. Gate = a vault
             // released to the game animation, over a vehicle v2 rejected, with a ranged weapon in hand. Any other feed: wanted false.
             {
-                mm::vaulttorso::GateInput gi;
-                gi.travRelease = (rel & kReleaseTrav) != 0;
-                gi.otherRelease = (rel & ~uint32_t(kReleaseTrav)) != 0;
-                gi.psmReleaseBit = (aIn.psmBlock & kPsmReleaseMask) != 0; // vehicle / scene / workspot / takedown / carry / vitals / swimming
-                gi.psmDetail = psmDetail;
-                gi.weaponDrawn = g_weaponHeld;
-                gi.vehicleVaultRanged = g_motion && g_motion->vehicleVaultWeapon && g_motion->vehicleVaultWeapon(); // also the hold after the release ends
+                mm::vaulttorso::GateInput vaultGate;
+                vaultGate.travRelease = (rel & kReleaseTrav) != 0;
+                vaultGate.otherRelease = (rel & ~uint32_t(kReleaseTrav)) != 0;
+                vaultGate.psmReleaseBit = (aIn.psmBlock & kPsmReleaseMask) != 0; // vehicle / scene / workspot / takedown / carry / vitals / swimming
+                vaultGate.psmDetail = psmDetail;
+                vaultGate.weaponDrawn = g_weaponHeld;
+                vaultGate.vehicleVaultRanged = g_motion && g_motion->vehicleVaultWeapon && g_motion->vehicleVaultWeapon(); // also the hold after the release ends
                 static const int64_t vaultTps = static_cast<int64_t>(QpcFreq());
-                const int edge = mm::vaulttorso::rt::Feed(gi, aRaw.dt, Qpc(), vaultTps);
+                const int edge = mm::vaulttorso::rt::Feed(vaultGate, aRaw.dt, Qpc(), vaultTps);
                 if (edge != 0 && g_log)
                 {
                     char line[160];

@@ -972,7 +972,7 @@ inline float FollowWeapon(const Prepared& p,const ov::Pose& body,const ov::Pose&
 // Applies the left arm adjustment to `target` (translation of the left clavicle). `body` = the MM pose the solver works on (masked channels
 // restored). Returns the length of the applied offset (m); 0 = nothing changed.
 inline float AdjustLeftArm(const Prepared& p,const ov::Pose& body,const ov::Pose& startPose,ov::Pose& target,LeftArmState* state,uint64_t rigId,
-                           int64_t ticks,int64_t tps,float weight,const PublishedStart* pub=nullptr)
+                           int64_t ticks,int64_t tps,float weight,const PublishedStart* /*pub*/=nullptr)
 {
     const auto& sk=p.skeleton;
     const int clavicle=sk.parent[p.arms.left.upper];
