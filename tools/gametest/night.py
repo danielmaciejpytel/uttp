@@ -27,7 +27,7 @@ One cycle (Research\\logs\\night\\<cycle-ts>\\cycle.json records every step with
                   then Y double tap if needed;
                   verified by the UTPP MMMASK/MMGATE melee lines and MM weight w >= 0.9 while masked),
                   melee_fists_target (--set melee_fists_target only: the fists against a REAL opponent - a Codeware NPC
-                  spawned and teleported by console commands, Immortal; far / near / camera-orbit / block phases; evidence =
+                  spawned at each phase distance by console commands, Immortal; far / near / camera-orbit / block phases; evidence =
                   MELEEAIM src=lock, V <-> target distance, target health before/after; see enemy_macro),
                   aim_probe (--set aim_probe only: perspective.aiming=tpp + utpp_probe AimProbe(true) by script, LT hold
                   4 s with 2 RT shots, AimProbe(false) + aiming=fpp restored in a finally; PASS = >= 4 aimprobe samples,
@@ -1526,18 +1526,22 @@ class Night:
         return res
 
     def enemy_macro(self, pad, guard, plan: dict) -> dict:
-        """Fist fight against a REAL opponent (`--set melee_fists_target`, not in 'all'). Nobody had seen the third-person
-        melee on a target: no `src=lock` line in any log; reach, hit direction and the look of a hit are unknown.
+        """Fist fight against a REAL opponent (`--set melee_fists_target`, not in 'all'): reach, hit direction and the
+        look of a hit on a target. Needs only the pad and the command channel - no key, no mouse, no overlay - so it also
+        runs with --background (the game must still take pad input then).
 
-        Console (every command echo-verified, gt_night.enemy_*; typed at ~12 ms per character, so they are short): Codeware
-        entity of a Character record (first that works of --enemy-record) 6 m ahead of V, tagged gn.ENEMY_TAG (NightAuto
-        then reports it in `v=`), Immortal god mode (the health drops but it cannot die), the attitude set to Neutral once
-        when it is Friendly (GetTargetObject skips a Friendly target). Phases (the target is TELEPORTED along the camera forward before each; it restores to 100 %):
-        far 2.0 m, near 1.2 m, orbit (camera turned 60 deg, target 1.2 m along the new forward), block 1.5 m - each with 3
-        punches (melee_punch) or the LT block (melee_block). The health must drop in near and orbit; far and block are
-        report only. Evidence per phase from the UTPP log: MELEEAIM src= (lock?
-        tgtYaw is clamped at 25 deg, so rawYaw = the body-to-target angle is reported too), MMMASK / MMMELEEFULL, V <-> target distance from the NightAuto POS lines, and the health read
-        before the next placement (nothing in the mod logs a hit). gt_night.enemy_evaluate gives the verdict. Everything is
+        Console (every command echo-verified, gt_night.enemy_*; typed at ~12 ms per character without the file channel):
+        NightAuto is pointed at gn.ENEMY_TAG (every POS line then carries the target in `v=`), the fists are equipped and
+        raised with NO target in the world, then every phase places a FRESH target: one command reads the old one (its
+        health = the previous phase's result), deletes it and spawns the next at the phase distance along the camera
+        forward (a target is never moved once it exists). The placement counts only when the next state
+        read shows the target `at=1` (|V <-> target - wanted| <= gn.ENEMY_PLACE_TOL); that same read applies Immortal god
+        mode and, when the attitude is Friendly or unreadable, Neutral (the game's lock skips a Friendly target) and echoes
+        the attitude after it. A phase whose target is not there is NOT punched (verdict line says why).
+        Phases: far 2.0 m, near 1.2 m, orbit (camera turned 60 deg first, target 1.2 m along the new forward), block
+        1.5 m - each with 3 punches (melee_punch) or the LT block (melee_block). The health must drop in near and orbit;
+        far and block are report only. Evidence per phase: MELEEAIM src= (lock?), V <-> target distance at placement and
+        from the POS lines, health before / after, hit marker; gt_night.enemy_evaluate gives the verdict. Everything is
         undone in a finally (target deleted, god mode removed, NightAuto tag restored, fists put away)."""
         res = {'checks': [], 'phases': []}
         fails, warns = [], []
@@ -1561,12 +1565,12 @@ class Night:
                                             f'no "[night] {tag} ok=" echo (console command lost)'))
             return ok
 
-        def enemy_call(label: str, dist: float | None = None, heal: bool = False) -> dict | None:
-            """One UTPPENEMY state command. The first call carries the definition; when a later echo says the global is
+        def enemy_call(label: str, want: float | None = None, prep: int | None = None) -> dict | None:
+            """One UTPPENEMY state command. A call before the definition carries it; when a later echo says the global is
             gone (or is lost) the same command is sent once more WITH the definition (the one cheap alternative)."""
             e = None
             for define in ([True] if not st['defined'] else [False, True]):
-                cmd = gn.enemy_cmd(label, dist, heal=heal, define=define)
+                cmd = gn.enemy_cmd(label, want, prep, define=define)
                 text = self.console_verified(pad, guard, cmd, lambda t: '[night] ENEMY ok=' in t, f'enemy/{label}')
                 e = gn.parse_enemy(text)
                 if e is not None and e['ok']:
@@ -1590,28 +1594,49 @@ class Night:
             st['active'] = ms['active_now']
             return text, ms
 
-        def spawn() -> dict | None:
-            for rec in records:
-                enemy['tried'].append(rec)
-                text = self.console_verified(pad, guard, gn.enemy_spawn_cmd(rec, args.enemy_spawn_dist),
-                                             lambda t: '[night] ENEMY_SPAWN ok=' in t, 'enemy_spawn')
-                ok, info = gn.night_echo(text, 'ENEMY_SPAWN')
-                res['checks'].append({'phase': 'enemy_spawn', 'record': rec, 'echo': info or None, 'ok': ok})
-                say(f'spawn {rec}: ' + (info or 'echo LOST'))
-                if ok is not True:
-                    continue                      # missing record / lost command: the next record (deletes this tag first)
-                st['spawned'] = True
-                end = time.monotonic() + args.enemy_spawn_wait
-                while True:                       # the earliest `found=1` ends the wait
-                    e = enemy_call('wait')
-                    if e is not None and e['ok'] and e['found']:
-                        enemy['record'] = rec
-                        return e
-                    if time.monotonic() >= end:
+        def place(name: str, dist: float, prev: dict | None) -> dict:
+            """Place a fresh target `dist` m ahead and wait for the state read that shows it there. -> {'echo': the
+            `at=1` state echo or None, 'why': text when not placed, 'old': the state read of the previous target}.
+            Candidates: the record that worked, else every --enemy-record in turn (a missing record -> the next one)."""
+            out = {'echo': None, 'why': None, 'old': None}
+            for rec in ([enemy['record']] if enemy['record'] else records):
+                if rec not in enemy['tried']:
+                    enemy['tried'].append(rec)
+                for attempt in (1, 2):                       # the second only when the echo of the first was lost
+                    cmd = gn.enemy_place_cmd(rec, dist, f'after_{prev["name"] if prev else "start"}',
+                                             define=not st['defined'])
+                    text = self.console_verified(pad, guard, cmd, lambda t: '[night] ENEMY_SPAWN ok=' in t,
+                                                 f'enemy_place/{name}')
+                    ok, info = gn.night_echo(text, 'ENEMY_SPAWN')
+                    res['checks'].append({'phase': f'enemy_place/{name}', 'record': rec, 'echo': info or None, 'ok': ok})
+                    say(f'{name}: place {rec} at {dist:.1f} m: ' + (info or 'echo LOST'))
+                    if ok is None:
+                        out['why'] = 'the placement command was lost (no echo)'
+                        continue
+                    if ok is False:
+                        out['why'] = f'the spawn failed ({info})'
                         break
-                    guard.wait(0.5)
-                warns.append(f'{rec}: spawn requested, no entity found within {args.enemy_spawn_wait:.0f} s -> next record')
-            return None
+                    st['spawned'] = True
+                    st['defined'] = True                     # the definition runs before the spawn in the same command
+                    if out['old'] is None and attempt == 1:
+                        out['old'] = gn.parse_enemy(text)    # the previous target, read before it was deleted
+                    end = time.monotonic() + args.enemy_spawn_wait
+                    last = None
+                    while True:                              # the earliest state read with at=1 ends the wait
+                        e = enemy_call('placed', dist, 1)
+                        last = e if e is not None and e['ok'] else last
+                        if e is not None and e['ok'] and e['found'] and e['at']:
+                            enemy['record'] = rec
+                            out['echo'], out['why'] = e, None
+                            return out
+                        if time.monotonic() >= end:
+                            break
+                        guard.wait(gn.ENEMY_POLL_S)
+                    out['why'] = (f'the target is {last["d2"]} m from V, wanted {dist:.1f} m (+-{gn.ENEMY_PLACE_TOL} m)'
+                                  if last is not None and last['found'] else
+                                  f'no target entity found within {args.enemy_spawn_wait:.0f} s after the spawn')
+                    break                                    # the next record, if there is one
+            return out
 
         def do_off() -> None:
             """Last state read, Immortal removed, entity deleted (idempotent: tagged entities only)."""
@@ -1665,105 +1690,111 @@ class Night:
                 st['retag'] = txt is not None
                 if txt is None:
                     warns.append('NightAuto retag LOST: no V <-> target distance in the POS lines')
-            first = spawn()
-            if first is None:
-                warns.append('no record could be spawned and found (tried ' + ', '.join(enemy['tried']) + ')')
-            else:
-                neutral = first['att'] == 0
-                ptext = self.console_verified(pad, guard, gn.enemy_prep_cmd(neutral),
-                                              lambda t: '[night] ENEMY_PREP ok=' in t, 'enemy_prep')
-                prep = gn.parse_enemy(ptext, 'ENEMY_PREP')
-                res['checks'].append({'phase': 'enemy_prep', 'echo': prep['raw'] if prep else None,
-                                      'ok': prep['ok'] if prep else None})
-                say('prep: ' + (prep['raw'] if prep else 'echo LOST'))
-                spawn_info = dict(first)
-                if prep is None or not prep['ok'] or prep['god'] is not True:
-                    warns.append('Immortal god mode not set (' + ('echo LOST' if prep is None else prep['raw'][:80])
-                                 + '): the target can die')
-                if neutral and (prep is None or prep['attset'] is not True):
-                    warns.append('SetAttitudeTowards(Neutral) did not run: the Friendly attitude stays')
-                if neutral:   # the one alternative: did the attitude change take?
-                    chk = enemy_call('recheck')
-                    if chk is not None and chk['ok']:
-                        spawn_info.update(att=chk['att'], att_name=chk['att_name'], act=chk['act'])
-                        if chk['att'] == 0:
-                            warns.append('attitude still Friendly after SetAttitudeTowards(Neutral): phases skipped')
-                enemy['spawn'] = spawn_info
-                say(f'target {enemy["record"]}: att={spawn_info.get("att_name")} '
-                    f'act={spawn_info.get("act")} hp={spawn_info.get("hp")}% hv={spawn_info.get("hv")} '
-                    f'd2={spawn_info.get("d2")} m')
-                base = {'hv': first['hv'], 'hp': first['hp']}   # a fresh spawn: full health
-            if spawn_info is not None and spawn_info.get('att') != 0:
-                off = file_size(self.utpp_log)
-                if args.cet_fists:
-                    script_cmd('fists_cmd', gn.FISTS_CMD, 'FISTS')
-                    st['fists'] = True
+            off = file_size(self.utpp_log)
+            if args.cet_fists:
+                script_cmd('fists_cmd', gn.FISTS_CMD, 'FISTS')
+                st['fists'] = True
+                if self.auto_pos:   # the earliest POS line with the weapon in hand ends the wait
+                    t_end = time.monotonic() + 2.0
+                    while not any('[night] POS' in l and ' w=1 ' in l
+                                  for l in read_since(self.utpp_log, off).splitlines()):
+                        if time.monotonic() >= t_end:
+                            warns.append('fists_cmd: no POS line with the weapon in hand within 2 s')
+                            break
+                        guard.wait(0.1)
+                else:
                     guard.wait(1.0)
-                self.play(pad, guard, 'melee_draw', plan)
-                text, ms = window(off, done=lambda x: x['on'], window_s=args.weapon_window)
-                res['checks'].append({'phase': 'melee_draw', 'mask_on': ms['on'], 'active_end': ms['active_now']})
-                if not ms['on']:
-                    warns.append('melee_draw: no "MMMASK on reasons=0x1" / "MMGATE melee=0x.." after the RT tap')
-                for name, dist, required, orbit, part in gn.ENEMY_PHASES:
-                    ph = {'name': name, 'dist_set': dist, 'required': required, 'orbit_deg': orbit, 'part': part}
-                    if orbit:
-                        pos = self.poll_pos(guard, pad)
-                        if pos and pos.get('p') and pos.get('cf'):
-                            side = gn.rotate_stick(*pos['cf'], orbit)
-                            target = (pos['p'][0] + side[0] * 10.0, pos['p'][1] + side[1] * 10.0)
-                            new = self.camera_align(pad, guard, plan, pos, target, {'events': []},
-                                                    tol=gn.ENEMY_ORBIT_TOL, why='enemy-orbit')
-                            if new and new.get('cf'):
-                                ph['orbit_done_deg'] = round(abs(gn.turned_deg(pos['cf'], new['cf'])), 1)
-                            if ph.get('orbit_done_deg', 0.0) < 0.5 * orbit:
-                                warns.append(f'{name}: the camera turned only {ph.get("orbit_done_deg")} deg (wanted {orbit:.0f})')
-                        else:
-                            warns.append(f'{name}: no position - the camera orbit was skipped')
-                    place = enemy_call(name, dist, heal=True)
-                    ph['place'] = place
-                    ph['placed'] = place is not None and place['ok'] and place['found']
-                    ph['place_raw'] = place['raw'] if place else None
-                    if place is not None and place['ok'] and place['heal'] is not True and not st.get('heal_warned'):
-                        st['heal_warned'] = True
-                        warns.append('health restore (RequestSettingStatPoolValue) failed: the drops are measured from '
-                                     'the state read of the previous phase')
-                    if phases:
-                        phases[-1]['after'] = place
-                    elif place is not None and place['ok'] and place['hv'] is not None:
-                        base = {'hv': place['hv'], 'hp': place['hp']}   # full health, read after the spawn settled
-                    off = file_size(self.utpp_log)
-                    self.play(pad, guard, part, plan)
-                    text, ms = window(off)
-                    aim = gn.meleeaim_stats(text)
-                    ph.update(aim=aim, lock=aim['lock'], dist=gn.target_distance_stats(text), mask_on=ms['on'],
-                              mask_seen=bool(ms['on'] or st['active']), full_on=text.count('MMMELEEFULL on'))
-                    phases.append(ph)
+            self.play(pad, guard, 'melee_draw', plan)
+            text, ms = window(off, done=lambda x: x['on'], window_s=args.weapon_window)
+            res['checks'].append({'phase': 'melee_draw', 'mask_on': ms['on'], 'active_end': ms['active_now']})
+            if not ms['on']:
+                warns.append('melee_draw: no "MMMASK on reasons=0x1" / "MMGATE melee=0x.." after the RT tap')
+            for name, dist, required, orbit, part in gn.ENEMY_PHASES:
+                ph = {'name': name, 'dist_set': dist, 'required': required, 'orbit_deg': orbit, 'part': part,
+                      'placed': False, 'why': None, 'aim': gn.meleeaim_stats(''), 'lock': 0, 'dist': None,
+                      'mask_on': False, 'mask_seen': False, 'full_on': 0}
+                phases.append(ph)
+                if orbit:
+                    pos = self.poll_pos(guard, pad)
+                    if pos and pos.get('p') and pos.get('cf'):
+                        side = gn.rotate_stick(*pos['cf'], orbit)
+                        target = (pos['p'][0] + side[0] * 10.0, pos['p'][1] + side[1] * 10.0)
+                        new = self.camera_align(pad, guard, plan, pos, target, {'events': []},
+                                                tol=gn.ENEMY_ORBIT_TOL, why='enemy-orbit')
+                        if new and new.get('cf'):
+                            ph['orbit_done_deg'] = round(abs(gn.turned_deg(pos['cf'], new['cf'])), 1)
+                        if ph.get('orbit_done_deg', 0.0) < 0.5 * orbit:
+                            warns.append(f'{name}: the camera turned only {ph.get("orbit_done_deg")} deg (wanted {orbit:.0f})')
+                    else:
+                        warns.append(f'{name}: no position - the camera orbit was skipped')
+                got = place(name, dist, phases[-2] if len(phases) > 1 else None)
+                old = got['old']
+                if len(phases) > 1 and phases[-2]['placed'] and old is not None and old['ok'] and old['found']:
+                    phases[-2]['after'] = old               # health of the previous target, read before its deletion
+                ph['place'] = got['echo']
+                ph['placed'] = got['echo'] is not None
+                ph['why'] = got['why']
+                if not ph['placed']:
+                    say(f'{name}: NOT placed - {ph["why"]}: no punches in this phase')
+                    if enemy['record'] is None:
+                        break                                   # no record ever worked: nothing to try again
+                    continue
+                e = got['echo']
+                ph['before'] = e
+                ph['placed_d2'] = e['d2']
+                if enemy['spawn'] is None:
+                    spawn_info = {'found': True, 'att': e['att_after'] if e['att_after'] is not None else e['att'],
+                                  'act': e['act'], 'hp': e['hp'], 'hv': e['hv'], 'd2': e['d2'],
+                                  'att_read': e['att']}
+                    spawn_info['att_name'] = gn.ENEMY_ATT_NAMES.get(spawn_info['att'])
+                    enemy['spawn'] = spawn_info
+                    say(f'target {enemy["record"]}: att={e["att_name"]} -> {spawn_info["att_name"]} act={e["act"]} '
+                        f'hp={e["hp"]}% hv={e["hv"]} d2={e["d2"]} m god={e["god"]} attset={e["attset"]}')
+                if e['god'] is not True and not st.get('god_warned'):
+                    st['god_warned'] = True
+                    warns.append('Immortal god mode not set (' + e['raw'][:80] + '): the target can die')
+                if spawn_info is not None and spawn_info.get('att') == 0:
+                    say(f'{name}: the target is still Friendly towards V: no punches')
+                    ph['skipped'] = 'the target is Friendly'
+                    break
+                say(f'{name}: placed {e["d2"]} m from V (wanted {dist:.1f}), hv={e["hv"]}')
+                off = file_size(self.utpp_log)
+                self.play(pad, guard, part, plan)
+                text, ms = window(off)
+                aim = gn.meleeaim_stats(text)
+                ph.update(aim=aim, lock=aim['lock'], dist=gn.target_distance_stats(text), mask_on=ms['on'],
+                          mask_seen=bool(ms['on'] or st['active']), full_on=text.count('MMMELEEFULL on'))
+            if st['spawned']:
                 do_off()
-                if phases:
-                    phases[-1]['after'] = enemy['off']
-                for i, ph in enumerate(phases):
-                    pl = ph.get('place')
-                    before = base if (pl and pl.get('heal') is True) else pl
-                    ph['drop'] = gn.enemy_hp_drop(before, ph.get('after'))
-                    ph['after_d2'] = (ph.get('after') or {}).get('d2')
-                    d, a = ph.get('dist'), ph['aim']
-                    say(f'{ph["name"]}: want {ph["dist_set"]:.1f} m, V<->target first/min/last '
-                        f'{(d or {}).get("first")}/{(d or {}).get("min")}/{(d or {}).get("last")} m (n={(d or {}).get("n", 0)}), '
-                        f'after d2={ph["after_d2"]} m, lock={ph["lock"]} src={a["src"]} lockPitch={a["lock_pitch"]} '
-                        f'lockYaw={a["lock_yaw"]} (clamped) lockRawYaw={a["lock_raw_yaw"]} (body to target), '
-                        f'hp drop={ph["drop"]}, mask_on={ph["mask_on"]} full_on={ph["full_on"]}'
-                        + (f', orbit {ph["orbit_done_deg"]} deg' if 'orbit_done_deg' in ph else ''))
+                last = next((p for p in reversed(phases) if p['placed']), None)
+                if last is not None and 'after' not in last:
+                    last['after'] = enemy['off']
+            for ph in phases:
+                ph['drop'] = gn.enemy_hp_drop(ph.get('before'), ph.get('after')) if ph['placed'] else None
+                ph['after_d2'] = (ph.get('after') or {}).get('d2')
+                d, a = ph.get('dist'), ph['aim']
+                say(f'{ph["name"]}: want {ph["dist_set"]:.1f} m, placed {ph.get("placed_d2")} m, V<->target first/min/last '
+                    f'{(d or {}).get("first")}/{(d or {}).get("min")}/{(d or {}).get("last")} m (n={(d or {}).get("n", 0)}), '
+                    f'before hv={(ph.get("before") or {}).get("hv")} after hv={(ph.get("after") or {}).get("hv")} '
+                    f'after d2={ph["after_d2"]} m, lock={ph["lock"]} src={a["src"]} lockPitch={a["lock_pitch"]} '
+                    f'lockYaw={a["lock_yaw"]} (clamped) lockRawYaw={a["lock_raw_yaw"]} (body to target), '
+                    f'hp drop={ph["drop"]}, mask_on={ph["mask_on"]} full_on={ph["full_on"]}'
+                    + (f', orbit {ph["orbit_done_deg"]} deg' if 'orbit_done_deg' in ph else '')
+                    + ('' if ph['placed'] else f', NOT placed ({ph["why"]})'))
         finally:
             teardown()
-        ev = gn.enemy_evaluate(spawn_info if spawn_info is not None else ({'found': False} if st['spawned'] else None),
-                               phases)
+        never = None                                  # spawned, but never at the wanted distance (or never found)
+        if spawn_info is None and st['spawned']:
+            never = {'found': False, 'why': 'target: never placed (' + next(
+                (p['why'] for p in reversed(phases) if p.get('why')), 'no phase ran') + ')'}
+        ev = gn.enemy_evaluate(spawn_info if spawn_info is not None else never, phases)
         fails += ev['fails']
         warns += ev['warns']
         if args.punch_report:
             enemy['report'] = self.punch_report()
         res['enemy'] = {'record': enemy['record'], 'tried': enemy['tried'], 'spawn': enemy['spawn'], 'locks': ev['locks'],
                         'hits': ev['hits'], 'report': enemy['report'],
-                        'phases': [{k: v for k, v in p.items() if k not in ('place', 'after')} for p in phases]}
+                        'phases': [{k: v for k, v in p.items() if k not in ('place', 'after', 'before')} for p in phases]}
         res['warnings'] = warns
         res['verdict'] = 'FAIL' if fails else 'PASS'
         res['fails'] = fails
@@ -3123,15 +3154,17 @@ def dry_run(args) -> int:
           'LT block 2 s, UnequipWeapon (then Y double tap if still active); verified by UTPP MMMASK/MMGATE melee lines '
           '(w >= 0.9 while masked, mask off <= 3 s after the holster)')
     print(f'     melee_fists_target (--set melee_fists_target only): Codeware NPC {", ".join(args.enemy_record.split(","))} '
-          f'(first that works), {args.enemy_spawn_dist:.0f} m ahead, Immortal, teleported to 2.0 / 1.2 / 1.2 (camera orbit '
-          '60 deg) / 1.5 m before 3 punches / 3 punches / 3 punches / LT block; PASS = target found (not Friendly), >= 1 '
-          'MELEEAIM src=lock, health drop at 1.2 m; target deleted and god mode removed in a finally'
+          '(first that works), fists raised with no target, then a fresh Immortal target spawned at 2.0 / 1.2 / 1.2 (camera '
+          'orbit 60 deg) / 1.5 m before 3 punches / 3 punches / 3 punches / LT block (a phase whose target is not at the '
+          'wanted distance is not punched); PASS = target found (not Friendly), >= 1 '
+          'MELEEAIM src=lock, health drop at 1.2 m; target deleted and god mode removed in a finally; pad and commands '
+          'only (also with --background)'
           + (' ; --punch-report: tools\\analysis\\punch_direction_report.py on the log' if args.punch_report else ''))
     if 'melee_fists_target' in names:
         rec0 = args.enemy_record.split(',')[0]
-        print(f'       spawn ({args.enemy_spawn_dist:.0f} m, Codeware, tag {gn.ENEMY_TAG}): {gn.enemy_spawn_cmd(rec0, args.enemy_spawn_dist)}')
-        print(f'       state/place (first call defines UTPPENEMY, {len(gn.ENEMY_DEFINE)} chars): '
-              f'{gn.enemy_cmd("near", 1.2, heal=True)}')
+        print(f'       place (Codeware, tag {gn.ENEMY_TAG}; the first one defines UTPPENEMY, {len(gn.ENEMY_DEFINE)} chars): '
+              f'{gn.enemy_place_cmd(rec0, 1.2, "after_near")}')
+        print(f'       placed? (state read until at=1, then god mode): {gn.enemy_cmd("placed", 1.2, 1)}')
         print(f'       despawn: {gn.enemy_off_cmd()}')
     print('     aim_probe (--set aim_probe only): perspective.aiming=tpp + utpp_probe AimProbe(true) by script, LT held 4 s with '
           '2 RT shots, AimProbe(false) + aiming=fpp always restored (finally); PASS = >= 4 aimprobe samples, >= 1 shot, '
@@ -3330,10 +3363,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--enemy-record', default=','.join(gn.ENEMY_RECORDS),
                    help='melee_fists_target: Character record(s), comma list, the first that spawns and is found is used '
                         '(env UTPP_NIGHT_ENEMY sets the default); names of the installed game\'s TweakDB')
-    p.add_argument('--enemy-spawn-dist', type=float, default=gn.ENEMY_SPAWN_DIST,
-                   help='melee_fists_target: first spawn distance along the camera forward (m); beyond the 5 m lock range')
-    p.add_argument('--enemy-spawn-wait', type=float, default=6.0,
-                   help='melee_fists_target: seconds to wait for the spawned entity (state echo found=1) per record')
+    p.add_argument('--enemy-spawn-wait', type=float, default=4.0,
+                   help='melee_fists_target: seconds to wait for the spawned target to show up at the wanted distance '
+                        '(state read at=1) per placement')
     p.add_argument('--enemy-pos-period', type=float, default=gn.ENEMY_POS_PERIOD,
                    help='melee_fists_target: NightAuto period (s) while the target exists (V <-> target distance)')
     p.add_argument('--punch-report', action='store_true',
