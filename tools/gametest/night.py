@@ -2585,7 +2585,8 @@ class Night:
             if walk['result'] != 'blocked':
                 break
             self.log(f'[clear] {where}: look-ahead {la["heading_deg"]:+.0f} deg blocked (moved {walk["moved_m"]:.2f} m, '
-                     f'stall {walk["stall_s"]} s) -> camera +90 deg')
+                     f'stall {walk["stall_s"]} s' + (', V left the ground: a drop on the route' if walk.get('drop') else '')
+                     + ') -> camera +90 deg')
             if direction == 2:
                 break
             self.turn_camera_90(pad, guard, plan, walk['p1'])
@@ -2653,6 +2654,11 @@ class Night:
             blocked_stall = False
         out = {'moved_m': round(moved, 2), 'stall_s': stall, 'p1': p1}
         if moved < CLEAR_MIN_MOVE_M or blocked_stall:
+            out['result'] = 'blocked'
+            return out
+        # a route on which V leaves the ground (a ledge, a drop) does not measure ground locomotion: treated like an obstacle
+        if self.utpp_log and gn.left_ground(read_since(self.utpp_log, off)):
+            out['drop'] = True
             out['result'] = 'blocked'
             return out
         out['result'] = 'clear'

@@ -221,6 +221,12 @@ ENEMY_POLL_S = 0.25          # period of the "is the new target there" state rea
 ENEMY_POS_PERIOD = 0.2       # NightAuto period during the macro (distance resolution around a punch)
 ENEMY_ORBIT_TOL = 8.0        # camera orbit tolerance (deg)
 ENEMY_LEVEL_TOL = 3.0        # camera pitch tolerance before the first target is placed (deg): the lock looks along the camera
+
+
+def left_ground(text: str) -> bool:
+    """True when the mod's air code saw V leave the ground in this log text (a ledge or a drop under V): an
+    'UTPP MMAIR phase=<x> was=Ground' line. Needs the trace lines of the diagnostic logs."""
+    return any('UTPP MMAIR phase=' in ln and ' was=Ground ' in ln for ln in text.splitlines())
 ENEMY_MIN_DROP = 0.5         # health drop (absolute, else percent points) that counts as "the punch hit"
 # (phase, target distance along the camera forward in m, health drop required, camera orbit deg, pad part)
 # near and orbit are the close-range phases (1.2 m): their punches must connect; far (2.0 m) and block are report only

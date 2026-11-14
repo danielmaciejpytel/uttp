@@ -2699,6 +2699,28 @@ class LookAheadTests(unittest.TestCase):
         self.assertTrue(any('probe ' in m and ' s' in m and 'look-ahead' in m for m in self.n.logged), self.n.logged)
         self.assertGreater(out['lookahead']['probe_s'], 0)
 
+    def test_route_on_which_v_leaves_the_ground_is_treated_like_an_obstacle(self):
+        w = self.world([_walk_scenario('long_route', 0.9, 4.0)])
+        play, state = w.play, {'n': 0}
+
+        def play_with_drop(*a, **k):
+            res = play(*a, **k)
+            state['n'] += 1
+            if state['n'] == 1:                       # the first look-ahead walk crosses a ledge
+                with open(self.log, 'a', encoding='utf-8') as f:
+                    f.write('[2026-11-14 05:57:03.701] [info] [1] [UTPP] UTPP MMAIR phase=LandApproach was=Ground action=land '
+                            'onG=0 vz=-1.95\n')
+            return res
+        self.n.play = play_with_drop
+        out = self.n.clear_path(_Pad(), _G(), {'runs': []}, 'long_route')
+        self.assertEqual(out['result'], 'clear')
+        walks = out['lookahead']['walks']
+        self.assertEqual([k['result'] for k in walks], ['blocked', 'clear'])
+        self.assertTrue(walks[0].get('drop'))
+        self.assertEqual(w.cf, (1.0, 0.0))                                      # camera turned away from the drop
+        self.assertTrue(any('a drop on the route' in m for m in self.n.logged), self.n.logged)
+        self.assertFalse(gn.left_ground('UTPP MMAIR phase=Ground was=Recover action=handBack onG=1'))   # coming back is no drop
+
     def test_clear_field_long_route_costs_one_look_ahead_and_returns_to_the_start(self):
         w = self.world([_walk_scenario('long_route', 0.9, 4.0)])
         out = self.n.clear_path(_Pad(), _G(), {'runs': []}, 'long_route')
