@@ -18,6 +18,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import gt_settings  # noqa: E402
 import gt_melee_weapons as gw  # noqa: E402
 import gt_night as gn  # noqa: E402
 from gt_input import file_size, read_since  # noqa: E402
@@ -394,6 +395,7 @@ class Macro(unittest.TestCase):
     def run_macro(self, script, set_name='melee_katana', tmp=None, raises=None):
         with tempfile.TemporaryDirectory() as d:
             n = FakeNight(d, script)
+            n.settings = gt_settings.Ledger(None, log=lambda m: None)      # the run record's list of what a macro changed
             plan = {'runs': []}
             if raises:
                 orig = n.play
@@ -408,6 +410,11 @@ class Macro(unittest.TestCase):
             except RuntimeError as e:
                 return n, e
             return n, res
+
+    def test_given_weapon_is_listed_in_the_ledger_and_marked_restored(self):
+        n, res = self.run_macro(good_script('katana'))
+        self.assertEqual([(e['key'], e['owner'], e['state']) for e in n.settings.record()],
+                         [('inventory.katana', 'melee_weapons', 'restored')])
 
     def test_katana_pass_in_order(self):
         n, res = self.run_macro(good_script('katana'))

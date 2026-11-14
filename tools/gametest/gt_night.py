@@ -41,6 +41,9 @@ SETS = {
     'crouch_turns': ['crouch_walk_turns'],
     # keyboard-and-mouse-like input: digital stick edges, key taps, camera turned while a key is held (not in 'all')
     'kbd': ['kbd_taps', 'kbd_switch_90', 'kbd_switch_180', 'kbd_diagonals', 'kbd_strafe_weave', 'kbd_mouse_turns'],
+    # the background input probe: pad-only walks (no key, no click) - with --background they show whether the game takes the
+    # pad while its window is behind other windows (V moves = it does); not in 'all'
+    'bg_probe': ['slow_walk_half_stick', 'run_arc_left', 'run_arc_right'],
 }
 # The car scenario runs FIRST: both test saves start at (or in) the car, so V is next to it. At the end of the set
 # the walking scenarios had taken V 50-80 m away and the summoned car parked wherever the game chose (2026-11-12

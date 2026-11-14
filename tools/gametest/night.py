@@ -45,6 +45,59 @@ One cycle (Research\\logs\\night\\<cycle-ts>\\cycle.json records every step with
  8 collect        copy UTPP/red4ext/CET/utpp_* logs, harness analysis (run.analyze_dir), video sheets (whole @0.5 s,
                   per scenario start/end +-3 s @0.1 s) also from a killed recording, summary.json (night metrics).
 
+Recording safety and measurement (gt_collect.py, gt_settings.py, gt_posemeter.py, gt_load.py):
+ - the pose recording segments (utpp-pose-ring-*.utpppose or the single utpp-pose-*.utpppose), the input dump (utpp-feed-*.txt)
+   and the mod log are copied from the game's log folder into <run>\\logs between the scenarios (finished ring segments), when the
+   scenario phase ends or fails (stop file, abort key, exception, timeout), again before the cycle ends and once more after
+   the game quit (the writer flushes its last block on close); the files and sizes are listed in cycle.json ("recordings").
+ - --diag keep|off|timed|until: the runner sets the mod's diagnostic logs option at arm (previous values read first) and puts
+   it back before every ExitGame; every other setting a macro switches (aim probe, fists) is restored in a finally and listed in
+   cycle.json ("settings"). A change that could not be restored (game gone) is kept in Research\\logs\\night\\pending_restore.json and
+   restored first thing by the NEXT launch.
+ - after the quit a worker process runs the pose meter (pose_metrics.analyze per scenario / step window and 'auto'); result:
+   pose_metrics.json, pose_table.txt, per-scenario "pose ..." lines in the log and summary.json. --pose-baseline <run folder>
+   prints before / after per scenario; the exit code is non-zero only when a "pose_limits" block of scenarios.json is exceeded.
+ - machine load over the scenario phase (CPU mean, compiler processes) next to the perf line.
+
+Speed (gt_flow.py, gt_post.py, gt_budget.py):
+ - look-ahead probe: skipped when the previous probe started within 1 m of here, along the same direction (camera and route within
+   15 deg), reached far enough and came back clear; the 1.4 s "face" push stays. Forgotten after a camera turn, a blocked attempt,
+   the vehicle scenario and at every cycle start. One log line names the reason.
+ - the recorder is ended (q, --recorder-grace, then terminate) BEFORE the game quits; the check of the file (length, size, brightness,
+   clock) is quick and the full decode runs in a background thread after the quit. ExitGame is given --quit-timeout (60 s) after its
+   echo before any taskkill.
+ - contact sheets (the "full" sheet cut into one-sheet parts) and failure clips run in a pool of processes sized to the idle cores
+   (--post-workers, at most 24, below-normal priority); at most --clips-per-cause (6) clips of each failure cause; --fast makes
+   neither and lists them in summary.json ("pending_media": names, video seconds, the commands that make them later:
+   gt_post.py sheets <run>, failure_clips.py <run> --per-cause 0 [--name <text>] [--list]).
+ - early stop (--early-stop N, 2): the first N walking scenarios invalid for one cause (V cannot move although the stick is
+   pushed, no "UTPP MOTION" lines; the checks run.py applies afterwards) end the cycle with that cause in one line; the rest is
+   listed as not played, the game is still quit and everything collected.
+ - at the end of a cycle a time budget table (per scenario: total, play, probe, retries, waits, copy, probes skipped; per phase:
+   launch, arm, scenarios, recorder stop, quit, collect and its post-processing parts) goes to the log, time_budget.txt and
+   summary.json.
+
+Session modes:
+ - --body female|male|both: that body's save is made the newest (select_save.py, times only, backup first) with the game closed and
+   put back exactly after the run on every exit path; a game that is already running is never closed for it (the run refuses); a
+   leftover selection of an earlier runner session is restored first at every start; "both" = one launch per body and one
+   body_summary_<time>.txt with the two runs side by side. --pose-baseline is used only against the body it was recorded on.
+ - --graphics low: the lowest quality profile before the launch (game closed); never restored automatically
+   (graphics_profile.py --restore).
+ - --background: needs nothing in the foreground, no keyboard and no user idle time (--min-idle defaults to 0, --cmd-channel to auto);
+   window recorder, file command channel, pad plugin switched on after arming and off at the end of the cycle; only Pause stops the
+   run. --dry-run --background states which requirements are met (test command module, pad plugin, window recorder).
+
+One launch, these sets, these extra commands, diagnostics until, everything restored, fast post-processing (python = the
+interpreter with numpy and psutil, run from the project root):
+   (i)   keyboard-like and standard movement sets on the Female body with the pose meter and a baseline comparison:
+         night.py --go --set kbd,loco --body female --diag until --cet "<commands>" --cet-final "<commands that undo them>"
+                  --pose-baseline <run folder of an earlier Female run> --fast
+   (ii)  fists, enemy and the four melee weapon sets on both bodies:
+         night.py --go --set melee_fists,melee_fists_target,melee_weapons --body both --diag until --fast
+   (iii) the background input probe (pad-only walks while the game window is behind others):
+         night.py --go --background --set bg_probe --diag until --fast
+
 Stopping: create Research\\logs\\night\\STOP (checked between scenarios/cycles), or send CTRL_BREAK / SIGTERM: the
 cycle finishes cleanly (ffmpeg 'q', pad neutral, game quit per --on-stop, collect). The STOP file is renamed to
 STOP.consumed-<ts>; a STOP file present at start refuses to run.
@@ -88,6 +141,15 @@ import gt_melee_weapons as gw  # noqa: E402
 import gt_night as gn  # noqa: E402
 import run as gt_run  # noqa: E402
 import failure_clips  # noqa: E402
+import gt_budget as gb  # noqa: E402
+import gt_collect as gc  # noqa: E402
+import gt_flow  # noqa: E402
+import gt_load  # noqa: E402
+import gt_post  # noqa: E402
+import gt_posemeter as gp  # noqa: E402
+import gt_session  # noqa: E402
+import select_save  # noqa: E402
+import gt_settings as gs  # noqa: E402
 import video_sheets  # noqa: E402
 from gt_input import CET_DIR, SCAN_ENTER, TESTCMD_FILE, BackgroundGuard, FileCommandChannel, NeedsKeyboard, file_size, \
     padd_ping, read_cet_overlay_key, read_since, testcmd_ready, wait_for_log  # noqa: E402
@@ -120,6 +182,8 @@ GAME_DIR = game_dir(required=False) or ''
 GAME_EXE_PATH = os.path.join(GAME_DIR, 'bin', 'x64', GAME_EXE)
 INSTALL_CET = os.path.join(PROJECT, 'Source', 'tools', 'install', 'install_cet_mods.py')
 STEAM_URL = 'steam://rungameid/1091500'
+QUIT_TIMEOUT_S = 60.0      # --quit-timeout default: a game that echoed ExitGame is given this long before the first kill
+RECORDER_GRACE_S = 8.0     # --recorder-grace default: seconds a recorder gets after 'q' before it is ended (fragmented mp4 stays decodable)
 BG_INPUT_ON = 'Game.UTPPTestBackgroundInput(true)'     # --background: test host plugin UTPPTestHost (test installs only)
 BG_INPUT_OFF = 'Game.UTPPTestBackgroundInput(false)'
 TS = '%Y-%m-%d %H:%M:%S.%f'
@@ -142,8 +206,36 @@ class GracefulStop(CycleError):
     """STOP file / signal / --max-wall-hours: finish the cycle cleanly (recording, game quit per --on-stop, collect)."""
 
 
+class EarlyStop(CycleError):
+    """The first walking scenarios are invalid for one cause: the rest of the cycle is not played (the game is still quit,
+    the files collected and the settings restored as after any failed cycle)."""
+
+
 class ScenarioTimeout(Exception):
     """A scenario exceeded --scenario-timeout; the cycle continues with the next scenario."""
+
+
+class _NightIo:
+    """The command sender of the settings ledger: one echo-verified command through the runner's channel."""
+
+    def __init__(self, night, pad, guard):
+        self.night, self.pad, self.guard = night, pad, guard
+
+    def run(self, cmd: str, tag: str, label: str):
+        return self.night.console_verified(self.pad, self.guard, cmd, lambda t: f'[night] {tag} ok=' in t, label)
+
+
+class _PlainGuard:
+    """No focus rules: the file command channel needs none (used when the run stopped or the game is left running)."""
+
+    def wait(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+    def ensure_focus(self) -> None:
+        return None
+
+    def check(self) -> None:
+        return None
 
 
 def stamp(dt: datetime | None) -> str | None:
@@ -303,31 +395,6 @@ def grab_gray(rect, out_w: int = 160, out_h: int = 90) -> tuple[bytes, int, int]
 
 # ---------------------------------------------------------------------------------------------- runner
 
-def run_sheet_jobs(jobs, run_one, workers: int = 1) -> dict:
-    """Run the sheet jobs [(name, extra_args)] with run_one(name, extra): all of them, `workers` at a time (1 =
-    sequential, in order). Independent jobs (own ffmpeg processes, own folder sheets\\<name>). Result: name ->
-    'ok' | 'error: ...' in the order of `jobs`; SystemExit and any other exception are kept per job. Returns when
-    every job has finished (the move to Media must see all sheets)."""
-    def one(job):
-        name, extra = job
-        try:
-            run_one(name, extra)
-            return 'ok'
-        except SystemExit as e:
-            return f'error: {e}'
-        except Exception as e:  # noqa: BLE001
-            return f'error: {e!r}'
-    jobs = list(jobs)
-    workers = max(1, min(int(workers), len(jobs) or 1))
-    if workers == 1:
-        outs = [one(j) for j in jobs]
-    else:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            outs = list(ex.map(one, jobs))
-    return {j[0]: o for j, o in zip(jobs, outs)}
-
-
 def newest_motion_status(log: str | None, tail_bytes: int = 8 << 20) -> str | None:
     """Newest motion status text (from 'motion enabled=' on, carries 'feedP95us=') in the UTPP log, None = none
     logged. Only the last `tail_bytes` of the log are read."""
@@ -383,6 +450,17 @@ class Night:
         self.channel_mode = None               # resolved --cmd-channel: 'console' | 'file' (auto: from the READY line)
         self.testcmd_path = TESTCMD_FILE       # tests point it at a scratch folder
         self.bg_input_active = False           # --background: UTPPTestHost background pad input switched on
+        self.settings = gs.Ledger(os.path.join(args.out_root, 'pending_restore.json'), log=self.log)
+        self.collector = None                  # gt_collect.SessionCollector of the running cycle
+        self.load_sampler = None               # gt_load.LoadSampler over the scenario phase
+        self.meter_job = None                  # gt_posemeter.MeterJob (worker processes)
+        self.budget = gb.Budget()              # where the wall time of the cycle went (printed at the end)
+        self.probe_cache = gt_flow.ProbeCache()   # look-ahead probes of this cycle that came back clear
+        self.early = gt_flow.EarlyStop(getattr(args, 'early_stop', 2))
+        self.deep_check = None                 # background thread: full decode of the recording after the quit
+        self.body = None                       # --body: 'female' | 'male' | None (the game's own save)
+        self.graphics_settings = None          # tests point these at temporary files
+        self.graphics_state_dir = None
 
     # -- bookkeeping --
     def log(self, msg: str) -> None:
@@ -485,11 +563,12 @@ class Night:
 
     def check_user_idle(self) -> None:
         idle = idle_seconds()
-        if idle is None or self.args.min_idle <= 0:
+        need = gt_session.effective_min_idle(self.args)
+        if idle is None or need <= 0:
             return
         own = None if self.last_own_input is None else time.monotonic() - self.last_own_input
-        if idle < self.args.min_idle and (own is None or own > idle + 5.0):
-            raise UserActive(f'user input {idle:.0f} s ago (< --min-idle {self.args.min_idle:.0f} s): somebody is '
+        if idle < need and (own is None or own > idle + 5.0):
+            raise UserActive(f'user input {idle:.0f} s ago (< --min-idle {need:.0f} s): somebody is '
                             'using the PC')
 
     def requested_stop(self) -> str | None:
@@ -599,6 +678,118 @@ class Night:
         finally:
             self.touched()
 
+    # -- settings the run changes (gt_settings.Ledger) --
+    def settings_io(self, pad, guard) -> _NightIo:
+        return _NightIo(self, pad, guard)
+
+    def note_cycle(self, key: str, value) -> None:
+        if self.cycle is not None:
+            self.cycle[key] = value
+            self.save()
+
+    def restore_settings(self, pad, guard, res: dict | None = None, why: str = 'before ExitGame') -> dict | None:
+        """Puts back every setting the run changed (open ledger entries). A failure is logged, kept in the cycle record and
+        never blocks the quit."""
+        if not self.settings.open_entries():
+            return None
+        try:
+            out = self.settings.restore_all(self.settings_io(pad, guard), why)
+        except Exception as e:  # noqa: BLE001
+            out = {'why': why, 'restored': 0, 'failed': [x['key'] for x in self.settings.open_entries()], 'error': repr(e)}
+            self.log(f'[settings] restore failed: {e!r}')
+        if res is not None:
+            res['restored_settings'] = out
+        self.note_cycle('settings_restore', out)
+        return out
+
+    def restore_settings_leave(self, why: str) -> None:
+        """The run ends and the game keeps running (or the run died): restore through the file channel when there is one (it
+        needs no focus and no key), else keep the changes in the pending file for the next launch."""
+        if not self.settings.open_entries():
+            return
+        try:
+            if self.use_file():
+                self.restore_settings(None, _PlainGuard(), None, why)
+        except Exception as e:  # noqa: BLE001
+            self.log(f'[settings] restore without the console failed: {e!r}')
+        if self.settings.open_entries():
+            self.settings_left(why)
+
+    def settings_left(self, why: str) -> None:
+        left = self.settings.game_gone(why)
+        if left:
+            ents = self.settings.left()
+            diag = [e for e in ents if e['key'] == gs.DIAG_KEY]
+            self.note_cycle('settings_left', {'keys': left, 'why': why,
+                                              'notes': [gs.left_text(e) for e in ents if not e['volatile']],
+                                              'diagnostic_logs_left_on': any(e['requested'] in ('timed', 'until') for e in diag),
+                                              'note': '; '.join(gs.left_text(e) for e in ents if not e['volatile']) or 'restore needed',
+                                              'pending_file': self.settings.pending_path})
+
+    def restore_pending_settings(self, guard) -> None:
+        """First thing after the launch: put back what an earlier run left changed (its pending_restore.json)."""
+        try:
+            rec = self.settings.restore_pending(self.settings_io(None, guard))
+        except Exception as e:  # noqa: BLE001
+            rec = {'error': repr(e)}
+            self.log(f'[settings] pending restore failed: {e!r}')
+        if rec:
+            self.note_cycle('pending_settings_restore', rec)
+
+    def apply_diag(self, guard, info: dict) -> None:
+        mode = getattr(self.args, 'diag', 'keep')
+        if mode == 'keep':
+            return
+        ent = self.settings.apply(self.settings_io(None, guard), gs.DIAG_KEY, gs.DIAG_VALUES[mode], '--diag', deps=gs.DIAG_DEPS)
+        info['diag'] = {k: ent[k] for k in ('requested', 'state', 'previous', 'note')}
+        if ent['state'] != 'applied':
+            self.log(f'[arm] WARNING: --diag {mode} not applied ({ent["note"]}): the run has no diagnostic recording')
+
+    # -- recording safety (gt_collect) --
+    def secure_session_files(self, phase: str, final: bool = False) -> dict | None:
+        """Copies the pose recording segments, the input dump and the mod log of this session into <run>\\logs. Idempotent and
+        cheap when nothing changed; never raises (a collection problem must not stop the run). Between scenarios only the
+        finished ring segments are copied, `final` copies everything."""
+        try:
+            if self.collector is None:
+                if not self.utpp_log or not self.cycle_dir:
+                    return None
+                since = gc.session_since(self.utpp_log, self.cycle['start'])
+                self.collector = gc.SessionCollector(
+                    self.args.log_dir, os.path.join(self.cycle_dir, 'logs'), since,
+                    extra_files=lambda: gt_log.session_files(self.utpp_log) if self.utpp_log else [], log=self.log)
+            out = self.collector.collect(phase, final=final)
+            if phase == 'collect' and out['busy']:
+                self.log(f'[collect] WARNING: files still held open after the quit, not copied: {out["busy"]}')
+            if final or out['new'] or out['refreshed'] or out['lost'] or out['errors']:
+                self.note_cycle('recordings', self.collector.summary())
+            return out
+        except Exception as e:  # noqa: BLE001
+            self.log(f'[collect] {phase}: copying the session files failed: {e!r}')
+            return None
+
+    # -- machine load --
+    def start_load(self) -> None:
+        try:
+            self.load_sampler = gt_load.LoadSampler().start()
+        except Exception as e:  # noqa: BLE001
+            self.load_sampler = None
+            self.log(f'[load] sampler not started: {e!r}')
+
+    def stop_load(self) -> None:
+        if self.load_sampler is None:
+            return
+        try:
+            self.note_cycle('machine_load', self.load_sampler.stop())
+        except Exception as e:  # noqa: BLE001
+            self.log(f'[load] sampler failed: {e!r}')
+        self.load_sampler = None
+
+    def report_load(self) -> None:
+        res = (self.cycle or {}).get('machine_load')
+        if res is not None:
+            self.log('[load] ' + gt_load.format_load(res))
+
     # -- 1/7: quit --
     def ensure_closed(self, label: str) -> dict:
         st = self.step(f'{label}')
@@ -686,7 +877,8 @@ class Night:
 
     def send_final_commands(self, pad, guard, res: dict) -> None:
         """Sent before every ExitGame, so the game never closes with a test setting left on. A failure here is logged
-        and never blocks the quit."""
+        and never blocks the quit. The ledger's settings go back first (--diag, aim probe, fists)."""
+        self.restore_settings(pad, guard, res)
         try:
             cmds = self.final_commands()
             if not cmds:
@@ -723,6 +915,9 @@ class Night:
             if act == 'done':
                 res['path'] = 'taskkill_force' if forced else ('taskkill' if killed else 'cet_exitgame')
                 self._close_crash_reporter(res)
+                if self.settings.open_entries():
+                    self.settings_left(f'the game ended ({res["path"]}) before the restore could be sent')
+                    res['settings_left'] = [e['key'] for e in self.settings.left()]
                 if getattr(self.args, 'cmd_channel', 'console') != 'console':
                     try:                 # no command line is left for the next session (the module skips them anyway)
                         FileCommandChannel(self.testcmd_path).clear()
@@ -794,7 +989,8 @@ class Night:
             self.log(f'[launch] CET overlay state check skipped ({e!r})')
 
     def launch(self) -> str:
-        if not self.pids() and getattr(self.args, 'cmd_channel', 'console') != 'file':
+        if not self.pids() and getattr(self.args, 'cmd_channel', 'console') != 'file' \
+                and not getattr(self.args, 'background', False):       # background: no overlay is ever opened, nothing to fix
             self.fix_cet_overlay_state()
         for attempt in (1, 2):
             st = self.step(f'launch#{attempt}')
@@ -862,12 +1058,18 @@ class Night:
         info = {}
         try:
             g.ensure_focus()
+            self.restore_pending_settings(g)          # what an earlier run left changed goes back before anything else
             off = file_size(log)
             cet = self.args.cet
             if self.args.cet_file:        # long command lists (quotes and length are fragile on a command line)
                 with open(self.args.cet_file, encoding='utf-8') as f:
                     cet = (cet + ';;' if cet else '') + f.read().strip()
             extra = [c.strip() for c in cet.split(';;') if c.strip()]
+            unowned = gs.scan_unowned(extra + self.final_commands())
+            if unowned:
+                info['unowned_settings'] = unowned
+                self.note_cycle('unowned_settings', unowned)
+                self.log(f'[arm] WARNING: --cet / --cet-final change settings the runner does not own and does not restore: {unowned}')
             res = self.type_console(g, gn.arm_cmds(self.args.db, extra), verify_log=log)
             info['cet'] = res
             if any(v is False for v in res.values()):
@@ -900,6 +1102,7 @@ class Night:
                 info['night_auto'] = self.auto_pos
                 info['night_auto_retry'] = True
                 self.log(f'[arm] NightAuto retry: {"on" if self.auto_pos else "LOST again - console polls"}')
+            self.apply_diag(g, info)
             if getattr(self.args, 'background', False):
                 try:
                     info['bg_input'] = self.bg_input(True, 'after arming')
@@ -1062,46 +1265,66 @@ class Night:
                 raise StopNight(str(e))
         self.write_rec_json(rec)
 
-    def stop_recording(self, rec: dict) -> dict:
-        """Graceful 'q' (or terminate); then length, decode, brightness and frame-size checks (also for a recording
-        whose ffmpeg already died: the fragmented mp4 stays decodable)."""
+    def stop_recording(self, rec: dict, check: bool = True) -> dict:
+        """Ends the recorder: 'q' on its stdin, --recorder-grace s to finish, then it is ended (a fragmented mp4 stays decodable).
+        check=True (default) also runs the recording check (finalize_recording); the cycle passes check=False before the game
+        quit and checks the file after it, so the game does not wait for a decode."""
         if rec.get('finalized'):
             return rec
+        if not rec.get('stopped'):
+            self.stop_recorder_process(rec)
+        if check:
+            self.check_recording(rec)
+        return rec
+
+    def stop_recorder_process(self, rec: dict) -> None:
         st = self.step('record_stop')
         proc = rec['proc']
         rec['stop_wall'] = datetime.now()
+        t0 = time.monotonic()
         if proc.poll() is not None:
             rec['stop'] = f'ffmpeg had exited (rc {proc.returncode})'
         else:
+            grace = float(getattr(self.args, 'recorder_grace', RECORDER_GRACE_S))
             try:
                 proc.stdin.write(b'q')
                 proc.stdin.flush()
-                proc.wait(timeout=60)
+                proc.wait(timeout=grace)
                 rec['stop'] = 'q'
             except Exception:  # noqa: BLE001
+                # 'q' was not taken within the grace: end the process (on Windows terminate() already is the hard kill)
                 proc.terminate()
                 try:
-                    proc.wait(timeout=10)
+                    proc.wait(timeout=5)
                 except Exception:  # noqa: BLE001
                     proc.kill()
                 rec['stop'] = 'terminate'
+        rec['stop_seconds'] = round(time.monotonic() - t0, 1)
         try:
             rec['errf'].close()
         except Exception:  # noqa: BLE001
             pass
-        rec['finalized'] = True
-        info = self.finalize_recording(rec)
+        rec['stopped'] = True
+        self.log(f'[record] recorder ended ({rec["stop"]}) {rec["stop_seconds"]} s after the stop request')
+        self.done(st, 'ok', stop=rec['stop'], stop_seconds=rec['stop_seconds'])
+
+    def check_recording(self, rec: dict, deep: bool = True) -> dict:
+        """The recording check (length, frame size, brightness, clock; deep=True also the full decode). The cycle runs it
+        with deep=False after the game quit and decodes the whole file in the background (start_deep_check)."""
+        st = self.step('record_check')
+        info = self.finalize_recording(rec, deep=deep)
         status = 'ok' if not info['problems'] else 'failed'
         if info['problems']:
             self.log('[record] !!! RECORDING PROBLEM: ' + '; '.join(info['problems']))
-        self.log(f'[record] stopped ({rec["stop"]}), duration {rec.get("duration")}, decode_ok {info.get("decode_ok")}, '
-                 f'clock {rec.get("clock", {}).get("start_method")}')
+        self.log(f'[record] checked ({rec.get("stop")}), duration {rec.get("duration")} ({rec.get("duration_source")}), '
+                 f'decode_ok {info.get("decode_ok")}, clock {rec.get("clock", {}).get("start_method")}')
         self.done(st, status, **info)
-        return rec
+        return info
 
-    def finalize_recording(self, rec: dict) -> dict:
+    def finalize_recording(self, rec: dict, deep: bool = True) -> dict:
         info: dict = {'stop': rec.get('stop'), 'problems': []}
         path = rec['path']
+        rec['finalized'] = True
         if not os.path.isfile(path) or os.path.getsize(path) == 0:
             info['problems'].append('recording file missing/empty')
             self.write_rec_json(rec)
@@ -1114,20 +1337,38 @@ class Night:
             rec['input_start'] = reader.input_start() or rec['input_start']
             rec['progress_info'] = reader.summary()
             info['problems'] += gt_capture.frozen_check(stderr)
-        p = self.runner([self.args.ffmpeg, '-hide_banner', '-i', path, '-map', '0:v:0', '-f', 'null', '-'],
-                        capture_output=True, text=True, errors='replace', timeout=3600)
-        decoded = gn.parse_decoded_seconds(p.stderr)
-        info['decode_ok'] = p.returncode == 0 and decoded is not None
-        info['decoded_s'] = decoded
-        frame_size = gn.parse_frame_size(p.stderr)
+        decoded = None
+        if deep:
+            p = self.runner([self.args.ffmpeg, '-hide_banner', '-i', path, '-map', '0:v:0', '-f', 'null', '-'],
+                            capture_output=True, text=True, errors='replace', timeout=3600)
+            decoded = gn.parse_decoded_seconds(p.stderr)
+            info['decode_ok'] = p.returncode == 0 and decoded is not None
+            info['decoded_s'] = decoded
+            frame_size = gn.parse_frame_size(p.stderr)
+            try:
+                probed = video_sheets.probe_duration(path, self.args.ffmpeg)
+            except (SystemExit, AttributeError):  # probe_duration was dropped from video_sheets (tools simplification)
+                probed = None
+            if not info['decode_ok']:
+                info['problems'].append('decode failed: ' + p.stderr.strip()[-300:])
+        else:
+            # no decode now: the container header gives the size and (after a graceful stop) the length
+            p = self.runner([self.args.ffmpeg, '-hide_banner', '-i', path], capture_output=True, text=True, errors='replace')
+            frame_size = gn.parse_frame_size(p.stderr)
+            probed = video_sheets.parse_duration(p.stderr)
+            info['decode_ok'] = None          # the full decode runs in the background (start_deep_check)
         info['frame_size'] = frame_size
-        try:
-            probed = video_sheets.probe_duration(path, self.args.ffmpeg)
-        except (SystemExit, AttributeError):  # probe_duration was dropped from video_sheets (tools simplification)
-            probed = None
         info['probed_s'] = probed
         # graceful stop: container duration; otherwise the decoded length (last fragment may be cut)
-        rec['duration'] = probed if rec.get('stop') == 'q' and probed else (decoded or probed)
+        if rec.get('stop') == 'q' and probed:
+            rec['duration'], rec['duration_source'] = probed, 'container'
+        elif decoded:
+            rec['duration'], rec['duration_source'] = decoded, 'decoded'
+        elif probed:
+            rec['duration'], rec['duration_source'] = probed, 'container'
+        else:
+            est = self.estimate_duration(rec)
+            rec['duration'], rec['duration_source'] = est
         yavg = []
         if rec['duration']:
             for frac in (0.1, 0.5, 0.9):
@@ -1141,19 +1382,76 @@ class Night:
         if reader is not None and rec.get('stop_wall'):
             info['problems'] += gt_capture.short_check(rec['duration'], (rec['stop_wall'] - rec['spawn_wall']).total_seconds())
         info['problems'] += gn.recording_check(frame_size, rec.get('expected_wh'), yavg, self.args.min_luma)
-        if not info['decode_ok']:
-            info['problems'].append('decode failed: ' + p.stderr.strip()[-300:])
         if rec['duration']:
-            mk = [m for m in rec['markers'] if m.get('sent') and m.get('log')]
-            rec['clock'] = gn.recording_clock(rec['spawn_wall'], rec.get('stop_wall') or datetime.now(),
-                                              rec['duration'], rec['input_start'], mk[0]['sent'] if mk else None,
-                                              mk[0]['log'] if mk else None)
-            if len(mk) > 1:
-                rec['clock']['marker_drift_s'] = round(
-                    (mk[-1]['log'] - mk[-1]['sent']).total_seconds() - (mk[0]['log'] - mk[0]['sent']).total_seconds(), 3)
+            self.set_recording_clock(rec)
         rec['check'] = info
         self.write_rec_json(rec)
         return info
+
+    @staticmethod
+    def estimate_duration(rec: dict) -> tuple:
+        """(seconds, source) of a recording whose container has no length: the last encoded time of the progress stream
+        (window capture), else the wall time between the start and the stop of the recorder."""
+        reader = rec.get('progress')
+        if reader is not None and getattr(reader, 'samples', None):
+            return reader.samples[-1][1], 'progress'
+        if rec.get('stop_wall') and rec.get('spawn_wall'):
+            return round((rec['stop_wall'] - rec['spawn_wall']).total_seconds(), 2), 'wall time'
+        return None, None
+
+    def set_recording_clock(self, rec: dict) -> None:
+        mk = [m for m in rec['markers'] if m.get('sent') and m.get('log')]
+        rec['clock'] = gn.recording_clock(rec['spawn_wall'], rec.get('stop_wall') or datetime.now(),
+                                          rec['duration'], rec['input_start'], mk[0]['sent'] if mk else None,
+                                          mk[0]['log'] if mk else None)
+        if len(mk) > 1:
+            rec['clock']['marker_drift_s'] = round(
+                (mk[-1]['log'] - mk[-1]['sent']).total_seconds() - (mk[0]['log'] - mk[0]['sent']).total_seconds(), 3)
+
+    def start_deep_check(self, rec: dict) -> None:
+        """Full decode of the recording in a background thread (the slow part of the check, kept away from the game's quit): the
+        file must decode to its end. Sets rec['deep'] when done; finish_deep_check() joins it and puts the result into the
+        record check. A length that was only estimated is replaced by the decoded one (and the clock is made again)."""
+        import threading
+        path = rec['path']
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            return
+
+        def work():
+            t0 = time.monotonic()
+            try:
+                # below-normal priority: the decode takes what the sheets, the clips and the pose meter leave
+                low = {'creationflags': gt_post.BELOW_NORMAL} if os.name == 'nt' and self.runner is subprocess.run else {}
+                p = self.runner([self.args.ffmpeg, '-hide_banner', '-i', path, '-map', '0:v:0', '-f', 'null', '-'],
+                                capture_output=True, text=True, errors='replace', timeout=3600, **low)
+                decoded = gn.parse_decoded_seconds(p.stderr)
+                rec['deep'] = {'decode_ok': p.returncode == 0 and decoded is not None, 'decoded_s': decoded,
+                               'seconds': round(time.monotonic() - t0, 1),
+                               'error': '' if p.returncode == 0 and decoded is not None else p.stderr.strip()[-300:]}
+            except Exception as e:  # noqa: BLE001
+                rec['deep'] = {'decode_ok': False, 'decoded_s': None, 'seconds': round(time.monotonic() - t0, 1), 'error': repr(e)}
+        self.deep_check = threading.Thread(target=work, name='deep-check', daemon=True)
+        self.deep_check.start()
+
+    def finish_deep_check(self, rec: dict | None) -> None:
+        th, self.deep_check = self.deep_check, None
+        if th is None or rec is None:
+            return
+        th.join(timeout=3600)
+        deep = rec.get('deep')
+        chk = rec.get('check')
+        if not deep or chk is None:
+            return
+        chk['decode_ok'], chk['decoded_s'], chk['decode_seconds'] = deep['decode_ok'], deep['decoded_s'], deep['seconds']
+        if not deep['decode_ok']:
+            chk['problems'].append('decode failed: ' + deep['error'])
+            self.log('[record] !!! RECORDING PROBLEM: decode failed: ' + deep['error'])
+        elif rec.get('duration_source') in ('progress', 'wall time') and deep['decoded_s']:
+            rec['duration'], rec['duration_source'] = deep['decoded_s'], 'decoded'
+            self.set_recording_clock(rec)
+        self.write_rec_json(rec)
+        self.log(f'[record] full decode in the background: ok={deep["decode_ok"]} decoded {deep["decoded_s"]} s, '
+                 f'{deep["seconds"]} s of work')
 
     # -- 6: scenarios --
     def play(self, pad, guard, name: str, plan: dict, sc=None) -> dict:
@@ -1609,8 +1907,12 @@ class Night:
             return ok
 
         off = file_size(self.utpp_log)
+        fists_entry = None
         if self.args.cet_fists:
             script_cmd('fists_cmd', gn.FISTS_CMD, 'FISTS')
+            # whatever happens below, the ledger puts the fists away before the game is quit (the finally of the run)
+            fists_entry = self.settings.register('equipment.fists', 'away', 'raised', 'melee_fists', volatile=True,
+                                                 restore=(gn.FISTS_OFF_CMD, 'FISTS_OFF'))
             guard.wait(1.0)
         self.play(pad, guard, 'melee_draw', plan)
         st = phase('melee_draw', off, done=lambda x: x['on'], window_s=self.args.weapon_window)
@@ -1645,6 +1947,8 @@ class Night:
                              + ' (no "MMMASK off" / melee bits still set)')
             elif self.args.cet_fists:
                 warns.append('fists_off_cmd did not clear melee; the Y double tap did')
+        if fists_entry is not None and cleared:
+            self.settings.mark_restored(fists_entry)
         res['mask_seen'] = any(c.get('mask_seen') for c in res['checks'])
         res['min_w'] = min(weights) if weights else None
         res['warnings'] = warns
@@ -1749,6 +2053,9 @@ class Night:
                         out['why'] = f'the spawn failed ({info})'
                         break
                     st['spawned'] = True
+                    if 'target' not in led:
+                        led['target'] = self.settings.register('enemy.target', 'absent', 'spawned', 'melee_fists_target', volatile=True,
+                                                               restore=(gn.enemy_off_cmd(), 'ENEMY_OFF'))
                     st['defined'] = True                     # the definition runs before the spawn in the same command
                     if out['old'] is None and attempt == 1:
                         out['old'] = gn.parse_enemy(text)    # the previous target, read before it was deleted
@@ -1780,6 +2087,8 @@ class Night:
             if ok is True:
                 st['off'] = True
                 enemy['off'] = gn.parse_enemy(text)
+                if led.get('target') is not None:
+                    self.settings.mark_restored(led['target'])
             say('off: ' + (info or 'echo LOST'))
 
         def teardown() -> None:
@@ -1796,6 +2105,8 @@ class Night:
                     self.console_verified(pad, guard, gn.nightauto_cmd(args.night_auto_period),
                                           lambda t: '[night] auto on' in t, 'nightauto_restore')
                     st['retag'] = False
+                    if led.get('retag') is not None:
+                        self.settings.mark_restored(led['retag'])
                 except Exception as ex:  # noqa: BLE001
                     say(f'cleanup: NightAuto restore error {ex!r}')
             if st['fists']:
@@ -1811,21 +2122,28 @@ class Night:
                         if ms['active_now']:
                             warns.append('melee mask still active after FISTS_OFF and the Y double tap')
                     st['fists'] = False
+                    if led.get('fists') is not None:
+                        self.settings.mark_restored(led['fists'])
                 except Exception as ex:  # noqa: BLE001
                     say(f'cleanup: fists error {ex!r}')
 
         spawn_info = None
+        led: dict = {}                                       # ledger entries of this macro (listed in the run record)
         try:
             if args.night_auto and self.auto_pos:   # POS lines with the target in v= (finer period for the distance)
                 txt = self.console_verified(pad, guard, gn.nightauto_cmd(args.enemy_pos_period, True, gn.ENEMY_TAG),
                                             lambda t: '[night] auto on' in t, 'nightauto_enemy')
                 st['retag'] = txt is not None
+                if st['retag']:
+                    led['retag'] = self.settings.register('night_auto.tag', 'vehicle', 'fight target', 'melee_fists_target', volatile=True)
                 if txt is None:
                     warns.append('NightAuto retag LOST: no V <-> target distance in the POS lines')
             off = file_size(self.utpp_log)
             if args.cet_fists:
                 script_cmd('fists_cmd', gn.FISTS_CMD, 'FISTS')
                 st['fists'] = True
+                led['fists'] = self.settings.register('equipment.fists', 'away', 'raised', 'melee_fists_target', volatile=True,
+                                                      restore=(gn.FISTS_OFF_CMD, 'FISTS_OFF'))
                 if self.auto_pos:   # the earliest POS line with the weapon in hand ends the wait
                     t_end = time.monotonic() + 2.0
                     while not any('[night] POS' in l and ' w=1 ' in l
@@ -1979,18 +2297,33 @@ class Night:
                                             f'no "[night] {tag} ok=" echo (console command lost)'))
             return ok
 
-        def cleanup(name: str, cmd: str, tag: str) -> None:
+        def cleanup(name: str, cmd: str, tag: str) -> bool | None:
             try:
-                script_cmd(name, cmd, tag)
+                return script_cmd(name, cmd, tag)
             except Exception as e:  # noqa: BLE001 - every cleanup command is tried, the original error propagates
                 fails.append(f'{name}: {e!r}')
                 self.log(f'[aimprobe] {name}: cleanup error {e!r}')
+                return None
 
         pos = self.poll_pos(guard, pad)
         if pos and pos.get('weapon') is False:
             self.log('[aimprobe] NightPos w=0 -> weapon_draw first')
             self.play(pad, guard, 'weapon_draw', plan)
             res['checks'].append({'phase': 'weapon_draw_first', 'weapon_before': False})
+        # the aiming mode is read first and put back as it was (the old fixed 'fpp' only when the value cannot be read)
+        prev = None
+        try:
+            prev = (self.settings.read(self.settings_io(pad, guard), ['perspective.aiming'], 'aiming_get') or {}).get('perspective.aiming')
+        except Exception as e:  # noqa: BLE001
+            self.log(f'[aimprobe] reading perspective.aiming failed: {e!r}')
+        restore_to = prev if prev in ('tpp', 'fpp') else 'fpp'
+        res['aiming_restore'] = {'previous': prev, 'restore_to': restore_to}
+        if prev is None:
+            self.log("[aimprobe] perspective.aiming could not be read: it is restored to 'fpp' as before")
+        # a fallback value that was never read must not be written into anybody's saved settings by a later launch:
+        # then the entry is volatile (not in the pending file) and carries its own restore command
+        aim_entry = self.settings.register('perspective.aiming', restore_to, 'tpp', 'aim_probe', volatile=prev is None,
+                                           restore=(gn.aiming_cmd(restore_to), 'AIMPROBE aiming=' + restore_to) if prev is None else None)
         off = file_size(self.utpp_log)
         try:
             script_cmd('aiming_tpp', gn.aiming_cmd('tpp'), 'AIMPROBE aiming=tpp')
@@ -2000,7 +2333,8 @@ class Night:
             guard.wait(0.5)  # log flush
         finally:
             cleanup('aimprobe_off', gn.aimprobe_cmd(False), 'AIMPROBE off')
-            cleanup('aiming_fpp', gn.aiming_cmd('fpp'), 'AIMPROBE aiming=fpp')
+            if cleanup('aiming_' + restore_to, gn.aiming_cmd(restore_to), 'AIMPROBE aiming=' + restore_to) is True:
+                self.settings.mark_restored(aim_entry)
         text = read_since(self.utpp_log, off)
         lines = text.splitlines()
         last_off = max((i for i, l in enumerate(lines) if '[night] AIMPROBE off ok=' in l), default=None)
@@ -2022,6 +2356,7 @@ class Night:
         """Turn the camera with short right-stick pulses until the target is within `tol` deg of the camera forward.
         Each pulse is followed by a real POS (cf feedback); the yaw rate and the turn direction adapt to it."""
         tol = self.args.align_tol if tol is None else tol
+        self.probe_cache.invalidate(f'camera turned ({why})')
         for k in range(self.args.align_pulses):
             b = gn.bearing_deg(known['p'][:2], known['cf'], target)
             if abs(b) < tol:
@@ -2083,6 +2418,7 @@ class Night:
 
     def turn_camera_90(self, pad, guard, plan: dict, pos: dict) -> None:
         """Turn the camera 90 deg to the right of its forward (the scenarios steer relative to the camera)."""
+        self.probe_cache.invalidate('camera turned (clear path)')
         side = gn.rotate_stick(*pos['cf'], 90.0)
         target = (pos['p'][0] + side[0] * 10.0, pos['p'][1] + side[1] * 10.0)
         self.camera_align(pad, guard, plan, pos, target, {'events': []}, why='clear-path')
@@ -2113,7 +2449,15 @@ class Night:
             self.scenario_deadline += seconds
 
     def clear_path(self, pad, guard, plan: dict, where: str) -> dict:
-        """Before a walking scenario: make sure the ground ahead is open (NightPos / NightAuto positions).
+        """Before a walking scenario: the probe (see _clear_path); its time goes to the scenario's probe column."""
+        t0 = time.monotonic()
+        try:
+            return self._clear_path(pad, guard, plan, where)
+        finally:
+            self.budget.add('probe', time.monotonic() - t0)
+
+    def _clear_path(self, pad, guard, plan: dict, where: str) -> dict:
+        """Make sure the ground ahead is open before a walking scenario (NightPos / NightAuto positions).
 
         Long route (gt_night.route_estimate: net displacement or longest straight leg > gn.ROUTE_LONG_M): the look-ahead
         walks the main leg (<= gn.LOOKAHEAD_MAX_S s) and checks that V kept moving, then walks back to the start
@@ -2174,10 +2518,18 @@ class Night:
             if not p0 or not p0.get('p') or not p0.get('cf'):
                 out['result'] = 'no position'
                 break
+            if direction == 0:
+                hit = self.probe_cache.lookup(p0['p'], p0['cf'], la)
+                if hit:
+                    return self.skip_look_ahead(pad, guard, plan, where, la, out, info, hit, t_in)
             walk = self.look_ahead_walk(pad, guard, plan, la, p0)
-            info['walks'].append({k: v for k, v in walk.items() if k != 'p1'})
+            info['walks'].append({**{k: v for k, v in walk.items() if k != 'p1'},
+                                  'p0': [round(p0['p'][0], 2), round(p0['p'][1], 2)],
+                                  'cf': [round(p0['cf'][0], 3), round(p0['cf'][1], 3)]})
             out['probes'].append({'turn': direction, 'moved_m': walk.get('moved_m'), 'stall_s': walk.get('stall_s')})
             out['result'] = walk['result']
+            if walk['result'] == 'clear':
+                self.probe_cache.remember(where, p0['p'], p0['cf'], la, walk.get('moved_m') or 0.0)
             if walk['result'] != 'blocked':
                 break
             self.log(f'[clear] {where}: look-ahead {la["heading_deg"]:+.0f} deg blocked (moved {walk["moved_m"]:.2f} m, '
@@ -2193,6 +2545,36 @@ class Night:
                  f'{out.get("result")}, probe {spent:.1f} s'
                  + (f', back at start +{back["residual_m"]:.2f} m' if back.get('residual_m') is not None else ''))
         return True
+
+    def skip_look_ahead(self, pad, guard, plan: dict, where: str, la: dict, out: dict, info: dict, hit: dict, t_in: float) -> bool:
+        """The look-ahead is not walked: an earlier probe from this spot along this direction reached far enough and came back
+        clear (gt_flow.ProbeCache). The short push that turns V along the route still happens, so the scenario starts in the
+        same state as after a probe."""
+        info['skipped'] = hit
+        out['result'] = 'clear'
+        out['probes'].append({'turn': 0, 'moved_m': None, 'skipped': True})
+        self.probe_cache.skipped += 1
+        self.budget.count('skipped')
+        self.face_forward(pad, guard, plan, la)
+        spent = time.monotonic() - t_in
+        info['probe_s'] = round(spent, 1)
+        self.extend_deadline(spent)
+        self.log(f'[clear] {where}: look-ahead {la["heading_deg"]:+.0f} deg SKIPPED - V stands {hit["dist_m"]} m from where the '
+                 f'probe of {hit["where"]} started, camera {hit["cam_diff_deg"]:+.0f} deg / route {hit["route_diff_deg"]:+.0f} deg '
+                 f'apart, that probe covered {hit["covered_m"]} m (needed {hit["needed_m"]} m) and came back clear; '
+                 f'face push only, {spent:.1f} s')
+        return True
+
+    def face_forward(self, pad, guard, plan: dict, la: dict) -> None:
+        """A short push in the route direction turns V forward again (after a walk back with the reversed stick he faces
+        backwards), then he stands still."""
+        sx, sy = la['stick']
+        k = 0.35 / max(math.hypot(sx, sy), 0.01)        # a small stick: turn, do not travel
+        fx, fy = round(sx * k, 4), round(sy * k, 4)
+        face = parse_scenario('clear_probe', {'steps': [
+            {'name': 'face', 'duration': 1.4, 'interp': 'step',
+             'ls': [[0, 0, 0], [0.02, fx, fy], [0.32, 0, 0]], 'rs': [[0, 0, 0]], 'metrics': False}]})
+        self.play(pad, guard, 'clear_probe', plan, face)
 
     def look_ahead_walk(self, pad, guard, plan: dict, la: dict, p0: dict) -> dict:
         """One look-ahead walk from position p0 and, when clear, the walk back. {'result': 'clear' | 'blocked' |
@@ -2226,12 +2608,7 @@ class Night:
         # V walked back with the stick reversed, so he now FACES backwards: the scenario would start with a 180 deg
         # turn in its first moving step (2026-11-12 12:14 / 12:28 runs: new first-step FAILs on footlock and
         # transitions). A short push in the route direction turns him forward again; then he stands still.
-        k = 0.35 / max(math.hypot(sx, sy), 0.01)        # a small stick: turn, do not travel
-        fx, fy = round(sx * k, 4), round(sy * k, 4)
-        face = parse_scenario('clear_probe', {'steps': [
-            {'name': 'face', 'duration': 1.4, 'interp': 'step',
-             'ls': [[0, 0, 0], [0.02, fx, fy], [0.32, 0, 0]], 'rs': [[0, 0, 0]], 'metrics': False}]})
-        self.play(pad, guard, 'clear_probe', plan, face)
+        self.face_forward(pad, guard, plan, la)
         return out
 
     def walk_back(self, pad, guard, plan: dict, la: dict, p0: dict, p1: dict, out_speed: float = 0.0) -> dict:
@@ -2316,6 +2693,9 @@ class Night:
             return att
         detail = {'scenario': name, 'attempt': 1, 'stall_s': rep['stall_s'], 'at': rep['at'], 'start': att['start'],
                   'end': datetime.now()}
+        self.probe_cache.invalidate(f'{name} was blocked')
+        self.budget.count('retry_n')
+        self.budget.add('retry_s', (detail['end'] - detail['start']).total_seconds())
         entry = next((r for r in reversed(plan['runs']) if r['scenario'] == name), None)
         if entry is not None:
             plan['runs'][:] = [r for r in plan['runs'] if r is not entry]
@@ -2326,13 +2706,15 @@ class Night:
                  'attempt discarded (not scored), camera to free ground, repeating once')
         self.cycle.setdefault('blocked_repeats', []).append(detail)
         sc = self.scenarios[name]
-        self.recover(pad, guard, plan, f'blocked {name}', sc, att['res'], att['off'])
-        if key_crouch:
-            stances = [s for s in (gn.stance_of(l) for l in gt_log.parse_text(read_since(self.utpp_log, att['off'])))
-                       if s]
-            if stances and stances[-1] == 'crouched':
-                self.crouch_toggle(pad, guard, 'standing')
-        guard.wait(1.0)
+        with self.budget.timed('retry_s'):
+            self.recover(pad, guard, plan, f'blocked {name}', sc, att['res'], att['off'])
+            if key_crouch:
+                stances = [s for s in (gn.stance_of(l) for l in gt_log.parse_text(read_since(self.utpp_log, att['off'])))
+                           if s]
+                if stances and stances[-1] == 'crouched':
+                    self.crouch_toggle(pad, guard, 'standing')
+        with self.budget.timed('wait'):
+            guard.wait(1.0)
         self.clear_path(pad, guard, plan, name)
         self.extend_deadline(time.monotonic() - t_in)
         att2 = self.play_attempt(pad, guard, plan, name, key_crouch)
@@ -2811,6 +3193,7 @@ class Night:
 
     def vehicle_macro(self, pad, guard, plan: dict) -> dict:
         out = []
+        self.probe_cache.invalidate('vehicle scenario')
         self.recover(pad, guard, plan, 'before vehicle_mount_exit', probe=True)
         for rep in range(1, self.args.vehicle_repeats + 1):
             self.check_continue()
@@ -2890,11 +3273,43 @@ class Night:
         sc = self.scenarios.get(name)
         return sc is not None and self.args.crouch_button == 'key' and bool(gn.crouch_toggle_steps(sc))
 
+    def live_invalid_cause(self, res: dict, log_off: int) -> str | None:
+        """The cause for which run.py will score the steps of a walking scenario INVALID (the same checks on the log slice of
+        the scenario: no motion lines, or the stick pushed on every step and V never moved), None = valid or no way to tell."""
+        try:
+            steps = [st for st in (res.get('steps') or []) if st.get('start') and st.get('end') and st.get('metrics', True)]
+            if not steps or not self.utpp_log:
+                return None
+            text = read_since(self.utpp_log, log_off)
+            lines = gt_log.parse_text(text)
+            pre = gt_log.motion_precondition(lines, steps[0]['start'], steps[-1]['end'])
+            if not pre['ok']:
+                return 'mm.motionDriver not active: no "UTPP MOTION" lines in the log while the scenario ran'
+            pushed = blocked = 0
+            for st in steps:
+                m = gt_log.compute_metrics(lines, st['start'], st['end'])
+                pushed += (m.get('pushed_ticks') or 0) >= gt_run.BLOCKED_MIN_TICKS
+                blocked += bool(gt_run.step_blocked(m))
+            if blocked and blocked == pushed:
+                return 'V does not move although the stick is pushed' + (
+                    ' (V is in a vehicle)' if gn.mounted_state(None, self.log_tail()) else '')
+        except Exception as e:  # noqa: BLE001 - the check is an optimisation, never a reason to fail
+            self.log(f'[early-stop] check failed: {e!r}')
+        return None
+
+    def stop_early(self, why: str, name: str, run: int) -> None:
+        names = [(n, r) for n in self.names for r in range(1, self.args.repeat + 1)]
+        rest = names[names.index((name, run)) + 1:]
+        self.cycle['skipped_scenarios'] = [{'name': n, 'run': r, 'reason': why} for n, r in rest]
+        self.log(f'[early-stop] {why} -> the cycle stops; {len(rest)} scenarios not played')
+        raise EarlyStop(f'early stop: {why}')
+
     def run_scenarios(self, plan: dict) -> list[dict]:
         st = self.step('scenarios')
         records = []
         guard = self.guard()
         pad = None
+        self.start_load()
         try:
             guard.ensure_focus()
             pad, fresh = gt_run.open_pad(self.run_args, guard)
@@ -2915,7 +3330,11 @@ class Night:
                 for name in self.names:
                     for r in range(1, self.args.repeat + 1):
                         self.check_continue()
-                        guard.wait(self.args.gap)
+                        t_scen = time.monotonic()
+                        self.budget.begin(f'{name}#{r}')
+                        live = None            # a walking scenario that ran: (play result, log offset) for the early-stop check
+                        with self.budget.timed('wait'):
+                            guard.wait(self.args.gap)
                         t0 = datetime.now()
                         self.scen_log_off = file_size(self.utpp_log)
                         limit = self.args.scenario_timeout
@@ -2956,6 +3375,7 @@ class Night:
                                     if walked['discarded']:   # the cycle record describes the kept attempt only
                                         rec['start'] = walked['start']
                                         rec['blocked_attempt'] = walked['discarded']
+                                    live = (res, log_off)
                                 elif key_crouch:
                                     res, cfails = self.play_with_key_crouch(pad, guard, name, plan)
                                 else:
@@ -2980,6 +3400,13 @@ class Night:
                         records.append(rec)
                         self.cycle['scenarios'] = records
                         self.save()
+                        with self.budget.timed('copy'):
+                            self.secure_session_files('between scenarios')   # the ring keeps ten minutes: finished segments go now
+                        self.budget.end(time.monotonic() - t_scen)
+                        if live is not None and rec.get('verdict') not in ('SKIP', 'TIMEOUT') and self.early.watching:
+                            why = self.early.note(f'{name}#{r}', self.live_invalid_cause(live[0], live[1]))
+                            if why:
+                                self.stop_early(why, name, r)
         except GuardError as e:
             self.done(st, 'failed', error=str(e))
             raise (StopNight if is_user_stop(str(e)) else CycleError)(str(e))
@@ -2987,31 +3414,96 @@ class Night:
             self.done(st, 'failed', error=str(e))
             raise
         finally:
+            if self.budget.current:
+                self.budget.end(0.0)
             if pad is not None:
                 pad.close()  # padd: pad stays plugged (neutral); unplugged after the game is closed
+            # every way out of the scenario phase (end, stop file, abort key, exception, timeout): the recording first,
+            # before anything slow happens and before the game is quit
+            self.secure_session_files('scenarios end', final=True)
+            self.stop_load()
         self.done(st, count=len(records))
         return records
 
     # -- 8: collect --
+    def post_workers(self, njobs: int) -> int:
+        """Processes for the sheets and the clips: --post-workers, else the idle cores (gt_post.pool_size)."""
+        n = int(getattr(self.args, 'post_workers', 0) or 0)
+        return n if n > 0 else gt_post.pool_size(njobs)
+
+    def write_summary(self, summary: dict) -> None:
+        with open(os.path.join(self.cycle_dir, 'summary.json'), 'w', encoding='utf-8') as f:
+            json.dump(gt_run.serialise_plan(summary), f, indent=1, default=str)
+
+    def sheet_plan(self, rec: dict, utpp_copy: str) -> list[dict]:
+        ck = rec['clock']
+        scs = [{'name': f'{s["name"]}_r{s["run"]}', 'start': s['start'], 'end': s.get('end')}
+               for s in self.cycle.get('scenarios', [])]
+        return gt_post.plan_sheets(rec['path'], utpp_copy, stamp(ck['video_end']), ck['clock_offset_s'], self.args.ffmpeg,
+                                   ck['video_start'], ck['duration_s'], scs, self.args.sheet_pad,
+                                   os.path.join(self.cycle_dir, 'sheets'), self.args.keep_sheet_frames)
+
+    def start_sheets(self, jobs: list[dict]):
+        """The contact sheets in a thread that drives the process pool; returns (thread, result dict filled when it ends)."""
+        import threading
+        out: dict = {}
+        sd = os.path.join(self.cycle_dir, 'sheets')
+
+        def work():
+            try:
+                res, timing = gt_post.run_sheets(jobs, sd, self.post_workers(len(jobs)))
+                out.update(result=res, timing=timing)
+            except Exception as e:  # noqa: BLE001
+                out.update(result={'error': repr(e)}, timing=None)
+        th = threading.Thread(target=work, name='sheets', daemon=True)
+        th.start()
+        return th, out
+
+    def pending_media(self, rec: dict, clips: bool = True) -> dict:
+        """--fast: what was not produced, with video seconds, and the commands that make it later."""
+        run = os.path.abspath(self.cycle_dir)
+        ck = rec['clock']
+        pend: dict = {'sheets': [{'sheet': 'full', 'video_s': [0.0, round(ck['duration_s'], 1)]}], 'clips': [], 'commands': {
+            'sheets': f'python -I "{os.path.join(HERE, "gt_post.py")}" sheets "{run}" [--only <sheet>]'}}
+        for w in gn.sheet_windows(ck['video_start'], ck['duration_s'],
+                                  [{'name': f'{s["name"]}_r{s["run"]}', 'start': s['start'], 'end': s.get('end')}
+                                   for s in self.cycle.get('scenarios', [])], self.args.sheet_pad):
+            pend['sheets'].append({'sheet': w['name'], 'video_s': [w['start'], w['end']]})
+        if clips:
+            pend['commands']['clips'] = (f'python -I "{os.path.join(HERE, "failure_clips.py")}" "{run}" --per-cause 0 '
+                                         '[--name <text>]   (add --list to see them first)')
+            try:
+                _, items, _ = failure_clips.plan_clips(self.cycle_dir, per_cause=0)
+                pend['clips'] = [{'name': it['name'], 'verdict': it['verdict'],
+                                  'video_s': [round(it['start'], 1), round(it['end'], 1)], 'cause': it['cause']} for it in items]
+            except (SystemExit, Exception) as e:  # noqa: BLE001
+                pend['clips_error'] = repr(e)
+        return pend
+
     def collect(self, rec: dict | None, plan: dict) -> dict:
         st = self.step('collect')
+        fast = bool(getattr(self.args, 'fast', False))
         ld = os.path.join(self.cycle_dir, 'logs')
         os.makedirs(ld, exist_ok=True)
+        with self.budget.phase('copy session files'):
+            self.secure_session_files('collect', final=True)        # after the quit: the last pose block was flushed on close
+        self.start_pose_meter(plan, ld)
         copied = []
         t_cycle = self.cycle['start'].timestamp() - 5
         srcs = gt_log.session_files(self.utpp_log) if self.utpp_log else []   # current file + rotated .N.log siblings
         srcs += [p for p in glob.glob(os.path.join(self.args.log_dir, 'red4ext-*.log')) if os.path.getmtime(p) >= t_cycle]
         srcs += [os.path.join(CET_DIR, n) for n in ('cyber_engine_tweaks.log', 'scripting.log')]
         srcs += glob.glob(os.path.join(CET_DIR, 'mods', 'utpp_*', '*.log'))
-        for s in srcs:
-            if s and os.path.isfile(s):
-                rel = os.path.basename(os.path.dirname(s)) + '__' + os.path.basename(s) if 'mods' in s else \
-                    os.path.basename(s)
-                shutil.copy2(s, os.path.join(ld, rel))
-                copied.append(rel)
+        with self.budget.phase('copy logs'):
+            for s in srcs:
+                if s and os.path.isfile(s):
+                    rel = os.path.basename(os.path.dirname(s)) + '__' + os.path.basename(s) if 'mods' in s else \
+                        os.path.basename(s)
+                    shutil.copy2(s, os.path.join(ld, rel))
+                    copied.append(rel)
         utpp_copy = os.path.join(ld, os.path.basename(self.utpp_log)) if self.utpp_log else None
         summary = {'cycle': self.cycle['name'], 'result': self.cycle.get('result'), 'utpp_log': utpp_copy,
-                   'copied': copied,
+                   'body': self.body, 'copied': copied,
                    'scenario_verdicts': {f'{s["name"]}#{s["run"]}': {'verdict': s.get('verdict'),
                                                                       'fails': s.get('fails'),
                                                                       **({'aimprobe': s['aimprobe']}
@@ -3020,15 +3512,31 @@ class Night:
                                                                          if 'enemy' in s else {})}
                                          for s in self.cycle.get('scenarios', []) if s.get('verdict')},
                    'recoveries': self.cycle.get('recoveries', [])}
-        # recording: finalize even if ffmpeg died with the game (fragmented mp4)
-        if rec and not rec.get('finalized'):
-            try:
-                self.stop_recording(rec)
-            except Exception as e:  # noqa: BLE001
-                self.log(f'[collect] recording finalize failed: {e!r}')
+        if self.cycle.get('skipped_scenarios'):
+            summary['skipped_scenarios'] = self.cycle['skipped_scenarios']
+        # recording: the recorder was ended before the quit; its check (length, size, clock) is quick, the full decode runs in
+        # the background (also from a recorder that died with the game: the fragmented mp4 stays decodable)
         if rec:
+            try:
+                if not rec.get('stopped'):
+                    self.stop_recording(rec, check=False)
+                if not rec.get('finalized'):
+                    with self.budget.phase('recording check'):
+                        self.check_recording(rec, deep=False)
+                    self.start_deep_check(rec)
+            except Exception as e:  # noqa: BLE001
+                self.log(f'[collect] recording check failed: {e!r}')
             summary['recording'] = {'path': rec['path'], 'mode': rec.get('mode'), 'stop': rec.get('stop'),
-                                    'check': rec.get('check')}
+                                    'stop_seconds': rec.get('stop_seconds'), 'check': rec.get('check')}
+        # contact sheets: they need the recording clock and the log copy only, so they start now and run while the rest goes on
+        sheets_th, sheets_out, sheet_jobs = None, {}, None
+        if rec and rec.get('clock') and utpp_copy:
+            if rec.get('duration_source') in ('progress', 'wall time'):
+                self.finish_deep_check(rec)          # the length was only estimated: the decoded one first
+            summary['clock'] = rec['clock']
+            if not self.args.no_sheets and not fast:
+                sheet_jobs = self.sheet_plan(rec, utpp_copy)
+                sheets_th, sheets_out = self.start_sheets(sheet_jobs)
         # harness analysis (run.py)
         harness_steps: list = []
         if plan['runs'] and utpp_copy:
@@ -3037,16 +3545,24 @@ class Night:
             plan_s = dict(plan, log=utpp_copy, log_offset=0, created=datetime.now())
             with open(os.path.join(gdir, 'plan.json'), 'w', encoding='utf-8') as f:
                 json.dump(gt_run.serialise_plan(plan_s), f, indent=1, default=str)
+            if self.meter_job is not None:
+                try:
+                    started = self.meter_job.start_helper_reports(os.path.join(gdir, 'plan.json'))
+                    if started:
+                        self.log(f'[pose] helper reports started: {", ".join(started)}')
+                except Exception as e:  # noqa: BLE001
+                    self.log(f'[pose] helper reports not started: {e!r}')
             ra = gt_run.build_parser().parse_args(['--scenario-file', self.args.scenario_file, '--thresholds',
                                                    self.args.thresholds, '--clock-offset', '0'])
-            try:
-                gt_run.analyze_dir(gdir, ra, log_override=utpp_copy)
-                with open(os.path.join(gdir, 'summary.json'), encoding='utf-8') as f:
-                    h = json.load(f)
-                summary['harness'] = {k: h.get(k) for k in ('overall', 'counts', 'aborted_runs', 'cet_commands')}
-                harness_steps = h.get('steps', [])
-            except Exception as e:  # noqa: BLE001
-                summary['harness'] = {'error': repr(e)}
+            with self.budget.phase('harness analysis'):
+                try:
+                    gt_run.analyze_dir(gdir, ra, log_override=utpp_copy)
+                    with open(os.path.join(gdir, 'summary.json'), encoding='utf-8') as f:
+                        h = json.load(f)
+                    summary['harness'] = {k: h.get(k) for k in ('overall', 'counts', 'aborted_runs', 'cet_commands')}
+                    harness_steps = h.get('steps', [])
+                except Exception as e:  # noqa: BLE001
+                    summary['harness'] = {'error': repr(e)}
         # failures at a glance: test mechanics (crouch/mount/weapon/timeouts) vs locomotion metrics
         mech, metr = gn.split_failures(harness_steps, self.cycle.get('scenarios', []))
         summary['mechanics_failures'] = mech
@@ -3067,55 +3583,169 @@ class Night:
             summary['night_metrics'] = gn.night_metrics(lines, a, b)
             summary['per_scenario'] = {f'{s["name"]}#{s["run"]}': gn.night_metrics(lines, s['start'], s['end'])
                                        for s in scs if s.get('end')}
-        # video sheets (also from a killed recording: duration = decoded length)
-        if rec and rec.get('clock') and utpp_copy:
-            ck = rec['clock']
-            summary['clock'] = ck
-            base = ['--video', rec['path'], '--log', utpp_copy, '--video-end', stamp(ck['video_end']),
-                    '--clock-offset', str(ck['clock_offset_s']), '--ffmpeg', self.args.ffmpeg]
-            if not self.args.keep_sheet_frames:
-                base.append('--no-keep-sheet-frames')       # default: frames are deleted once the sheet exists
-            sd = os.path.join(self.cycle_dir, 'sheets')
-            jobs = [('full', ['--every', '0.5', '--cols', '6', '--rows', '4', '--width', '320'])]
-            for w in gn.sheet_windows(ck['video_start'], ck['duration_s'],
-                                      [{'name': f'{s["name"]}_r{s["run"]}', 'start': s['start'], 'end': s.get('end')}
-                                       for s in self.cycle.get('scenarios', [])], self.args.sheet_pad):
-                jobs.append((w['name'], ['--every', '0.1', '--start', str(w['start']), '--end', str(w['end']),
-                                         '--cols', '6', '--rows', '5', '--width', '320']))
-            res = {}
-            if not self.args.no_sheets:
-                res = run_sheet_jobs(jobs, lambda name, extra: video_sheets.annotated_main(
-                    base + extra + ['--out', os.path.join(sd, name)]), self.args.sheet_jobs)
-            summary['sheets'] = res
-        with open(os.path.join(self.cycle_dir, 'summary.json'), 'w', encoding='utf-8') as f:
-            json.dump(gt_run.serialise_plan(summary), f, indent=1, default=str)
-        if rec and rec.get('clock') and not self.args.no_failure_clips:
-            # 1x clips of every failing step / scenario, into Media\mp4 (read from the summary.json written above)
-            try:
-                clips = failure_clips.make_clips(self.cycle_dir, ffmpeg=self.args.ffmpeg)
-                summary['failure_clips'] = [{k: c[k] for k in ('path', 'name', 'verdict', 'why')} for c in clips]
-                for c in clips:
-                    self.log(f'[clips] {c["verdict"]} {c["name"]}: {c["path"]}')
-            except (SystemExit, Exception) as e:  # noqa: BLE001
-                summary['failure_clips'] = f'error: {e!r}'
-                self.log(f'[clips] failed: {e!r}')
-            with open(os.path.join(self.cycle_dir, 'summary.json'), 'w', encoding='utf-8') as f:
-                json.dump(gt_run.serialise_plan(summary), f, indent=1, default=str)
+        self.write_summary(summary)
+        # failure clips (the run's recording is still in the run folder; the media move below comes after them)
+        clip_info: dict = {}
+        if fast and rec and rec.get('clock'):
+            summary['pending_media'] = self.pending_media(rec, clips=not self.args.no_failure_clips)
+            self.log(f'[post] --fast: {len(summary["pending_media"]["sheets"])} sheets and '
+                     f'{len(summary["pending_media"]["clips"])} failure clips not made; the commands are in summary.json '
+                     '(pending_media)')
+        elif rec and rec.get('clock') and not self.args.no_failure_clips:
+            # 1x clips of the failing steps / scenarios, into Media\mp4 (read from the summary.json written above); the
+            # cuts run in the process pool, at most --clips-per-cause of each cause
+            dropped: list = []
+
+            def cutter(video, jobs):
+                t0 = time.monotonic()
+                w = self.post_workers(len(jobs))
+                res = gt_post.cut_pool(video, jobs, self.args.ffmpeg, True, w,
+                                       scratch=os.path.join(self.cycle_dir, '_tmp', 'clips'))
+                clip_info.update(workers=w, jobs=len(jobs), seconds=round(time.monotonic() - t0, 1))
+                return res
+            with self.budget.phase('failure clips'):
+                try:
+                    clips = failure_clips.make_clips(self.cycle_dir, ffmpeg=self.args.ffmpeg,
+                                                     per_cause=self.args.clips_per_cause, cutter=cutter, dropped_out=dropped)
+                    summary['failure_clips'] = [{k: c[k] for k in ('path', 'name', 'verdict', 'why')} for c in clips]
+                    for c in clips:
+                        self.log(f'[clips] {c["verdict"]} {c["name"]}: {c["path"]}')
+                    if dropped:
+                        summary['failure_clips_not_cut'] = dropped
+                        for d in dropped:
+                            self.log(f'[clips] {len(d["dropped"])} more of the cause {d["cause"]!r} not cut (limit '
+                                     f'{self.args.clips_per_cause} per cause; failure_clips.py <run> --per-cause 0 cuts them)')
+                except (SystemExit, Exception) as e:  # noqa: BLE001
+                    summary['failure_clips'] = f'error: {e!r}'
+                    self.log(f'[clips] failed: {e!r}')
+            if clip_info:
+                self.budget.notes['failure clips'] = f'{clip_info["jobs"]} clips, {clip_info["workers"]} processes'
+        # the pose meter workers have been running since the start of the collect
+        with self.budget.phase('pose meter wait'):
+            self.finish_pose_meter(summary)
+        if sheets_th is not None:
+            with self.budget.phase('sheets (wait)'):
+                sheets_th.join()
+            summary['sheets'] = sheets_out.get('result')
+            tm = sheets_out.get('timing')
+            if tm:
+                summary['sheets_timing'] = tm
+                self.budget.notes['sheets (wait)'] = (f'{tm["jobs"]} jobs, {tm["workers"]} processes, {tm["seconds"]} s wall, '
+                                                      f'{tm["busy_s"]} s of work')
+        elif fast and rec and rec.get('clock'):
+            summary['sheets'] = 'not made (--fast): see pending_media'
+        elif self.args.no_sheets and rec and rec.get('clock'):
+            summary['sheets'] = {}
+        with self.budget.phase('full decode (wait)'):
+            self.finish_deep_check(rec)
+        if rec and rec.get('clock'):
+            summary['clock'] = rec['clock']
+        summary['recordings'] = self.collector.summary() if self.collector else None
+        if getattr(self.args, 'background', False):
+            arm = next((x for x in self.cycle['steps'] if x['name'] == 'arm'), {})
+            summary['background'] = {
+                'min_idle_s': gt_session.effective_min_idle(self.args), 'command_channel': self.channel_mode or self.args.cmd_channel,
+                'pad_plugin_answer': (arm.get('bg_input') or {}).get('result'), 'recorder': (rec or {}).get('mode'),
+                'recorder_warning': (rec or {}).get('warning'),
+                'keyboard_skips': [f'{s["name"]}#{s["run"]}' for s in self.cycle.get('scenarios', [])
+                                   if s.get('skip_reason') == 'needs keyboard']}
+        summary['machine_load'] = self.cycle.get('machine_load')
+        summary['settings'] = {'ledger': self.settings.record(), 'left': self.cycle.get('settings_left'),
+                               'pending_restored_at_launch': self.cycle.get('pending_settings_restore'),
+                               'unowned': self.cycle.get('unowned_settings')}
+        self.write_summary(summary)
         if not self.args.no_media_move:
             # Media rule: the recording and the sheet images go straight to Media\mp4 / Media\png (after the clips,
             # which read the recording from the summary written above). A killed cycle moves what exists; a failed
             # move is logged and never fails the cycle.
-            try:
-                summary['media'] = failure_clips.move_to_media(self.cycle_dir, summary, log=self.log)
-                self.cycle['media'] = summary['media']
-                self.save()
-            except Exception as e:  # noqa: BLE001
-                summary['media'] = {'errors': [repr(e)]}
-                self.log(f'[media] move failed: {e!r}')
-            with open(os.path.join(self.cycle_dir, 'summary.json'), 'w', encoding='utf-8') as f:
-                json.dump(gt_run.serialise_plan(summary), f, indent=1, default=str)
+            with self.budget.phase('media move'):
+                try:
+                    summary['media'] = failure_clips.move_to_media(self.cycle_dir, summary, log=self.log)
+                    self.cycle['media'] = summary['media']
+                    self.save()
+                except Exception as e:  # noqa: BLE001
+                    summary['media'] = {'errors': [repr(e)]}
+                    self.log(f'[media] move failed: {e!r}')
+            self.write_summary(summary)
         self.done(st, copied=len(copied))
         return summary
+
+    # -- pose meter (gt_posemeter) --
+    def start_pose_meter(self, plan: dict, logs_dir: str) -> None:
+        """Worker processes over the collected recording; returns at once (never delays the work that follows)."""
+        self.meter_job = None
+        if getattr(self.args, 'no_pose_meter', False):
+            return
+        files = gc.pose_files(logs_dir)
+        if not files:
+            self.note_cycle('pose_meter', {'status': 'no pose recording was collected (diagnostic logs off?)'})
+            self.log('[pose] no pose recording in the run folder: the meter did not run (is --diag on, or the diagnostic logs on?)')
+            return
+        try:
+            windows = gp.build_windows(self.cycle.get('scenarios'), plan.get('runs'))
+            self.meter_job = gp.MeterJob(os.path.join(self.cycle_dir, '_tmp', 'pose_meter'), files, windows).start()
+            self.log(f'[pose] meter started in worker processes: {len(files)} recording files, {len(windows)} windows')
+        except Exception as e:  # noqa: BLE001
+            self.meter_job = None
+            self.note_cycle('pose_meter', {'status': f'not started: {e!r}'})
+            self.log(f'[pose] meter not started: {e!r}')
+
+    def finish_pose_meter(self, summary: dict) -> None:
+        job = self.meter_job
+        if job is None:
+            if self.cycle.get('pose_meter'):
+                summary['pose_meter'] = self.cycle['pose_meter']
+            return
+        self.meter_job = None
+        try:
+            out = job.finish(getattr(self.args, 'pose_timeout', 900.0))
+            res = gp.assemble(self.cycle['name'], out, job.windows,
+                              self.collector.summary() if self.collector else None, self.cycle.get('machine_load'))
+            gp.write_outputs(self.cycle_dir, res)
+            lines = gp.scenario_lines(res)
+            for ln in lines:
+                self.log('[pose] ' + ln)
+            for e in res['errors']:
+                self.log(f'[pose] ERROR {e}')
+            rec = {'file': 'pose_metrics.json', 'table': 'pose_table.txt', 'lines': lines, 'errors': res['errors'],
+                   'windows_without_result': res['windows_without_result'], 'helper_reports': res['helper_reports']}
+            want = gt_session.POSE_BODY.get(self.body) if self.body else None
+            if want and res.get('body') and res['body'] != want:
+                msg = f'--body {self.body} asked for the {want} body but the pose recording is of the {res["body"]} body'
+                self.log(f'[pose] !!! BODY MISMATCH: {msg}')
+                rec['body_mismatch'] = summary['body_mismatch'] = self.cycle['body_mismatch'] = msg
+            elif want and not res.get('body'):
+                self.log(f'[pose] the body of this run (--body {self.body}) could not be checked: the pose recording names none')
+            base = None
+            base_body = gp.load_body(self.args.pose_baseline) if getattr(self.args, 'pose_baseline', '') else None
+            if base_body and res.get('body') and base_body != res['body']:
+                rec['baseline_skipped'] = f'baseline recorded on {base_body}, this run is {res["body"]}'
+                self.log(f'[pose] baseline {self.args.pose_baseline} not used: {rec["baseline_skipped"]}')
+            elif getattr(self.args, 'pose_baseline', ''):
+                try:
+                    base = gp.load_rows(self.args.pose_baseline)
+                    text = gp.format_comparison(gp.compare_rows(res['rows'], base))
+                    with open(os.path.join(self.cycle_dir, 'pose_compare.txt'), 'w', encoding='utf-8') as f:
+                        f.write('\n'.join(text) + '\n')
+                    for ln in text:
+                        self.log('[pose] vs baseline ' + ln.strip())
+                    rec['baseline'] = self.args.pose_baseline
+                except Exception as e:  # noqa: BLE001
+                    rec['baseline_error'] = repr(e)
+                    self.log(f'[pose] baseline comparison failed: {e!r}')
+            bad = gp.check_limits(res['rows'], gp.load_pose_limits(self.args.scenario_file), base)
+            rec['limits_exceeded'] = bad
+            for b in bad:
+                self.log(f'[pose] LIMIT EXCEEDED {b["label"]} {b["metric"]} = {b["value"]} ({b["kind"]} {b["limit"]})')
+            if bad:
+                self.cycle['pose_limits_exceeded'] = bad
+            summary['pose_meter'] = rec
+            self.note_cycle('pose_meter', {k: rec[k] for k in ('file', 'table', 'errors', 'limits_exceeded')})
+            if not res['errors']:
+                shutil.rmtree(os.path.join(self.cycle_dir, '_tmp', 'pose_meter'), ignore_errors=True)
+        except Exception as e:  # noqa: BLE001
+            summary['pose_meter'] = {'error': repr(e)}
+            self.log(f'[pose] meter failed: {e!r}')
 
     def perf_status(self, attempts: int = 3) -> None:
         """After the scenarios: the motion driver status (frames, feedP95us, budget, skips) into the cycle record - the
@@ -3177,9 +3807,17 @@ class Night:
         self.cycle_dir = os.path.join(self.args.out_root, name)
         os.makedirs(self.cycle_dir, exist_ok=True)
         self.cycle = {'name': name, 'index': n, 'start': start, 'args': vars(self.args), 'steps': [],
-                      'scenarios': [], 'result': None}
+                      'scenarios': [], 'result': None, 'body': self.body}
         self.utpp_log = None
         self.channel_mode = None
+        self.collector = None
+        self.meter_job = None
+        self.budget = gb.Budget()
+        self.probe_cache = gt_flow.ProbeCache()
+        self.early = gt_flow.EarlyStop(getattr(self.args, 'early_stop', 2))
+        self.deep_check = None
+        self.settings.entries = []
+        self.settings.cycle_name = name
         rec = None
         plan = {'runs': [], 'created': start}
         quit_game = True
@@ -3188,21 +3826,29 @@ class Night:
             self.check_continue()
             self.ensure_closed('ensure_closed')
             self.stop_padd()
+            self.apply_graphics()
             self.install()
             log = self.launch()
             self.arm(log)
             rec = self.start_recording()
             self.marker(rec, f'{name}-start')
-            self.run_scenarios(plan)
+            early = None
+            try:
+                self.run_scenarios(plan)
+            except EarlyStop as e:
+                early = e
             self.perf_status()
+            self.report_load()
             self.marker(rec, f'{name}-end')
-            self.cycle['result'] = 'ok'
+            self.cycle['result'] = 'ok' if early is None else f'failed: {early}'
         except StopNight as e:
             self.cycle['result'] = f'stopped: {e}'
+            self.secure_session_files('stop', final=True)
             self.bg_input(False, 'stop')
             if rec:
-                self.stop_recording(rec)
+                self.stop_recording(rec, check=False)
             if getattr(e, 'leave_game', False):
+                self.settings_left('somebody is at the PC: nothing is typed into the game')
                 self.log(f'[night] STOP: {e} (before the cycle: game left alone)')
             else:
                 self.log(f'[night] STOP: {e} -> quitting the game anyway (never left running), then no more cycles')
@@ -3222,15 +3868,22 @@ class Night:
             self.cycle['result'] = f'graceful stop: {e}'
             self.log(f'[night] graceful stop: {e} (on-stop={self.args.on_stop})')
             quit_game = self.args.on_stop == 'quit'
+            self.secure_session_files('graceful stop', final=True)
+            if not quit_game:
+                self.restore_settings_leave('run stopped, the game stays open')
         except (CycleError, NeedsKeyboard) as e:
             self.cycle['result'] = f'failed: {e}'
             self.log(f'[night] cycle failed: {e}')
+            self.secure_session_files('cycle failed', final=True)
         finally:
             if self.bg_input_active and self.cycle['result'] is None:   # any other exception leaves run_cycle here
                 self.bg_input(False, 'error')
+            if self.cycle['result'] is None:                              # an unexpected exception: copy and restore what we can
+                self.secure_session_files('unexpected error', final=True)
+                self.restore_settings_leave('unexpected error')
         self.bg_input(False, 'end of cycle')
         if rec:
-            self.stop_recording(rec)
+            self.stop_recording(rec, check=False)      # the check (and the full decode) wait until the game is closed
         if quit_game:
             try:
                 self.ensure_closed('quit')
@@ -3243,11 +3896,53 @@ class Night:
         except Exception as e:  # noqa: BLE001
             self.log(f'[night] collect failed: {e!r}')
         self.cycle['end'] = datetime.now()
+        self.report_budget()
         self.save()
         return self.cycle
 
+    def apply_graphics(self) -> None:
+        """--graphics low: the lowest quality profile, with the game closed, before the launch. Never restored here."""
+        mode = getattr(self.args, 'graphics', 'keep')
+        if mode != 'low':
+            return
+        res = gt_session.apply_graphics(mode, self.graphics_settings, self.graphics_state_dir)
+        self.log(f'[graphics] {res["status"]}')
+        self.note_cycle('graphics', {k: res[k] for k in ('mode', 'code', 'status')})
+
+    def report_budget(self) -> None:
+        """Time budget table of the cycle (printed, kept in cycle.json and next to summary.json as time_budget.txt)."""
+        try:
+            lines = self.budget.table(self.cycle['steps'])
+            if not lines:
+                return
+            self.log('[budget] time budget of this run:')
+            for ln in lines:
+                self.log('[budget] ' + ln)
+            self.cycle['time_budget'] = {'scenarios': self.budget.rows(), 'phases': self.budget.phase_totals(self.cycle['steps']),
+                                         'post': dict(self.budget.phases), 'probes_skipped': self.probe_cache.skipped}
+            with open(os.path.join(self.cycle_dir, 'time_budget.txt'), 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines) + '\n')
+            sp = os.path.join(self.cycle_dir, 'summary.json')
+            if os.path.isfile(sp):
+                with open(sp, encoding='utf-8') as f:
+                    summ = json.load(f)
+                summ['time_budget'] = self.cycle['time_budget']
+                with open(sp, 'w', encoding='utf-8') as f:
+                    json.dump(summ, f, indent=1, default=str)
+        except Exception as e:  # noqa: BLE001 - a report problem never fails the cycle
+            self.log(f'[budget] table failed: {e!r}')
+
 
 # ---------------------------------------------------------------------------------------------- dry run
+
+def night_pids_dry() -> list[int]:
+    """Game processes for the dry run's read-only checks."""
+    try:
+        from gt_win32 import Win32Api
+        return Win32Api().list_pids(GAME_EXE)
+    except Exception:  # noqa: BLE001
+        return []
+
 
 def dry_run(args) -> int:
     print('DRY RUN - read-only checks; no input, no launch, no quit, no install, nothing written under the game folder\n')
@@ -3272,6 +3967,42 @@ def dry_run(args) -> int:
     print(f'     launch: {args.launch} -> ' + (f'{GAME_EXE_PATH} (cwd {os.path.dirname(GAME_EXE_PATH)})'
                                                  if args.launch == 'exe' else f'Start-Process {STEAM_URL}'))
     print(f'     quit command (CET console): {gn.QUIT_CMD}')
+    print(f'     recording safety: pose segments (utpp-pose-*.utpppose), input dump (utpp-feed-*.txt) and mod log from {args.log_dir} '
+          'are copied into <run>\\logs between the scenarios, at the end of the scenario phase on every exit path, and after the quit')
+    print('     --diag ' + args.diag + ': ' + ('the diagnostic logs option is not touched' if args.diag == 'keep' else
+          f'diagnostic logs "{args.diag}" are set at arm (previous values read first) and put back before every ExitGame / on every '
+          'exit path; a change that could not be put back stays in pending_restore.json and the next launch restores it first'))
+    pend = os.path.join(args.out_root, 'pending_restore.json')
+    print(f'     pending settings restore from an earlier run: ' + (f'PRESENT {pend} (the next launch restores it first)'
+                                                                   if os.path.isfile(pend) else 'none'))
+    print('     pose meter: worker processes after the quit (pose_metrics.json, pose_table.txt, "pose ..." lines)'
+          + (f'; baseline {args.pose_baseline}' if args.pose_baseline else '') + ('; DISABLED (--no-pose-meter)' if args.no_pose_meter else ''))
+    print(f'     machine load: CPU mean over the scenario phase and compiler processes seen (warning above '
+          f'{gt_load.HIGH_CPU_PERCENT:.0f} % CPU or any compiler), next to the perf line')
+    print(f'     speed: the recorder is ended {args.recorder_grace:.0f} s after "q" at the latest and BEFORE the game quits; its full '
+          f'decode runs in the background after the quit; ExitGame is given {args.quit_timeout:.0f} s (when echoed) before taskkill; '
+          'contact sheets (cut into one-sheet parts) and failure clips run in a pool of processes sized to the idle cores '
+          f'(now ~{gt_post.pool_size(40)} of {os.cpu_count()} for 40 jobs; --post-workers {args.post_workers})')
+    print('     post-processing: ' + ('--fast: NO sheets and NO failure clips (summary.json "pending_media" lists them with video '
+                                     'seconds and the commands that make them later)' if args.fast else
+                                     f'sheets{"" if not args.no_sheets else " OFF"}, failure clips'
+                                     f'{"" if not args.no_failure_clips else " OFF"}: at most {args.clips_per_cause} per cause '
+                                     '(the first failing item of each scenario first; 0 = all)'))
+    print('     look-ahead probe: skipped when the previous probe started within '
+          f'{gt_flow.SPOT_M:.0f} m of here along the same direction (camera and route within {gt_flow.HEADING_DEG:.0f} deg), '
+          f'covered >= {gt_flow.REACH_SLACK * 100:.0f} % of the distance needed and came back clear; the 1.4 s face push stays; '
+          'forgotten after a camera turn, a blocked attempt, the vehicle scenario and at every cycle start')
+    print('     early stop: ' + (f'the first {args.early_stop} walking scenarios invalid for one cause (V cannot move / no motion '
+                                 'lines) end the cycle with that cause in one line; the rest is listed as not played'
+                                 if args.early_stop else 'off (--early-stop 0)'))
+    print('     time budget: a table per scenario (total, play, probe, retries, waits, copy, probes skipped) and per phase '
+          '(launch, arm, scenarios, recorder stop, quit, collect, post-processing) at the end; time_budget.txt in the run folder')
+    bodies = gt_session.bodies_of(args.body)
+    print('     body: ' + (', '.join(f'{b} = {gt_session.BODY_SAVES[b]}' for b in bodies) + ' (select_save.py before each launch with the '
+                           'game closed, exact restore after each run on every exit path; one launch per body, one summary '
+                           'body_summary_<time>.txt)' if bodies else 'keep (the game starts with its own newest save)'))
+    print('     graphics: ' + ('low before the launch (graphics_profile.py --apply), never restored automatically'
+                               if args.graphics == 'low' else 'keep'))
     print(f'     arm commands: {gn.arm_cmds(args.db, [c for c in args.cet.split(";;") if c.strip()])}')
     print(f'     position probe: {gn.NIGHTPOS_CMD} (needs utpp_core 0.5.2 installed; fallback inline '
           f'{len(gn.POS_FUNC_DEF) + len(gn.POS_CALL) + 1} chars)')
@@ -3405,7 +4136,8 @@ def dry_run(args) -> int:
             print(f'[--] ffmpeg command ({mode})' + ('' if rect else ' (example rect 0,0,1920,1080)') + ': ' +
                   subprocess.list2cmdline(cmd))
         idle = idle_seconds()
-        print(f'[--] user idle {idle:.0f} s (--min-idle {args.min_idle:.0f})')
+        print(f'[--] user idle {idle:.0f} s (--min-idle {gt_session.effective_min_idle(args):.0f}'
+              f'{" - default of --background" if args.background and args.min_idle is None else ""})')
     ovk = read_cet_overlay_key()
     item('CET overlay key (bindings.json)', bool(ovk), str([hex(v) for v in ovk]) if ovk else 'unknown')
     item('CET log', os.path.isfile(os.path.join(CET_DIR, 'cyber_engine_tweaks.log')))
@@ -3416,6 +4148,35 @@ def dry_run(args) -> int:
                                                                                          'init.lua')))
         print(f'[--] newest UTPP log READY line: {testcmd_ready(read_since(lg, 0)) if lg else None}')
     print(f'[--] command channel {args.cmd_channel}, background {args.background}')
+    if bodies:
+        ss = gt_session.SaveSession(args.out_root, running=lambda: night_pids_dry())
+        try:
+            have = select_save.scan_saves(ss.saves_dir)
+        except select_save.SaveError as e:
+            have = {}
+            item('saves folder', False, str(e))
+        for b in bodies:
+            item(f'save of the {b} body ({gt_session.BODY_SAVES[b]})', gt_session.BODY_SAVES[b] in have)
+        left = ss.leftover()
+        print(f'[--] leftover save selection of an earlier run: ' + (f'PRESENT {left} (the next start restores it first)' if left else 'none'))
+        item('no foreign select_save state in place', not (ss.state_present() and not left), ss.state_file)
+        item('game not running (a body is selected with the game closed; a running game is never closed for it)',
+             not ss.game_running())
+    if args.graphics == 'low':
+        print('[--] graphics: ' + gt_session.graphics_status())
+    if args.background:
+        ff8, why8 = gt_capture.find_ffmpeg(args.capture_ffmpeg)
+        reqs = gt_session.background_requirements(GAME_DIR, os.path.dirname(TESTCMD_FILE), args, ff8, why8)
+        print('\nBackground mode (--background): the game stays behind other windows; no foreground, no keyboard, no user idle '
+              f'time needed ({gt_session.effective_min_idle(args):.0f} s); only Pause stops the run')
+        for label, good, detail in reqs:
+            item(label, good, detail)
+        lg_ready = testcmd_ready(read_since(lg, 0)) if lg else None
+        print(f'[--] test command module READY line in the newest UTPP log: {lg_ready}'
+              + ('' if lg_ready else ' (it appears at the start of a session; the run needs it after the launch)'))
+        missing = [l for l, g, _ in reqs if not g]
+        print('     background run ' + ('is possible: every requirement is met' if not missing else
+                                        'is NOT possible yet, missing: ' + '; '.join(missing)))
     item('vgamepad package (Tools\\pylibs)', os.path.isdir(os.path.join(PROJECT, 'Tools', 'pylibs', 'vgamepad')))
     sc_q = subprocess.run(['sc', 'query', 'ViGEmBus'], capture_output=True, text=True, errors='replace')
     item('ViGEmBus service running', 'RUNNING' in sc_q.stdout)
@@ -3439,6 +4200,14 @@ def dry_run(args) -> int:
 
 
 # ---------------------------------------------------------------------------------------------- CLI
+
+class _ExplicitChannel(argparse.Action):
+    """--cmd-channel <mode>: store the mode and remember that it was given (--background otherwise picks auto)."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        namespace.cmd_channel_explicit = True
+
 
 class _ExplicitCapture(argparse.Action):
     """--capture <mode>: store the mode and remember that it was given (a given mode is never replaced by the
@@ -3507,7 +4276,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help='key = keyboard C tap (ToggleCrouch IK_C) verified by MMTRACE loco; pad = the scenario B hold')
     p.add_argument('--crouch-key-hold', type=float, default=0.08)
     p.add_argument('--crouch-verify', type=float, default=1.5, help='seconds to see loco=2 / loco=1 after a C tap')
-    p.add_argument('--quit-timeout', type=float, default=20.0, help='seconds after ExitGame before taskkill')
+    p.add_argument('--quit-timeout', type=float, default=QUIT_TIMEOUT_S,
+                   help='seconds after an echoed ExitGame before taskkill (a game that is closing needs well over 20 s on a '
+                        'busy machine; without the echo the kill is immediate)')
     p.add_argument('--quit-focus-tries', type=int, default=3, help='refocus attempts when quitting (then taskkill)')
     p.add_argument('--quit-focus-gap', type=float, default=2.0)
     p.add_argument('--car-stop-speed', type=float, default=0.2, help='m/s below which the vehicle is stationary')
@@ -3519,7 +4290,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--gameplay-settle', type=float, default=15.0)
     p.add_argument('--calib-timeout', type=float, default=30.0)
     p.add_argument('--focus-grace', type=float, default=0.0)
-    p.add_argument('--min-idle', type=float, default=120.0, help='required user idle time before a cycle (0 = off)')
+    p.add_argument('--min-idle', type=float, default=None,
+                   help='required user idle time before a cycle (0 = off; default 120 s, 0 with --background)')
     p.add_argument('--wake', default='rs')
     p.add_argument('--pad-settle', type=float, default=2.0)
     p.add_argument('--gap', type=float, default=2.0)
@@ -3592,8 +4364,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--weapon-window', type=float, default=6.0, help='draw/holster confirmation window (s)')
     p.add_argument('--sheet-pad', type=float, default=3.0)
     p.add_argument('--no-sheets', action='store_true')
-    p.add_argument('--sheet-jobs', type=int, default=8,
-                   help='video sheets built in parallel after the game is closed (1 = one by one)')
+    p.add_argument('--post-workers', type=int, default=0,
+                   help='processes for the contact sheets and the failure clips after the game is closed (0 = from the cores '
+                        'that are idle then, at most 24; 1 = one by one)')
     p.add_argument('--keep-sheet-frames', action=argparse.BooleanOptionalAction, default=False,
                    help='keep sheets\\<name>\\frames (per-frame images, intermediate files of video_sheets.py); '
                         'default: deleted once the sheets exist')
@@ -3601,16 +4374,57 @@ def build_parser() -> argparse.ArgumentParser:
                    help='leave the recording and the sheet images in the run folder (default: move them to Media)')
     p.add_argument('--no-failure-clips', action='store_true',
                    help='do not cut 1x clips of failing steps into Media\\mp4\\<date>_niezaliczone_<run>')
+    p.add_argument('--clips-per-cause', type=int, default=failure_clips.PER_CAUSE,
+                   help='failure clips per cause (the failure kind with its numbers removed): the first failing item of each '
+                        'scenario first, then the others in time order; 0 = every failing item (default %(default)s)')
+    p.add_argument('--fast', action='store_true',
+                   help='no contact sheets and no failure clips: the run record (summary.json, pending_media) lists which '
+                        'sheets and clips are left, with their video seconds and the commands that make them later (gt_post.py '
+                        'sheets <run> / failure_clips.py <run>)')
+    p.add_argument('--recorder-grace', type=float, default=RECORDER_GRACE_S,
+                   help="seconds the window / desktop recorder gets to finish after 'q' before it is ended (a fragmented mp4 "
+                        'stays decodable)')
+    p.add_argument('--early-stop', type=int, default=2,
+                   help='stop the cycle when each of its first N walking scenarios is invalid for the same cause (V cannot '
+                        'move, no motion lines ...); 0 = always play everything')
     p.add_argument('--pause-between', type=float, default=30.0, help='seconds between cycles')
-    p.add_argument('--cmd-channel', default='console', choices=['console', 'file', 'auto'],
+    p.add_argument('--cmd-channel', default='console', choices=['console', 'file', 'auto'], action=_ExplicitChannel,
                    help='how commands reach the game: console = typed into the CET overlay; file = cmd.txt of the test '
                         'module utpp_testcmd, confirmed by its ACK in the UTPP log (no overlay, no keys, no clicks); '
                         'auto = file when the module logged READY in the session, else console')
+    p.add_argument('--diag', default='keep', choices=['keep', 'off', 'timed', 'until'],
+                   help="the mod's diagnostic logs option: keep = do not touch (default); off | timed (5 minutes) | until = set "
+                        'at arm and put back (previous value read first) before every ExitGame and on every exit path; if the '
+                        'game is gone first the change stays in pending_restore.json and the next launch restores it')
+    p.add_argument('--pose-baseline', default='',
+                   help='run folder with a pose_metrics.json: print before / after per scenario and per column; the exit code '
+                        'is non-zero only when a "pose_limits" block of scenarios.json is exceeded')
+    p.add_argument('--no-pose-meter', action='store_true', help='do not run the pose meter on the collected recording')
+    p.add_argument('--pose-timeout', type=float, default=900.0, help='seconds the pose meter workers may take after the quit')
     p.add_argument('--background', action='store_true',
                    help='the game may stay in the background: no focusing, no abort on focus loss; keyboard / mouse '
                         'input is refused (scenarios that need keys are skipped), pad reports are still sent and the '
-                        'user-abort keys stay active. Needs --cmd-channel file or auto')
+                        'user-abort keys stay active. Needs --cmd-channel file or auto (picked automatically when none is given); '
+                        '--min-idle defaults to 0 and the window recorder is used; only Pause stops the run')
+    p.set_defaults(cmd_channel_explicit=False)
+    p.add_argument('--body', default='keep', choices=list(gt_session.BODY_CHOICES),
+                   help='the body the game starts with: female / male = that body\'s save is made the newest one (select_save.py: '
+                        'times only, with a backup) while the game is closed and put back exactly after the run on every exit '
+                        'path; both = one launch per body and one summary with both side by side; keep = the game\'s own choice '
+                        '(default). A game that is already running is never closed for this (the run refuses). Saves: '
+                        + ', '.join(f'{b} = {n}' for b, n in gt_session.BODY_SAVES.items()))
+    p.add_argument('--graphics', default='keep', choices=['keep', 'low'],
+                   help='low = the lowest quality profile (graphics_profile.py) before the launch, game closed; it is NOT '
+                        'restored automatically (graphics_profile.py --restore); keep = settings as they are (default)')
     return p
+
+
+def finalize_args(args):
+    """Defaults that depend on other options: --background without an explicit --cmd-channel uses auto (the file channel when
+    the test command module is there)."""
+    if getattr(args, 'background', False) and not getattr(args, 'cmd_channel_explicit', False):
+        args.cmd_channel = 'auto'
+    return args
 
 
 def validate_args(args) -> list[str]:
@@ -3628,6 +4442,11 @@ def validate_args(args) -> list[str]:
             errs.append(f'--vehicle-spawn: unknown mode {m!r}')
     if getattr(args, 'background', False) and getattr(args, 'cmd_channel', 'console') == 'console':
         errs.append('--background needs --cmd-channel file or auto (console typing needs the game in the foreground)')
+    pb = getattr(args, 'pose_baseline', '')
+    if pb and not os.path.isfile(os.path.join(pb, 'pose_metrics.json')):
+        errs.append(f'--pose-baseline {pb!r}: no pose_metrics.json in that folder')
+    if getattr(args, 'clips_per_cause', 0) < 0 or getattr(args, 'early_stop', 0) < 0 or getattr(args, 'post_workers', 0) < 0:
+        errs.append('--clips-per-cause, --early-stop and --post-workers must not be negative')
     return errs
 
 
@@ -3641,8 +4460,51 @@ def install_signal_handlers(night: Night) -> None:
             signal.signal(sig, handler)
 
 
+def run_cycles(night: Night, args, results: list, body: str | None) -> bool:
+    """--cycles cycles of one body; appends to `results`. Returns True when the whole session must stop (stop request, somebody
+    at the PC, Ctrl+C)."""
+    for n in range(1, args.cycles + 1):
+        try:
+            c = night.run_cycle(n)
+            results.append({'cycle': c['name'], 'body': body, 'result': c['result'],
+                            **({'pose_limits_exceeded': c['pose_limits_exceeded']} if c.get('pose_limits_exceeded') else {}),
+                            **({'body_mismatch': c['body_mismatch']} if c.get('body_mismatch') else {})})
+        except StopNight:
+            results.append({'cycle': night.cycle['name'], 'body': body, 'result': night.cycle['result']})
+            return True
+        except KeyboardInterrupt:
+            results.append({'cycle': night.cycle['name'] if night.cycle else None, 'body': body, 'result': 'Ctrl+C'})
+            return True
+        if night.requested_stop():
+            print(f'[night] stopping: {night.stop_reason}')
+            return True
+        if n < args.cycles:
+            end = time.monotonic() + args.pause_between
+            while time.monotonic() < end and not night.requested_stop():
+                time.sleep(1.0)
+    return False
+
+
+def write_body_summary(args, results: list) -> list[str]:
+    """--body both (or any run with a body): the runs side by side in one file next to the night_<ts>.json."""
+    digests: dict = {}
+    for r in results:
+        if r.get('body') and r.get('cycle'):
+            digests[r['body']] = gt_session.run_digest(os.path.join(args.out_root, r['cycle']))
+            digests[r['body']]['saves'] = r.get('saves')
+    if not digests:
+        return []
+    lines = gt_session.side_by_side_lines(digests)
+    stamp_ = datetime.now().strftime('%Y%m%d-%H%M%S')
+    with open(os.path.join(args.out_root, f'body_summary_{stamp_}.txt'), 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+    with open(os.path.join(args.out_root, f'body_summary_{stamp_}.json'), 'w', encoding='utf-8') as f:
+        json.dump(digests, f, indent=1, default=str)
+    return lines
+
+
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    args = finalize_args(build_parser().parse_args(argv))
     if args.dry_run:
         return dry_run(args)
     scenarios = load_scenarios(args.scenario_file)
@@ -3660,36 +4522,55 @@ def main(argv=None) -> int:
     night = Night(args)
     from gt_win32 import Win32Api
     night.api = Win32Api()
+    bodies = gt_session.bodies_of(args.body)
+    session = gt_session.SaveSession(args.out_root, out=lambda m: print(m, flush=True))
+    try:
+        session.restore_leftover()       # an earlier session that did not put the saves back: first thing at every start
+    except gt_session.SessionError as e:
+        print(f'[body] {e}')
+        if bodies:
+            return 4
+        print('[body] the run goes on with the game\'s own save: the leftover selection waits for the next start')
+    if bodies and night.pids():
+        print('refusing to start: the game is already running (started by somebody else?): a body needs its save selected with the '
+              'game closed and this run does not close a game it did not start - close it first')
+        return 4
     install_signal_handlers(night)
     import atexit
     keep_awake(True)
     atexit.register(keep_awake, False)
-    results = []
+    atexit.register(lambda: session.restore() if session.selected else None)     # every exit path puts the saves back
+    results: list = []
     try:
-        for n in range(1, args.cycles + 1):
+        for body in bodies or [None]:
+            saves: dict = {}
+            if body:
+                try:
+                    saves['select'] = session.select(body)
+                except gt_session.SessionError as e:
+                    print(f'[body] {body}: {e}')
+                    results.append({'cycle': None, 'body': body, 'result': f'not started: {e}', 'saves': {'select_error': str(e)}})
+                    break
+            night.body = body
             try:
-                c = night.run_cycle(n)
-                results.append({'cycle': c['name'], 'result': c['result']})
-            except StopNight:
-                results.append({'cycle': night.cycle['name'], 'result': night.cycle['result']})
+                stop = run_cycles(night, args, results, body)
+            finally:
+                if body:
+                    saves['restore'] = session.restore()
+                    for r in results:
+                        if r.get('body') == body:
+                            r['saves'] = saves
+            if stop:
                 break
-            except KeyboardInterrupt:
-                results.append({'cycle': night.cycle['name'] if night.cycle else None, 'result': 'Ctrl+C'})
-                break
-            if night.requested_stop():
-                print(f'[night] stopping: {night.stop_reason}')
-                break
-            if n < args.cycles:
-                end = time.monotonic() + args.pause_between
-                while time.monotonic() < end and not night.requested_stop():
-                    time.sleep(1.0)
     finally:
         keep_awake(False)
     os.makedirs(args.out_root, exist_ok=True)
     with open(os.path.join(args.out_root, f'night_{datetime.now():%Y%m%d-%H%M%S}.json'), 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=1)
     print(json.dumps(results, indent=1))
-    return 0 if results and all(r['result'] == 'ok' for r in results) else 1
+    for ln in write_body_summary(args, results):
+        print(ln)
+    return 0 if results and all(r['result'] == 'ok' and not r.get('pose_limits_exceeded') for r in results) else 1
 
 
 if __name__ == '__main__':

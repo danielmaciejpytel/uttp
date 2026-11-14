@@ -731,6 +731,12 @@ def run_one(night, pad, guard, plan, tag: str, tables: dict | None, out: dict | 
                 _remove(run)
             except Exception as e:  # noqa: BLE001
                 run.fails.append(f'cleanup: {type(e).__name__}: {str(e)[:120]}')
+            ledger = getattr(night, 'settings', None)          # listed in the run record: what this weapon changed and its state
+            if ledger is not None:
+                what = 'cyberware.loadout' if w['kind'] == 'cyberware' else f'inventory.{tag}'
+                ent = ledger.register(what, 'as before', 'given', 'melee_weapons', volatile=True)
+                if run.removed in ('removed', 'nothing'):
+                    ledger.mark_restored(ent)
         run.view.update(given=run.given, removed=run.removed)
     if reason and skip:
         run.warns.append(reason)
@@ -761,6 +767,9 @@ def run_weapon_macro(night, pad, guard, plan, set_name: str, out: dict | None = 
             out['own_clip_phases'] += [dict(p, weapon=tag) for p in view['own_clip_phases']]
         night.log(f'[weapons] {tag}: {r["verdict"]}' + (f': {"; ".join(r["fails"])}' if r['fails'] else '')
                   + (f' ({r["skip_reason"]})' if r['skip_reason'] else ''))
+        secure = getattr(night, 'secure_session_files', None)      # a long run: finished recording segments go before the ring drops them
+        if secure is not None:
+            secure('between weapons')
     verdicts = [r['verdict'] for r in out['weapons'].values()]
     out['verdict'] = 'FAIL' if 'FAIL' in verdicts else 'SKIP' if all(v == 'SKIP' for v in verdicts) else 'PASS'
     return out

@@ -102,7 +102,13 @@ def annotated_main(argv=None) -> int:
     ap.add_argument('--keep-sheet-frames', action=argparse.BooleanOptionalAction, default=False,
                     help='keep the per-frame images (frames\\fNNNN.png / .txt, intermediate files of the sheets) after '
                          'the sheets are built; default: they are deleted once the sheets exist')
+    ap.add_argument('--frame-offset', type=int, default=0,
+                    help='number of the frames and sheets before this one (a long sheet cut into parts that run in parallel): '
+                         'the frame numbers in the headers, the sheet numbers and the index continue from it; must be a '
+                         'multiple of cols * rows')
     a = ap.parse_args(argv)
+    if a.frame_offset % max(1, a.cols * a.rows):
+        raise SystemExit('--frame-offset must be a multiple of cols * rows')
 
     log = a.log or gt_log.newest_log()
     if not log or not os.path.isfile(log):
@@ -137,11 +143,12 @@ def annotated_main(argv=None) -> int:
     for i, vt in enumerate(times, start=1):
         wall = vstart + timedelta(seconds=vt)
         ann = frame_annotation(lines, wall, a.every / 2, max_lines=max(1, (a.text_height - 6) // 15 - 1))
-        header = f'v={vt:7.2f}s  {wall:%H:%M:%S.%f}'[:-3] + f'  #{i}'
+        num = i + a.frame_offset
+        header = f'v={vt:7.2f}s  {wall:%H:%M:%S.%f}'[:-3] + f'  #{num}'
         txt = os.path.join(fdir, f'f{i:04d}.txt')
         with open(txt, 'w', encoding='utf-8', newline='\n') as f:  # CR would render as an empty line
             f.write('\n'.join([header] + ann).replace('%', '%%'))
-        index.append(f'#{i:04d} sheet {(i - 1) // per_sheet + 1:02d}  {header}\n    ' + '\n    '.join(ann))
+        index.append(f'#{num:04d} sheet {(num - 1) // per_sheet + 1:02d}  {header}\n    ' + '\n    '.join(ann))
         vf = f'scale={a.width}:-2,pad=iw:ih+{a.text_height}:0:0:black'
         if drawtext_ok:
             vf += (f",drawtext=fontfile='{font}':textfile='f{i:04d}.txt':x=4:y=h-{a.text_height - 4}:"
@@ -159,9 +166,10 @@ def annotated_main(argv=None) -> int:
 
     sheets = 0
     for s, first in enumerate(range(1, len(times) + 1, per_sheet), start=1):
+        sheet_no = s + a.frame_offset // per_sheet
         p = subprocess.run([a.ffmpeg, '-hide_banner', '-loglevel', 'error', '-y', '-start_number', str(first),
                             '-i', 'f%04d.png', '-frames:v', '1', '-vf',
-                            f'tile={a.cols}x{a.rows}:padding=4:margin=4', os.path.join('..', f'sheet_{s:02d}.png')],
+                            f'tile={a.cols}x{a.rows}:padding=4:margin=4', os.path.join('..', f'sheet_{sheet_no:02d}.png')],
                            cwd=fdir, capture_output=True, text=True, errors='replace')
         if p.returncode != 0:
             raise SystemExit(f'ffmpeg sheet {s} failed: {p.stderr.strip()[:300]}')

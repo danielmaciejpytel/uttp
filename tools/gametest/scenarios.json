@@ -1,6 +1,7 @@
 {
   "_format": "see gt_scenario.py docstring; ls/rs = [t, x, y] (x right, y forward), *_polar = [t, deg, mag] (0 = forward, + = clockwise/right), lt/rt = [t, v]; times relative to step start; undefined channels keep the previous step's final value",
   "_bindings": "Pad mapping under InputSchemesMode=Alternative (verified in game 2026-10-23): L3 (LS) tap = sprint, R3 (RS click) TAP 0.08 s = crouch toggle (crouch_fraction 1.0; an R3 hold 0.35 s did not toggle), B = Dodge (a B hold 0.35 s never crouched: 2026-10-07 and 2026-10-23 runs); camera speed depends on the game's pad sensitivity (camera_whip_180 rs durations are a starting point, calibrate with the cam= yaw in the trace)",
+  "_pose_limits": "optional per scenario: \"pose_limits\": {\"<column of the pose meter row>\": 400} (a maximum) or {\"<column>\": {\"max\": 400, \"min\": 0, \"max_vs_baseline_pct\": 20}}; checked on the scenario window <name>#<run> by night.py (pose meter) and gt_posemeter.py; none configured = report only; columns: see gt_posemeter.window_row",
   "defaults": {"rate_hz": 60, "interp": "smooth"},
   "scenarios": {
     "slow_walk_half_stick": {
@@ -56,8 +57,6 @@
     },
     "flick_180_run": {
       "description": "run (full stick) forward, stick reversed in 0.1 s, run back, stop",
-      "_note_thresholds": "Design choice for 0.1.0: run 180 turn churn accepted up to 3.75 transitions/s; turn rework (compare with the GASPALS 1.2 turn) in the next update",
-      "thresholds": {"motion_transitions_per_s": {"max": 3.75}},
       "steps": [
         {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
         {"name": "accel", "duration": 1.5, "ls": [[0, 0, 0], [0.3, 0, 1]]},
@@ -69,8 +68,6 @@
     },
     "flick_180_sprint": {
       "description": "sprint (full stick + L3 tap) forward, stick reversed in 0.1 s, stop",
-      "_note_thresholds": "Design choice for 0.1.0: sprint 180 turn accepted up to 3.75 transitions/s and 15.75 cm foot-lock correction; turn rework in the next update",
-      "thresholds": {"motion_transitions_per_s": {"max": 3.75}, "footlock_corr_max_cm": {"max": 15.75}},
       "steps": [
         {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
         {"name": "accel", "duration": 1.5, "ls": [[0, 0, 0], [0.3, 0, 1]], "buttons": [{"t": 0.4, "button": "LS", "hold": 0.12}]},
@@ -134,7 +131,7 @@
     },
     "sprint_dash": {
       "description": "sprint (full stick + L3), then dodge/dash taps of B while moving (forward, left, right, back) and a sprint stop; pad dodge = Dodge_Button IK_Pad_B_CIRCLE (inputUserMappings.xml), fired by IsActionJustTapped(n\"Dodge\") with move input (locomotionTransitions.script:286); B is Dodge under the Alternative input scheme too (crouch = R3 tap since 2026-10-23)",
-      "_note_thresholds": "Design choice for 0.1.0: dash churn accepted up to 3.75 transitions/s; the dash animations are reworked in the next update",
+      "_note_thresholds": "The motion data has no dash clips yet, so a dash is played with start and turn clips: up to 3.75 transitions/s accepted until dash clips exist",
       "thresholds": {"motion_transitions_per_s": {"max": 3.75}},
       "steps": [
         {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},

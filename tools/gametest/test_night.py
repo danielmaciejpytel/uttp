@@ -28,6 +28,7 @@ sys.path.insert(0, HERE)
 
 import gt_log  # noqa: E402
 import gt_night as gn  # noqa: E402
+import gt_settings as gs  # noqa: E402
 import night  # noqa: E402
 from gt_scenario import BUTTONS, load_scenarios, parse_scenario  # noqa: E402
 from test_gametest import GAME_PID, OTHER_HWND, FakeApi  # noqa: E402
@@ -313,6 +314,7 @@ class EnsureClosedTests(unittest.TestCase):
         args = night.build_parser().parse_args(['--quit-timeout', '3', '--kill-grace', '2', '--out-root', 'unused',
                                                 '--log-dir', log_dir or tempfile.mkdtemp()])
         n = night.Night(args, runner=runner)
+        n.settings.pending_path = None          # tests never write the pending restore file
         log = night.gt_log.newest_log(args.log_dir) or os.path.join(args.log_dir, 'utpp-2026-10-07-23-00-00.log')
         open(log, 'a').close()
 
@@ -480,7 +482,8 @@ class EnsureClosedTests(unittest.TestCase):
         self.assertFalse(res['cet_sent'])
         self.assertEqual(res['path'], 'taskkill')
         self.assertNotIn('ExitGame', ''.join(c[1] for c in api.calls if c[0] == 'char'))
-        self.assertEqual(night.build_parser().parse_args([]).quit_timeout, 20.0)
+        self.assertEqual(night.build_parser().parse_args([]).quit_timeout, night.QUIT_TIMEOUT_S)
+        self.assertEqual(night.QUIT_TIMEOUT_S, 60.0)
 
     def test_quit_focus_loss_is_not_fatal(self):
         api = FakeApi()
@@ -1130,15 +1133,17 @@ class MacroTests(unittest.TestCase):
         r = self.n.melee_macro(_Pad(), _G(), {'runs': []})
         self.assertEqual(r['verdict'], 'PASS', r)
 
-    def _aim_stub(self, hold_lines=None, echoes=None, weapon=True, play_error=None):
+    def _aim_stub(self, hold_lines=None, echoes=None, weapon=True, play_error=None, aiming_before='fpp'):
         """play() / console_verified() / poll_pos() stubs for aim_probe_macro. `echoes` maps the echo tag ('aiming=tpp',
-        'on', 'off', 'aiming=fpp') to 'true' / 'false' / None (= console command lost, no echo)."""
+        'on', 'off', 'aiming=fpp') to 'true' / 'false' / None (= console command lost, no echo). `aiming_before` is what the
+        settings read answers for perspective.aiming (None = no echo: the value cannot be read)."""
         self.played.clear()
         self.order = []
         ech = {'aiming=tpp': 'true', 'on': 'true', 'off': 'true', 'aiming=fpp': 'true'}
         ech.update(echoes or {})
         cmds = {gn.aiming_cmd('tpp'): 'aiming=tpp', gn.aimprobe_cmd(True): 'on', gn.aimprobe_cmd(False): 'off',
                 gn.aiming_cmd('fpp'): 'aiming=fpp'}
+        self.get_cmds = []
         self.n.poll_pos = lambda g, pad=None, timeout=None: {'weapon': weapon}
 
         def play(pad, g, name, plan, sc=None):
@@ -1152,6 +1157,12 @@ class MacroTests(unittest.TestCase):
             return {'steps': []}
 
         def console_verified(pad, g, cmd, echo, label, timeout=3.0):
+            if cmd == gs.get_cmd(['perspective.aiming']):                               # the settings read (not a probe command)
+                self.get_cmds.append(cmd)
+                if aiming_before is None:
+                    return None
+                self.cet(f'[night] SETGET ok=true perspective.aiming=string:{aiming_before}')
+                return open(self.log, encoding='utf-8').read()
             key = cmds[cmd]
             self.order.append(key)
             val = ech[key]
@@ -1263,6 +1274,68 @@ class MacroTests(unittest.TestCase):
         with self.assertRaises(night.ScenarioTimeout):
             self.n.aim_probe_macro(_Pad(), _G(), {'runs': []})
         self.assertEqual(self.order[-2:], ['off', 'aiming=fpp'])
+
+    def test_aim_probe_restores_the_value_it_read_not_a_fixed_one(self):
+        self._aim_stub(self._aim_ok(), aiming_before='tpp')
+        r = self.n.aim_probe_macro(_Pad(), _G(), {'runs': []})
+        self.assertEqual(r['verdict'], 'PASS', r)
+        self.assertEqual(self.order, ['aiming=tpp', 'on', 'aim_probe_hold', 'off', 'aiming=tpp'])   # put back to tpp, not fpp
+        self.assertEqual(r['aiming_restore'], {'previous': 'tpp', 'restore_to': 'tpp'})
+        self.assertEqual(len(self.get_cmds), 1)
+        self.assertEqual(self.n.settings.open_entries(), [])                              # the restore echo was seen
+        self.assertEqual([e['state'] for e in self.n.settings.record()], ['restored'])
+        self._aim_stub(self._aim_ok(), aiming_before='fpp')
+        r = self.n.aim_probe_macro(_Pad(), _G(), {'runs': []})
+        self.assertEqual(self.order[-1], 'aiming=fpp')
+
+    def test_aim_probe_unreadable_aiming_falls_back_to_fpp_and_says_so(self):
+        self._aim_stub(self._aim_ok(), aiming_before=None)
+        r = self.n.aim_probe_macro(_Pad(), _G(), {'runs': []})
+        self.assertEqual(r['aiming_restore'], {'previous': None, 'restore_to': 'fpp'})
+        self.assertEqual(self.order[-1], 'aiming=fpp')
+        self.assertEqual(r['verdict'], 'PASS', r)
+        self.assertEqual([(e['volatile'], e['state']) for e in self.n.settings.record()], [(True, 'restored')])   # never in the pending file
+
+    def test_aim_probe_lost_restore_stays_open_and_is_sent_again_before_exit(self):
+        self._aim_stub(self._aim_ok(), aiming_before='tpp', echoes={'aiming=tpp': None})
+        r = self.n.aim_probe_macro(_Pad(), _G(), {'runs': []})
+        self.assertEqual(r['verdict'], 'FAIL')
+        self.assertEqual([e['key'] for e in self.n.settings.open_entries()], ['perspective.aiming'])
+        sent = []
+
+        def cv(pad, g, cmd, echo, label, timeout=3.0):
+            sent.append(cmd)
+            self.cet('[night] SETSET ok=true all')
+            return open(self.log, encoding='utf-8').read()
+        self.n.console_verified = cv
+        res = {}
+        self.n.send_final_commands(_Pad(), _G(), res)
+        self.assertEqual(sent, [gs.set_cmd([('perspective.aiming', 'tpp')])])
+        self.assertEqual(res['restored_settings']['restored'], 1)
+        self.assertEqual(self.n.settings.open_entries(), [])
+
+    def test_melee_fists_are_in_the_ledger_and_put_away_even_when_the_macro_dies(self):
+        self._melee_stub(self._melee_ok)
+        r = self.n.melee_macro(_Pad(), _G(), {'runs': []})
+        self.assertEqual(r['verdict'], 'PASS', r)
+        self.assertEqual([(e['owner'], e['state']) for e in self.n.settings.record()], [('melee_fists', 'restored')])
+        self.n.settings.entries = []
+        self._melee_stub(self._melee_ok)
+        orig = self.n.play
+
+        def play(pad, g, name, plan, sc=None):
+            if name == 'melee_punch':
+                raise night.ScenarioTimeout('timeout')
+            return orig(pad, g, name, plan, sc)
+        self.n.play = play
+        with self.assertRaises(night.ScenarioTimeout):
+            self.n.melee_macro(_Pad(), _G(), {'runs': []})
+        self.assertEqual([e['owner'] for e in self.n.settings.open_entries()], ['melee_fists'])
+        self.cv.clear()
+        res = {}
+        self.n.send_final_commands(_Pad(), _G(), res)                                    # before ExitGame
+        self.assertEqual([c for _, c in self.cv], [gn.FISTS_OFF_CMD])
+        self.assertEqual(res['restored_settings']['restored'], 1)
 
     def test_aim_probe_fails_land_in_summary_verdicts(self):
         self._aim_stub(self._aim_ok())
@@ -2378,60 +2451,6 @@ class CalibrationWaitTests(unittest.TestCase):
         self.assertEqual(n.logged, [])
 
 
-class SheetJobsTests(unittest.TestCase):
-    JOBS = [('full', ['a']), ('door_r1', ['b']), ('car_r1', ['c']), ('bad_exit', ['d']), ('bad_exc', ['e'])]
-
-    @staticmethod
-    def fn(name, extra):
-        if name == 'bad_exit':
-            raise SystemExit('ffmpeg frame 3 failed')
-        if name == 'bad_exc':
-            raise ValueError('boom')
-
-    def test_all_run_errors_kept_order_stable(self):
-        import threading
-        done, lock, others_done = [], threading.Lock(), threading.Event()
-
-        def fn(name, extra):
-            if name == 'full':                             # the first job finishes last: it waits for all the others
-                others_done.wait(10.0)
-            with lock:
-                done.append(name)
-                if len(done) == len(self.JOBS) - 1 and 'full' not in done:
-                    others_done.set()
-            self.fn(name, extra)
-        res = night.run_sheet_jobs(self.JOBS, fn, 4)
-        self.assertEqual(sorted(done), sorted(n for n, _ in self.JOBS))   # every job ran
-        self.assertEqual(list(res), [n for n, _ in self.JOBS])           # order = job order
-        self.assertEqual(res['full'], 'ok')
-        self.assertEqual(res['bad_exit'], 'error: ffmpeg frame 3 failed')
-        self.assertEqual(res['bad_exc'], "error: ValueError('boom')")
-        self.assertEqual(done[-1], 'full')
-
-    def test_one_worker_is_sequential_in_order(self):
-        import threading
-        calls, threads = [], set()
-
-        def fn(name, extra):
-            calls.append(name)
-            threads.add(threading.get_ident())
-        res = night.run_sheet_jobs(self.JOBS, fn, 1)
-        self.assertEqual(calls, [n for n, _ in self.JOBS])
-        self.assertEqual(threads, {threading.get_ident()})
-        self.assertEqual(set(res.values()), {'ok'})
-
-    def test_parallel_really_overlaps(self):
-        import threading
-        barrier = threading.Barrier(3, timeout=5)
-        res = night.run_sheet_jobs([('a', []), ('b', []), ('c', [])], lambda n, e: barrier.wait(), 3)
-        self.assertEqual(set(res.values()), {'ok'})                     # 3 jobs met at the barrier -> concurrent
-
-    def test_empty_and_default_option(self):
-        self.assertEqual(night.run_sheet_jobs([], self.fn, 8), {})
-        self.assertEqual(night.build_parser().parse_args([]).sheet_jobs, 8)
-        self.assertEqual(night.build_parser().parse_args(['--sheet-jobs', '1']).sheet_jobs, 1)
-
-
 class PerfStatusTests(unittest.TestCase):
     OK = '[2026-11-12 03:40:00.000] [info] [1] [UTPP] UTPP CET [night] PERF true  motion enabled=1 frames=9 feedP95us=87.5 budget=250 trav=0'
     OLD = '[2026-11-12 03:30:00.000] [info] [1] [UTPP] UTPP mm.motionDriver status: motion enabled=1 frames=5 feedP95us=70.0 budget=250 trav=0'
@@ -2684,6 +2703,47 @@ class LookAheadTests(unittest.TestCase):
         self.assertEqual(len(plan['runs']), 1)                                  # one 1.2 s probe, no walk back
         self.assertAlmostEqual(plan['runs'][0]['steps'][0]['end'].timestamp() - plan['runs'][0]['steps'][0]['start'].timestamp(),
                                night.CLEAR_PROBE_S + 0.6, places=3)
+
+    def test_second_look_ahead_from_the_same_spot_is_skipped_and_only_the_face_push_is_played(self):
+        w = self.world([_walk_scenario('long_route', 0.9, 4.0), _walk_scenario('again', 0.9, 4.0)])
+        plan = {'runs': []}
+        first = self.n.clear_path(_Pad(), _G(), plan, 'long_route')
+        walked = len(plan['runs'])
+        self.assertNotIn('skipped', first['lookahead'])
+        self.assertEqual([k['p0'] for k in first['lookahead']['walks']], [[0.0, 0.0]])      # start and camera are recorded
+        self.assertEqual(first['lookahead']['walks'][0]['cf'], [0.0, 1.0])
+        out = self.n.clear_path(_Pad(), _G(), plan, 'again')
+        self.assertEqual(out['result'], 'clear')
+        self.assertIn('skipped', out['lookahead'])
+        self.assertEqual(out['lookahead']['skipped']['where'], 'long_route')
+        self.assertEqual([r['steps'][0]['name'] for r in plan['runs'][walked:]], ['face'])   # no probe walk, no walk back
+        self.assertTrue(any('SKIPPED' in m and 'face push only' in m for m in self.n.logged), self.n.logged)
+        self.assertEqual(self.n.probe_cache.skipped, 1)
+
+    def test_probe_is_repeated_when_v_is_elsewhere_or_the_camera_turned_or_the_route_differs(self):
+        w = self.world([_walk_scenario('long_route', 0.9, 4.0), _walk_scenario('again', 0.9, 4.0),
+                        _walk_scenario('side', 0.9, 4.0)])
+        plan = {'runs': []}
+        self.n.clear_path(_Pad(), _G(), plan, 'long_route')
+        w.p = [3.0, 0.0]                                                         # 3 m from the probe start
+        far = self.n.clear_path(_Pad(), _G(), plan, 'again')
+        self.assertNotIn('skipped', far['lookahead'])
+        self.n.turn_camera_90(_Pad(), _G(), plan, w.pos())                       # the camera turn forgets every probe
+        self.assertEqual(self.n.probe_cache.entries, [])
+        self.assertIn('camera turned (clear path)', self.n.probe_cache.invalidated)
+        w.p = [0.0, 0.0]
+        again = self.n.clear_path(_Pad(), _G(), plan, 'side')
+        self.assertNotIn('skipped', again['lookahead'])
+        self.assertEqual(self.n.probe_cache.skipped, 0)
+
+    def test_blocked_attempt_forgets_the_probes_and_the_budget_counts_the_retry(self):
+        w = self.world([_walk_scenario('mid', 0.4, 3.0)], blocked=lambda x, y: y > 2.8 and w.cf == (0.0, 1.0))
+        self.n.probe_cache.remember('earlier', (0.0, 0.0), (0.0, 1.0), {'heading_deg': 0.0, 'duration': 2.0, 'reach_m': 6.0}, 5.0)
+        self.n.budget.begin('mid#1')
+        self.n.play_walking(_Pad(), _G(), {'runs': []}, 'mid')
+        self.assertIn('mid was blocked', self.n.probe_cache.invalidated)
+        row = self.n.budget.rows()[0]
+        self.assertTrue(row['retry'].startswith('1/'), row)
 
     def test_blocked_mid_route_is_repeated_once_and_only_the_second_attempt_is_scored(self):
         w = self.world([_walk_scenario('mid', 0.4, 3.0)], blocked=lambda x, y: y > 2.8 and w.cf == (0.0, 1.0))
@@ -3215,6 +3275,10 @@ class EnemyMacroTests(unittest.TestCase):
         self.assertTrue(r['enemy']['locks'] >= 1)
         json.dumps(r, default=str)                                                   # cycle.json serialisable
         self.assertEqual(w.state['spawned'], None)                                   # the target is gone at the end
+        # what the macro changed is listed in the run record and was put back by its own teardown
+        self.assertEqual({e['key']: e['state'] for e in self.n.settings.record()},
+                         {'night_auto.tag': 'restored', 'enemy.target': 'restored', 'equipment.fists': 'restored'})
+        self.assertEqual(self.n.settings.open_entries(), [])
         text = open(self.log, encoding='utf-8').read()
         self.assertEqual(text.count('label=after_start found=0'), 1)
         self.assertIn('god=true', text)
