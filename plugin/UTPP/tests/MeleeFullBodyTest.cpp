@@ -101,6 +101,14 @@ static void TestDecision()
         c.edit(in);
         const bool on = gc.Update(in);
         Expect((std::string("decision: ") + c.name).c_str(), !on && gc.LastWhy() == c.why, melee::WhyName(gc.LastWhy()));
+        // the decision without the ownership term: on only when the owner is the one missing term
+        Expect((std::string("decision without owner: ") + c.name).c_str(), gc.OnWithoutOwner() == (c.why == melee::kWhyOwner));
+    }
+    {
+        melee::Gate gw;
+        const bool on = gw.Update(StandingMelee()) && gw.OnWithoutOwner();
+        gw.Reset();
+        Expect("decision without owner: on with every condition, off after Reset", on && !gw.OnWithoutOwner());
     }
     // standing details that still count: not reported, NotInBase 0, Stand 1, AimWalk 2 (fists block / targeting)
     bool standingOk = true;

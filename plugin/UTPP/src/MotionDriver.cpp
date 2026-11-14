@@ -545,11 +545,21 @@ void RecordGripInfoLocked(const motionpose::FrameInfo& aInfo)
 uint64_t g_aoFrames = 0, g_aimHandback = 0;
 float g_aoYaw = 0.0f, g_aoU = 0.0f, g_aoW = 0.0f;
 bool g_release = false, g_injured = false;
-// g_release = g_releaseInput (script release: body carry, grenade throw) || (g_gameOverlay && g_meleeOwnsUpper).
-// g_gameOverlay: the script sent the "Game" overlay (a melee weapon drawn) without its release; the game's clip owns the upper body only
-// while the host reports a melee action or the melee guard on the feed (FeedInput::meleeOwnsUpper), so MOTION keeps the body between strikes.
-bool g_releaseInput = false, g_gameOverlay = false, g_meleeOwnsUpper = false;
-void RefreshReleaseLocked() { g_release = g_releaseInput || (g_gameOverlay && g_meleeOwnsUpper); }
+// g_release = g_releaseInput (script release: body carry, grenade throw) || (g_gameOverlay && g_meleeOwnsBody).
+// g_gameOverlay: the script sent the "Game" overlay (a melee weapon drawn) without its release. MOTION yields only while the melee
+// full-body layer owns the whole body (FeedInput::meleeOwnsBody). While the game's melee clip or the melee guard owns the upper body
+// only (FeedInput::meleeUpperMasked) MOTION keeps running: g_meleeMasked keeps the lower body on MOTION, applies the host's upper mask
+// and fade on MOTION's bones (ApplyLocked) and keeps the head lead / orientation / lean layers quiet. Between strikes neither is set.
+bool g_releaseInput = false, g_gameOverlay = false, g_meleeOwnsBody = false, g_meleeUpperMasked = false;
+bool g_meleeMasked = false;
+bool g_meleeMaskTail = false; // the masked upper body is still fading out after the melee mask ended (host upperScale < 1)
+void RefreshReleaseLocked()
+{
+    g_release = g_releaseInput || (g_gameOverlay && g_meleeOwnsBody);
+    g_meleeMasked = g_gameOverlay && g_meleeUpperMasked && !g_release;
+    if (g_release)
+        g_meleeMaskTail = false;
+}
 // commit C prep (air): SetAirFeed one-shot (consumed by the next Step), not-probed dead reckoning. motionfix item 5:
 // v2 owns air while mm.motionDriver is on (the runtime never claimed air frames: SetAirOwns / SetMotionOwnsAir and the 'air-owns' skip removed).
 adapter::AirFeed g_airIn;
@@ -3963,7 +3973,7 @@ void HeadLeadStepLocked(const adapter::MotionFeed& aF, float aDt)
     sg.weaponBusy = g_weaponAction == 2 || g_weaponAction == 8 || g_hipFirePoseNow || g_reloadUpperWeight > 0.0f;
     sg.air = (aF.air.valid && !aF.air.onGround) || adapter::PsmAir(aF.psmDetailed);
     sg.crouch = adapter::PsmCrouchStance(aF.psmDetailed);
-    sg.blocked = g_trav.active || g_release || !g_headLeadOn || g_leanHeadOwns; // switched off: the weight fades out first
+    sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_headLeadOn || g_leanHeadOwns; // switched off: the weight fades out first
     g_hl.Step(g_hlParams, sg, aDt);
 }
 
@@ -4015,7 +4025,7 @@ void OrientWarpStepLocked(Bundle& aB, const adapter::MotionFeed& aF, int32_t aCl
                     (aF.haveWeapon && aF.weaponDrawn);
     sg.air = (aF.air.valid && !aF.air.onGround) || adapter::PsmAir(aF.psmDetailed);
     sg.crouch = adapter::PsmCrouchStance(aF.psmDetailed) || g_slideFrame;
-    sg.blocked = g_trav.active || g_release || !g_orientWarpOn || !aB.rootFrameValid || !loopClip || !g_owSk.ok || // off: fades out first
+    sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_orientWarpOn || !aB.rootFrameValid || !loopClip || !g_owSk.ok || // off: fades out first
                  aB.map.shooterModeActive || aB.map.h2Active; // the Strafe modes hold the root on the actor: nothing to warp towards the path
     g_ow.Step(g_owParams, sg, aDt);
     const float rootYawDeg = aB.rootFrameValid ? aB.rootFrame.Frame().yaw / integ::kDegToRad : 0.0f;
@@ -4046,7 +4056,7 @@ void PelvisTrimStepLocked(const Bundle& aB, const adapter::MotionFeed& aF, float
                     (aF.haveWeapon && aF.weaponDrawn);
     sg.air = (aF.air.valid && !aF.air.onGround) || adapter::PsmAir(aF.psmDetailed);
     sg.crouch = adapter::PsmCrouchStance(aF.psmDetailed) || g_slideFrame;
-    sg.blocked = g_trav.active || g_release || !aB.rootFrameValid || !g_ptSk.ok;
+    sg.blocked = g_trav.active || g_release || g_meleeMasked || !aB.rootFrameValid || !g_ptSk.ok;
     g_pt.Step(g_ptParams, sg, aDt);
     const bool drawn = aF.haveWeapon && aF.weaponDrawn;
     g_ptWhy = sg.aiming ? "aim" : drawn ? "drawn" : sg.weaponBusy ? "wpnact" : sg.air ? "air" : sg.crouch ? "crouch" : g_trav.active ? "trav"
@@ -4070,7 +4080,7 @@ void BodyOffsetStepLocked(const Bundle& aB, const adapter::MotionFeed& aF, bool 
     // traversal: the montage branch resets the weight; after the handback it stays 0 while the handback blend runs (no foot contacts /
     // the montage root yaw turned back, kTravBlendOut), so the offset never snaps in on top of that blend
     const bool trav = g_trav.active || g_trav.noContactLeft > 0.0f || g_trav.yawBackT >= 0.0f;
-    sg.blocked = trav || g_release || !aB.rootFrameValid;
+    sg.blocked = trav || g_release || g_meleeMasked || !aB.rootFrameValid;
     g_bo.Step(g_boParams, sg, aDt);
     g_boWhy = sg.aiming ? "aim" : aMelee ? "melee" : sg.weaponBusy ? "wpnact" : trav ? "trav" : g_release ? "release"
             : !aB.rootFrameValid ? "noroot" : "ok";
@@ -4096,7 +4106,7 @@ void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::M
     sg.air = (aF.air.valid && !aF.air.onGround) || adapter::PsmAir(aF.psmDetailed) || aCs.movementMode != 0;
     sg.crouch = adapter::PsmCrouchStance(aF.psmDetailed) || aCs.stance != 0;
     sg.slide = g_slideFrame;
-    sg.blocked = g_trav.active || g_release || !g_leanSetting;
+    sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_leanSetting;
     sg.head = headOwns;
     if (aR.clip >= 0 && static_cast<size_t>(aR.clip) < aB.leanClipMap.size())
     {
@@ -4276,7 +4286,8 @@ const motion::PoseHistory* VehicleExitHistoryLocked(const Bundle& b, const integ
 
 bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 {
-    g_meleeOwnsUpper = aRaw.meleeOwnsUpper;
+    g_meleeOwnsBody = aRaw.meleeOwnsBody;
+    g_meleeUpperMasked = aRaw.meleeUpperMasked;
     {
         const bool wasRelease = g_release;
         RefreshReleaseLocked();
@@ -5781,8 +5792,9 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
     aSnap.traceAiming = g_aimingNow ? 1 : 0;
     aSnap.traceClip = g_last.clip;
     // the v1 upper-body mask bits are database bone indices: kept only when both databases map to the same game bones.
-    // with a weapon overlay active the upper body comes from MM + overlay (upperScale 1); game actions (melee actions and the
-    // melee guard with the Game overlay, body carry, ...) arrive as release and never reach this point. upperBits are v1's (written only by
+    // with a weapon overlay active the upper body comes from MM + overlay (upperScale 1); the melee full-body layer and body carry
+    // arrive as release and never reach this point; masked melee (game strike clip or guard, upper body only) keeps v1's upperScale
+    // with the upper mask on these bones (meleeUpper below). upperBits are v1's (written only by
     // BuildUpperMaskLocked) and stay untouched: upperScale 1 already makes them inert, and v1 needs them after a yield.
     bool sameBones = aSnap.numBones == n;
     for (uint32_t i = 0; i < n && sameBones; ++i)
@@ -5811,7 +5823,18 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
         g_aimUpperTail = false;
     const bool reloadHandback = weaponOverlay && g_reloadUpperWeight > 0.0f;
     const bool reloadCorrectionTail = aSnap.reloadContactsEligible && g_reloadContactFade.Active();
-    if (handbackUsed || fadingAim || g_weaponUpperFrame || fadingWeapon || reloadHandback || reloadCorrectionTail)
+    // melee masked (g_meleeMasked): the game's melee clip or the melee guard owns the upper body; the host's upperScale (its mask
+    // fade in / out) stays, the upper bits are the host's when both databases map to the same game bones, else built on MOTION's
+    // bones. The tail keeps that while the host's mask is still fading out after the melee mask ended.
+    if (g_meleeMasked)
+        g_meleeMaskTail = true;
+    const bool fadingMelee = !g_meleeMasked && g_meleeMaskTail && !g_release && aSnap.upperScale < 1.0f;
+    if (!g_meleeMasked && !fadingMelee)
+        g_meleeMaskTail = false;
+    const bool meleeUpper = g_meleeMasked || fadingMelee;
+    if (meleeUpper)
+        aSnap.lowerScale = 1.0f; // MOTION owns the lower body: a melee full-body weight must not thin its legs / hips
+    if (handbackUsed || fadingAim || g_weaponUpperFrame || fadingWeapon || reloadHandback || reloadCorrectionTail || meleeUpper)
     {
         if (handbackUsed)
             ++g_aimHandback;
@@ -5879,7 +5902,7 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
 #if defined(UTPP_MOTION_DRIVER_OVARMS_MUTATION) && UTPP_MOTION_DRIVER_OVARMS_MUTATION == 2
     aSnap.overlayArms = g_ovArmsNow ? 1u : 0u; // mutation 2: set through blends and the game-upper handback
 #else
-    aSnap.overlayArms = (g_ovArmsNow && !handbackUsed && !fadingAim && !g_weaponUpperFrame && !fadingWeapon && !reloadHandback &&
+    aSnap.overlayArms = (g_ovArmsNow && !handbackUsed && !fadingAim && !g_weaponUpperFrame && !fadingWeapon && !reloadHandback && !meleeUpper &&
                          !reloadCorrectionTail && !hipFireNativeFallback && aSnap.upperScale >= 1.0f && g_hiLeft <= 0.0f &&
                          g_hoLeft <= 0.0f && !g_release) ? 1u : 0u;
 #endif
@@ -6665,7 +6688,7 @@ std::string StatusLocked()
     char buf[1600]; // UTPP-MOTION SEAM trav + air: was 768 (trav= field, air: segment); motionfix: was 1280
     std::snprintf(buf, sizeof(buf),
                   " motion enabled=%d body=%s db=%s(%s)%s err='%s' reason=%s skip=%s pick=clip:%d@%.2f/db%d/cost%.3f rate=%.4f"
-                  " frames=%llu applied=%llu steps=%llu feedP95us=%.1f budget=%.0f trav=%d overlay=%d/%d rel=%d fault=%s tail=%llu layoutSkips=%llu handin=%llu handover=%llu trav=%d/%llu/%llu/%llu/%llu sha=%s"
+                  " frames=%llu applied=%llu steps=%llu feedP95us=%.1f budget=%.0f trav=%d overlay=%d/%d rel=%d meleeMask=%d fault=%s tail=%llu layoutSkips=%llu handin=%llu handover=%llu trav=%d/%llu/%llu/%llu/%llu sha=%s"
                   " air:owns=motion feed=%d mode=%d ttl=%.2f dist=%.2f land=%d%d rtzRes=%.3f/%.3f",
                   g_enabled ? 1 : 0, BodyName(g_body), dbOk ? "loaded" : "no", loaded, g_loading ? " loading" : "",
                   g_bundle ? g_bundle->err.c_str() : "", why.c_str(), g_lastSkip, g_last.clip,
@@ -6674,7 +6697,7 @@ std::string StatusLocked()
                   static_cast<unsigned long long>(g_frames),
                   static_cast<unsigned long long>(g_applied), static_cast<unsigned long long>(g_steps),
                   static_cast<double>(P95Locked()), static_cast<double>(adapter::Budget::kFeedP95Us),
-                  g_bundle && g_bundle->travOk ? 1 : 0, g_pose, g_aim, g_release ? 1 : 0,
+                  g_bundle && g_bundle->travOk ? 1 : 0, g_pose, g_aim, g_release ? 1 : 0, g_meleeMasked ? 1 : 0,
                   g_faultWhy ? g_faultWhy : "none", static_cast<unsigned long long>(g_tailFrames),
                   static_cast<unsigned long long>(g_skipLayout), static_cast<unsigned long long>(g_handinFrames),
                   static_cast<unsigned long long>(g_handoverFrames),

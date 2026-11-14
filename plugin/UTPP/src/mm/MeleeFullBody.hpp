@@ -182,6 +182,7 @@ public:
         m_airT = 0.0f;
         m_why = kWhyFlag;
         m_standing = false;
+        m_onWithoutOwner = false;
     }
     // Once per feed. The speed and air timers are tracked on every call, whatever the other conditions say.
     bool Update(const Input& aIn)
@@ -222,8 +223,13 @@ public:
                 : air                            ? kWhyAir
                 : aIn.stickHeld || m_fastOff     ? kWhySpeed
                                                  : kWhyOn;
+        // the same decision without the ownership term: whether the full body would take the body if the base pose owned it
+        // (the motion driver yields on this, so the full-body layer can start while the driver runs)
+        m_onWithoutOwner = aIn.flag && (aIn.meleeMask || aIn.guard) && stateOk && aIn.stance == kStanceStand &&
+                           StandingDetail(aIn.psmDetail) && !air && !(aIn.stickHeld || m_fastOff);
         return m_why == kWhyOn;
     }
+    bool OnWithoutOwner() const { return m_onWithoutOwner; }
     Why LastWhy() const { return m_why; }
     bool StandingGrounded() const { return m_standing; } // stance Stand + standing LocomotionDetailed + grounded, whatever else holds
     float FastSeconds() const { return m_fastT; } // s of fast time (dips < kBridgeSeconds bridged)
@@ -238,6 +244,7 @@ private:
     float m_airT = 0.0f;
     Why m_why = kWhyFlag;
     bool m_standing = false;
+    bool m_onWithoutOwner = false;
 };
 
 // Fade-out time of the lower body (2026-11-12): the legs leave the game pose slowly (eased kReleaseFadeSeconds) only when the

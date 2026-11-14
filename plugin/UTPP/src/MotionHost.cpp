@@ -1589,12 +1589,18 @@ const MotionSetFrame* MotionStepLocked(const FeedInput& aRaw, float aDt, float c
     // mutation 23: v2 sees the closed exit window only (the jump-out state does not reach the chooser after a false contact)
     raw.vehicleExitWindow = g_exitLeft > 0.0f || (UTPP_AND_NOT(VEHEXIT, 23) g_jumpOutExit); // r3 landing: the jump-out state outlives the closed window until the touchdown
     raw.vehicleJumpOut = g_jumpOutExit;
-    // a melee action (gate incl. its release hold), the melee full-body layer still fading, or the melee guard (on, or would be on
-    // if the base pose owned the body, or its upper mask still fading out) - only while PSM.MeleeWeapon is a melee weapon state:
-    // once the weapon is holstered / removed the motion driver owns the body on this feed. The full-body weight, the guard
-    // decision and the guard tail are the ones of the previous feed.
-    raw.meleeOwnsUpper = g_meleeState >= kPsmMeleeWeaponIdle &&
-                         (g_meleeActive || g_meleeFullBlend.Weight() > 0.0f || g_meleeGuardGate.OnWithoutOwner() || g_meleeGuardTail);
+    // melee ownership, only while PSM.MeleeWeapon is a melee weapon state (once the weapon is holstered / removed the motion
+    // driver owns the body on this feed). Two kinds:
+    //  - meleeOwnsBody: the melee full-body layer would take the body (or is still fading) - its clip writes hips, spine and legs,
+    //    so the driver yields;
+    //  - meleeUpperMasked: otherwise a melee action (gate incl. its release hold), the melee guard (on, would be on if the base
+    //    pose owned the body, or its upper mask still fading out) or the upper mask still fading - the game's clip owns the upper
+    //    body only; the driver keeps the lower body and applies the host's upper mask on its own bones.
+    // The full-body decision and weight, the guard decision, the guard tail and the mask weight are the ones of the previous feed.
+    const bool meleeWeaponState = g_meleeState >= kPsmMeleeWeaponIdle;
+    raw.meleeOwnsBody = meleeWeaponState && (g_meleeFullGate.OnWithoutOwner() || g_meleeFullBlend.Weight() > 0.0f);
+    raw.meleeUpperMasked = meleeWeaponState && !raw.meleeOwnsBody &&
+                           (g_meleeActive || g_meleeGuardGate.OnWithoutOwner() || g_meleeGuardTail || g_maskBlend.Weight() > 0.0f);
     raw.vehicleExitPose = g_vtExitSeedFeed != 0 && g_vtExitSeedFeed == g_feedCalls ? &g_vtExitSeedSnap : nullptr;
     raw.rootFeedSequence = g_feedCalls;
     raw.capsuleDeltaCurrent[0] = capX * aDt;
@@ -5092,7 +5098,9 @@ void Feed(const FeedInput& aRawIn)
     guardIn.flag = g_meleeGuardFlag;
     guardIn.setting = g_meleeGuardSetting;
     guardIn.maskOk = g_upperMaskOn && g_upperMask.ok;
-    guardIn.owner = baseMaskOwner && aIn.tppActive && g_releaseReasons == 0;
+    // the guard only replaces the upper body: the base pose may be the host's or the motion driver's (the driver keeps the lower
+    // body and applies the mask on its own bones), so the driver running is no reason to keep the guard off
+    guardIn.owner = (baseMaskOwner || g_legCtx.v2) && aIn.tppActive && g_releaseReasons == 0;
     guardIn.gateOpen = (g_effGate == 0 || g_holdActive) && (aIn.psmBlock & ExitReleaseMask(g_exitLeft > 0.0f, g_exitLatchedPsm)) == 0;
     guardIn.meleeState = g_meleeState;
     guardIn.upperBody = g_upperBody;

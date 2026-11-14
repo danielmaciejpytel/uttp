@@ -75,11 +75,15 @@ struct FeedInput
     bool vehicleExitWindow = false;
     // Native host -> MOTION only: that exit window opened as a bike jump-out (MMDriver JumpOutLatch); the hold ends at the touchdown.
     bool vehicleJumpOut = false;
-    // Native host -> MOTION only: a melee action or the melee guard owns the body on this feed (PSM.MeleeWeapon is a melee weapon
-    // state and: the melee gate is active - melee bits of the feed or their release hold -, the melee full-body layer still has
-    // weight, or the guard is on / would be on / is fading out). A "Game" overlay (melee weapon drawn) releases MOTION only while this
-    // is set; between strikes and once the weapon leaves the hand MOTION keeps the body.
-    bool meleeOwnsUpper = false;
+    // Native host -> MOTION only: the melee full-body layer owns the whole body on this feed (PSM.MeleeWeapon is a melee weapon
+    // state and the full-body layer would be on if the base pose owned the body, or still has weight). A "Game" overlay (melee
+    // weapon drawn) releases MOTION only while this is set.
+    bool meleeOwnsBody = false;
+    // Native host -> MOTION only: the game's melee clip (or the melee guard pose) owns the upper body only (a melee weapon state and
+    // the melee gate active - melee bits or their release hold -, the guard on / would be on / fading out, or the upper mask still
+    // fading; never together with meleeOwnsBody). MOTION keeps running and the lower body, applies the host's upper mask and fade
+    // on its own bones, and keeps its head / orientation / lean layers quiet.
+    bool meleeUpperMasked = false;
     // Native host -> MOTION only: the game pose captured at a normal (non jump-out) vehicle exit whose hand-in was accepted on THIS feed
     // (MMDriver MotionStepLocked, null on every other feed / path). MOTION turns it into the PoseHistory of the first search after the
     // re-entry (ExitPoseHistory.hpp) instead of the database mean. Layout of the vehicle capture: local pose per database bone of

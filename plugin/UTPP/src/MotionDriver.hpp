@@ -14,8 +14,9 @@
 //   UTPPSetMMOverlayInputs(pose: Int32, aim: Int32, release: Bool, injured: Bool, resolvedAimPose: Int32)
 //       pose    = ov::PoseOverlay value of mm/Overlay.hpp (0 Default, 1 Rifle, 2 Pistol1H, 3 Pistol2H, Injured; the motion
 //                 Enum_OverlayPose value 9 is accepted as Injured); invalid -> Default. PoseOverlay::Game (a melee weapon drawn)
-//                 = release only while the host reports a melee action or the melee guard on the feed (FeedInput::
-//                 meleeOwnsUpper); otherwise v2 runs with the Default (or Injured) overlay.
+//                 = release only while the melee full-body layer owns the whole body (FeedInput::meleeOwnsBody); while
+//                 the game's melee clip or the melee guard owns the upper body only (FeedInput::meleeUpperMasked) v2 keeps
+//                 the lower body and applies the host's upper mask; otherwise v2 runs with the Default (or Injured) overlay.
 //       aim     = ov::AimState value (Aiming -> OverlayInputs.wantsToAim, also set by the PSM UpperBody Aim of the feed).
 //       release = the weapon class stays on game animations (body carry, grenade throw): v2 yields, v1 runs unchanged (v1's own
 //                 release / upper mask hands the body back to the game).

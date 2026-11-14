@@ -704,8 +704,9 @@ public class UTPPMotionGlue extends ScriptableSystem {
         aim = UTPPMotionAimAiming();
         return;
       }
-      // every melee weapon (fists and arm cyberware included) sends the Game overlay: the DLL releases the body only while a
-      // melee action or the melee guard holds it and keeps the body between strikes and after the weapon leaves the hand
+      // every melee weapon (fists and arm cyberware included) sends the Game overlay: the DLL releases the body only while the
+      // melee full-body layer holds it, keeps the lower body under other melee actions and the melee guard (upper body masked),
+      // and keeps the whole body between strikes and after the weapon leaves the hand
       pose = UTPPMotionPoseGameOverlay();
       return;
     }

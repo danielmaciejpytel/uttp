@@ -663,7 +663,7 @@ int main(int argc, char** argv)
         Check(n == 30 && finite && mapOk && StatusField(idle, "skip=") == "none" && StatusField(idle, "rel=") == "0",
               "Game overlay without a melee action -> motion pose (no overlay-release)", std::to_string(n) + " " + idle);
         motionhost::FeedInput f = WalkFeed();
-        f.meleeOwnsUpper = true;
+        f.meleeOwnsBody = true; // the melee full-body layer owns the whole body
         int yielded = 0;
         for (int i = 0; i < 5; ++i)
         {
@@ -686,6 +686,63 @@ int main(int argc, char** argv)
               "Game overlay after the melee action -> motion pose again", std::to_string(n));
         Check(counter(after, "handin=") > counter(strike, "handin="), "melee action end -> hand-in blend",
               StatusField(strike, "handin=") + " -> " + StatusField(after, "handin="));
+        // masked melee (the game's strike clip or the guard owns the upper body only): motion keeps running and the lower body, the
+        // host's upper mask fade (upperScale) is kept, lowerScale is 1, no handover. Matching bone sets keep the host's bits,
+        // differing bone sets get the upper mask built on motion's bones.
+        {
+            motionhost::FeedInput fm = WalkFeed();
+            fm.meleeUpperMasked = true;
+            const std::string before = motiondriver::Status();
+            bool stepped = true, applied = true, keptScale = true, legs = true, bitsKept = true;
+            for (int i = 0; i < 5; ++i)
+            {
+                stepped = motiondriver::Step(fm, 0, fm.dt) && stepped;
+                mm::integ::PoseSnapshot s = BaseLikeSnapshot(kRigPtr, rw.bones);
+                s.upperScale = 0.4f;
+                s.lowerScale = 0.6f;
+                s.upperBits[0] = 0xA5A5A5A5u;
+                applied = motiondriver::ApplyToSnapshot(s) && applied;
+                keptScale = keptScale && s.upperScale == 0.4f;
+                legs = legs && s.lowerScale == 1.0f;
+                bitsKept = bitsKept && s.upperBits[0] == 0xA5A5A5A5u;
+            }
+            const std::string masked = motiondriver::Status();
+            Check(stepped && applied && StatusField(masked, "rel=") == "0" && StatusField(masked, "skip=") == "none",
+                  "masked melee -> motion keeps stepping and publishing (no release)", masked);
+            Check(keptScale && legs, "masked melee -> host upper fade kept, lower body on motion (lowerScale 1)");
+            Check(bitsKept, "masked melee, matching bone sets -> host upper bits kept");
+            Check(counter(masked, "handover=") == counter(before, "handover="), "masked melee -> no handover",
+                  StatusField(before, "handover=") + " -> " + StatusField(masked, "handover="));
+            // differing bone sets (another rig mapping, as with arm cyberware): the mask is built on motion's bones
+            (void)motiondriver::Step(fm, 0, fm.dt);
+            mm::integ::PoseSnapshot d = MarkedSnapshot(kRigPtr); // gameIndex 1000+i: no bone matches
+            const bool dApplied = motiondriver::ApplyToSnapshot(d);
+            uint32_t anyBits = 0;
+            for (uint32_t w = 0; w < sizeof d.upperBits / sizeof d.upperBits[0]; ++w)
+                anyBits |= d.upperBits[w];
+            Check(dApplied && d.upperScale == 0.5f && d.lowerScale == 1.0f && d.upperBits[0] != 0xF0F0F0F0u && anyBits != 0,
+                  "masked melee, differing bone sets -> upper mask on motion's bones, host fade kept",
+                  "upperScale=" + std::to_string(d.upperScale) + " lowerScale=" + std::to_string(d.lowerScale) +
+                      " bits0=" + std::to_string(d.upperBits[0]));
+            // the mask ends while the host's upper mask is still fading out: the tail keeps the masked upper body
+            motionhost::FeedInput fe = WalkFeed();
+            (void)motiondriver::Step(fe, 0, fe.dt);
+            mm::integ::PoseSnapshot t = MarkedSnapshot(kRigPtr);
+            t.upperScale = 0.7f;
+            (void)motiondriver::ApplyToSnapshot(t);
+            Check(t.upperScale == 0.7f && t.upperBits[0] != 0xF0F0F0F0u, "masked melee fade-out tail -> host fade kept on motion's bones",
+                  "upperScale=" + std::to_string(t.upperScale));
+            // fade finished (upperScale 1): differing bone sets are the full motion body again
+            (void)motiondriver::Step(fe, 0, fe.dt);
+            mm::integ::PoseSnapshot u = MarkedSnapshot(kRigPtr);
+            u.upperScale = 1.0f;
+            (void)motiondriver::ApplyToSnapshot(u);
+            (void)motiondriver::Step(fe, 0, fe.dt);
+            mm::integ::PoseSnapshot v = MarkedSnapshot(kRigPtr);
+            (void)motiondriver::ApplyToSnapshot(v);
+            Check(v.upperScale == 1.0f && v.lowerScale == 1.0f, "after the melee fade -> differing bone sets: full motion body",
+                  "upperScale=" + std::to_string(v.upperScale));
+        }
         // a drawn melee weapon between strikes never enters the ranged-weapon paths (hip-fire pose, shot route, shooter-mode rest)
         {
             const uint32_t drawn = mm::integ::kPsmWeaponKnown | mm::integ::kPsmWeaponDrawn;

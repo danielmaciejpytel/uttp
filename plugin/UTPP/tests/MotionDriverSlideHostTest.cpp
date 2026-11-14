@@ -254,15 +254,19 @@ SkipRun SkipScenario()
     return r;
 }
 
-// Melee rest pose: a drawn melee weapon sends the Game overlay (5) without the release. The host's melee gate (melee bits of the feed,
-// debounce, release hold) is the only thing that makes the driver yield: rel=1 during the action, rel=0 between strikes, after the
-// release hold and on the first feed whose PSM.MeleeWeapon state is no longer a melee weapon state (holster / removal).
+// Melee rest pose: a drawn melee weapon sends the Game overlay (5) without the release. A melee action whose clip the full-body
+// layer does not cover (melee bits, full-body flag off) and the melee guard mask the upper body only: the driver keeps running
+// (rel=0, meleeMask=1) until the melee gate's release hold and the host's upper-mask fade out end, and on the first feed whose
+// PSM.MeleeWeapon state is no longer a melee weapon state (holster / removal) it owns the body again. Only the full-body layer
+// (flag + setting on, standing, allowed state) releases the driver (rel=1).
 struct MeleeRun
 {
     std::string idle, strike;
-    int holdFeeds = -1;   // feeds after the melee bits clear (state Idle) until rel=0
-    int holsterFeeds = -1; // feeds after the melee bits clear with the state NotReady until rel=0
-    std::string guardOff;
+    int holdFeeds = -1;    // feeds after the melee bits clear (state Idle) until meleeMask=0
+    int holsterFeeds = -1; // feeds after the melee bits clear with the state NotReady until meleeMask=0
+    std::string guardOff, guardOn, fullStrike;
+    std::string hostAfterHold, hostFull; // host melee status (diagnostics)
+    int fullBackFeeds = -1; // feeds after the full-body strike's bits clear until rel=0
 };
 
 MeleeRun MeleeScenario()
@@ -277,30 +281,49 @@ MeleeRun MeleeScenario()
         f.onGround = true;
         f.distToGround = -2.0f;
         f.velWorld[2] = 0.0f;
-        f.locoState = 0;
+        f.locoState = 1; // standing (Locomotion Stand): the melee full-body layer only takes a standing body
         f.psmBlock = aPsm;
         motiondriver::FeedAirFromInput(f);
         motionhost::Feed(f);
         return StatusField(motiondriver::Status(), "rel=");
     };
+    const auto masked = [&](uint32_t aPsm) { feed(aPsm); return StatusField(motiondriver::Status(), "meleeMask="); };
     const uint32_t idle = state(2), attack = mm::integ::kPsmMeleeAttack | state(6), notReady = state(0);
+    const uint32_t comboAttack = mm::integ::kPsmMeleeAttack | state(12); // an attack state in the default full-body state mask
     motiondriver::SetOverlayInputs(5, 0, false, false); // PoseOverlay::Game
     for (int i = 0; i < 30; ++i) feed(idle);
     r.idle = motiondriver::Status();
     for (int i = 0; i < 30; ++i) feed(attack);
     r.strike = motiondriver::Status();
     for (int i = 0; i < 120 && r.holdFeeds < 0; ++i)
-        if (feed(idle) == "0") r.holdFeeds = i + 1;
+        if (masked(idle) == "0") r.holdFeeds = i + 1;
+    r.hostAfterHold = motionhost::MeleeFullBodyStatus();
     for (int i = 0; i < 30; ++i) feed(idle);
     for (int i = 0; i < 30; ++i) feed(attack);
     for (int i = 0; i < 120 && r.holsterFeeds < 0; ++i)
-        if (feed(notReady) == "0") r.holsterFeeds = i + 1;
+        if (masked(notReady) == "0") r.holsterFeeds = i + 1;
     for (int i = 0; i < 60; ++i) feed(notReady); // the melee gate's release hold of the last attack runs out
-    // the guard flag with melee.guard off (default): the driver keeps the body between strikes
+    // the guard flag with melee.guard off: the driver keeps the body between strikes, nothing masked
     motionhost::SetMeleeGuard(true);
     for (int i = 0; i < 30; ++i) feed(idle);
     r.guardOff = motiondriver::Status();
+    // melee.guard on: the guard masks the upper body, the driver keeps running (no release)
+    motionhost::SetMeleeGuardSetting(true);
+    for (int i = 0; i < 30; ++i) feed(idle);
+    r.guardOn = motiondriver::Status();
+    motionhost::SetMeleeGuardSetting(false);
     motionhost::SetMeleeGuard(false);
+    for (int i = 0; i < 60; ++i) feed(notReady);
+    // a weapon covered by the full-body clips (flag + setting on), standing attack: the full-body layer owns the whole body -> release
+    motionhost::SetMeleeFullBody(true);
+    motionhost::SetMeleeFullBodySetting(true);
+    for (int i = 0; i < 30; ++i) feed(idle);
+    for (int i = 0; i < 30; ++i) feed(comboAttack);
+    r.fullStrike = motiondriver::Status();
+    r.hostFull = motionhost::MeleeFullBodyStatus();
+    for (int i = 0; i < 180 && r.fullBackFeeds < 0; ++i)
+        if (feed(idle) == "0") r.fullBackFeeds = i + 1;
+    motionhost::SetMeleeFullBody(false);
     for (int i = 0; i < 10; ++i) feed(0u);
     motiondriver::SetOverlayInputs(0, 0, false, false);
     return r;
@@ -585,16 +608,30 @@ int main(int argc, char** argv)
     {
         const MeleeRun m = MeleeScenario();
         char md[200];
-        std::snprintf(md, sizeof md, "release hold feeds %d, holster feeds %d", m.holdFeeds, m.holsterFeeds);
+        std::snprintf(md, sizeof md, "mask hold feeds %d, holster feeds %d, full-body back feeds %d", m.holdFeeds, m.holsterFeeds,
+                      m.fullBackFeeds);
         std::printf("INFO melee: %s\n", md);
-        Check(StatusField(m.idle, "rel=") == "0" && StatusField(m.idle, "skip=") == "none",
+        std::printf("INFO melee host after hold: %s\nINFO melee host full strike: %s\n", m.hostAfterHold.c_str(), m.hostFull.c_str());
+        const auto status = [](const std::string& aS) {
+            return "rel=" + StatusField(aS, "rel=") + " meleeMask=" + StatusField(aS, "meleeMask=") + " skip=" + StatusField(aS, "skip=");
+        };
+        std::printf("INFO melee states: idle %s | strike %s | guardOff %s | guardOn %s | fullStrike %s\n", status(m.idle).c_str(),
+                    status(m.strike).c_str(), status(m.guardOff).c_str(), status(m.guardOn).c_str(), status(m.fullStrike).c_str());
+        Check(StatusField(m.idle, "rel=") == "0" && StatusField(m.idle, "skip=") == "none" && StatusField(m.idle, "meleeMask=") == "0",
               "melee: Game overlay, weapon state Idle, no melee bits -> motion keeps the body", m.idle.substr(0, 200));
-        Check(StatusField(m.strike, "rel=") == "1", "melee: melee bits (attack) -> the driver yields (release)", m.strike.substr(0, 200));
-        // release hold 0.55 s at 60 Hz = 33 feeds; the full-body layer is off in this host (no flag), so no fade on top
-        Check(m.holdFeeds >= 30 && m.holdFeeds <= 40, "melee: the release ends with the melee gate's release hold (0.55 s)", md);
+        Check(StatusField(m.strike, "rel=") == "0" && StatusField(m.strike, "skip=") == "none" && StatusField(m.strike, "meleeMask=") == "1",
+              "melee: melee bits, weapon not covered by the full-body clips -> masked upper body, the driver keeps running", status(m.strike));
+        // release hold 0.55 s at 60 Hz = 33 feeds, then the host's eased upper-mask fade out (kMeleeReleaseFadeOutSeconds 0.35 s =
+        // 21 feeds) keeps the masked upper body; the full-body layer is off here (no flag), so no fade on top
+        Check(m.holdFeeds >= 30 + 21 && m.holdFeeds <= 40 + 21, "melee: the mask ends with the release hold and the upper-mask fade out", md);
         Check(m.holsterFeeds >= 1 && m.holsterFeeds <= 1, "melee: weapon state NotReady (holster / removal) -> the driver owns the body on the first feed", md);
-        Check(StatusField(m.guardOff, "rel=") == "0" && StatusField(m.guardOff, "skip=") == "none",
+        Check(StatusField(m.guardOff, "rel=") == "0" && StatusField(m.guardOff, "skip=") == "none" && StatusField(m.guardOff, "meleeMask=") == "0",
               "melee: guard flag on with melee.guard off -> motion keeps the body between strikes", m.guardOff.substr(0, 200));
+        Check(StatusField(m.guardOn, "rel=") == "0" && StatusField(m.guardOn, "skip=") == "none" && StatusField(m.guardOn, "meleeMask=") == "1",
+              "melee: guard on -> masked upper body, the driver keeps the lower body", status(m.guardOn));
+        Check(StatusField(m.fullStrike, "rel=") == "1" && StatusField(m.fullStrike, "meleeMask=") == "0",
+              "melee: covered weapon, standing attack -> the full-body layer owns the body (release)", status(m.fullStrike));
+        Check(m.fullBackFeeds >= 1, "melee: the full-body release ends after the strike", md);
     }
 
     // review (A): a jump into a climb hands the weight over like a landing, without a reset on the first montage frame
