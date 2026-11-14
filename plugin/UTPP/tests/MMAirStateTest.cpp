@@ -1511,6 +1511,22 @@ static void TestStepDown()
                   b.plays[static_cast<int>(Action::PlayFallLoop)] == 0,
               "%s: no air episode and no air clip with the step-down reach (episodes %u) %s", rd.first, on.Stats().episodes, b.Seq().c_str());
     }
+    // Female V sprinting off a 29 cm step: six airborne feeds, floor probed 0.21 / 0.13 m below, the PSM Fall detail only on the last airborne
+    // feed (9 cm of floor left at 2.7 m/s), ground on the next feed (game run: LandApproach on the PSM Fall feed, jump-off and three landing clips).
+    // The step-down reach must hold it; without the reach (stepDownS alone) the PSM Fall feed starts an episode.
+    const std::vector<StepFeed> stepEnd = {{0.0168f, -1.346f, -2.0f, false, 0}, {0.0187f, -1.615f, -2.0f, false, 0}, {0.0146f, -1.915f, 0.205f, false, 0},
+                                           {0.0167f, -2.148f, -2.0f, false, 0}, {0.0167f, -2.415f, 0.135f, false, 0}, {0.0170f, -2.682f, -2.0f, false, 14},
+                                           {0.0182f, -3.213f, -2.0f, true, 0}};
+    {
+        AirState plain = MakeRuntime(true, false), on = MakeRuntime(true);
+        const Trace a = RunSteps(plain, stepEnd), b = RunSteps(on, stepEnd);
+        CHECK(plain.Stats().episodes >= 1, "step end 29 cm, PSM Fall on the last airborne feed: stepDownS alone starts an episode (%u) %s", plain.Stats().episodes,
+              a.Seq().c_str());
+        CHECK(on.Stats().episodes == 0 && b.plays[static_cast<int>(Action::PlayLand)] == 0 && b.plays[static_cast<int>(Action::PlayOff)] == 0 &&
+                  b.plays[static_cast<int>(Action::PlayFallLoop)] == 0,
+              "step end 29 cm, PSM Fall on the last airborne feed: no air episode and no air clip with the step-down reach (episodes %u) %s",
+              on.Stats().episodes, b.Seq().c_str());
+    }
     {
         int firstPlain = -1, firstOn = -1;
         AirState plain = MakeRuntime(true, false), on = MakeRuntime(true);

@@ -60,7 +60,8 @@ inline constexpr float kStepDownDepthM = 0.30f;
 inline constexpr float kStepDownMaxSeconds = 0.20f;
 // PSM Fall on a step-down (= adapter::kGroundDropPsmFallS / kGroundDropFallM of the chooser mapping): with stepDownS on, a not-grounded run that
 // carries the PSM Fall detail (and no other air detail) is a fall once it lasted kStepDownPsmFallSeconds over two feeds or the capsule fell
-// kStepDownFallM; the step-down reach does not extend it. The game reports its Fall detail for small drops of two feeds while running too.
+// kStepDownFallM; the step-down reach does not extend it, except while the known floor is reached within kStepDownPsmFallSeconds at the current
+// fall speed (the end of a step-down). The game reports its Fall detail for small drops of two feeds while running too.
 inline constexpr int kPsmFallDetail = 14;
 inline constexpr float kStepDownPsmFallSeconds = 0.04f;
 inline constexpr float kStepDownFallM = 0.2f;
@@ -397,14 +398,18 @@ public:
             const bool psmFallGrace = cfg_.stepDownS > 0.0f && airPsmFall_ && airPsmFallDescending_ && !(IsAirDetail(in.psmDetail) && in.psmDetail != kPsmFallDetail);
             const bool psmFallOver =
                 airFeeds_ >= 2 && (airTime_ >= std::fmin(cfg_.stepDownS, kStepDownPsmFallSeconds) || airDropM_ >= kStepDownFallM);
-            const bool fallEvidence = (IsAirDetail(in.psmDetail) && !psmFallGrace) || (psmFallGrace && psmFallOver) || in.vehicleExit ||
-                                      in.distToGround > cfg_.physFallDist;
             // step-down reach: a known floor within stepDownDepthM of the drop start keeps the step-down until stepDownMaxS
             // (h_ dead-reckoned below 0 = the floor is reached, the touchdown is a feed late: clamped like the chooser floor, AirFloorStep)
-            const bool stepReach = cfg_.stepDownDepthM > 0.0f && hValid_ && probeAnchored_ && airDropM_ + std::fmax(h_, 0.0f) <= cfg_.stepDownDepthM &&
-                                   airTime_ < cfg_.stepDownMaxS && !airPsmFall_;
+            const bool reachFloor = cfg_.stepDownDepthM > 0.0f && hValid_ && probeAnchored_ && airDropM_ + std::fmax(h_, 0.0f) <= cfg_.stepDownDepthM &&
+                                    airTime_ < cfg_.stepDownMaxS;
+            const bool stepReach = reachFloor && !airPsmFall_;
+            // a descending PSM Fall run keeps the reach while its known floor is reached within kStepDownPsmFallSeconds at the current fall
+            // speed (the end of a step-down; = the chooser mapping, adapter::kGroundDropPsmFallS)
+            const bool psmFallReach = reachFloor && psmFallGrace && in.vz < 0.0f && std::fmax(h_, 0.0f) <= -in.vz * kStepDownPsmFallSeconds;
+            const bool fallEvidence = (IsAirDetail(in.psmDetail) && !psmFallGrace) || (psmFallGrace && psmFallOver && !psmFallReach) || in.vehicleExit ||
+                                      in.distToGround > cfg_.physFallDist;
             const bool stepDownOver =
-                cfg_.stepDownS <= 0.0f || fallEvidence || (airTime_ >= cfg_.stepDownS && airFeeds_ >= 2 && !stepReach); // one long frame is no fall
+                cfg_.stepDownS <= 0.0f || fallEvidence || (airTime_ >= cfg_.stepDownS && airFeeds_ >= 2 && !stepReach && !psmFallReach); // one long frame is no fall
             const bool physStepDownOver = stepDownOver || in.vz > cfg_.physFallVz;
             if (!noTrigger && !grounded && airTime_ >= cfg_.minAir && stepDownOver && in.vz <= cfg_.fallVz &&
                 (fallTtl >= cfg_.fallMinTtl || probeMiss))

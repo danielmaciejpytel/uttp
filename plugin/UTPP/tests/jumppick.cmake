@@ -101,4 +101,13 @@ if(EXISTS "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide.utppmm"
              --flicker "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/air_ground_flicker_feeds.txt")
     set_tests_properties(utpp_mm_jump_pick_mut42 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL psm_drop_fall: a rising PSM Fall is InAir on its first feed"
                          ENVIRONMENT "UTPP_MUTATION_JUMPPICK=42")
+    # 43 (src/mm/MotionAdapter.hpp) a PSM Fall run never keeps the step-down reach: the 29 cm step whose Fall detail arrives on the last airborne
+    # feed (psm_drop_step_end) picks the jump-off and landing clips again.
+    add_test(NAME utpp_mm_jump_pick_mut43 COMMAND utpp_mm_jump_pick_rt
+             "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261021_1213.txt"
+             "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide"
+             --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt"
+             --flicker "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/air_ground_flicker_feeds.txt")
+    set_tests_properties(utpp_mm_jump_pick_mut43 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL psm_drop_step_end: a short PSM Fall on a small drop keeps the ground clips"
+                         ENVIRONMENT "UTPP_MUTATION_JUMPPICK=43")
 endif()

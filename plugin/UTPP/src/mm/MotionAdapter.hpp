@@ -659,8 +659,13 @@ inline constexpr float kGroundDropStepMaxS = 0.20f;
 // the ground on the third feed). A descending contact loss that carries the PSM Fall detail stays ground for kGroundDropPsmFallS over at least
 // kGroundDropMinFeeds feeds or until the capsule fell kGroundDropFallM (the third feed at 60 Hz, the second at 30 Hz): a real fall turns InAir
 // at most one feed later than on its first PSM Fall feed (recorded falls: 0-17 ms; a dodge that leaves the ground rises and is InAir at
-// once). The step-down reach never extends it. Mirrored by
+// once). The step-down reach does not extend it, except on the touchdown of a step (below). Mirrored by
 // air::kStepDownPsmFallSeconds (AirState) so both sides agree.
+// PSM Fall at the end of a step-down: running off a 29 cm step the game reported its Fall detail only on the last of six
+// airborne feeds (0.10 s in, 20 cm fallen, the floor probed 13 cm below on the feed before: 9 cm left at 2.7 m/s), and the capsule was on the
+// ground on the next feed; the jump-off and three landing clips played in 0.3 s. A descending PSM Fall run keeps the step-down reach (known floor,
+// whole depth <= groundDropStepM, < kGroundDropStepMaxS) while the floor is reached within kGroundDropPsmFallS at the current fall speed. The
+// recorded PSM Fall drops of 31-54 cm predict a depth above groundDropStepM and fall as before; a floor that is not known keeps the rule above.
 inline constexpr float kGroundDropPsmFallS = 0.04f;
 inline constexpr float kStanceFilterSeconds = 0.15f;    // MapConfig::stanceFilterS the runtime uses (task bound: changes < ~0.15 s filtered)
 // P1 fix batch 2 (2026-10-21 12:15 recording, tests/P1StanceLatencyTest.cpp): the clean Stand <-> Crouch edge bypasses the filter
@@ -1173,6 +1178,7 @@ struct MapState
     float groundDropM = 0.0f;
     bool groundDropFell = false; // the current contact loss was released to InAir (the step-down reach does not take it back)
     bool groundDropPsmFall = false; // the current contact loss carried the PSM Fall detail (kGroundDropPsmFallS)
+    int32_t groundDropLastGround = 0; // the last ground PSM detail (PsmGround): the locomotion detail of a graced PSM Fall feed
     int stanceOut = -1;
     int stanceRawLast = -1; // last raw stance of a feed that was not a Dodge
     bool stanceProvisional = false; // stanceOut came from a pass-through feed (slide / first feed after it), not yet held for the filter time
@@ -1339,6 +1345,12 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             if (UTPP_AND_NOT(JUMPPICK, 40) fall && !m.groundDropFell && !m.groundDropPsmFall && f.air.distanceToGround >= 0.0f &&
                 m.groundDropM + f.air.distanceToGround <= c.groundDropStepM && m.groundDropAge < kGroundDropStepMaxS)
                 fall = false;
+            // the same reach for a descending PSM Fall run whose known floor is reached within kGroundDropPsmFallS at the current fall speed
+            // (PSM Fall at the end of a step-down, see kGroundDropPsmFallS; mutation 43: a PSM Fall run never keeps the reach)
+            if (UTPP_AND_NOT(JUMPPICK, 43) fall && !m.groundDropFell && m.groundDropPsmFall && c.groundDropStepM > 0.0f && velIn[2] < 0.0f &&
+                f.air.distanceToGround >= 0.0f && m.groundDropM + f.air.distanceToGround <= c.groundDropStepM && m.groundDropAge < kGroundDropStepMaxS &&
+                f.air.distanceToGround <= -velIn[2] * kGroundDropPsmFallS)
+                fall = false;
             m.groundDropFell = m.groundDropFell || fall;
             if (!fall && airFeed)
             {
@@ -1356,6 +1368,11 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         }
     }
     bool psmAir = PsmAir(f.psmDetailed) && !psmFallGraced;
+    // a graced PSM Fall feed is a ground feed for the locomotion mapping below: it keeps the last ground detail (the game sends locomotion state 0
+    // with the Fall detail, so a sprint read as Stand for that feed and a Walk_to_Run / Walk_to_Sprint pair was picked around it)
+    const int32_t locoDetail = psmFallGraced && PsmGround(m.groundDropLastGround) ? m.groundDropLastGround : f.psmDetailed;
+    if (PsmGround(f.psmDetailed))
+        m.groundDropLastGround = f.psmDetailed;
     // groundDropGraceS: the PSM Fall detail on a feed whose fresh contact still reports the ground, out of a ground frame, is no fall yet (the
     // PSM flickers it for one feed at a ledge edge); a real fall loses the contact on the same or the next feed and is InAir then.
     if (c.groundDropGraceS > 0.0f && psmAir && f.psmDetailed == kPsmFall && f.air.valid && f.air.onGround && st.movementMode == 0 && !x.vehicleExit &&
@@ -1439,7 +1456,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // MapConfig::slide; everything else below keeps seeing the PSM as before)
     const bool slideActive = c.slide && c.slideSpec.declared && PsmSlide(f.psmDetailed) && mode == 0;
     const float calibrationWeight = m.stanceCalibration.Update(stance,
-        mode == 0 && PsmGround(f.psmDetailed), c.stanceSpeedBlendTime, dt);
+        mode == 0 && PsmGround(locoDetail), c.stanceSpeedBlendTime, dt);
     float scale = BlendedSpeedScaleFor(c, calibrationWeight, gameSp);
     if (c.slide && c.slideSpec.declared)
     {
@@ -1464,9 +1481,9 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     }
     const motiontraj::V3 vel = motiontraj::GameVelocityToCm(velIn, scale);
     const float sp = motiontraj::SizeXY(vel);
-    const bool visualStrafe = c.visualStrafe && mode == 0 && PsmGround(f.psmDetailed);
+    const bool visualStrafe = c.visualStrafe && mode == 0 && PsmGround(locoDetail);
     // fix/slide-exit: CrouchSprint is sprint only once the (filtered) stance is Stand; with the filter off stance == Stand there
-    bool sprintInput = PsmSprint(f.psmDetailed) && !visualStrafe // No strafe Sprint assets.
+    bool sprintInput = PsmSprint(locoDetail) && !visualStrafe // No strafe Sprint assets.
 #if UTPP_SLIDEEXIT_MUTATION != 5
         && !(stance == 1) // a Sprint feed (4 or CrouchSprint 30) inside the filtered crouch is no sprint yet
 #endif
@@ -1489,7 +1506,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             m.dodgeDecay = true;
             m.dodgeDecayS = 0.0f;
         }
-        else if (on && m.dodgeDecay && mode == 0 && PsmGround(f.psmDetailed) && gameSp < m.dodgePrevSpeed && m.dodgeDecayS + dt <= c.dodgeGaitHoldS)
+        else if (on && m.dodgeDecay && mode == 0 && PsmGround(locoDetail) && gameSp < m.dodgePrevSpeed && m.dodgeDecayS + dt <= c.dodgeGaitHoldS)
         {
             m.dodgeDecayS += dt;
             dodgeHeld = true;
@@ -1565,7 +1582,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             m.h2Latched = false;
         else if (!m.h2Latched)
         {
-            m.h2Latched = mode == 0 && PsmGround(f.psmDetailed) && (stance == 0 || stance == 1) && input && off >= kH2EnterDeg &&
+            m.h2Latched = mode == 0 && PsmGround(locoDetail) && (stance == 0 || stance == 1) && input && off >= kH2EnterDeg &&
                           gameSp >= kH2MinSpeedMs;
             m.h2NoInputAge = 0.0f;
         }
@@ -1668,7 +1685,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     const bool analogFloor = c.analogFloorStick < 0.0f; // mutation 2: never (a runtime value, no constant condition)
 #else
     const bool analogFloor = c.analogFloorStick > 0.0f && c.analogFloorFrac > 0.0f && mode == 0 &&
-                             !sprintInput && (f.psmDetailed == kPsmStand || f.psmDetailed == kPsmCrouch) && !motiontraj::IsZero(acc) &&
+                             !sprintInput && (locoDetail == kPsmStand || locoDetail == kPsmCrouch) && !motiontraj::IsZero(acc) &&
                              stickRaw > 0.0f && stickRaw < c.analogFloorStick;
 #endif
     float liftFrac = 0.0f, liftStick = 0.0f;
@@ -1725,7 +1742,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // turn. Query that visible heading, then predict toward the held view even
     // after the mouse stops; capsule heading alone makes every future flat.
     facing.aimTurnInPlace = x.aimFacing && x.rootYawValid && mode == 0 &&
-        PsmGround(f.psmDetailed) && motiontraj::IsZero(acc) && sp <= motiontraj::kHasVelocity;
+        PsmGround(locoDetail) && motiontraj::IsZero(acc) && sp <= motiontraj::kHasVelocity;
     if (facing.aimTurnInPlace)
         facing.actorYawDeg = motiontraj::GameYawToTrajYaw(x.rootYawDeg);
     facing.shotTurn = facing.aimTurnInPlace && x.shotTurn;
@@ -1737,7 +1754,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     const bool restTurn = false; // mutation 1: the rest TIP is never admitted
 #else
     const bool restTurn = x.restTurn && !facing.aimTurnInPlace && x.rootYawValid && std::isfinite(yawNow) && mode == 0 &&
-        PsmGround(f.psmDetailed) && (stance == 0 || stance == 1) && motiontraj::IsZero(acc) && sp <= motiontraj::kHasVelocity &&
+        PsmGround(locoDetail) && (stance == 0 || stance == 1) && motiontraj::IsZero(acc) && sp <= motiontraj::kHasVelocity &&
         motiontraj::RootDeltaYaw(yawNow, x.rootYawDeg) >= motiontraj::kTurnInPlaceDeg;
 #endif
     if (restTurn)
@@ -1748,7 +1765,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     }
     motiontraj::Derived d = motiontraj::MakeDerived(c.cmc, gait, stance, stick, sp, trajAcc, rot == motiontraj::RotationMode::OrientToMovement,
                                                 mode == 1, motiontraj::CalculateDirection(vel, actorYawPre));
-    if (mode == 0 && PsmGround(f.psmDetailed) && motiontraj::IsZero(acc))
+    if (mode == 0 && PsmGround(locoDetail) && motiontraj::IsZero(acc))
         d.capsuleStop = CapsuleStopPrediction(c, calibrationWeight, gameSp);
     else if (slideBrake)
         d.capsuleStop = SlideBrakePrediction(c, gameSp);
@@ -1761,7 +1778,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         motiontraj::Dot(motiontraj::SafeNormal(planarVelocity), motiontraj::SafeNormal(dir)) >= alignedCos;
     const bool alignedActor = std::isfinite(yawNow) &&
         std::fabs(motiontraj::NormalizeAxis(inputYaw - yawNow)) <= 5.f;
-    if (dt > 0.f && mode == 0 && PsmGround(f.psmDetailed) && stickRaw >= .99f &&
+    if (dt > 0.f && mode == 0 && PsmGround(locoDetail) && stickRaw >= .99f &&
         rot == motiontraj::RotationMode::OrientToMovement && alignedActor && alignedVelocity &&
         std::fabs(calibrationWeight - float(stance)) <= .0001f)
     {

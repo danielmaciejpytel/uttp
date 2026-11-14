@@ -2099,7 +2099,9 @@ void StepDownReachChecks(Model& m, const std::vector<Section>& aSecs, const Vari
 // running down a 10 cm drop where the game reported its Fall detail on both airborne feeds (the game run showed a jump-off clip and two landing
 // clips in 0.05 s; mutation 41 = PSM Fall is InAir at once must FAIL here); psm_drop_fall, Female V dodging off a 0.5 m ledge with the Fall detail
 // from its first airborne feed: InAir at most kGroundDropPsmFallS plus one feed after the first PSM Fall feed, air clips still played.
-// Production floor rule (AirFloorStep), 60 and 30 Hz.
+// psm_drop_step_end, Female V sprinting off a 29 cm step: six airborne feeds, the floor probed 21 / 13 cm below, the Fall detail only on the last
+// airborne feed with the floor 9 cm away (the game run showed a jump-off clip and three landing clips in 0.3 s; mutation 43 = a PSM Fall run
+// never keeps the step-down reach must FAIL here). Production floor rule (AirFloorStep), 60 and 30 Hz.
 void PsmFallDropChecks(Model& m, const std::vector<Section>& aSecs, const Variant& aProd)
 {
     Variant prod = aProd;
@@ -2107,7 +2109,7 @@ void PsmFallDropChecks(Model& m, const std::vector<Section>& aSecs, const Varian
     int steps = 0, falls = 0;
     for (const Section& s0 : aSecs)
     {
-        const bool step = s0.name == "psm_drop_step", fall = s0.name == "psm_drop_fall";
+        const bool step = s0.name == "psm_drop_step" || s0.name == "psm_drop_step_end", fall = s0.name == "psm_drop_fall";
         if (!step && !fall)
             continue;
         steps += step;
@@ -2128,13 +2130,20 @@ void PsmFallDropChecks(Model& m, const std::vector<Section>& aSecs, const Varian
             {
                 std::snprintf(what, sizeof what, "%s: a short PSM Fall on a small drop keeps the ground clips (jump / land frames, InAir frames)", s.name.c_str());
                 Check(a.airFrames == 0 && a.inAirFrames == 0, what, a.airFrames, a.inAirFrames);
-                // the ground selection of the same feeds (contact flag held, no PSM air detail): same clip on every frame, legs within 6 deg
+                // the ground selection of the same feeds (contact flag held, no PSM air detail, the locomotion state of the feed before: the
+                // game sends state 0 with the Fall detail): same clip on every frame, legs within 6 deg
                 Section ground = s;
+                int prevLoco = -1;
                 for (Row& r : ground.rows)
                 {
                     r.onGround = 1;
                     if (adapter::PsmAir(adapter::DetailFromFeed(r.psm, r.loco)))
+                    {
                         r.psm &= ~integ::kPsmDetailFieldMask;
+                        if (prevLoco >= 0)
+                            r.loco = prevLoco;
+                    }
+                    prevLoco = r.loco;
                 }
                 const std::vector<Frame> g = Replay(m, ground, prod);
                 int diff = g.size() != on.size() ? 1 : 0;
@@ -2177,7 +2186,7 @@ void PsmFallDropChecks(Model& m, const std::vector<Section>& aSecs, const Varian
             }
         }
     }
-    Check(steps == 1 && falls == 1, "PSM Fall drop fixture: psm_drop_step and psm_drop_fall sections (counts)", steps, falls);
+    Check(steps == 2 && falls == 1, "PSM Fall drop fixture: psm_drop_step, psm_drop_step_end and psm_drop_fall sections (counts)", steps, falls);
 }
 
 void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>& aJumpSecs, const Variant& aProd)
