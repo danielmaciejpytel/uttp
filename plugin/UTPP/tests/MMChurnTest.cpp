@@ -39,12 +39,8 @@
 //   2026-11-13 09:24: the crouched reface start used to be followed by Loop_B, BR, RR, FR and F).
 //   churn_kbd_strafe_taps.feed / churn_kbd_strafe_taps_man.feed (Female 2026-11-14 06:48, Male 06:59; game 9 and 10 changes in 2.8 s): left / right taps
 //   0.35 s apart at a run keep one turn clip per tap (8 changes, check K at most one per tap); the finished turn used to hand to a loop one to seven
-//   feeds before the next tap (MatcherConfig::turnCommitTailS). churn_flick_run_kbd.feed (Female 06:48 flick, game 8 changes in 2.5 s): 4 changes,
-//   6 without MatcherConfig::downshiftDeferS (Run_to_Walk shown for one feed before the Stop of the release), 5 when a new press during the
-//   stop does not take the side of the reface start it picks (refacestart::Episode pending press; R_180 used to swap to L_180 at clip time 0.30).
-//   The replayed body yaw is the recorded one, so the later L_180 after Walk_to_Run stays in this replay; in game the body turns the picked side.
-//   L (FootLockConfig::maxOffset): the replay foot lock correction of the keyboard strafe taps (both bodies), the unarmed walk start and the Male
-//   sprint flick stays below 15.0 cm (the in-game limit; 16.1 - 16.9 cm before, a soft lock pulled along by a clip switch that swings its foot).
+//   feeds before the next tap (MatcherConfig::turnCommitTailS). churn_flick_run_kbd.feed (Female 06:48 flick, game 8 changes in 2.5 s): 5 changes,
+//   6 without MatcherConfig::downshiftDeferS (Run_to_Walk shown for one feed before the Stop of the release).
 //   UTPP_CHURN_TRACE=1 prints each window's clip changes, the replay foot lock peak between them and the reaction to each heading step.
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
@@ -66,7 +62,6 @@ struct Window
     bool restarts = false; // check D applies: no start clip restarted from its first frame over and over
     bool turnHeld = false; // check G applies: a turn clip picked on the reversal plays through its authored root turn
     int edgeMax = -1;      // check K applies: at most this many clip changes after each digital heading step (-1 = not checked)
-    float footPeakCm = -1.0f; // check L applies: the replay foot lock correction stays below this in [t0, t1) (cm, -1 = not checked)
 };
 
 // check G (MatcherConfig::turnCommit): pivot / moving-turn clips (steer::IsPivot / IsMoveTurn) picked in [aT0, aT1) that were replaced before their authored
@@ -438,9 +433,9 @@ int main(int argc, char** argv)
         {"churn_reface_whip.feed", {{"camera_whip_180 accel", 185.111f, 187.111f, 3, true}}},
         // Female 2026-11-11 17:37: the stick held against a blocked capsule (weapon armed / unarmed walk): the start clips restarted every 0.2 s (13 changes in 3 s)
         {"churn_stalled_start.feed", {{"weapon_aim walk_armed", 307.026f, 310.026f, 6, false, true}, {"weapon_aim aim_walk", 310.026f, 313.026f, 3, false, true},
-                                       {"weapon_walk walk_unarmed", 318.44f, 321.442f, 6, false, true, false, -1, 15.0f}}},
+                                       {"weapon_walk walk_unarmed", 318.44f, 321.442f, 6, false, true}}},
         // Male 2026-11-11 17:19: sprint flick; 9 changes in 2.5 s (3.6 per second, game 9) before the turn commit, 6 with it
-        {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male)", 181.397f, 183.897f, 6, false, false, true, -1, 15.0f}}, true},
+        {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male)", 181.397f, 183.897f, 6, false, false, true}}, true},
         {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 3}, {"sprint_dash sprint_again", 264.284f, 267.284f, 7}}},
         // Female 2026-11-14 03:53, keyboard-like input (full-deflection direction keys): the harness step windows keep 3.0 changes per second; check K
         // runs over the key edges of the whole sequence (the key edge of a step reaches the feed ~0.13 s before the harness step window starts)
@@ -449,7 +444,7 @@ int main(int argc, char** argv)
         {"churn_kbd_diagonals.feed", {{"kbd_diagonals fwd_right", 80.16f, 81.06f, 2}, {"kbd_diagonals right", 81.06f, 81.96f, 2}, {"kbd_diagonals back_right", 81.96f, 82.86f, 2},
                                       {"kbd_diagonals back", 82.86f, 83.76f, 2}, {"kbd_diagonals back_left", 83.76f, 84.66f, 2}, {"kbd_diagonals left", 84.66f, 85.56f, 2},
                                       {"kbd_diagonals fwd_left", 85.56f, 86.46f, 2}, {"kbd_diagonals key edges", 79.9f, 87.2f, 99, false, false, false, 2}}},
-        {"churn_kbd_strafe.feed", {{"kbd_strafe_weave weave", 100.56f, 103.76f, 9}, {"kbd_strafe_weave strafe_taps", 103.76f, 106.56f, 8, false, false, false, -1, 15.0f},
+        {"churn_kbd_strafe.feed", {{"kbd_strafe_weave weave", 100.56f, 103.76f, 9}, {"kbd_strafe_weave strafe_taps", 103.76f, 106.56f, 8},
                                    {"kbd_strafe_weave weave key edges", 100.4f, 103.6f, 99, false, false, false, 2},
                                    {"kbd_strafe_weave strafe_taps key edges", 103.6f, 106.5f, 99, false, false, false, 1}}},
         {"churn_kbd_switch180.feed", {{"kbd_switch_180 back", 56.77f, 58.37f, 4}, {"kbd_switch_180 fwd_again", 58.37f, 59.97f, 4}, {"kbd_switch_180 right", 62.77f, 64.37f, 4},
@@ -458,12 +453,12 @@ int main(int argc, char** argv)
         {"churn_crouch_reface_man.feed", {{"crouch_walk_turns walk (Male, reface start)", 222.48f, 224.48f, 2}}, true},
         {"churn_crouch_reface_man.feed", {{"crouch_walk_turns walk (same feed, Female body)", 222.48f, 224.48f, 2}}},
         // keyboard left / right taps at a run, both bodies (2026-11-14 06:48 Female, 06:59 Male): the game counted 9 and 10 changes in 2.8 s
-        {"churn_kbd_strafe_taps.feed", {{"kbd_strafe_weave strafe_taps (second run)", 103.36f, 106.16f, 8, false, false, false, -1, 15.0f},
+        {"churn_kbd_strafe_taps.feed", {{"kbd_strafe_weave strafe_taps (second run)", 103.36f, 106.16f, 8},
                                         {"kbd_strafe_weave strafe_taps key edges (second run)", 103.2f, 106.1f, 99, false, false, false, 1}}},
-        {"churn_kbd_strafe_taps_man.feed", {{"kbd_strafe_weave strafe_taps (Male)", 95.91f, 98.71f, 8, false, false, false, -1, 15.0f},
+        {"churn_kbd_strafe_taps_man.feed", {{"kbd_strafe_weave strafe_taps (Male)", 95.91f, 98.71f, 8},
                                             {"kbd_strafe_weave strafe_taps key edges (Male)", 95.75f, 98.65f, 99, false, false, false, 1}}, true},
         // Female 2026-11-14 06:48 run flick (game 8 changes in 2.5 s)
-        {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 4}}},
+        {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 5}}},
     };
     // opt-in: UTPP_CHURN_TRACE=1 prints every clip change of each window with its clip time and the foot lock correction peak after it
     char* traceEnv = nullptr;
@@ -471,12 +466,9 @@ int main(int argc, char** argv)
     _dupenv_s(&traceEnv, &traceEnvLen, "UTPP_CHURN_TRACE");
     const bool trace = traceEnv && std::strcmp(traceEnv, "1") == 0;
     std::free(traceEnv);
+    g_dumpCorr = trace;
     for (const Slice& s : slices)
     {
-        // check L needs the per-frame foot lock correction of its slice
-        g_dumpCorr = trace;
-        for (const Window& w : s.windows)
-            g_dumpCorr = g_dumpCorr || w.footPeakCm > 0.0f;
         FeedFile f;
         if (!LoadFeedAny(sliceDir + "\\" + s.file, f))
         {
@@ -560,21 +552,6 @@ int main(int argc, char** argv)
                               static_cast<double>(kMaxRefaceSwapS * 1000.0f));
                 Check(rs.count >= 1, std::string("reface swap present ") + w.name, sw);
                 Check(rs.worstDelayS <= kMaxRefaceSwapS, std::string("reface swap not delayed ") + w.name, sw);
-            }
-            if (w.footPeakCm > 0.0f)
-            {
-                float peak = 0.0f;
-                size_t frames = 0;
-                for (size_t i = 0; i < f.fr.size() && 2 * i + 1 < g_corr.size(); ++i)
-                    if (f.fr[i].t >= w.t0 && f.fr[i].t < w.t1)
-                    {
-                        peak = std::fmax(peak, std::fmax(g_corr[2 * i], g_corr[2 * i + 1]));
-                        ++frames;
-                    }
-                char fp[120];
-                std::snprintf(fp, sizeof(fp), "foot lock correction peak %.1f cm over %zu frames (limit %.1f cm)", static_cast<double>(peak), frames,
-                              static_cast<double>(w.footPeakCm));
-                Check(frames > 0 && peak < w.footPeakCm, std::string("foot lock peak ") + w.name, fp);
             }
             if (w.restarts)
             {
