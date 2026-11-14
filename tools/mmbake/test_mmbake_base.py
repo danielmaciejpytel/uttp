@@ -21,6 +21,13 @@ CLIPS = os.path.join(ROOT, "Animations", "retarget", "out")
 META = os.path.join(ROOT, "Animations", "sourcepack", "SourcePack_export", "meta")
 TMP = os.path.join(ROOT, "Build", "work", "mmbake")
 BAKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mmbake_base.py")
+# Databases the current meta lists for clips of a delivered file that has no tag for them (added to the meta after that file
+# was baked), per file name: {database: clips}. Any other difference between the meta and a file's tags fails.
+META_ADDED_AFTER_BAKE = {
+    "utpp_base_dense_subset.utppmm": {
+        "PSD_Dense_Stand_Walk_SpinTransition": {f"M_Neutral_Walk_Reface_Start_{d}_{s}_{a}"
+                                                for d in "BF" for s in "LR" for a in ("090", "180")}},
+}
 
 fails = 0
 passes = 0
@@ -131,6 +138,14 @@ def main():
     DB, CLIPS, META = a.db, a.clips, a.meta
     bake_args = [] if (a.clips, a.meta) == (ap.get_default("clips"), ap.get_default("meta")) else ["--clips", CLIPS, "--meta", META]
     os.makedirs(TMP, exist_ok=True)
+    # the clip set of the database under test is the one its file lists (the clip folder holds more clips than this subset):
+    # the fresh bakes take exactly those clips (mmbake --clip-names-from)
+    b, h, secs = read_db(DB)
+    db_names = [cstr(b, secs, struct.unpack_from("<I", b, secs["CLIP"][2] + 32 * i)[0]) for i in range(h["clips"])]
+    names_json = os.path.join(TMP, "db_clip_names.json")
+    with open(names_json, "w", encoding="utf-8") as f:
+        json.dump({"clips": [{"name": nm} for nm in db_names]}, f)
+    bake_args += ["--clip-names-from", names_json]
     # ---- determinism: two fresh bakes + the delivered file
     outs = []
     for k in range(2):
@@ -141,13 +156,44 @@ def main():
         outs.append(open(o, "rb").read())
     delivered = open(DB, "rb").read()
     check("determinism: bake twice -> identical bytes", outs[0] == outs[1], f"{len(outs[0])} bytes")
-    check("determinism: delivered Data file == fresh bake", outs[0] == delivered)
+    # delivered vs fresh bake: the data sections must be byte-identical. The name / tag sections may differ only by databases the
+    # current meta lists and the delivered file has no tag for (a database added to the meta after the bake); every tag the
+    # delivered file has must be set on exactly the same clips.
+    fb, fh, fsecs = read_db(os.path.join(TMP, "determinism_0.utppmm"))
+    name_secs = {"STRS", "TAGS", "CLIP", "GRUP"}
+    data_diff = sorted(k for k in set(secs) | set(fsecs) if k not in name_secs and
+                       (k not in secs or k not in fsecs or b[secs[k][2]:secs[k][2] + secs[k][3]] != fb[fsecs[k][2]:fsecs[k][2] + fsecs[k][3]]))
+    tags_d = [cstr(b, secs, struct.unpack_from("<I", b, secs["TAGS"][2] + 4 * i)[0]) for i in range(h["tags"])]
+    tags_f = [cstr(fb, fsecs, struct.unpack_from("<I", fb, fsecs["TAGS"][2] + 4 * i)[0]) for i in range(fh["tags"])]
+    allowed = META_ADDED_AFTER_BAKE.get(os.path.basename(DB), {})
+    rec_bad, tag_bad, extra_bad, newer = 0, 0, [], set()
+    for i in range(min(h["clips"], fh["clips"])):
+        rd_ = struct.unpack_from("<IIIIIIQ", b, secs["CLIP"][2] + 32 * i)
+        rf_ = struct.unpack_from("<IIIIIIQ", fb, fsecs["CLIP"][2] + 32 * i)
+        nm_ = cstr(b, secs, rd_[0])
+        if nm_ != cstr(fb, fsecs, rf_[0]) or rd_[1:6] != rf_[1:6]:
+            rec_bad += 1
+        got_d = {t for j, t in enumerate(tags_d) if rd_[6] >> j & 1}
+        got_f = {t for j, t in enumerate(tags_f) if rf_[6] >> j & 1}
+        if got_f & set(tags_d) != got_d:
+            tag_bad += 1
+        for t in got_f - set(tags_d):
+            newer.add(t)
+            if nm_ not in allowed.get(t, ()):
+                extra_bad.append(f"{nm_}:{t}")
+    same = outs[0] == delivered
+    check("determinism: delivered Data file == fresh bake (byte-identical, or identical data sections + clip records + every "
+          "delivered tag, differing only by the listed databases added to the meta after the bake)",
+          same or (not data_diff and h["clips"] == fh["clips"] and h["frames"] == fh["frames"] and rec_bad == 0 and tag_bad == 0
+                   and not extra_bad),
+          "byte-identical" if same else f"data sections differing {data_diff or 'none'}; clip records differing {rec_bad}; "
+          f"clips with a changed delivered tag {tag_bad}; databases only in the current meta {sorted(newer) or 'none'}; "
+          f"not listed as added after the bake {extra_bad[:5] or 'none'}")
     s0 = open(os.path.join(TMP, "determinism_0.utppmm.summary.json"), "rb").read().replace(b"determinism_0", b"X")
     s1 = open(os.path.join(TMP, "determinism_1.utppmm.summary.json"), "rb").read().replace(b"determinism_1", b"X")
     check("determinism: summary JSON identical", s0 == s1)
 
     # ---- header / CRC via independent reader
-    b, h, secs = read_db(DB)
     check("magic/version/header size", h["magic"] == b"UTPPMMDB" and h["version"] == 1 and h["header_size"] == 128)
     check("file_size field", h["file_size"] == len(b))
     check("payload CRC32 (zlib)", zlib.crc32(b[128:]) & 0xFFFFFFFF == h["pcrc"])
@@ -182,12 +228,17 @@ def main():
     check("rig hash == FNV-1a64(rig.json bones 0..72)", hval == h["rig_hash"], f"0x{hval:016x}")
 
     # ---- counts vs inputs
-    files = sorted(f for d in CLIPS.split(";") if d for f in glob.glob(os.path.join(d, "*.utppclip.json")))
+    # the inputs of the database = the clip files of the names it lists (each must be in the clip folder)
+    want_names = set(db_names)
+    files = sorted(f for d in CLIPS.split(";") if d for f in glob.glob(os.path.join(d, "*.utppclip.json"))
+                   if os.path.basename(f)[:-len(".utppclip.json")] in want_names)
     clips = {}
     for f in files:
         c = json.load(open(f, encoding="utf-8"))
         clips[c["source_clip"]] = c
     total = sum(len(c["frames"]) for c in clips.values())
+    check("every clip the database lists is in the clip folder", want_names <= set(clips),
+          f"{len(want_names & set(clips))} of {len(want_names)}; missing {sorted(want_names - set(clips))[:5]}")
     check("clip count", h["clips"] == len(clips), f"{h['clips']} vs {len(clips)}")
     check("frame count", h["frames"] == total, f"{h['frames']} vs {total}")
     check("bone count 73 / feature count 27", h["bones"] == 73 and h["features"] == 27)
@@ -200,12 +251,26 @@ def main():
     tags = [cstr(b, secs, struct.unpack_from("<I", b, secs["TAGS"][2] + 4 * i)[0]) for i in range(h["tags"])]
     ok_frames = all(clips[nm]["num_frames"] == n for nm, _, n, *_ in crec)
     check("per-clip frame counts match inputs", ok_frames)
+    # every database the file has a tag for must match the meta exactly; a database the meta lists beyond the file's tag table
+    # must be one of META_ADDED_AFTER_BAKE on exactly its clips
     ok_tags = True
+    meta_only = set()
+    allowed = META_ADDED_AFTER_BAKE.get(os.path.basename(DB), {})
+    seen_added = {t: set() for t in allowed}
     for nm, _, _, _, _, _, mask in crec:
-        want = sorted(json.load(open(meta_path(nm), encoding="utf-8"))["databases"])
+        want = set(json.load(open(meta_path(nm), encoding="utf-8"))["databases"])
         got = sorted(t for i, t in enumerate(tags) if mask >> i & 1)
-        ok_tags &= want == got
-    check("per-clip database tags match meta", ok_tags, ", ".join(tags))
+        ok_tags &= sorted(want & set(tags)) == got
+        for t in want - set(tags):
+            meta_only.add(t)
+            if t in seen_added:
+                seen_added[t].add(nm)
+            else:
+                ok_tags = False
+    ok_tags &= all(seen_added[t] == set(allowed[t]) for t in allowed)
+    check("per-clip database tags match meta (the file's tag table exactly; beyond it only the databases listed as added after "
+          "the bake, on exactly their clips)", ok_tags,
+          ", ".join(tags) + (f"; databases only in the current meta: {', '.join(sorted(meta_only))}" if meta_only else ""))
 
     # ---- exclusion check: notify ranges independently
     F = h["features"]

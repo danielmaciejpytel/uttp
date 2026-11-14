@@ -136,10 +136,8 @@ REGISTRY = {
         'note': 'leanbake.LEAN_DATA; the file was not found in the project folders (2026-11-09)'},
     'mmbake/test_mmbake_base.py': {
         'markers': {'data'},
-        'xfail': 'stale vs the delivered Data DB: the test bake has 96 clips / 10451 frames, the Data file 718 / 80110 '
-                 '(5 checks: delivered == fresh bake, clip / frame count, POSE size, per-clip tags)',
-        'xfail_sig': {'fails': [r'determinism: delivered Data file == fresh bake', r'clip count', r'frame count',
-                                r'POSE section size', r'per-clip database tags match meta'], 'exception': None}},
+        'note': 'bakes the clips the Data subset file lists (the clip folder holds more); the current meta adds a database the '
+                'file has no tag for, reported in the detail of the determinism and tag checks'},
     'mmbake/test_mmbake_motion.py': {
         'markers': {'data'}, 'requires': ['Data/utpp_motion_woman.summary.json'],
         'note': 'validates the baker against a woman v2 database WITH its bake summary (bake_args -> retarget inputs); the only such pair '

@@ -83,6 +83,13 @@ WEAPONS = {
     # arm cyberware: needs the cyberware loadout change, see cyberware_equip_cmd
     'mantis': {'label': 'mantis blades', 'anim_var': 'mantis_blade', 'block': True, 'kind': 'cyberware',
                'records': ('Items.MantisBlades',)},
+    # strong arms: arm cyberware whose record inherits the fists anim variable; the pack registers third-person fist sets for it
+    # behind the StrongArms variable. The script never switches the full body (nor the full pose layer) on for arm cyberware, so
+    # 'covered' is False whatever the script's list says about the fists variable, and the state mask is the default one.
+    # 'phases' = the standing phases only; 'pose' = the run needs the pose recording (diagnostic logs on) to measure the body.
+    'strong_arms': {'label': 'strong arms (fists cyberware)', 'anim_var': 'w_melee_fists', 'block': True, 'kind': 'cyberware',
+                    'records': ('Items.StrongArms',), 'covered': False, 'states_default': True,
+                    'phases': ('light_combo', 'strong_attack', 'block'), 'pose': True},
 }
 for _tag, _w in WEAPONS.items():
     _w['tag'] = _tag
@@ -396,10 +403,28 @@ PHASES = (
 )
 
 
+def weapon_phases(w: dict) -> list[dict]:
+    """The strike phases a weapon runs, in order: no block phase without a block set; a 'phases' list keeps only those names."""
+    only = w.get('phases')
+    return [p for p in PHASES if not (p.get('needs_block') and not w['block']) and (only is None or p['name'] in only)]
+
+
+def weapon_covered(w: dict, tables: dict | None) -> bool | None:
+    """Coverage of a weapon: its own 'covered' entry when it has one, else the script's full-body list."""
+    return w['covered'] if 'covered' in w else is_covered(tables, w['anim_var'])
+
+
+def weapon_states(w: dict, tables: dict | None) -> int | None:
+    """State mask the script sends for a weapon: the default mask for 'states_default' entries, else the table entry."""
+    if w.get('states_default'):
+        return tables['default_states'] if tables else None
+    return expected_states(tables, w['anim_var'])
+
+
 def phase_plan(tag: str) -> list[str]:
     """Names of all phases in order for a weapon (equip .. remove)."""
     w = WEAPONS[tag]
-    mid = [p['name'] for p in PHASES if not (p.get('needs_block') and not w['block'])]
+    mid = [p['name'] for p in weapon_phases(w)]
     return ['equip', 'draw'] + mid + ['holster', 'remove']
 
 
@@ -467,8 +492,8 @@ class _Run:
 
     def __init__(self, night, pad, guard, plan, w: dict, tables: dict | None):
         self.night, self.pad, self.guard, self.plan, self.w, self.tables = night, pad, guard, plan, w, tables
-        self.covered = is_covered(tables, w['anim_var'])
-        self.exp_states = expected_states(tables, w['anim_var'])
+        self.covered = weapon_covered(w, tables)
+        self.exp_states = weapon_states(w, tables)
         self.mask_active = False
         self.full_active = False
         self.phases: list = []
@@ -711,12 +736,13 @@ def run_one(night, pad, guard, plan, tag: str, tables: dict | None, out: dict | 
         if w['kind'] == 'cyberware' and os.environ.get(ALLOW_CYBERWARE_ENV) != '1':
             reason, skip = f'skip: arm cyberware changes the cyberware loadout; set {ALLOW_CYBERWARE_ENV}=1 to run it', True
         else:
+            if w.get('pose') and getattr(getattr(night, 'args', None), 'diag', 'keep') == 'off':
+                run.warns.append('pose recording wanted for this weapon but the diagnostic logs are off (--diag off): '
+                                 'the body shape cannot be measured')
             reason = _equip(run)
             skip = bool(reason and reason.startswith('skip'))
         if reason is None:
-            for phase in PHASES:
-                if phase.get('needs_block') and not w['block']:
-                    continue
+            for phase in weapon_phases(w):
                 _strike_phase(run, phase)
             _holster(run)
     except BaseException as e:      # noqa: BLE001 - the cleanup below must run for every error, then it is re-raised
@@ -782,21 +808,27 @@ def run_weapon_macro(night, pad, guard, plan, set_name: str, out: dict | None = 
 def dry_run_lines(tag: str, scenarios: dict | None = None) -> list[str]:
     w = WEAPONS[tag]
     tables = load_script_tables()
-    cov = is_covered(tables, w['anim_var'])
-    exp = expected_states(tables, w['anim_var'])
+    cov = weapon_covered(w, tables)
+    exp = weapon_states(w, tables)
     lines = [f'== {w["set"]}: {w["label"]} ({tag}), anim variable {w["anim_var"]}, script covers it: {cov}, '
              f'state mask {"0x%X" % exp if exp is not None else "?"} ({exp})',
              f'   records (first with friendlyName == {w["anim_var"]} is used): {", ".join(w["records"])}']
     if w['kind'] == 'cyberware':
         lines += [f'   needs {ALLOW_CYBERWARE_ENV}=1 (changes and restores the cyberware loadout)',
                   f'   equip   : {cyberware_equip_cmd(w)}', f'   draw    : {cyberware_draw_cmd()}']
+    if w.get('pose'):
+        lines.append('   pose    : needs the pose recording (diagnostic logs on: night.py --diag timed | until) to measure the body')
     else:
         lines += [f'   count   : {count_cmd(w)}',
                   f'   equip   : {give_cmd(w, w["records"][0])}  (record from the count echo; nothing is given when the player owns one)']
     lines.append(f'   in hand : {inhand_cmd()}')
+    runs = [p['name'] for p in weapon_phases(w)]
     for p in PHASES:
         if p.get('needs_block') and not w['block']:
             lines.append(f'   {p["name"]:14}: skipped (no block set)')
+            continue
+        if p['name'] not in runs:
+            lines.append(f'   {p["name"]:14}: not run for this weapon')
             continue
         dur = ''
         sc = scenarios.get(p['part']) if scenarios else None
