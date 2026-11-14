@@ -2756,7 +2756,11 @@ class Night:
         farther than --home-radius m from the start point (`force`: farther than 5 m), V is teleported back there, facing as
         before. True = V was put back. Each return is recorded in cycle['home_returns']."""
         radius = float(getattr(self.args, 'home_radius', 0.0) or 0.0)
-        if self.home is None or radius <= 0.0 or not self.auto_pos:
+        if radius <= 0.0 or not self.auto_pos:
+            return False
+        if self.home is None:      # the first read saw V still leaving a vehicle (or no position): take the point now,
+            if not force:          # but never the place where the game has just blocked the weapon
+                self.note_home(pad, guard)
             return False
         try:
             pos = self.poll_pos(guard, pad)

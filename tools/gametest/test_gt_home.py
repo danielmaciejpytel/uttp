@@ -83,6 +83,17 @@ class KeepNearHome(unittest.TestCase):
         self.assertFalse(n.keep_near_home(None, self.Guard(), {}, 'before x'))
         self.assertEqual((n.sent, len(n.answers)), ([], 1))
 
+    def test_the_start_point_is_taken_later_when_the_first_read_saw_v_mounted(self):
+        n = self.make()
+        n.answers = [pos(HOME[0], HOME[1], HOME[2], mounted=True)]
+        n.note_home(None, self.Guard())
+        self.assertIsNone(n.home)
+        n.answers = [pos(*HOME)]                                  # the first check before a weapon: on foot now
+        self.assertFalse(n.keep_near_home(None, self.Guard(), {}, 'before handgun'))
+        self.assertEqual(n.home, HOME)
+        n.answers = [pos(HOME[0] + 100.0, HOME[1]), pos(*HOME)]
+        self.assertTrue(n.keep_near_home(None, self.Guard(), {}, 'before revolver'))
+
     def test_radius_zero_switches_it_off(self):
         n = self.make('0')
         n.answers = [pos(*HOME)]
