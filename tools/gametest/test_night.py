@@ -2884,7 +2884,7 @@ class EnemyPureTests(unittest.TestCase):
         self.assertIn('melee_block', gn.validate_sets(['melee_fists_target'], missing)[0])
         self.assertTrue(all(part in sc for *_, part in gn.ENEMY_PHASES))
         self.assertEqual([p[0] for p in gn.ENEMY_PHASES], ['far', 'near', 'orbit', 'block'])
-        self.assertEqual([p[1] for p in gn.ENEMY_PHASES], [2.0, 1.2, 1.2, 1.5])
+        self.assertEqual([p[1] for p in gn.ENEMY_PHASES], [1.8, 1.2, 1.2, 1.5])
         self.assertEqual([p[0] for p in gn.ENEMY_PHASES if p[2]], ['near', 'orbit'])  # the health drop required at 1.2 m
 
     def test_commands_are_one_ascii_line_with_their_own_tag(self):
@@ -3302,7 +3302,7 @@ class EnemyMacroTests(unittest.TestCase):
         rec = gn.ENEMY_RECORDS[0]
         self.assertEqual(cmds['nightauto_enemy'], gn.nightauto_cmd(0.2, True, gn.ENEMY_TAG))
         self.assertEqual(cmds['nightauto_restore'], gn.nightauto_cmd(self.n.args.night_auto_period))   # the vehicle tag again
-        self.assertEqual(cmds['enemy_place/far'], gn.enemy_place_cmd(rec, 2.0, 'after_start', define=True))
+        self.assertEqual(cmds['enemy_place/far'], gn.enemy_place_cmd(rec, 1.8, 'after_start', define=True))
         self.assertEqual(cmds['enemy_place/near'], gn.enemy_place_cmd(rec, 1.2, 'after_far'))
         self.assertEqual(cmds['enemy_place/orbit'], gn.enemy_place_cmd(rec, 1.2, 'after_near'))
         self.assertEqual(cmds['enemy_place/block'], gn.enemy_place_cmd(rec, 1.5, 'after_orbit'))
@@ -3315,7 +3315,7 @@ class EnemyMacroTests(unittest.TestCase):
         self.assertEqual(r['enemy']['hits'], {'far': False, 'near': True, 'orbit': True, 'block': False})
         self.assertEqual((ph['near']['drop'], ph['far']['drop'], ph['block']['drop']), (30.0, 0.0, 0.0))
         self.assertEqual(ph['orbit']['orbit_done_deg'], 60.0)
-        self.assertEqual({k: p['placed_d2'] for k, p in ph.items()}, {'far': 2.0, 'near': 1.2, 'orbit': 1.2, 'block': 1.5})
+        self.assertEqual({k: p['placed_d2'] for k, p in ph.items()}, {'far': 1.8, 'near': 1.2, 'orbit': 1.2, 'block': 1.5})
         self.assertEqual(ph['near']['dist']['min'], 1.2)
         self.assertEqual(r['enemy']['record'], rec)
         self.assertEqual(r['enemy']['spawn']['att_name'], 'hostile')
@@ -3335,7 +3335,7 @@ class EnemyMacroTests(unittest.TestCase):
         r = self.run_macro(w)
         self.assertEqual(r['verdict'], 'FAIL')
         self.assertEqual(w.played, ['melee_draw', 'melee_face_forward'])                                 # no punch into the air
-        self.assertTrue(any('never placed' in f and '6.0 m from V, wanted 2.0 m' in f for f in r['fails']), r['fails'])
+        self.assertTrue(any('never placed' in f and '6.0 m from V, wanted 1.8 m' in f for f in r['fails']), r['fails'])
         self.assertNotIn('no `src=lock`', ' '.join(r['fails']))
         self.assertEqual([p['name'] for p in r['enemy']['phases']], ['far'])         # nothing to try again with no record that worked
         self.assertIn('enemy_off', [lab for lab, _ in w.cmds])                       # cleaned up all the same
@@ -3360,8 +3360,8 @@ class EnemyMacroTests(unittest.TestCase):
         self.assertEqual(r['enemy']['tried'], list(gn.ENEMY_RECORDS[:2]))
         self.assertEqual(r['enemy']['record'], gn.ENEMY_RECORDS[1])
         places = [c for lab, c in w.cmds if lab == 'enemy_place/far']
-        self.assertEqual(places, [gn.enemy_place_cmd(gn.ENEMY_RECORDS[0], 2.0, 'after_start', define=True),
-                                  gn.enemy_place_cmd(gn.ENEMY_RECORDS[1], 2.0, 'after_start', define=True)])
+        self.assertEqual(places, [gn.enemy_place_cmd(gn.ENEMY_RECORDS[0], 1.8, 'after_start', define=True),
+                                  gn.enemy_place_cmd(gn.ENEMY_RECORDS[1], 1.8, 'after_start', define=True)])
         self.assertEqual([c['ok'] for c in r['checks'] if c['phase'] == 'enemy_place/far'], [False, True])
         later = [c for lab, c in w.cmds if lab == 'enemy_place/near']
         self.assertEqual(later, [gn.enemy_place_cmd(gn.ENEMY_RECORDS[1], 1.2, 'after_far')])   # the record that worked

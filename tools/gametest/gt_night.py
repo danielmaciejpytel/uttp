@@ -229,8 +229,9 @@ def left_ground(text: str) -> bool:
     return any('UTPP MMAIR phase=' in ln and ' was=Ground ' in ln for ln in text.splitlines())
 ENEMY_MIN_DROP = 0.5         # health drop (absolute, else percent points) that counts as "the punch hit"
 # (phase, target distance along the camera forward in m, health drop required, camera orbit deg, pad part)
-# near and orbit are the close-range phases (1.2 m): their punches must connect; far (2.0 m) and block are report only
-ENEMY_PHASES = (('far', 2.0, False, 0.0, 'melee_punch'), ('near', 1.2, True, 0.0, 'melee_punch'),
+# near and orbit are the close-range phases (1.2 m): their punches must connect; far and block are report only. far is
+# 1.8 m: the game's own target pick ends near 2.0 m from V on both bodies, so a target at 2.0 m is a coin toss
+ENEMY_PHASES = (('far', 1.8, False, 0.0, 'melee_punch'), ('near', 1.2, True, 0.0, 'melee_punch'),
                 ('orbit', 1.2, True, 60.0, 'melee_punch'), ('block', 1.5, False, 0.0, 'melee_block'))
 
 
