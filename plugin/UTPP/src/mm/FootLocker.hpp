@@ -53,6 +53,10 @@ struct FootLockConfig
     float blendInTime = 0.08f;  // s, lock start
     float blendOutTime = 0.15f; // s, after unlock
     float maxDrift = 0.25f;     // m, locked target vs animated ankle; beyond -> immediate unlock + blend out
+    // m, bound of the soft lock (soft slip on, not replant mode): when the animated toe runs away from the lock faster than the slip follows
+    // (a clip switch that swings the locked foot, a fast heading flip) and the offset left after the slip passes this, the lock is
+    // released like a drift unlock, so the leg is never pulled further than the last solved correction
+    float maxOffset = 0.12f;
     float maxExtension = 0.995f; // fraction of (thigh + shin) length the IK may reach
     float softExtension = 0.97f; // above this fraction the reach is limited softly towards maxExtension
     float maxDt = 0.25f;        // s, larger steps are clamped
@@ -175,6 +179,8 @@ struct FootLockDiagnostics
     uint64_t nonFiniteResets = 0;
     uint64_t settles = 0; // locked-foot updates with settling applied
     uint64_t slips = 0;   // 0.5.9: locked-foot updates with the soft slip applied
+    uint64_t offsetReleases = 0; // soft locks released because the offset passed FootLockConfig::maxOffset
+    uint64_t footOffsetReleases[2] = {0, 0};
     float maxCorrection = 0.0f; // m, since Init/Reset
     // loco C0 (diagnostics only): per-foot counters (index kLeft / kRight; the sums equal the totals above) and last events
     uint64_t footSlips[2] = {0, 0};        // locked-foot updates with the soft slip applied
@@ -489,7 +495,7 @@ private:
     {
         auto pos = [](float v) { return std::isfinite(v) && v > 0.0f; };
         return std::isfinite(c.onThreshold) && std::isfinite(c.offThreshold) && c.offThreshold <= c.onThreshold &&
-               pos(c.blendInTime) && pos(c.blendOutTime) && pos(c.maxDrift) && pos(c.maxExtension) && c.maxExtension < 1.0f &&
+               pos(c.blendInTime) && pos(c.blendOutTime) && pos(c.maxDrift) && pos(c.maxOffset) && pos(c.maxExtension) && c.maxExtension < 1.0f &&
                pos(c.softExtension) && c.softExtension <= c.maxExtension &&
                pos(c.maxDt) &&
                std::isfinite(c.settleSpeed) && c.settleSpeed >= 0.0f && std::isfinite(c.settleCapsuleSpeed) && c.settleCapsuleSpeed >= 0.0f;
@@ -913,6 +919,20 @@ private:
                         ++m_diag.slips;
                         ++m_diag.footSlips[aSide]; // loco C0
                     }
+#if !(defined(UTPP_FLCAP_MUTATION) && UTPP_FLCAP_MUTATION == 1) // mutation 1: no soft offset bound (only maxDrift releases)
+                    if (!holdSupport && m_slipStart > 0.0f && Len(f.offset) > m_cfg.maxOffset)
+                    {
+                        // the animated toe ran away from the soft lock faster than the slip follows: released like a drift unlock, so
+                        // the blend-out starts from the last solved correction instead of pulling the leg further than maxOffset
+                        f.releaseWeight = wPrev;
+                        f.locked = false;
+                        f.suppressed = true;
+                        f.stepping = f.waiting = false;
+                        f.lift = 0.0f;
+                        ++m_diag.offsetReleases;
+                        ++m_diag.footOffsetReleases[aSide];
+                    }
+#endif
                 }
             }
         }

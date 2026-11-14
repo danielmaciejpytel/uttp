@@ -16,10 +16,11 @@ struct Episode
     int direction = 0;
     int32_t clip = -1;
     bool previousInput = false;
+    bool pending = false; // a press while moving waits for the matcher's pick on the same feed
     float target = 0, elapsed = 0;
     int gait = -1;
 
-    void Clear() { direction = 0; clip = -1; elapsed = 0; }
+    void Clear() { direction = 0; clip = -1; elapsed = 0; pending = false; }
     void Reset() { *this = {}; }
     void Step(float dt, bool eligible, bool input, bool starting, float speed,
               float actorYaw, float targetYaw, int currentGait)
@@ -34,27 +35,50 @@ struct Episode
         if (direction)
         {
             elapsed += dt;
-            if (!input || !starting || currentGait != gait || elapsed > 2.0f ||
+            // A gait change alone keeps the side: the wanted direction is still
+            // the one the start was admitted for, so the faster variant of the
+            // start must turn the same way. Dropping to rest ends the episode.
+            if (!input || !starting || currentGait < 1 || elapsed > 2.0f ||
                 std::fabs(Angle(targetYaw - target)) > 20.0f * kDeg)
                 Clear();
+            else
+                gait = currentGait;
         }
         if (dt == 0) return; // allow cancellation, but do not consume a new edge
         const bool pressed = input && !previousInput;
         previousInput = input;
-        if (!direction && pressed && starting && speed <= .5f && currentGait >= 1)
+        pending = false;
+        if (!direction && pressed && starting && currentGait >= 1)
         {
             const float error = Angle(targetYaw - actorYaw);
             if (std::fabs(error) >= 120.0f * kDeg)
             {
-                direction = error >= 0 ? 1 : -1;
                 target = targetYaw;
                 gait = currentGait;
+                elapsed = 0;
+                // From rest the side is the sign of the error. A new press while
+                // still moving (the stick pressed again during a stop) takes the
+                // side of the reface start the matcher picks on this feed, so
+                // the body turns the way that clip turns.
+                if (speed <= .5f)
+                    direction = error >= 0 ? 1 : -1;
+                else
+                    pending = true;
             }
         }
     }
     void Selected(int32_t selectedClip, int selectedDirection)
     {
-        if (!direction) return;
+        if (!direction)
+        {
+            if (pending && selectedClip >= 0 && (selectedDirection == 1 || selectedDirection == -1))
+            {
+                direction = selectedDirection;
+                clip = selectedClip;
+            }
+            pending = false;
+            return;
+        }
         if (selectedDirection != direction || selectedClip < 0)
             Clear();
         else
