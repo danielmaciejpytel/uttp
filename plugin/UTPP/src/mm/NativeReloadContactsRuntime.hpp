@@ -303,8 +303,15 @@ inline constexpr bool FkOwnerOverlay(int32_t overlay)
 }
 // Admission of the contact solve for one hook call (FkHook ApplyPoseSnapshot). The mapping owner keeps its rule (every reload overlay,
 // authored clips included); the FK owner corrects only the listed overlays and never a purpose-built (authored) reload.
+// Whether the pose owner of the latest hook call corrects pistol reloads (Mapping: every reload overlay; FK: FkOwnerOverlay). Written by
+// Admit on every hook call, read by the driver's ground keep (ReloadContactFade.hpp GroundMoveKeep): the keep and its clavicle bits act
+// only where the contact solve really runs. False until the first hook call.
+inline std::atomic<bool> g_ownerCorrectsPistols{false};
+inline bool OwnerCorrectsPistols(){return g_ownerCorrectsPistols.load(std::memory_order_relaxed);}
 inline bool Admit(const integ::PoseSnapshot& s,HookOwner owner)
 {
+    g_ownerCorrectsPistols.store(owner==HookOwner::Mapping || FkOwnerOverlay(static_cast<int32_t>(ov::PoseOverlay::Pistol1H)),
+                                 std::memory_order_relaxed);
     if(!s.reloadContactsEligible || !ReloadContactsOverlay(s.traceOverlay))return false;
     if(owner==HookOwner::Mapping)return true;
     return !s.reloadAuthoredClip && FkOwnerOverlay(s.traceOverlay);
@@ -1365,9 +1372,12 @@ inline bool Valid(const Prepared& p,const integ::PoseSnapshot& s,uint32_t count)
        p.skeleton.n>int(integ::kMaxMMBones) || s.numBones!=uint32_t(p.skeleton.n) ||
        p.arms.weaponLeft>=p.skeleton.n || !p.arms.Valid(p.skeleton))return false;
     for(int b:{p.arms.left.upper,p.arms.left.lower,p.arms.left.hand,
-               p.arms.right.upper,p.arms.right.lower,p.arms.right.hand,
-               int(p.skeleton.parent[p.arms.left.upper]),int(p.skeleton.parent[p.arms.right.upper])})
+               p.arms.right.upper,p.arms.right.lower,p.arms.right.hand})
         if(b<0 || !integ::SnapshotUpperBone(s,uint32_t(b)))return false;
+    // The clavicles may be left out of the mask (ReloadContactFade.hpp ClearShoulderGirdleBits: a pistol reload kept through a walk
+    // start keeps V's own clavicles): the records then already carry them, restoreMasked leaves them and the reach step starts from them.
+    for(int b:{int(p.skeleton.parent[p.arms.left.upper]),int(p.skeleton.parent[p.arms.right.upper])})
+        if(b<0)return false;
     for(int i=0;i<p.skeleton.n;++i)
     {
         const int g=p.gameIndex[i];

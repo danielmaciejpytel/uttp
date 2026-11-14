@@ -569,6 +569,142 @@ int main(int argc,char** argv)
         Check(scanned>=4 && worst<=0.0015f,"the stock clearance shift does not drive the left arm deeper into the torso");
     }
 
+    // 9) Pistol reload that began standing, then V starts to walk / run (GroundMoveKeep, ReloadContactFade.hpp). Policy at 60 fps with
+    //    the production CorrectionFade / UpperEnvelope: the keep never changes a frame the former rule allows (standing reloads and reloads
+    //    that began moving are bit-identical), keeps a full correction through the walk start and the exit, ends on crouch / air / slide
+    //    without re-acquiring, and never latches during the entry ramp.
+    {
+        struct G{bool stationary,groundStand;};
+        const auto play=[&](auto&& at,int len,bool keepOn,std::vector<float>& w,bool& latched){
+            rt::CorrectionFade fade;rt::UpperEnvelope env;rt::CorrectionEpisode ep;ep.Begin();
+            const float dt=1.0f/60.0f;w.clear();latched=false;
+            for(int k=0;k<len+20;++k)
+            {
+                const G g=at(k);
+                const float e=env.Step(dt,k<len,false,true);
+                const bool before=rt::ReloadCorrectionPose(false,g.stationary,0,false); // non-authored pistol: the pose rule alone
+                const bool keep=keepOn && ep.groundKeep.Step(true,before,g.groundStand,fade.weight);
+                latched=latched || ep.groundKeep.latched;
+                w.push_back(fade.Step(dt,e,before || keep,true,true));
+            }
+        };
+        const float dt=1.0f/60.0f,fall=dt/0.2f+1.0e-5f;
+        const auto same=[](const std::vector<float>& a,const std::vector<float>& b){
+            if(a.size()!=b.size())return false;
+            for(size_t i=0;i<a.size();++i)if(std::memcmp(&a[i],&b[i],sizeof(float))!=0)return false;
+            return true;};
+        std::vector<float> before,kept;bool latchedBefore=false,latched=false;
+        const auto standing=[](int){return G{true,true};};
+        play(standing,100,false,before,latchedBefore);play(standing,100,true,kept,latched);
+        Check(same(before,kept) && !latched,"ground keep: a standing pistol reload is bit-identical (never latched)");
+        const auto walking=[](int){return G{false,true};};
+        play(walking,100,false,before,latchedBefore);play(walking,100,true,kept,latched);
+        Check(same(before,kept) && !latched,"ground keep: a pistol reload that began walking is bit-identical (no correction, never latched)");
+        const auto entryMove=[](int k){return G{k<5,true};};
+        play(entryMove,100,false,before,latchedBefore);play(entryMove,100,true,kept,latched);
+        Check(same(before,kept) && !latched,"ground keep: V moving during the entry ramp (correction not full) keeps the former withdrawal");
+        const auto runStart=[](int k){return G{k<60,true};};
+        play(runStart,100,false,before,latchedBefore);play(runStart,100,true,kept,latched);
+        float minKept=1.0f,maxDrop=0.0f,minBefore=1.0f;
+        for(int k=60;k<100;++k){minKept=std::min(minKept,kept[size_t(k)]);minBefore=std::min(minBefore,before[size_t(k)]);}
+        for(size_t k=1;k<kept.size();++k)maxDrop=std::max(maxDrop,kept[k-1]-kept[k]);
+        std::printf("  walk start inside a standing pistol reload: former min %.3f | kept min %.3f max drop/frame %.4f end %.4f\n",
+                    minBefore,minKept,maxDrop,kept.back());
+        Check(minBefore<=1.0e-6f,"fixture: the former pistol rule withdraws the correction on the walk start");
+        Check(latched && minKept>=0.999f && maxDrop<=fall && kept.back()<=1.0e-6f,
+              "ground keep: the walk start keeps the full correction to the end of the reload, the exit falls with the envelope (.2 s)");
+        const auto crouch=[](int k){return k<60 ? G{true,true} : k<75 ? G{false,true} : k<85 ? G{false,false} : G{false,true};};
+        play(crouch,110,true,kept,latched);
+        float minWalk=1.0f,riseAfter=0.0f,dropCrouch=0.0f;
+        for(int k=60;k<75;++k)minWalk=std::min(minWalk,kept[size_t(k)]);
+        for(int k=76;k<110;++k){riseAfter=std::max(riseAfter,kept[size_t(k)]-kept[size_t(k-1)]);dropCrouch=std::max(dropCrouch,kept[size_t(k-1)]-kept[size_t(k)]);}
+        Check(minWalk>=0.999f && riseAfter<=0.0f && dropCrouch<=fall && kept[109]<=1.0e-6f,
+              "ground keep: a crouch / air / slide frame ends it as a .2 s withdrawal, walking upright again does not re-acquire it");
+        rt::GroundMoveKeep rifleKeep;
+        Check(!rifleKeep.Step(false,false,true,1.0f) && !rifleKeep.latched,"ground keep: never for a rifle / under an owner without the pistol solve");
+        {
+            integ::PoseSnapshot a=snap;a.traceOverlay=int32_t(ov::PoseOverlay::Pistol1H);
+            rt::Admit(a,rt::HookOwner::FK);const bool fk=rt::OwnerCorrectsPistols();
+            rt::Admit(a,rt::HookOwner::Mapping);const bool mapping=rt::OwnerCorrectsPistols();
+            Check(fk==rt::FkOwnerOverlay(int32_t(ov::PoseOverlay::Pistol1H)) && !fk && mapping,
+                  "owner flag: the FK owner (no pistol solve) disables the ground keep, the mapping owner enables it");
+        }
+        rt::CorrectionEpisode ep;ep.Begin();ep.groundKeep.Step(true,false,true,1.0f);const bool wasLatched=ep.groundKeep.latched;ep.Begin();
+        Check(wasLatched && !ep.groundKeep.latched && !ep.groundKeep.closed,"ground keep: a new reload episode starts without the keep");
+
+        // Shoulder girdle bits: only the clavicle channels leave the weapon-action mask.
+        const auto action=integ::BuildWeaponActionMask(sk.n,2,[&](uint32_t b){return file.BoneName(b);});
+        uint32_t bits[sizeof(action.bits)/sizeof(action.bits[0])];std::memcpy(bits,action.bits,sizeof(bits));
+        const int cleared=rt::ClearShoulderGirdleBits(bits,uint32_t(sk.n),2,[&](uint32_t b){return file.BoneName(b);});
+        const int lc=sk.parent[rig.left.upper],rc=sk.parent[rig.right.upper];
+        bool othersSame=true;
+        for(int b=0;b<sk.n;++b)
+        {
+            const bool was=(action.bits[b>>5]>>(b&31))&1u,now=(bits[b>>5]>>(b&31))&1u;
+            const std::string_view nm=file.BoneName(b);
+            const bool girdle=nm.substr(0,12)=="LeftShoulder" || nm.substr(0,13)=="RightShoulder";
+            othersSame=othersSame && (girdle ? !now : now==was);
+        }
+        Check(cleared>=2 && othersSame && !((bits[lc>>5]>>(lc&31))&1u) && !((bits[rc>>5]>>(rc&31))&1u) &&
+              ((bits[rig.left.upper>>5]>>(rig.left.upper&31))&1u),
+              "girdle bits: both clavicles leave the weapon-action mask, the arms and every other channel stay");
+
+        // Whole frame: the game's clavicles collapse 8 cm each towards the midline (the recorded run start). Records are composed the
+        // way the hook does (BlendIntoRecords: masked channels at upperScale = 1 - envelope, the rest at lowerScale 1), then Finish.
+        auto native=std::make_unique<ov::Pose>(*base);
+        {
+            const auto lm=native_reload::Model(sk,*base,lc).t,rm=native_reload::Model(sk,*base,rc).t;
+            const math::Vec3 in=(rm-lm)*(1.0f/gik::Len(rm-lm));
+            for(int side=0;side<2;++side)
+            {
+                const int c=side ? rc : lc;
+                auto m=native_reload::Model(sk,*native,c);
+                m.t=m.t+in*(side ? -0.08f : 0.08f);
+                native->b[c]=native_reload::Relative(native_reload::Model(sk,*native,sk.parent[c]),m);
+            }
+        }
+        const auto width=[&](const ov::Pose& q){
+            return gik::Len(native_reload::Model(sk,q,rig.left.upper).t-native_reload::Model(sk,q,rig.right.upper).t);};
+        const auto frameAt=[&](float envelope,float weight,bool girdleOff,ov::Pose& out){
+            integ::PoseSnapshot s=snap;s.traceOverlay=int32_t(ov::PoseOverlay::Pistol2H);s.sequence=900;s.reloadContactsWeight=weight;
+            s.upperScale=1.0f-envelope;s.lowerScale=1.0f;
+            if(girdleOff)rt::ClearShoulderGirdleBits(s.upperBits,uint32_t(sk.n),2,[&](uint32_t b){return file.BoneName(b);});
+            std::vector<unsigned char> records;Records(*native,records);rt::Cycle cycle;
+            if(!rt::Capture(prepared,s,records.data(),sk.n,true,cycle))return false;
+            integ::BlendIntoRecords(records.data(),uint32_t(sk.n),s,1.0f);
+            native_reload_contacts::Result r;
+            if(weight>0.0f && !rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,weight,rt::kAuthoredContactMinReach,nullptr,0,10000000))return false;
+            return rt::Read(prepared,records.data(),out);
+        };
+        const float wOwn=width(*base),wGame=width(*native);
+        ov::Pose formerMoving,keptFull,keptCleared;
+        const bool okF=frameAt(1.0f,0.0f,false,formerMoving),okK=frameAt(1.0f,1.0f,false,keptFull),okC=frameAt(1.0f,1.0f,true,keptCleared);
+        float clavStep=9.0f,handStep=9.0f;
+        if(okK && okC)
+        {
+            clavStep=std::max(gik::Len(native_reload::Model(sk,keptFull,lc).t-native_reload::Model(sk,keptCleared,lc).t),
+                              gik::Len(native_reload::Model(sk,keptFull,rc).t-native_reload::Model(sk,keptCleared,rc).t));
+            handStep=std::max(gik::Len(native_reload::Model(sk,keptFull,rig.left.hand).t-native_reload::Model(sk,keptCleared,rig.left.hand).t),
+                              gik::Len(native_reload::Model(sk,keptFull,rig.right.hand).t-native_reload::Model(sk,keptCleared,rig.right.hand).t));
+        }
+        float minExit=9.0f,minExitFormer=9.0f;bool exitOk=true;
+        for(int k=0;k<=12;++k)
+        {
+            const float e=1.0f-float(k)/12.0f;ov::Pose a,f2;
+            exitOk=exitOk && frameAt(e,e,true,a) && frameAt(e,e,false,f2);
+            if(exitOk){minExit=std::min(minExit,width(a));minExitFormer=std::min(minExitFormer,width(f2));}
+        }
+        std::printf("  girdle: own width %.1fcm, game %.1fcm | former walk start %.1fcm | kept %.1fcm, kept+girdle %.1fcm (clavicle step %.2fmm, hand step %.2fmm) | exit min %.1fcm (former exit %.1fcm)\n",
+                    wOwn*100.0f,wGame*100.0f,okF?width(formerMoving)*100.0f:-1.0f,okK?width(keptFull)*100.0f:-1.0f,okC?width(keptCleared)*100.0f:-1.0f,
+                    clavStep*1000.0f,handStep*1000.0f,minExit*100.0f,minExitFormer*100.0f);
+        Check(wGame<wOwn-0.12f,"fixture: the game's clavicles are more than 12 cm narrower than V's own");
+        Check(okF && width(formerMoving)<wOwn-0.10f,"fixture: the former walk start (correction withdrawn, mask on the clavicles) shows the narrow game girdle");
+        Check(okK && okC && std::fabs(width(keptCleared)-wOwn)<0.002f && std::fabs(width(keptFull)-wOwn)<0.002f,
+              "girdle: the kept correction holds V's own shoulder width, with and without the clavicle bits");
+        Check(clavStep<0.001f && handStep<0.001f,"girdle: clearing the clavicle bits under a full correction moves no clavicle or hand (no pop at the latch)");
+        Check(exitOk && minExit>=wOwn-0.002f,"girdle: through the .2 s exit the shoulder width stays V's own at every frame");
+    }
+
     std::printf("%d passed, %d failed\n",g_pass,g_fail);
     return g_fail?1:0;
 }

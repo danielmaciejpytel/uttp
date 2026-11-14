@@ -3,6 +3,8 @@
 // from FK. Native reload envelope remains independent of this correction fade.
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <string_view>
 namespace utpp::mm::reload_contacts_runtime
 {
 // Verified authored clips only: shape the output, never the raw controller clock.
@@ -304,6 +306,65 @@ struct CorrectionFade
 #define UTPP_RELOAD_CORRECTION_MOVING 0
 #endif
 inline constexpr bool kReloadCorrectionMoving=UTPP_RELOAD_CORRECTION_MOVING!=0;
+// Pistol reload whose contact correction is fully in when V starts to walk / run on the ground. The pistol rule (stationary only)
+// withdraws the correction over .2 s while the reload handback still owns the arms AND the clavicles (BuildWeaponActionMask), so the
+// output shows the game's own clavicles, whose translation lanes move with its run start: recorded 2026-11-14, revolver, the shoulder
+// joints 38.6 -> 20.6 cm apart (Male) / 33.5 -> 20.6 cm (Female), clavicles crossed, for the last ~.35 s of the reload and its exit.
+// The keep latches on the first frame on which the former rule would withdraw a FULL correction (weight >= kGroundKeepLatchWeight) while
+// V stands upright on the ground (PSM stance Stand, MovementMode OnGround, no slide frame); from then on the correction stays allowed
+// (it follows the native envelope, through the exit) and the driver keeps the clavicles on V's own pose (ClearShoulderGirdleBits).
+// Crouch, air or a slide ends it for the rest of the episode (the former .2 s withdrawal, never re-acquired). A reload that never had a
+// full correction (began moving, or V moves during the entry ramp) keeps the former rule; a frame on which the former rule allows the
+// correction is unchanged, so standing reloads are bit-identical. Mutation 1 (UTPP_RELOAD_GROUND_KEEP_MUTATION) turns the keep off.
+#if defined(UTPP_RELOAD_GROUND_KEEP_MUTATION) && UTPP_RELOAD_GROUND_KEEP_MUTATION==1
+inline constexpr bool kReloadGroundKeep=false; // mutation 1: the pistol rule withdraws the correction on the run start (former policy)
+#else
+inline constexpr bool kReloadGroundKeep=true;
+#endif
+inline constexpr float kGroundKeepLatchWeight=0.999f;
+struct GroundMoveKeep
+{
+    bool latched=false; // the correction is kept through ground movement for the rest of this episode
+    bool closed=false;  // crouch / air / slide after the latch: no keep (and no new latch) until the episode resets
+    void Reset(){latched=false;closed=false;}
+    // pistol: pistol overlay inside the reload domain (rifles have their own pose rule); allowedBefore: the former admission of this frame
+    // ((kReloadCorrectionMoving || ReloadCorrectionPose) && (!authored || stationary episode)); groundStand: stance Stand, MovementMode
+    // OnGround, no slide frame; fadeWeight: CorrectionFade weight before this frame's Step. Returns the keep of this frame (OR it into
+    // the admission). Non-finite fadeWeight never latches.
+    bool Step(bool pistol,bool allowedBefore,bool groundStand,float fadeWeight)
+    {
+        if constexpr(!kReloadGroundKeep){Reset();return false;}
+        if(!pistol){Reset();return false;}
+        if(closed)return false;
+        if(!groundStand)
+        {
+            closed=latched;
+            latched=false;
+            return false;
+        }
+        if(!latched && !allowedBefore && std::isfinite(fadeWeight) && fadeWeight>=kGroundKeepLatchWeight)latched=true;
+        return latched;
+    }
+};
+// Removes the clavicle channels (the "LeftShoulder" / "RightShoulder" prefixes of IsWeaponActionBone) from a weapon-action mask: they
+// then take the lower-body weight of the composition (the source of Spine3), i.e. V's own clavicles under the game's arms. Returns the
+// number of bits cleared.
+template<class NameAt>
+inline int ClearShoulderGirdleBits(uint32_t* bits,uint32_t numBones,uint32_t firstBone,NameAt&& nameAt)
+{
+    if(!bits)return 0;
+    int cleared=0;
+    for(uint32_t b=firstBone;b<numBones;++b)
+    {
+        const std::string_view n=nameAt(b);
+        if(n.substr(0,12)=="LeftShoulder" || n.substr(0,13)=="RightShoulder")
+        {
+            const uint32_t bit=1u<<(b&31u);
+            if(bits[b>>5]&bit){bits[b>>5]&=~bit;++cleared;}
+        }
+    }
+    return cleared;
+}
 struct CorrectionEpisode
 {
     static constexpr float kStationarySpeedMps=0.05f;
@@ -313,11 +374,12 @@ struct CorrectionEpisode
     bool observedActive=false;
     bool allowed=false;
     bool authoredSeen=false;
+    GroundMoveKeep groundKeep; // stepped by the caller after Observe; reset with the episode (Observe's result does not read it)
 
-    void Reset(){entryPending=false;observedActive=false;allowed=false;authoredSeen=false;}
+    void Reset(){entryPending=false;observedActive=false;allowed=false;authoredSeen=false;groundKeep.Reset();}
     // Call only on the actual non-reload -> reload action edge. Does not touch
     // any CorrectionFade weight owned by the caller.
-    void Begin(){entryPending=true;observedActive=false;allowed=false;authoredSeen=false;}
+    void Begin(){entryPending=true;observedActive=false;allowed=false;authoredSeen=false;groundKeep.Reset();}
 
     // reloadActive is PSM action==2; false is the action-0 envelope tail.
     // domainPermitted includes TPP/weapon/release/body safety. Any loss of

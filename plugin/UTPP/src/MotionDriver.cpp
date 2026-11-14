@@ -2704,7 +2704,14 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
     const bool correctionPose = reload_contacts_runtime::ReloadCorrectionPose(rifleOverlay,
         stationaryReload, cs.movementMode, b.map.slideActive || adapter::PsmSlide(f.psmDetailed)) &&
         !(rifleOverlay && b.map.slideActive && !DeRollBonesLocked(b).Valid(b.eval.Skel()));
-    const bool allowStationaryCorrection = (reload_contacts_runtime::kReloadCorrectionMoving || correctionPose) && (!authoredEpisode || stationaryEpisode);
+    const bool allowedBefore = (reload_contacts_runtime::kReloadCorrectionMoving || correctionPose) && (!authoredEpisode || stationaryEpisode);
+    // A pistol reload whose correction is fully in keeps it when V starts to walk / run upright on the ground (ReloadContactFade.hpp
+    // GroundMoveKeep); ApplyLocked then keeps the clavicles on V's own pose. False on every frame the former rule already allows, and
+    // under a pose owner that does not correct pistol reloads (the contact solve would not hold the hands on the weapon there).
+    const bool groundKeep = g_reloadContactEpisode.groundKeep.Step(
+        reloadDomain && !rifleOverlay && reload_contacts_runtime::OwnerCorrectsPistols(), allowedBefore,
+        cs.stanceRaw == 0 && cs.movementMode == 0 && !(b.map.slideActive || adapter::PsmSlide(f.psmDetailed)), g_reloadContactFade.weight);
+    const bool allowStationaryCorrection = allowedBefore || groundKeep;
     g_reloadContactFade.Step(dt, g_reloadUpperWeight, allowStationaryCorrection, reloadDomain, true);
     // Perspective permission is independently checked before Capture and immediately before Finish.
     g_reloadContactsEligible = reloadDomain && g_reloadContactFade.Active();
@@ -5857,7 +5864,14 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
             const integ::UpperMask action = integ::BuildWeaponActionMask(
                 n, kFirstBone, [&](uint32_t i) { return b.db.BoneName(i); });
             if (action.ok)
+            {
                 std::memcpy(aSnap.upperBits, action.bits, sizeof aSnap.upperBits);
+                // Pistol reload kept through a walk / run start (GroundMoveKeep): the clavicles stay on V's own pose under the game's
+                // arms, so the game's moving clavicle lanes never narrow the shoulders (the correction was full when it latched).
+                if (g_reloadContactEpisode.groundKeep.latched)
+                    reload_contacts_runtime::ClearShoulderGirdleBits(aSnap.upperBits, n, kFirstBone,
+                                                                     [&](uint32_t i) { return b.db.BoneName(i); });
+            }
         }
     }
     else if (!sameBones || weaponOverlay)
