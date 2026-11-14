@@ -64,6 +64,37 @@ namespace
 using namespace utpp::motionhost;
 constexpr float kDegT = 0.017453292f;
 int g_pass = 0, g_fail = 0;
+// The test clock: one simulated QueryPerformanceCounter value read by the test and by the host (TestSetQpcTicks). It starts at the
+// real counter and advances only by the waits a scenario asks for (Tick intervals, 60 Hz animation frames), never by the time a
+// step takes to compute, so the results do not depend on the machine load. Back-to-back feeds without a wait share one time stamp.
+int64_t g_clockTicks = 0;
+int64_t ClockHz()
+{
+    static const int64_t f = []
+    {
+        LARGE_INTEGER x{};
+        QueryPerformanceFrequency(&x);
+        return int64_t(x.QuadPart);
+    }();
+    return f;
+}
+void ClockStart()
+{
+    LARGE_INTEGER t{};
+    QueryPerformanceCounter(&t);
+    g_clockTicks = int64_t(t.QuadPart);
+    TestSetQpcTicks(g_clockTicks);
+}
+int64_t ClockNow() { return g_clockTicks; }
+void ClockSetAtLeast(int64_t aTicks) // never backwards
+{
+    if (aTicks > g_clockTicks)
+    {
+        g_clockTicks = aTicks;
+        TestSetQpcTicks(g_clockTicks);
+    }
+}
+void ClockAdvance(double aSeconds) { ClockSetAtLeast(g_clockTicks + int64_t(aSeconds * double(ClockHz()) + 0.5)); }
 void Check(const std::string& aName, bool aOk, const std::string& aDetail = {})
 {
     (aOk ? g_pass : g_fail)++;
@@ -2019,19 +2050,16 @@ DisabledResult DisabledRun()
         Feed(in);
     SetEnabled(false);
     DisabledResult r;
-    LARGE_INTEGER fq;
-    QueryPerformanceFrequency(&fq);
     static PoseSnapshot snap{};
     for (int i = 0; i < 60; ++i)
     {
-        Sleep(10);
+        ClockAdvance(0.010);
         Tick();
-        LARGE_INTEGER now;
-        QueryPerformanceCounter(&now);
+        const int64_t now = ClockNow();
         if (utpp::g_mmPose.Read(snap))
         {
             r.wMin = std::min(r.wMin, utpp::g_hot.mmActive.load() ? snap.weight : 0.0f);
-            r.ageMax = std::max(r.ageMax, float(double(now.QuadPart - snap.publishTicks) / double(fq.QuadPart)));
+            r.ageMax = std::max(r.ageMax, float(double(now - snap.publishTicks) / double(ClockHz())));
         }
     }
     r.active = Status().find(" holdPoseActive=1") != std::string::npos;
@@ -2470,15 +2498,12 @@ VxRes Run(const std::vector<VxStep>& aPost, bool aVehicle = true)
         if (s.stale)
         {
             r.staleW0 = r.staleW0 < 0.0f ? PublishedWeight() : r.staleW0;
-            LARGE_INTEGER f0, fq, fn;
-            QueryPerformanceFrequency(&fq);
-            QueryPerformanceCounter(&f0);
+            const int64_t f0 = ClockNow();
             do
             {
-                Sleep(5);
+                ClockAdvance(0.005);
                 Tick();
-                QueryPerformanceCounter(&fn);
-            } while (float(double(fn.QuadPart - f0.QuadPart) / double(fq.QuadPart)) < s.seconds);
+            } while (float(double(ClockNow() - f0) / double(ClockHz())) < s.seconds);
             if (r.staleW1 < 0.0f)
             {
                 r.staleW1 = PublishedWeight();
@@ -2681,21 +2706,18 @@ bool CountMotionStep(const FeedInput& aRaw, uint32_t, float)
     return false;
 }
 const MotionHooks kCountMotionHooks{&CountMotionStep};
-// Sleeps aSeconds of wall time calling Tick() every 5 ms (the engine's per-frame tick while the script feed is silent).
+// Runs aSeconds of the test clock calling Tick() every 5 ms (the engine's per-frame tick while the script feed is silent).
 void TickFor(float aSeconds)
 {
-    LARGE_INTEGER f0, fq, fn;
-    QueryPerformanceFrequency(&fq);
-    QueryPerformanceCounter(&f0);
+    const int64_t f0 = ClockNow();
     do
     {
-        Sleep(5);
+        ClockAdvance(0.005);
         Tick();
-        QueryPerformanceCounter(&fn);
-    } while (float(double(fn.QuadPart - f0.QuadPart) / double(fq.QuadPart)) < aSeconds);
+    } while (float(double(ClockNow() - f0) / double(ClockHz())) < aSeconds);
 }
-// r4 landing: the injected game sim clock (MMDriver SetSimClock). Follow = sim time runs with the wall time, Frozen = pause / menu (sim time stands still while the wall
-// time runs), Unavailable = the clock call fails (Tick falls back to the short wall-clock bound).
+// The injected game sim clock (MMDriver SetSimClock). Follow = sim time runs with the wall time (the test clock), Frozen = pause / menu (sim time stands
+// still while the wall time runs), Unavailable = the clock call fails (Tick falls back to the short wall-clock bound).
 enum class SimMode
 {
     Follow,
@@ -2704,12 +2726,9 @@ enum class SimMode
 };
 SimMode g_simMode = SimMode::Follow;
 double g_simPausedTotal = 0.0, g_simFrozenAt = 0.0;
-double WallSeconds()
+double WallSeconds() // the test clock (the host's wall time) in seconds
 {
-    LARGE_INTEGER fq, fn;
-    QueryPerformanceFrequency(&fq);
-    QueryPerformanceCounter(&fn);
-    return double(fn.QuadPart) / double(fq.QuadPart);
+    return double(ClockNow()) / double(ClockHz());
 }
 bool TestSimClock(double& aSeconds)
 {
@@ -2867,32 +2886,13 @@ JumpOutRes RunRecordedJumpOut(const std::function<void(int)>& aHook = {}, const 
         r.diagStarts += d.find("UTPP EXITDIAG +0.00s ") != std::string::npos ? 1 : 0;
     return r;
 }
-// ---- P2 helpers: simulated animation thread (game local-pose records, kGameBoneStride, FkSide) at real 60 Hz
+// ---- vehicle transition helpers: simulated animation thread (game local-pose records, kGameBoneStride, FkSide) at 60 Hz of the test clock
 namespace vti = utpp::mm::integ;
 namespace vtr = utpp::mm::vehtrans;
-int64_t QpcNow()
-{
-    LARGE_INTEGER t;
-    QueryPerformanceCounter(&t);
-    return t.QuadPart;
-}
-float QpcSeconds(int64_t aTicks)
-{
-    LARGE_INTEGER f;
-    QueryPerformanceFrequency(&f);
-    return float(double(aTicks) / double(f.QuadPart));
-}
-void SpinUntil(int64_t aTicks)
-{
-    while (QpcNow() < aTicks)
-        ;
-}
-int64_t FrameTicks()
-{
-    LARGE_INTEGER f;
-    QueryPerformanceFrequency(&f);
-    return f.QuadPart / 60;
-}
+int64_t QpcNow() { return ClockNow(); }
+float QpcSeconds(int64_t aTicks) { return float(double(aTicks) / double(ClockHz())); }
+void SpinUntil(int64_t aTicks) { ClockSetAtLeast(aTicks); } // the next frame starts at aTicks (or now, when the clock is already past it)
+int64_t FrameTicks() { return ClockHz() / 60; }
 struct Recs
 {
     std::vector<uint8_t> buf;
@@ -4255,15 +4255,7 @@ void SectionVehExit(int argc, char** argv, const std::vector<uint64_t>& aHashes,
             const JumpOutRes jd = RunRecordedJumpOut([dropS, kDropRow](int aRow) {
                 if (aRow != kDropRow)
                     return;
-                LARGE_INTEGER f0, fq, fn;
-                QueryPerformanceFrequency(&fq);
-                QueryPerformanceCounter(&f0);
-                do
-                {
-                    Sleep(5);
-                    Tick();
-                    QueryPerformanceCounter(&fn);
-                } while (float(double(fn.QuadPart - f0.QuadPart) / double(fq.QuadPart)) < dropS);
+                TickFor(dropS);
             });
             bool kept = jd.land > kDropRow && jd.flagRow.size() > size_t(jd.land);
             for (int k = kDropRow; kept && k <= jd.land; ++k)
@@ -8968,15 +8960,12 @@ TickRes TickDisabled(float aSeconds)
     r.wStart = r.wMax = Field(st0, "weight");
     const float t0 = Field(st0, "holdPoseTicks");
     SetEnabled(false);
-    LARGE_INTEGER fq, a, now;
-    QueryPerformanceFrequency(&fq);
-    QueryPerformanceCounter(&a);
+    const int64_t a = ClockNow();
     for (;;)
     {
-        Sleep(10);
+        ClockAdvance(0.010);
         Tick();
-        QueryPerformanceCounter(&now);
-        const float el = float(double(now.QuadPart - a.QuadPart) / double(fq.QuadPart));
+        const float el = float(double(ClockNow() - a) / double(ClockHz()));
         const float w = Field(Status(), "weight");
         r.wMax = std::max(r.wMax, w);
         if (r.zeroAfter < 0.0f && w <= 0.0f)
@@ -10360,6 +10349,7 @@ int main(int argc, char** argv)
         std::printf("usage: utpp_mm_loco_test <database.utppmm> [extra.utppmm ...] [--units=main,057,...]\n");
         return 2;
     }
+    ClockStart(); // every unit runs on the test clock
     // ---- unit: stick filter
     if (UnitOn("main")) // the two unit checks run once (shard "main")
     {

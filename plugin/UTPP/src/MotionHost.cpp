@@ -833,7 +833,16 @@ void ResetOffsetLocked()
         g_offsetRoot.Reset();
 }
 
+#ifndef UTPP_PLUGIN_DLL // test hook: compiled out of UTPP.dll (CMakeLists.txt)
+std::atomic<int64_t> g_testQpcTicks{-1}; // TestSetQpcTicks: simulated QPC ticks (< 0 = the real counter)
+int64_t Qpc()
+{
+    const int64_t t = g_testQpcTicks.load(std::memory_order_acquire);
+    return t >= 0 ? t : util::QpcTicks();
+}
+#else
 int64_t Qpc() { return util::QpcTicks(); }
+#endif
 double QpcFreq() { return static_cast<double>(util::QpcFrequency()); }
 
 // Game SIM time in seconds (GameInstance.GetSimTime): does not advance in pause / menu / photo mode. In redscript GetSimTime is a static native of the
@@ -6036,6 +6045,13 @@ void SetSimClock(SimClockFn aClock)
 {
     g_simClockHook.store(aClock, std::memory_order_release);
 }
+
+#ifndef UTPP_PLUGIN_DLL // test hook: compiled out of UTPP.dll (CMakeLists.txt)
+void TestSetQpcTicks(int64_t aTicks)
+{
+    g_testQpcTicks.store(aTicks, std::memory_order_release);
+}
+#endif
 
 void PublishGetUpGap()
 {

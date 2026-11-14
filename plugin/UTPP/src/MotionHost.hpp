@@ -504,6 +504,11 @@ void SetLogger(void (*aLog)(const char*));
 // The test hook injects a clock; it is called from Tick() outside the driver mutex.
 using SimClockFn = bool (*)(double& aSeconds);
 void SetSimClock(SimClockFn aClock);
+#ifndef UTPP_PLUGIN_DLL // test hook: compiled out of UTPP.dll (CMakeLists.txt)
+// Tests: every time the host reads (feed and publish stamps, Tick silences, command dt) becomes aTicks in QueryPerformanceCounter units
+// (the real frequency); aTicks < 0 = the real counter again. The test sets it before each step, so results do not depend on the machine load.
+void TestSetQpcTicks(int64_t aTicks);
+#endif
 bool WantsFeed();
 // Number of vehicle jump-out launches seen so far (the edge that logs 'JUMPOUT vehicle bit released'). Monotonic, never reset: a caller
 // that compares it with a stored value sees every launch, however short the flight state is.
