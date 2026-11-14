@@ -663,9 +663,63 @@ SelectionDiag g_selDiag{}; // SelectionDiagnostics: the chooser inputs and the m
 // the previous valid pick (motion CurrentDatabaseTags "Pivots").
 float g_rootYawDeg = 0.0f;
 int32_t g_prevDb = -1;
-std::array<float, adapter::Budget::kWindow> g_times{};
+std::array<float, adapter::Budget::kWindow> g_times{};     // per feed: the smaller of the wall time and the thread's own time (trip decision)
+std::array<float, adapter::Budget::kWindow> g_wallTimes{}; // per feed: wall time (status / log only)
 std::array<float, adapter::Budget::kWindow> g_sorted{};
 uint64_t g_timeCount = 0;
+// Budget pause (FinishFrameLocked trips it, BudgetPauseStepLocked ends it on feed time): g_budgetTripped is the pause flag.
+#ifndef UTPP_MOTION_DRIVER_BUDGET_MUTATION
+#define UTPP_MOTION_DRIVER_BUDGET_MUTATION 0 // test builds only: 1 = a pause never ends, 2 = wall time only
+#endif
+float g_budgetPauseLeft = 0.0f;                             // feed time left in the current pause
+float g_budgetPauseS = 0.0f;                                // length of the current / last pause
+float g_budgetNextPauseS = adapter::Budget::kPauseFirstS;   // length of the next pause
+uint64_t g_budgetTrips = 0;
+float g_budgetTripP95 = 0.0f, g_budgetTripWallP95 = 0.0f;   // statistics of the window that tripped last
+ULONG64 g_feedCycles0 = 0;                                  // thread cycles at the start of this feed
+bool g_feedCyclesOk = false;
+char g_budgetBuf[320] = {};
+#ifdef UTPP_MOTION_DRIVER_TEST_FAULTS
+float g_testWallUs = -1.0f, g_testThreadUs = -1.0f;         // TestSetFeedTimesUs (< 0 = measured)
+#endif
+// Processor cycles of a thread per microsecond (QueryThreadCycleTime against QueryPerformanceCounter), measured once on the loader
+// thread: the largest ratio of three ~1 ms busy spans (preemption during a span only lowers it, towards wall time). -1 = not
+// measured yet, 0 = unavailable or implausible: the trip decision then uses wall time alone.
+std::atomic<float> g_cyclesPerUs{-1.0f};
+void MeasureThreadCyclesOnce()
+{
+    if (g_cyclesPerUs.load(std::memory_order_acquire) >= 0.0f)
+        return;
+    LARGE_INTEGER hz{};
+    double best = 0.0;
+    if (QueryPerformanceFrequency(&hz) && hz.QuadPart > 0)
+    {
+        for (int k = 0; k < 3; ++k)
+        {
+            LARGE_INTEGER q0{}, q1{};
+            ULONG64 c0 = 0, c1 = 0;
+            QueryPerformanceCounter(&q0);
+            if (!QueryThreadCycleTime(GetCurrentThread(), &c0))
+            {
+                best = 0.0;
+                break;
+            }
+            do
+                QueryPerformanceCounter(&q1);
+            while (q1.QuadPart - q0.QuadPart < hz.QuadPart / 1000);
+            if (!QueryThreadCycleTime(GetCurrentThread(), &c1))
+            {
+                best = 0.0;
+                break;
+            }
+            QueryPerformanceCounter(&q1); // the cycle span lies inside the counter span: the ratio errs low
+            const double us = static_cast<double>(q1.QuadPart - q0.QuadPart) * 1.0e6 / static_cast<double>(hz.QuadPart);
+            if (us > 0.0 && c1 >= c0)
+                best = std::max(best, static_cast<double>(c1 - c0) / us);
+        }
+    }
+    g_cyclesPerUs.store(best >= 100.0 && best <= 20000.0 ? static_cast<float>(best) : 0.0f, std::memory_order_release);
+}
 integ::PoseSnapshot g_lastSnap{};
 bool g_haveLastSnap = false;
 // v2 -> v1 handover: after a yield the last published v2 pose stays published (held, as under g_holdSwap) and is then
@@ -1437,6 +1491,7 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
         }
     }
 #endif
+    MeasureThreadCyclesOnce(); // feed budget: thread time factor, off the game thread, before the first feed of this bundle
     const auto t0 = std::chrono::steady_clock::now(); // UTPP-MOTION SEAM motionfix (item 4): load time (load done line)
     std::unique_ptr<Bundle> b;
     const char* fault = nullptr;
@@ -1476,6 +1531,7 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
                 g_bundle->eval.SetFeminineShoulders(g_femShoulderM);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
+            g_budgetPauseLeft = 0.0f;
             g_timeCount = 0;
             g_wasRunning = false; // commit A: a handover started by the body switch keeps running (held snapshot = game rig)
             g_pending = false;
@@ -1536,17 +1592,19 @@ Fallback ResolveLocked()
     return adapter::Resolve(r);
 }
 
-float P95Locked()
+float P95Of(const std::array<float, adapter::Budget::kWindow>& aRing)
 {
-    const size_t n = std::min<size_t>(g_timeCount, g_times.size());
+    const size_t n = std::min<size_t>(g_timeCount, aRing.size());
     if (n == 0)
         return 0.0f;
-    std::copy(g_times.begin(), g_times.begin() + static_cast<std::ptrdiff_t>(n), g_sorted.begin());
+    std::copy(aRing.begin(), aRing.begin() + static_cast<std::ptrdiff_t>(n), g_sorted.begin());
     const size_t k = static_cast<size_t>(std::ceil(0.95 * static_cast<double>(n))) - 1;
     std::nth_element(g_sorted.begin(), g_sorted.begin() + static_cast<std::ptrdiff_t>(k),
                      g_sorted.begin() + static_cast<std::ptrdiff_t>(n));
     return g_sorted[k];
 }
+float P95Locked() { return P95Of(g_times); }         // the trip statistic (status feedP95us)
+float WallP95Locked() { return P95Of(g_wallTimes); } // status / log only, never per feed
 
 ov::PoseOverlay OverlayLocked()
 {
@@ -1644,6 +1702,7 @@ void SetEnabled(bool aOn)
         g_pending = false;
         g_wasRunning = false;
         g_budgetTripped = false; // g_faulted stays: fault = v1 until the end of the session
+        g_budgetPauseLeft = 0.0f; // the pause length / trip count stay (session values)
         g_timeCount = 0;
         TravResetLocked(true); // UTPP-MOTION SEAM trav
         ProbeEndLocked(aOn ? "enable-change" : "motion-off");
@@ -2308,6 +2367,13 @@ size_t TestRetiredPoses()
 {
     std::lock_guard lock(g_m);
     return g_testRetired.size();
+}
+
+void TestSetFeedTimesUs(float aWallUs, float aThreadUs)
+{
+    std::lock_guard lock(g_m);
+    g_testWallUs = aWallUs;
+    g_testThreadUs = aThreadUs;
 }
 
 MagTapProbe TestMagTapProbe()
@@ -3279,6 +3345,78 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
     }
 }
 
+// Feed budget. Each feed that produced a motion pose records its wall time and the smaller of the wall time and the thread's own
+// processor time (time the game thread spends preempted by other programs is not a cost of the feed). When the p95 of the
+// last kWindow decision times exceeds kTripFactor x kFeedP95Us the motion pose pauses (Resolve -> Budget, the held pose hands
+// over to the base path) for g_budgetPauseS of feed time; then the statistics restart empty and the next Step re-enters with the
+// hand-in from the published pose. One log line per trip and per resume.
+void BudgetLogLocked(const char* aLine)
+{
+    if (g_log != nullptr)
+        g_log(aLine);
+}
+
+void BudgetTripLocked(float aP95)
+{
+    g_budgetTripped = true; // takes effect from the next Step (Resolve -> Budget), this pose is still published
+    ++g_budgetTrips;
+    g_budgetPauseS = g_budgetNextPauseS;
+    g_budgetPauseLeft = g_budgetPauseS;
+    g_budgetNextPauseS = std::fmin(2.0f * g_budgetPauseS, adapter::Budget::kPauseMaxS);
+    g_budgetTripP95 = aP95;
+    g_budgetTripWallP95 = WallP95Locked();
+    RefreshTravActiveLocked();
+    TravRecheckDeferredLocked();
+    std::snprintf(g_budgetBuf, sizeof(g_budgetBuf),
+                  // no "feedP95us=" token here: log readers take the newest line carrying it as the status line
+                  "UTPP mm.motionDriver budget trip #%llu p95us=%.1f wallP95us=%.1f limit=%.0f pause=%.1fs next=%.0fs threadTime=%d",
+                  static_cast<unsigned long long>(g_budgetTrips), static_cast<double>(aP95), static_cast<double>(g_budgetTripWallP95),
+                  static_cast<double>(adapter::Budget::kTripFactor * adapter::Budget::kFeedP95Us), static_cast<double>(g_budgetPauseS),
+                  static_cast<double>(g_budgetNextPauseS), g_cyclesPerUs.load(std::memory_order_relaxed) > 0.0f ? 1 : 0);
+    BudgetLogLocked(g_budgetBuf);
+}
+
+// Game thread, every enabled Step before the path is resolved: a pause counts down on feed time (dt clamped like the other feed
+// clocks) and ends here, so this Step already runs the motion path again.
+void BudgetPauseStepLocked(float aDt)
+{
+    if (!g_budgetTripped)
+        return;
+    if (std::isfinite(aDt) && aDt > 0.0f)
+        g_budgetPauseLeft = std::fmax(0.0f, g_budgetPauseLeft - std::fmin(aDt, 0.25f));
+#if UTPP_MOTION_DRIVER_BUDGET_MUTATION == 1
+    return; // mutation 1: the pause never ends
+#else
+    if (g_budgetPauseLeft > 0.0f)
+        return;
+    g_budgetTripped = false;
+    g_timeCount = 0; // the statistics window restarts empty
+    RefreshTravActiveLocked();
+    TravRecheckDeferredLocked();
+    std::snprintf(g_budgetBuf, sizeof(g_budgetBuf),
+                  "UTPP mm.motionDriver budget resume #%llu after=%.1fs tripP95us=%.1f tripWallP95us=%.1f next=%.0fs",
+                  static_cast<unsigned long long>(g_budgetTrips), static_cast<double>(g_budgetPauseS),
+                  static_cast<double>(g_budgetTripP95), static_cast<double>(g_budgetTripWallP95),
+                  static_cast<double>(g_budgetNextPauseS));
+    BudgetLogLocked(g_budgetBuf);
+#endif
+}
+
+void BudgetRecordLocked(float aWallUs, float aUs)
+{
+    const size_t i = static_cast<size_t>(g_timeCount % g_times.size());
+    g_times[i] = aUs;
+    g_wallTimes[i] = aWallUs;
+    ++g_timeCount;
+    if (g_timeCount < adapter::Budget::kWindow)
+        return;
+    const float p95 = P95Locked();
+    if (p95 > adapter::Budget::kTripFactor * adapter::Budget::kFeedP95Us)
+        BudgetTripLocked(p95);
+    else if (g_timeCount == adapter::Budget::kWindow)
+        g_budgetNextPauseS = adapter::Budget::kPauseFirstS; // a full window without a trip
+}
+
 bool FinishFrameLocked(std::chrono::steady_clock::time_point t0)
 {
     ++g_frames;
@@ -3286,12 +3424,23 @@ bool FinishFrameLocked(std::chrono::steady_clock::time_point t0)
     g_wasRunning = true;
     g_hoLeft = 0.0f;
     g_lastSkip = "none";
-    const float us = std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - t0).count();
-    g_times[g_timeCount % g_times.size()] = us;
-    ++g_timeCount;
-    if (g_timeCount >= adapter::Budget::kWindow &&
-        P95Locked() > adapter::Budget::kTripFactor * adapter::Budget::kFeedP95Us)
-        g_budgetTripped = true; // takes effect from the next Step (Resolve -> Budget), this pose is still published
+    float wallUs = std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - t0).count();
+    float us = wallUs;
+    const float cyclesPerUs = g_cyclesPerUs.load(std::memory_order_relaxed);
+    ULONG64 c1 = 0;
+    if (g_feedCyclesOk && cyclesPerUs > 0.0f && QueryThreadCycleTime(GetCurrentThread(), &c1) && c1 >= g_feedCycles0)
+        us = std::fmin(wallUs, static_cast<float>(static_cast<double>(c1 - g_feedCycles0) / static_cast<double>(cyclesPerUs)));
+#ifdef UTPP_MOTION_DRIVER_TEST_FAULTS
+    if (g_testWallUs >= 0.0f)
+    {
+        wallUs = g_testWallUs;
+        us = g_testThreadUs >= 0.0f ? std::fmin(wallUs, g_testThreadUs) : wallUs;
+    }
+#endif
+#if UTPP_MOTION_DRIVER_BUDGET_MUTATION == 2
+    us = wallUs; // mutation 2: wall time only
+#endif
+    BudgetRecordLocked(wallUs, us);
     return true;
 }
 
@@ -4164,7 +4313,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     }
 #endif
     MaybeLoadLocked();
+    BudgetPauseStepLocked(aDt); // feed budget: a pause ends on feed time, before this Step resolves its path
     const auto t0 = std::chrono::steady_clock::now(); // feed cost only (after a possible worker join / thread start)
+    g_feedCyclesOk = QueryThreadCycleTime(GetCurrentThread(), &g_feedCycles0) != 0; // feed budget: the thread's own time
     g_reason = ResolveLocked();
     RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked();
     LogReasonLocked(g_reason, nullptr); // UTPP-MOTION SEAM motionfix (item 4): every change (incl. -> none), was once per reason
@@ -6134,6 +6285,19 @@ float AimPoseWeightLocked()
     return w;
 }
 
+// Feed budget fields at the end of the status line: wall-time p95 of the window, trips this session, feed time left in the pause,
+// length of the current / next pause, thread time in use (1) or wall time alone (0).
+std::string BudgetStatusSuffixLocked()
+{
+    char buf[200];
+    std::snprintf(buf, sizeof buf, " wallP95us=%.1f budgetTrips=%llu budgetPauseS=%.2f budgetCoolS=%.0f threadTime=%d",
+                  static_cast<double>(WallP95Locked()), static_cast<unsigned long long>(g_budgetTrips),
+                  static_cast<double>(g_budgetTripped ? g_budgetPauseLeft : 0.0f),
+                  static_cast<double>(g_budgetTripped ? g_budgetPauseS : g_budgetNextPauseS),
+                  g_cyclesPerUs.load(std::memory_order_relaxed) > 0.0f ? 1 : 0);
+    return buf;
+}
+
 std::string StatusLocked()
 {
     std::lock_guard lock(g_m);
@@ -6271,7 +6435,7 @@ std::string StatusLocked()
            std::to_string(g_bundle && g_bundle->leanOk ? g_bundle->lean.Tel().disable : 0.0f) +
            " leanHead=" + std::to_string(g_leanHeadSetting ? 1 : 0) + " leanScale=" + std::to_string(g_leanParams.scale) +
            " leanClips=" + std::to_string(g_bundle ? g_bundle->leanMapped : 0) + "/" + std::to_string(g_bundle ? g_bundle->leanMismatch : 0) +
-           DualStatusSuffix();
+           DualStatusSuffix() + BudgetStatusSuffixLocked();
 }
 } // namespace
 

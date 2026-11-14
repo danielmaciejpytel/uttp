@@ -2057,6 +2057,11 @@ struct Budget
     static constexpr float kLayersP95Us = 20.0f;    // overlay + additive (report 6.6 #9)
     static constexpr float kTripFactor = 2.0f;      // trip when p95 > factor x kFeedP95Us over kWindow feeds
     static constexpr uint32_t kWindow = 600;
+    // A trip pauses the motion pose for a span of feed time, then the statistics restart empty and the pose comes back. The first
+    // pause lasts kPauseFirstS; each trip after a resumed window doubles it up to kPauseMaxS; a full kWindow of feeds without a trip
+    // sets it back to kPauseFirstS.
+    static constexpr float kPauseFirstS = 5.0f;
+    static constexpr float kPauseMaxS = 60.0f;
 };
 
 // ---------------------------------------------------------------- pose sampling (game-local, frame lerp + nlerp)

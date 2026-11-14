@@ -619,6 +619,9 @@ void TestWorkerResume();
 void TestThrowInNextStep(); // unit test target only: the next enabled Step throws inside the lock (fault path, 6.10.6)
 void TestKeepRetiredPoses(bool aOn); // unit test target only: bundles replaced by the worker keep their pose buffer, NaN-filled
 size_t TestRetiredPoses();             // pose buffers retired so far (TestKeepRetiredPoses)
+// unit test target only: every following motion feed records aWallUs as its wall time and aThreadUs as the thread's own time
+// for the feed budget (aWallUs < 0 = measured again; aThreadUs < 0 = no thread time, wall time alone).
+void TestSetFeedTimesUs(float aWallUs, float aThreadUs);
 // unit test target only: the magazine top-up gesture of the last main-path Step, with the published MM pose (database bone order,
 // 7 floats per bone: p xyz, q xyzw) right before and right after the gesture edit of that same Step.
 struct MagTapProbe

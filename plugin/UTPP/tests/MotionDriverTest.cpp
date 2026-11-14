@@ -944,6 +944,267 @@ int main(int argc, char** argv)
                   std::to_string(wantHi) + (reentryB ? "" : " (a frame without a motion pose)"));
     }
 
+    // ---- 8k. feed budget: a trip pauses the motion pose for a span of feed time (5 s, doubled after each resumed window up to 60 s,
+    // back to 5 s after a clean window of Budget::kWindow feeds), hands over / in through the same blends as a toggle, and decides on
+    // the smaller of the wall time and the thread's own time of a feed. Feed times come from the test seam (TestSetFeedTimesUs).
+    {
+        using mm::adapter::Budget;
+        const uint32_t fb = motiondriver::kFirstBone;
+        auto baseSnap = [&]() {
+            mm::integ::PoseSnapshot s{};
+            s.weight = 0.75f;
+            s.numBones = rw.bones;
+            s.firstBone = fb;
+            s.rig = kRigPtr;
+            for (uint32_t i = 0; i < mm::integ::kMaxMMBones; ++i)
+                s.gameIndex[i] = (i >= fb && i < rw.bones) ? static_cast<int32_t>(i) : -1;
+            for (uint32_t i = 0; i < rw.bones; ++i)
+                s.pose[size_t(i) * 7 + 6] = 1.0f;
+            return s;
+        };
+        // largest translation difference over the mapped bones (no quaternion sign ambiguity)
+        auto transDiff = [&](const mm::integ::PoseSnapshot& a, const mm::integ::PoseSnapshot& b) {
+            float m = 0.0f;
+            for (uint32_t i = fb; i < rw.bones; ++i)
+                for (int k = 0; k < 3; ++k)
+                    m = std::fmax(m, std::fabs(a.pose[size_t(i) * 7 + k] - b.pose[size_t(i) * 7 + k]));
+            return m;
+        };
+        auto counter = [&](const char* aField) { return std::strtoull(StatusField(motiondriver::Status(), aField).c_str(), nullptr, 10); };
+        struct Fed
+        {
+            bool step = false, budget = false;
+            mm::integ::PoseSnapshot pub{};
+        };
+        auto feed = [&](float aDt) {
+            motionhost::FeedInput f = WalkFeed();
+            f.dt = aDt;
+            Fed r;
+            r.step = motiondriver::Step(f, 0, aDt);
+            r.budget = std::strcmp(motiondriver::LastSkipReason(), "budget") == 0;
+            r.pub = baseSnap();
+            (void)motiondriver::ApplyToSnapshot(r.pub);
+            return r;
+        };
+        // motion feeds until the first Step without a motion pose (that Step is consumed); aMotion = motion feeds before it
+        auto runUntilSkip = [&](float aDt, int aMax, int& aMotion, Fed* aLast = nullptr) {
+            aMotion = 0;
+            for (int i = 0; i < aMax; ++i)
+            {
+                Fed r = feed(aDt);
+                if (!r.step)
+                {
+                    if (aLast)
+                        *aLast = r;
+                    return r.budget;
+                }
+                ++aMotion;
+            }
+            return false;
+        };
+        // skipped feeds of a pause after its first one, up to the Step that runs the motion pose again (consumed, returned in aResume)
+        auto runPause = [&](float aDt, int aMax, int& aPaused, Fed* aResume = nullptr) {
+            aPaused = 1; // the Step runUntilSkip consumed
+            for (int i = 0; i < aMax; ++i)
+            {
+                Fed r = feed(aDt);
+                if (r.step)
+                {
+                    if (aResume)
+                        *aResume = r;
+                    return true;
+                }
+                if (!r.budget)
+                    return false;
+                ++aPaused;
+            }
+            return false;
+        };
+        // the pause covers aPaused skipped Steps; it ends on the next Step: (aPaused + 1) x dt = pause length, within one feed (+ float
+        // rounding of the accumulated clock)
+        auto pauseOk = [](int aPaused, float aDt, float aWant) {
+            return std::fabs(static_cast<float>(aPaused + 1) * aDt - aWant) <= 1.01f * aDt;
+        };
+        const float dt60 = 1.0f / 60.0f;
+        const unsigned long long trips0 = counter("budgetTrips=");
+        const size_t tripLines0 = LogCount("UTPP mm.motionDriver budget trip #"), resumeLines0 = LogCount("UTPP mm.motionDriver budget resume #");
+        const size_t budgetLines0 = LogCount("UTPP mm.motionDriver budget ");
+        // A. a fresh window
+        motiondriver::TestSetFeedTimesUs(100.0f, 100.0f);
+        motiondriver::SetEnabled(false);
+        motiondriver::SetEnabled(true);
+        for (int i = 0; i < 30; ++i)
+            (void)feed(dt60);
+        // B. the wall time is long (the thread was preempted), the thread's own time short: no trip
+        motiondriver::TestSetFeedTimesUs(800.0f, 100.0f);
+        int motion = 0;
+        const bool skippedB = runUntilSkip(dt60, 2 * static_cast<int>(Budget::kWindow) + 100, motion);
+        {
+            const std::string st = motiondriver::Status();
+            Check(!skippedB && motion == 2 * static_cast<int>(Budget::kWindow) + 100 && counter("budgetTrips=") == trips0 &&
+                      std::fabs(std::atof(StatusField(st, "feedP95us=").c_str()) - 100.0) < 0.5 &&
+                      std::fabs(std::atof(StatusField(st, "wallP95us=").c_str()) - 800.0) < 0.5,
+                  "8k wall time 800 us, own thread time 100 us over 1300 feeds: no trip, feedP95us = thread time, wallP95us = wall time",
+                  "motion " + std::to_string(motion) + " feedP95us=" + StatusField(st, "feedP95us=") + " wallP95us=" +
+                      StatusField(st, "wallP95us=") + " budgetTrips=" + StatusField(st, "budgetTrips="));
+        }
+        // C. both long: trip, a 5 s pause with the handover, the resume with the hand-in, the window restarts empty
+        const float lastMotionToBase = [&]() {
+            Fed r = feed(dt60);
+            return transDiff(r.pub, baseSnap());
+        }();
+        motiondriver::TestSetFeedTimesUs(800.0f, 800.0f);
+        const unsigned long long ho0 = counter("handover="), hi0 = counter("handin=");
+        Fed prev = feed(dt60), first{};
+        int motionC = 0;
+        bool skippedC = false;
+        for (int i = 0; i < 200; ++i, ++motionC)
+        {
+            Fed r = feed(dt60);
+            if (!r.step)
+            {
+                first = r;
+                skippedC = r.budget;
+                break;
+            }
+            prev = r;
+        }
+        const std::string stPause = motiondriver::Status();
+        Check(skippedC && first.budget && counter("budgetTrips=") == trips0 + 1 && LogCount("UTPP mm.motionDriver budget trip #") == tripLines0 + 1,
+              "8k wall and thread time 800 us: the window trips (one trip line), the motion pose pauses (skip=budget)",
+              "motion feeds before the pause " + std::to_string(motionC) + " | " + stPause.substr(0, 200));
+        Check(StatusField(stPause, "reason=") == "budget" && StatusField(stPause, "skip=") == "budget" &&
+                  std::fabs(std::atof(StatusField(stPause, "budgetCoolS=").c_str()) - Budget::kPauseFirstS) < 0.01 &&
+                  std::atof(StatusField(stPause, "budgetPauseS=").c_str()) > 0.0,
+              "8k status during the pause: reason=budget skip=budget budgetCoolS=5 budgetPauseS > 0",
+              "reason=" + StatusField(stPause, "reason=") + " skip=" + StatusField(stPause, "skip=") + " budgetCoolS=" +
+                  StatusField(stPause, "budgetCoolS=") + " budgetPauseS=" + StatusField(stPause, "budgetPauseS="));
+        const std::string tripLine = [&]() {
+            for (size_t i = g_logLines.size(); i-- > 0;)
+                if (g_logLines[i].find("budget trip #") != std::string::npos)
+                    return g_logLines[i];
+            return std::string();
+        }();
+        Check(tripLine.find(" p95us=800.0 wallP95us=800.0 limit=500 pause=5.0s next=10s") != std::string::npos &&
+                  tripLine.find("feedP95us=") == std::string::npos,
+              "8k trip line: p95 values, limit, pause, next pause (no status token feedP95us=)", tripLine);
+        // pause and resume: the published pose never steps by more than half the motion-to-base distance in one frame
+        float maxStep = transDiff(first.pub, prev.pub);
+        int changed = transDiff(first.pub, baseSnap()) > 0.0f ? 1 : 0;
+        bool contiguous = true;
+        int paused = 1;
+        Fed resume{};
+        bool resumed = false;
+        prev = first;
+        for (int i = 0; i < 2000 && !resumed; ++i)
+        {
+            Fed r = feed(dt60);
+            maxStep = std::fmax(maxStep, transDiff(r.pub, prev.pub));
+            if (r.step)
+            {
+                resume = r;
+                resumed = true;
+                break;
+            }
+            const bool ch = transDiff(r.pub, baseSnap()) > 0.0f;
+            contiguous = contiguous && r.budget && (!ch || changed == paused);
+            changed += ch ? 1 : 0;
+            ++paused;
+            prev = r;
+        }
+        const unsigned long long ho1 = counter("handover=");
+        int wantHo = 0;
+        for (float left = motionhost::kDefaultHardOutTime; (left = std::fmax(0.0f, left - dt60)) > 0.0f;)
+            ++wantHo;
+        Check(contiguous && changed >= wantHo && changed <= wantHo + 1 && ho1 - ho0 == static_cast<unsigned long long>(changed),
+              "8k pause: the held motion pose hands over to the base pose over kDefaultHardOutTime (same handover as a toggle), then base",
+              "changed " + std::to_string(changed) + " (want " + std::to_string(wantHo) + ".." + std::to_string(wantHo + 1) +
+                  ") handover= +" + std::to_string(ho1 - ho0) + (contiguous ? "" : " (not contiguous)"));
+        Check(resumed && pauseOk(paused, dt60, Budget::kPauseFirstS) && LogCount("UTPP mm.motionDriver budget resume #") == resumeLines0 + 1,
+              "8k the pause ends by itself after 5 s of feed time (one resume line)",
+              std::string(resumed ? "resumed" : "NOT resumed") + " after " + std::to_string(paused) + " skipped feeds");
+        // hand-in: the first frame after the resume is the published base pose on every mapped bone, the blend runs over the toggle time
+        int hiFrames = 0;
+        bool handinFirstHeld = resumed && transDiff(resume.pub, baseSnap()) == 0.0f, allMotion = resumed;
+        prev = resume;
+        for (int i = 0; i < 20 && resumed; ++i)
+        {
+            Fed r = feed(dt60);
+            maxStep = std::fmax(maxStep, transDiff(r.pub, prev.pub));
+            allMotion = allMotion && r.step;
+            prev = r;
+        }
+        hiFrames = static_cast<int>(counter("handin=") - hi0);
+        const int wantHi = 1 + wantHo;
+        Check(resumed && handinFirstHeld && allMotion && hiFrames == wantHi,
+              "8k resume: the motion pose hands in from the published base pose (same hand-in as a toggle on)",
+              std::string("first frame = base ") + (handinFirstHeld ? "yes" : "no") + " handin= +" + std::to_string(hiFrames) + "/" +
+                  std::to_string(wantHi) + (allMotion ? "" : " (a frame without a motion pose)"));
+        Check(resumed && lastMotionToBase > 0.05f && maxStep <= 0.5f * lastMotionToBase,
+              "8k no single-frame pose step at the pause or the resume (largest frame step <= half the motion-to-base distance)",
+              "largest step " + std::to_string(maxStep) + " m, motion-to-base " + std::to_string(lastMotionToBase) + " m");
+        // D. the same load keeps tripping: every trip follows a full fresh window (600 feeds) and doubles the pause up to 60 s
+        // (the resume above already ran 21 motion feeds of the new window)
+        {
+            const float want[] = {10.0f, 20.0f, 40.0f, 60.0f, 60.0f};
+            std::string detail;
+            bool ok = true;
+            int already = 21;
+            for (float w : want)
+            {
+                int m = 0, p = 0;
+                const bool s = runUntilSkip(dt60, 700, m);
+                const bool r = s && runPause(dt60, 5000, p);
+                ok = ok && s && r && m + already == static_cast<int>(Budget::kWindow) && pauseOk(p, dt60, w);
+                detail += std::to_string(m + already) + " feeds -> " + std::to_string(static_cast<float>(p + 1) * dt60) + " s; ";
+                already = 1; // the resume Step is the first feed of the next window
+            }
+            Check(ok, "8k repeated trips: each after a fresh 600-feed window, pauses 10 / 20 / 40 / 60 / 60 s (first 5 s above)", detail);
+        }
+        // E. a clean window after a resume resets the pause to 5 s
+        {
+            motiondriver::TestSetFeedTimesUs(100.0f, 100.0f);
+            int m = 0, p = 0;
+            const bool cleanSkip = runUntilSkip(dt60, static_cast<int>(Budget::kWindow) + 50, m);
+            const double cool = std::atof(StatusField(motiondriver::Status(), "budgetCoolS=").c_str());
+            motiondriver::TestSetFeedTimesUs(800.0f, 800.0f);
+            const bool s = runUntilSkip(dt60, 200, m);
+            const bool r = s && runPause(dt60, 5000, p);
+            Check(!cleanSkip && std::fabs(cool - Budget::kPauseFirstS) < 0.01 && s && r && pauseOk(p, dt60, Budget::kPauseFirstS),
+                  "8k a full window without a trip resets the pause to 5 s",
+                  "budgetCoolS after the clean window " + std::to_string(cool) + ", next pause " + std::to_string(static_cast<float>(p + 1) * dt60) + " s");
+        }
+        // F. the pause runs on feed time: 5 s at 30 / 60 / 120 Hz (window first cleaned at the same rate)
+        {
+            std::string detail;
+            bool ok = true;
+            for (float hz : {30.0f, 60.0f, 120.0f})
+            {
+                const float dt = 1.0f / hz;
+                motiondriver::TestSetFeedTimesUs(100.0f, 100.0f);
+                int m = 0, p = 0;
+                const bool cleanSkip = runUntilSkip(dt, static_cast<int>(Budget::kWindow) + 50, m);
+                motiondriver::TestSetFeedTimesUs(800.0f, 800.0f);
+                const bool s = runUntilSkip(dt, 200, m);
+                const bool r = s && runPause(dt, 5000, p);
+                ok = ok && !cleanSkip && s && r && pauseOk(p, dt, Budget::kPauseFirstS);
+                detail += std::to_string(static_cast<int>(hz)) + " Hz: " + std::to_string(p) + " skipped feeds = " +
+                          std::to_string(static_cast<float>(p + 1) * dt) + " s; ";
+            }
+            Check(ok, "8k the 5 s pause is frame-rate independent (30 / 60 / 120 Hz, within one feed)", detail);
+        }
+        const unsigned long long tripsAll = counter("budgetTrips=") - trips0;
+        const size_t lines = LogCount("UTPP mm.motionDriver budget ") - budgetLines0;
+        Check(tripsAll == 10 && lines == 2 * tripsAll, "8k one trip line and one resume line per trip, nothing per frame",
+              std::to_string(tripsAll) + " trips, " + std::to_string(lines) + " budget lines");
+        // back to measured feed times and a fresh window for the sections below
+        motiondriver::TestSetFeedTimesUs(-1.0f, -1.0f);
+        motiondriver::SetEnabled(false);
+        motiondriver::SetEnabled(true);
+        for (int i = 0; i < 30; ++i)
+            (void)feed(dt60);
+    }
+
     // ---- 8c. MotionSetFrame pose lifetime (commit A review): Frame copies the v2 pose into the caller's buffer under the v2 lock, so a
     // bundle swap / free by the worker (reload, body switch) after Frame returned cannot leave the caller with a dangling pointer.
     // Instrumented (TestKeepRetiredPoses): a replaced bundle's pose buffer is NaN-filled and kept alive, so a pointer into the old
