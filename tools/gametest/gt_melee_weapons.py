@@ -80,6 +80,12 @@ WEAPONS = {
     # no set of its own in the pack: full body is expected to stay off (control)
     'hammer': {'label': 'two-handed hammer', 'anim_var': 'w_melee_hammer', 'block': True, 'kind': 'weapon',
                'records': ('Items.Preset_Hammer_Default', 'Items.Preset_Hammer_Sasquatch')},
+    # rig probes: arm cyberware that is equipped only to record the merged rig (the equip re-arms the skin helper plan and starts a
+    # new pose segment); the in-hand check is expected to skip them, the restore step still runs
+    'monowire': {'label': 'monowire (rig probe)', 'anim_var': 'monowire', 'block': False, 'kind': 'cyberware',
+                 'records': ('Items.NanoWires',), 'covered': False, 'states_default': True, 'phases': ()},
+    'launcher': {'label': 'projectile launcher (rig probe)', 'anim_var': 'launcher', 'block': False, 'kind': 'cyberware',
+                 'records': ('Items.ProjectileLauncher',), 'covered': False, 'states_default': True, 'phases': ()},
     # arm cyberware: needs the cyberware loadout change, see cyberware_equip_cmd
     'mantis': {'label': 'mantis blades', 'anim_var': 'mantis_blade', 'block': True, 'kind': 'cyberware',
                'records': ('Items.MantisBlades',)},
