@@ -1,0 +1,2 @@
+[2026-11-10 08:18:19.289] [info    ] [134948] [UTPP] UTPP early pose experiment: owner=Mapping catalogValid=0 helpers=0 restartRequired=1
+[2026-11-10 08:19:10.840] [info    ] [134948] [UTPP] UTPP early pose arm: ready=0 rig=1000 bones=645

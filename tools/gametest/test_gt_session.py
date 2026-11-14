@@ -320,6 +320,62 @@ class SideBySideTests(unittest.TestCase):
         self.assertEqual(dg['scenarios'], {})
         self.assertTrue(gs.side_by_side_lines({'female': dg}))
 
+    def test_pose_owner_in_the_result_line(self):
+        f = gs.run_digest(self.run_dir('r1', 'woman', None, 112.0, 0.132))
+        m = gs.run_digest(self.run_dir('r2', 'man', None, 140.0, 0.05))
+        self.assertTrue(any(l.startswith('female: run r1') and 'pose owner unknown' in l for l in gs.side_by_side_lines({'female': f})))
+        f['pose_owner'] = gs.gt_log.pose_owner_of_log(os.path.join(TESTDATA, 'pose_owner_fk.txt'))
+        m['pose_owner'] = gs.gt_log.pose_owner_of_log(os.path.join(TESTDATA, 'pose_owner_fk.txt'))
+        lines = gs.side_by_side_lines({'female': f, 'male': m})
+        self.assertTrue(any(l.startswith('female: run r1') and 'pose owner FK' in l for l in lines))
+        self.assertFalse([l for l in lines if 'POSE OWNER DIFFERS' in l])
+        m['pose_owner'] = gs.gt_log.pose_owner_of_log(os.path.join(TESTDATA, 'pose_owner_mapping.txt'))
+        lines = gs.side_by_side_lines({'female': f, 'male': m})
+        self.assertTrue(any(l.startswith('male: run r2') and 'pose owner Mapping' in l for l in lines))
+        self.assertEqual([l for l in lines if 'POSE OWNER DIFFERS' in l], ['!!! POSE OWNER DIFFERS: female FK, male Mapping - these runs '
+                                                                         'are not comparable'])
+        # the digest reads the owner from the run's summary.json (written by night.py)
+        r = self.run_dir('r3', 'woman', None, 1.0, 0.1)
+        _dump(os.path.join(r, 'summary.json'), {'pose_owner': m['pose_owner']})
+        self.assertEqual(gs.run_digest(r)['pose_owner']['owner'], 'Mapping')
+
+
+TESTDATA = os.path.join(HERE, 'testdata')
+
+
+class PoseOwnerTests(unittest.TestCase):
+    """gt_log.pose_owner on log fixtures: the load line of the switch file and earlyOwner of the FK counters lines."""
+    def owner(self, name):
+        return gs.gt_log.pose_owner_of_log(os.path.join(TESTDATA, name))
+
+    def test_fixtures(self):
+        po = self.owner('pose_owner_mapping.txt')
+        self.assertEqual((po['owner'], po['owner_line'], po['early_owner'], po['catalog_valid'], po['helpers']),
+                         ('Mapping', True, [1], 1, 116))
+        self.assertEqual(gs.gt_log.pose_owner_label(po), 'Mapping')
+        po = self.owner('pose_owner_fk.txt')
+        self.assertEqual((po['owner'], po['owner_line'], po['early_owner']), ('FK', False, [0]))
+        po = self.owner('pose_owner_unknown.txt')
+        self.assertEqual((po['owner'], po['early_owner']), ('unknown', []))
+        po = self.owner('pose_owner_conflict.txt')
+        self.assertEqual(po['owner'], 'conflict')
+        self.assertTrue(gs.gt_log.pose_owner_label(po).startswith('CONFLICT (load line says Mapping'))
+        po = self.owner('pose_owner_mapping_invalid_catalog.txt')
+        self.assertEqual((po['owner'], po['catalog_valid']), ('Mapping', 0))
+        self.assertIn('catalogValid=0', gs.gt_log.pose_owner_label(po))
+        self.assertEqual(self.owner('no_such_file.txt')['owner'], 'unknown')
+        self.assertEqual(gs.gt_log.pose_owner_label(None), 'unknown')
+
+    def test_text_rules(self):
+        fk = 'UTPP FK counters (tpp): totalCalls=1 (+1) mmActive=1 earlyOwner=%d earlyApplied=0\n'
+        load = 'UTPP early pose experiment: owner=Mapping catalogValid=1 helpers=116 restartRequired=1\n'
+        po = gs.gt_log.pose_owner
+        self.assertEqual(po(load)['owner'], 'Mapping')                      # the load line alone (no third-person sample yet)
+        self.assertEqual(po(fk % 1)['owner'], 'conflict')                   # earlyOwner=1 without the load line
+        self.assertEqual(po(fk % 0 + fk % 1)['owner'], 'conflict')          # mixed values
+        self.assertEqual(po(load + fk % 1 + fk % 1)['owner'], 'Mapping')
+        self.assertEqual(po(load.replace('Mapping', 'FK'))['owner'], 'conflict')
+
 
 if __name__ == '__main__':
     unittest.main()

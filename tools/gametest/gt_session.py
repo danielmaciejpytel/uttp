@@ -23,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import graphics_profile  # noqa: E402
+import gt_log  # noqa: E402
 import select_save  # noqa: E402
 
 BODY_SAVES = {'female': 'ManualSave-115', 'male': 'ManualSave-106'}
@@ -267,7 +268,7 @@ def run_digest(run_dir: str) -> dict:
             'duration_s', 'head_speed_p95', 'chest_speed_p95', 'spikes_per_s', 'helper_p95_cm', 'anatomy_share')}
     return {'run': os.path.basename(os.path.abspath(run_dir)), 'result': cyc.get('result'), 'pose_body': pose.get('body'),
             'perf': cyc.get('perf_status'), 'scenarios': scen, 'harness': summ.get('harness'),
-            'skipped': summ.get('skipped_scenarios'), 'body_mismatch': cyc.get('body_mismatch')}
+            'skipped': summ.get('skipped_scenarios'), 'body_mismatch': cyc.get('body_mismatch'), 'pose_owner': summ.get('pose_owner')}
 
 
 def _cell(v, nd=1) -> str:
@@ -306,6 +307,7 @@ def side_by_side_lines(digests: dict[str, dict]) -> list[str]:
     for b in bodies:
         d = digests[b]
         lines.append(f'{b}: run {d["run"]}, result {d["result"]}, pose body {d["pose_body"]}'
+                     + f', pose owner {gt_log.pose_owner_label(d.get("pose_owner"))}'
                      + (f', {len(d["skipped"])} scenarios not played' if d.get('skipped') else '')
                      + (f', perf {d["perf"]}' if d.get('perf') else ''))
         want = POSE_BODY.get(b)
@@ -321,4 +323,8 @@ def side_by_side_lines(digests: dict[str, dict]) -> list[str]:
             lines.append(f'{b}: save {sel.get("save")} selected; restore code {res.get("code")}, restored={res.get("restored")}'
                          + ('' if res.get('code') == 0 and res.get('restored') else
                             ' !!! ' + '; '.join(res.get('lines') or ['not restored'])))
+    owners = {b: (digests[b].get('pose_owner') or {}).get('owner') or 'unknown' for b in bodies}
+    if len(set(owners.values())) > 1:
+        lines.append('!!! POSE OWNER DIFFERS: ' + ', '.join(f'{b} {o}' for b, o in owners.items())
+                     + ' - these runs are not comparable')
     return lines

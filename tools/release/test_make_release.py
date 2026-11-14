@@ -792,5 +792,107 @@ class SkinHelperAudit(unittest.TestCase):
         self.assertNotIn("{", r)
 
 
+class EarlyPoseOption(unittest.TestCase):
+    """--early-pose FILE --early-pose-sha HEX packs the pose owner switch file; without it the package is unchanged."""
+    GOOD = b"UTPP_EARLY_POSE_V1\n0123456789abcdef\nFEDCBA9876543210\n\n"
+
+    def setUp(self):
+        import argparse
+        self.tmp = tempfile.TemporaryDirectory()
+        self.src = Path(self.tmp.name) / "switch.txt"
+        self.src.write_bytes(self.GOOD)
+        self.sha = mr.sha256_bytes(self.GOOD)
+        self.args = argparse.Namespace(game=r"X:\nogame", code_tree=r"X:\notree", dll=r"X:\none.dll", dry_run=False, nue=True,
+                                       dayof={"melee": "skip", "car": "skip"}, data_roots=[r"X:\nodata"], skin_data_root=r"X:\noskin")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_default_plan_and_texts_unchanged(self):
+        rels = {e.rel for e in mr.build_plan(self.args, [])}
+        self.assertFalse([r for r in rels if "early-pose" in r.lower() or "early_pose" in r.lower()])
+        self.args.early_pose, self.args.early_pose_sha = None, None
+        self.assertEqual(rels, {e.rel for e in mr.build_plan(self.args, [])})
+        for melee in (True, False):
+            self.assertEqual(mr.gen_readme(melee), mr.gen_readme(melee, False, False))
+        self.assertNotIn("early-pose", mr.gen_readme().decode())
+        F = mr.Findings()   # without the option every early pose name fails, the exact switch path included
+        mr.check_required({}, F, {mr.EARLY_POSE_REL})
+        self.assertIn(mr.EARLY_POSE_REL, [i["file"] for i in F.items if i["check"] == "forbidden-file"])
+        F = mr.Findings()
+        mr.check_early_pose(None, F, False)
+        self.assertEqual(F.items, [])
+
+    def test_option_packs_the_pinned_file(self):
+        self.args.early_pose, self.args.early_pose_sha = str(self.src), self.sha.upper()
+        errs = []
+        ents = {e.rel: e for e in mr.build_plan(self.args, errs)}
+        self.assertNotIn("early pose", " ".join(errs))
+        e = ents[mr.EARLY_POSE_REL]
+        self.assertEqual((e.kind, e.src, e.expect_sha, e.expect_size), ("data", self.src, self.sha, len(self.GOOD)))
+        names = set(ents)
+        F = mr.Findings()   # expected with the option; any other early pose name still fails
+        mr.check_required({}, F, names, True)
+        self.assertNotIn(mr.EARLY_POSE_REL, [i["file"] for i in F.items if i["check"] == "forbidden-file"])
+        F = mr.Findings()
+        mr.check_required({}, F, names | {mr.P_DLL + "early-pose-experiment.txt"}, True)
+        self.assertEqual([i["file"] for i in F.items if i["check"] == "forbidden-file"], [mr.P_DLL + "early-pose-experiment.txt"])
+        F = mr.Findings()
+        mr.check_early_pose(self.GOOD, F, True)
+        self.assertEqual([(i["level"], i["check"]) for i in F.items], [("INFO", "early-pose")])
+        self.assertIn("2 hashes", F.items[0]["detail"])
+        F = mr.Findings()   # option given, file missing from the package
+        mr.check_early_pose(None, F, True)
+        self.assertEqual([i["level"] for i in F.items], ["FAIL"])
+        self.args.early_pose = str(Path(self.tmp.name) / "missing.txt")
+        errs = []
+        mr.build_plan(self.args, errs)
+        self.assertTrue([x for x in errs if "early pose file" in x])
+
+    def test_content_is_checked_as_the_plugin_parses_it(self):
+        self.assertEqual(mr.check_early_pose_bytes(self.GOOD), [])
+        self.assertEqual(mr.check_early_pose_bytes(self.GOOD.replace(b"\n", b"\r\n")), [])
+        bad = {
+            "header": b"UTPP_EARLY_POSE_V2\n0123456789abcdef\n",
+            "bom": b"\xef\xbb\xbfUTPP_EARLY_POSE_V1\n0123456789abcdef\n",
+            "off switch": b"UTPP_EARLY_POSE_OFF\n",
+            "short": b"UTPP_EARLY_POSE_V1\n0123456789abcde\n",
+            "not hex": b"UTPP_EARLY_POSE_V1\n0123456789abcdeg\n",
+            "repeat (case)": b"UTPP_EARLY_POSE_V1\n0123456789abcdef\n0123456789ABCDEF\n",
+            "zero": b"UTPP_EARLY_POSE_V1\n0000000000000000\n",
+            "empty": b"UTPP_EARLY_POSE_V1\n",
+            "too many": b"UTPP_EARLY_POSE_V1\n" + b"".join(b"%016x\n" % (i + 1) for i in range(mr.EARLY_POSE_MAX_HASHES + 1)),
+        }
+        for what, data in bad.items():
+            self.assertTrue(mr.check_early_pose_bytes(data), what)
+            F = mr.Findings()
+            mr.check_early_pose(data, F, True)
+            self.assertIn("FAIL", [i["level"] for i in F.items], what)
+        at_limit = b"UTPP_EARLY_POSE_V1\n" + b"".join(b"%016x\n" % (i + 1) for i in range(mr.EARLY_POSE_MAX_HASHES))
+        self.assertEqual(mr.check_early_pose_bytes(at_limit), [])
+
+    def test_arguments_come_together(self):
+        self.assertEqual(mr.early_pose_args_error(None, None), "")
+        self.assertEqual(mr.early_pose_args_error("f.txt", self.sha), "")
+        self.assertTrue(mr.early_pose_args_error("f.txt", None))
+        self.assertTrue(mr.early_pose_args_error(None, self.sha))
+        self.assertTrue(mr.early_pose_args_error("f.txt", "abc"))
+        argv = sys.argv
+        try:   # refused before anything is read or written
+            sys.argv = ["make_release.py", "--code-tree", r"X:\notree", "--dll", r"X:\none.dll", "--out", r"X:\noout",
+                        "--early-pose", str(self.src)]
+            self.assertEqual(mr.main(), 2)
+        finally:
+            sys.argv = argv
+
+    def test_readme_names_the_file_only_with_the_option(self):
+        on = mr.gen_readme(True, False, True).decode()
+        self.assertIn("early-pose.txt", on)
+        self.assertEqual(on.replace(mr.EARLY_POSE_README.replace("\n", "\r\n"), ""), mr.gen_readme(True).decode())
+        F = mr.Findings()
+        mr.scan_text(mr.README_REL, on, F, True)
+        self.assertEqual([i for i in F.items if i["level"] in ("FAIL", "WARN")], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -34,6 +34,8 @@ melee=ship|skip,car=ship|skip` (what did not pass the in-game test that day is l
 Parried graph (optional, melee group): utpp_melee_parried_graph.archive (modified copy of the game's player_melee.animgraph, pinned
 SHA below) ships only when a Parried-bit (32) line of the shipped utpp_melee.reds belongs to a weapon with per-strike parried clips
 (PARRIED_CLIPS, keyed by the pinned melee archive SHA); fists = generic only, so 0.1.0 does not include it. See parried_graph_rule.
+--early-pose FILE --early-pose-sha HEX (optional): also packs the pose owner switch file red4ext\\plugins\\UTPP\\early-pose.txt
+(copy of FILE, pinned, parsed as the plugin parses it); without it no early pose file of any name may ship.
 --dry-run: nothing is staged or zipped; every source is hashed, transformed in memory and scanned in place, and the
 report/manifest go to <out>\\dryrun\\. Exit code 0 = no FAIL finding, 1 = at least one FAIL, 2 = bad input.
 """
@@ -110,6 +112,8 @@ OLD_SKIN_FOLDER = "helper_candidate"   # test-install name of the folder; refuse
 # The 2026-11-11 renames changed the package layout (data\ folder, new file names) but not the content of any pinned data file except
 # the style weights (TRANSFORMS): the pins below are the content that was tested in game, found by hash (find_source).
 # No early pose file ships (round 2, 2026-11-11): the tested behaviour is "experiment off" (the DLL reads only early-pose.txt).
+# Explicit opt-in only (--early-pose FILE --early-pose-sha HEX, see EARLY_POSE_REL below): the switch file that selects the early
+# mapping pose owner, copied from FILE, pinned to HEX and parsed as the DLL parses it. Without the option nothing changes.
 DATA = [
     (P_DLL + "data/utpp_base.utppmm", 176048992, "c4886150a1eb774cc3eed8c30e629ace20194d5fc101e6d6f4cd6f4b77ecb784"),
     (P_DLL + "data/utpp_base.airz", 29252, "89873c49674a31b33757db42c272427b8f33816e492037d189eac526d3cf82aa"),
@@ -430,6 +434,15 @@ def dayof_shipped(args):
 
 
 DLL_REL = P_DLL + "UTPP.dll"
+# Pose owner switch (optional, --early-pose): the plugin reads this file once at load. Present = the pose is written in the early
+# mapping stage (first line UTPP_EARLY_POSE_V1, then one 16-digit hex bone name hash per line); absent (the default package) = the
+# pose is written in the FK stage. A file whose list does not parse still selects the early owner and then writes no pose at all,
+# so the packer checks the content exactly as the plugin parses it (check_early_pose_bytes).
+EARLY_POSE_REL = P_DLL + "early-pose.txt"
+EARLY_POSE_HEADER = "UTPP_EARLY_POSE_V1"
+EARLY_POSE_MAX_HASHES = 1024   # the plugin's rig bone limit
+EARLY_POSE_README = ("\nPose write stage: red4ext\\plugins\\UTPP\\early-pose.txt selects the earlier of the two pose write stages of the\n"
+                     "plugin. Delete it with the game closed to use the later stage; the change applies at the next game start.")
 README_REL = P_DLL + "README.txt"
 NOTICES_REL = P_DLL + "THIRD_PARTY_NOTICES.txt"
 LICENSE_REL = P_DLL + "LICENSE.txt"   # copy of <code tree>\LICENSE
@@ -460,7 +473,7 @@ controller; rebind it in Mod Settings. It is provided through Input Loader (r6\\
 is required for this key; everything else works without it.
 Emergency switches: an empty file next to UTPP.dll named utpp_locomotion.disable, utpp_lootrange.disable,
 utpp_headguard.disable or utpp_interactrange.disable switches the matching native feature off (the last one stops
-the third-person interaction range / interaction descriptor changes).
+the third-person interaction range / interaction descriptor changes).{early_pose_line}
 
 Animation pack: Mod Settings > Ultimate Third Person > General > Animation pack. "Ultimate Third Person Project" (default) = the
 animations of this mod. "Game Animations" = the animations of the game itself on the third-person body: the camera, the full body,
@@ -793,6 +806,12 @@ def build_plan(args, errors):
     mode = Entry(SKIN_MODE_REL, "gen", note="generated: APPLY + LF")
     mode.data = SKIN_MODE_BYTES
     entries.append(mode)
+    early_src = getattr(args, "early_pose", None)
+    if early_src:  # explicit opt-in only (main checks that the pin is given); default packages never contain the switch file
+        p = Path(early_src)
+        if need(p, "early pose file (--early-pose)"):
+            entries.append(Entry(EARLY_POSE_REL, "data", src=p, expect_sha=(getattr(args, "early_pose_sha", None) or "").lower(),
+                                 expect_size=p.stat().st_size, note="pose owner switch, copy of --early-pose, pinned by --early-pose-sha"))
     entries.append(Entry(README_REL, "gen", note="generated"))
     lic =Path(args.code_tree) / "LICENSE"
     need(lic, "licence file")
@@ -854,11 +873,11 @@ GRAPH_README = ("\nMelee parrying: archive\\pc\\mod\\utpp_melee_parried_graph.ar
                 "graph. To go back to the game's own parry selection, delete this file.")
 
 
-def gen_readme(melee=True, graph=False):
+def gen_readme(melee=True, graph=False, early_pose=False):
     nv = " or NVIDIA" if nvidia_tools() else ""
     melee_line = MELEE_LINE[bool(melee)] + (GRAPH_README if (melee and graph) else "")
-    return README_TXT.format(version=VERSION, author=AUTHOR, nvidia_unaffiliated=nv,
-                             melee_line=melee_line).replace("\n", "\r\n").encode("utf-8")
+    return README_TXT.format(version=VERSION, author=AUTHOR, nvidia_unaffiliated=nv, melee_line=melee_line,
+                             early_pose_line=EARLY_POSE_README if early_pose else "").replace("\n", "\r\n").encode("utf-8")
 
 
 # ---------------------------------------------------------------------------------------------- scanning
@@ -1123,8 +1142,62 @@ REQUIRED_TEXT = {  # shipped file -> strings that must be in it (menu entries an
 }
 
 
-def check_required(rel_to_text, F, names):
-    """The Animation pack and Diagnostic logs menu entries, the diagnostic defaults and the README / licence texts must be staged."""
+def check_early_pose_bytes(data):
+    """Problems of an early pose switch file, parsed as the plugin parses it ([] = valid): first line exactly UTPP_EARLY_POSE_V1, then
+    1..1024 lines of exactly 16 hex digits (empty lines skipped), each a non-zero hash that occurs once."""
+    try:
+        text = data.decode("ascii")
+    except UnicodeDecodeError:
+        return ["not plain ASCII text (a byte order mark or other bytes break the header)"]
+    lines = text.replace("\r\n", "\n").split("\n")
+    if lines[0] != EARLY_POSE_HEADER:
+        return ["first line is %r, expected %r" % (lines[0][:40], EARLY_POSE_HEADER)]
+    problems, seen = [], set()
+    for n, line in enumerate(lines[1:], 2):
+        if not line:
+            continue
+        if len(line) != 16 or any(c not in "0123456789abcdefABCDEF" for c in line):
+            problems.append("line %d is not a 16-digit hex hash: %r" % (n, line[:40]))
+            continue
+        value = int(line, 16)
+        if not value or value in seen:
+            problems.append("line %d: %s hash %s" % (n, "zero" if not value else "repeated", line))
+        seen.add(value)
+    if not seen:
+        problems.append("no hash listed")
+    if len(seen) > EARLY_POSE_MAX_HASHES:
+        problems.append("%d hashes, the plugin accepts at most %d" % (len(seen), EARLY_POSE_MAX_HASHES))
+    return problems
+
+
+def check_early_pose(data, F, expected):
+    """data: bytes of EARLY_POSE_REL in the package (None = not shipped). Without --early-pose (expected False) nothing is checked here
+    (check_required refuses every early pose name). With it the file must ship and parse; it is then reported as expected (INFO)."""
+    if not expected:
+        return
+    if data is None:
+        F.add("FAIL", "early-pose", EARLY_POSE_REL, "--early-pose was given but the switch file is not in the package")
+        return
+    problems = check_early_pose_bytes(data)
+    for x in problems:
+        F.add("FAIL", "early-pose", EARLY_POSE_REL, x)
+    if not problems:
+        F.add("INFO", "early-pose", EARLY_POSE_REL, "expected: pose owner switch (early mapping stage), %d hashes" %
+              len([l for l in data.decode("ascii").splitlines()[1:] if l]))
+
+
+def early_pose_args_error(path, sha):
+    """--early-pose and --early-pose-sha come together (a pinned file or none); the pin is a SHA-256. '' = fine."""
+    if bool(path) != bool(sha):
+        return "--early-pose and --early-pose-sha must be given together"
+    if sha and not re.fullmatch(r"[0-9a-fA-F]{64}", sha):
+        return "--early-pose-sha must be a SHA-256 (64 hex digits)"
+    return ""
+
+
+def check_required(rel_to_text, F, names, early_pose=False):
+    """The Animation pack and Diagnostic logs menu entries, the diagnostic defaults and the README / licence texts must be staged.
+    early_pose (--early-pose): EARLY_POSE_REL is expected; every other early pose name still fails."""
     for rel, needles in REQUIRED_TEXT.items():
         t = rel_to_text.get(rel)
         if t is None:
@@ -1142,7 +1215,9 @@ def check_required(rel_to_text, F, names):
             if not m or m.group(1) != want:
                 F.add("FAIL", "default-off" if want == "off" else "required", P_CET + "utpp_core/init.lua",
                       "%s default is %r, expected %r" % (key, m.group(1) if m else None, want))
-    for rel in sorted(names):  # the early pose experiment stays off: no early pose file of any name
+    for rel in sorted(names):  # the early pose experiment stays off: no early pose file of any name (unless explicitly packed)
+        if early_pose and rel == EARLY_POSE_REL:
+            continue
         if "early-pose" in rel.lower() or "early_pose" in rel.lower():
             F.add("FAIL", "forbidden-file", rel, "early pose files do not ship (the tested behaviour is: experiment off)")
 
@@ -1338,7 +1413,15 @@ def main():
     ap.add_argument("--allow-dirty", action="store_true", help="allow uncommitted shipped code files (never for the final run)")
     ap.add_argument("--allow-old-dll", action="store_true", help="allow the 0.6.5 DLL (5a291a88...)")
     ap.add_argument("--clean", action="store_true", help="delete the stage folder and the old zip first")
+    ap.add_argument("--early-pose", default=None, metavar="FILE",
+                    help="pack FILE as %s (pose owner switch: early mapping stage); default: no such file, FK stage. "
+                         "Needs --early-pose-sha" % EARLY_POSE_REL.replace("/", "\\"))
+    ap.add_argument("--early-pose-sha", default=None, metavar="HEX", help="pinned SHA-256 of the --early-pose file")
     args = ap.parse_args()
+    early_err = early_pose_args_error(args.early_pose, args.early_pose_sha)
+    if early_err:
+        print("ERROR: " + early_err)
+        return 2
     if not args.game:
         print("ERROR: the game folder is not configured: pass --game or set UTPP_GAME_DIR (or game_dir in tools/local_paths.json)")
         return 2
@@ -1375,7 +1458,7 @@ def main():
     notices = gen_notices(errors, graph)
     for e in entries:
         if e.rel == README_REL:
-            e.data = gen_readme("melee" in dayof_shipped(args), graph)
+            e.data = gen_readme("melee" in dayof_shipped(args), graph, bool(args.early_pose))
         elif e.rel == NOTICES_REL:
             e.data = notices
     if errors:
@@ -1402,7 +1485,8 @@ def main():
     code_paths.append("plugin/UTPP/" + SKIN_HEADER_SUB)   # source of the approved skin helper hashes the DLL was built from
     rc, dirty_out = run_git(tree_root, "status", "--porcelain", "--", *code_paths)
     dirty = [l for l in dirty_out.splitlines() if l.strip()] if rc == 0 else ["git status failed"]
-    print("UTPP %s release packer | mode=%s | nue=%s" % (VERSION, "DRY-RUN" if args.dry_run else "FINAL", args.nue))
+    print("UTPP %s release packer | mode=%s | nue=%s | pose owner=%s" % (VERSION, "DRY-RUN" if args.dry_run else "FINAL", args.nue,
+                                                                   "Mapping (--early-pose)" if args.early_pose else "FK"))
     print("code tree : %s  commit %s (%s)  dirty shipped files: %d" % (tree_root, commit[:12], branch, len(dirty)))
     for l in dirty:
         print("            dirty:", l)
@@ -1527,7 +1611,10 @@ def main():
                       "DLL is the 0.6.5 build (5a291a88...): full PDB path, old version/author (rebuild for %s)" % VERSION)
     names = {e.rel for e in entries}
     check_defaults(texts, F)
-    check_required(texts, F, names)
+    check_required(texts, F, names, bool(args.early_pose))
+    early_e = next((e for e in entries if e.rel == EARLY_POSE_REL), None)
+    check_early_pose((early_e.src if args.dry_run else stage / native(EARLY_POSE_REL)).read_bytes() if early_e else None, F,
+                     bool(args.early_pose))
     approved, approved_err = load_approved_table(tree_root)
     mode_e = next((e for e in entries if e.rel == SKIN_MODE_REL), None)
     dll_e = next((e for e in entries if e.kind == "dll"), None)
@@ -1564,6 +1651,8 @@ def main():
         "release": "UTPP " + VERSION, "gameVersion": GAME_VERSION, "author": AUTHOR,
         "nvidiaNotice": {"motionbricks": NOTICE_MOTIONBRICKS, "kimodo": NOTICE_KIMODO},"createdAt": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "mode": "dry-run" if args.dry_run else "final", "nueReload": args.nue,
+        "poseOwner": ("Mapping (%s, pinned %s)" % (EARLY_POSE_REL.replace("/", "\\"), args.early_pose_sha.lower())
+                      if args.early_pose else "FK (no early pose file)"),
         "dayOfBuild": {g: args.dayof.get(g, "undecided (assumed ship)") for g in DAYOF_GROUPS},
         "pendingFiles": pending, "codeTree": str(tree_root), "commit": commit, "branch": branch, "dirtyShippedFiles": dirty,
         "dll": {"path": str(args.dll), "sha256": next(e.sha for e in entries if e.kind == "dll")},

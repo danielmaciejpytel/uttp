@@ -3755,6 +3755,9 @@ class Night:
                                          for s in self.cycle.get('scenarios', [])
                                          if s.get('verdict') and f'{s["name"]}#{s["run"]}' not in not_judged},
                    'recoveries': self.cycle.get('recoveries', [])}
+        # which stage wrote the pose in this session (gt_log.pose_owner): runs on different owners are not comparable
+        summary['pose_owner'] = self.cycle['pose_owner'] = gt_log.pose_owner_of_log(utpp_copy)
+        self.log(f'[collect] pose owner: {gt_log.pose_owner_label(summary["pose_owner"])}')
         if self.cycle.get('skipped_scenarios'):
             summary['skipped_scenarios'] = self.cycle['skipped_scenarios']
         if self.freeze_info:
@@ -4818,6 +4821,7 @@ def run_cycles(night: Night, args, results: list, body: str | None) -> bool:
         try:
             c = night.run_cycle(n)
             results.append({'cycle': c['name'], 'body': body, 'result': c['result'],
+                            **({'pose_owner': gt_log.pose_owner_label(c['pose_owner'])} if c.get('pose_owner') else {}),
                             **({'pose_limits_exceeded': c['pose_limits_exceeded']} if c.get('pose_limits_exceeded') else {}),
                             **({'body_mismatch': c['body_mismatch']} if c.get('body_mismatch') else {}),
                             **({'game_froze': c['freeze']['since']} if c.get('freeze') else {})})

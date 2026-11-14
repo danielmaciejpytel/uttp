@@ -6,10 +6,14 @@ cycleX = folder under Research\logs\night (or a full path). Prints per (scenario
 the delta, and a summary (how many steps improved / worsened / unchanged, counts above the thresholds).
 """
 import glob
+import json
 import os
 import re
 import sys
 import collections
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gt_log  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 NIGHT = os.path.join(ROOT, 'Research', 'logs', 'night')
@@ -41,6 +45,19 @@ def resolve(name):
     return name if os.path.isdir(name) else os.path.join(NIGHT, name)
 
 
+def owner_of(cycle_dir):
+    """Pose owner of a cycle: summary.json "pose_owner" (written by night.py), else read from the mod log copy in logs\\."""
+    try:
+        with open(os.path.join(cycle_dir, 'summary.json'), encoding='utf-8') as f:
+            po = json.load(f).get('pose_owner')
+    except (OSError, ValueError):
+        po = None
+    if not po:
+        logs = [p for p in glob.glob(os.path.join(cycle_dir, 'logs', 'utpp-*.log')) if gt_log.is_session_log(p)]
+        po = gt_log.pose_owner_of_log(min(logs, key=len) if logs else None)
+    return po
+
+
 def main(argv):
     if len(argv) < 3:
         print(__doc__)
@@ -49,6 +66,10 @@ def main(argv):
     wanted = None
     if '--metric' in argv:
         wanted = set(argv[argv.index('--metric') + 1].split(','))
+    oa, ob = owner_of(a), owner_of(b)
+    print(f'pose owner: A {gt_log.pose_owner_label(oa)} | B {gt_log.pose_owner_label(ob)}')
+    if oa.get('owner') != ob.get('owner') or 'unknown' in (oa.get('owner'), ob.get('owner')):
+        print('!!! the pose owners differ or are unknown: the deltas below compare different pose write stages')
     ma, mb = metrics_of(a), metrics_of(b)
     keys = sorted(k for k in set(ma) | set(mb) if (wanted is None or k[2] in wanted))
     thresholds = {'footlock_corr_max_cm': 15.0, 'offset_saturated_s': 0.5}

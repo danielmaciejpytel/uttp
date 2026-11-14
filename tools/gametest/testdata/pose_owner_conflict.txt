@@ -1,0 +1,2 @@
+[2026-11-10 08:18:19.289] [info    ] [134948] [UTPP] UTPP early pose experiment: owner=Mapping catalogValid=1 helpers=116 restartRequired=1
+[2026-11-10 08:19:20.001] [info    ] [ 63048] [UTPP] UTPP FK counters (tpp): totalCalls=7849 (+7849) matchedCalls=1837 (+1837) appliedCalls=0 mmAppliedCalls=1500 (+1500) badIndexCalls=0 fault=0 faultCode=0x00000000 armed=1 matchMode=0 matchTag=1837 matchRig=1821 sameCountCalls=1821 lastDescCount=645 rigBones=645 mmBonesWritten=98000 mmRigMismatch=0 mmStaleSkips=0 mmTornReads=0 mmActive=1 earlyOwner=0 earlyApplied=0

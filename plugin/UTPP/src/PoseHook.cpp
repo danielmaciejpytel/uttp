@@ -24,6 +24,7 @@
 #include "ragdoll/RdLastPose.hpp"
 #include "ragdoll/RagdollSlotProbe.hpp"
 #include "mm/VehicleTransition.hpp" // vehicle batch W1 P2: mount / exit transition on the Mapping owner path
+#include "mm/CoreWriteRecord.hpp"
 
 #include <atomic>
 #include <cstring>
@@ -64,6 +65,18 @@ struct CycleWorker
     uint64_t session = 0;
 };
 thread_local CycleWorker g_cycleWorker;
+// Mapping owner: core writers (and the weight-0 writer window) of the mapping jobs of the pending cycle of this thread
+// (mm/CoreWriteRecord.hpp). Kept only while the cycle the main job started is pending; handed to the FK call that consumes that cycle
+// and cleared by every FK call, so the writers of one cycle never reach the FK call of another one.
+struct EarlyWriters { uint64_t cycle = 0; uint32_t writers = 0; };
+thread_local EarlyWriters g_earlyWriters;
+void KeepEarlyWriters(uint32_t aRecord)
+{
+    const auto& state = g_cycleWorker.state;
+    if (!state.active || !state.cycle) { g_earlyWriters = {}; return; }
+    if (g_earlyWriters.cycle != state.cycle) g_earlyWriters = {state.cycle, 0};
+    g_earlyWriters.writers |= mm::corewrite::EarlyPart(aRecord); // the helper jobs of the cycle add nothing and remove nothing
+}
 // Reset of the pending cycle evidence for the per-FK-call path. A state that is not active is already the reset state (only Observe
 // writes it, setting `active` together with every other field; Reset clears all of them), so the ~2 KB clear is skipped for it:
 // with the diagnostics off this ran on every FK call of every skeleton.
@@ -508,6 +521,11 @@ void ApplyEarlyMapping(void* aGraph, void* aContext, unsigned int aLod)
         // Non-zero = a transition frame: no MM blend, reload contacts, AO or game pose sample on it.
         if (mm::vehtrans::Wanted())
         {
+            // The weight-0 writer window of this cycle opens here, before the transition writes, as the FK owner opens it before
+            // FkSide (FkHook.cpp ApplyMotionMatching): a write that ends the transition still reaches the helper recompute inside it.
+            if (bodyhelperruntime::Enabled() && bodyhelperruntime::ZeroWriterRecompute() &&
+                mm::vehtrans::g_mountTpp.load(std::memory_order_acquire))
+                mm::corewrite::MarkZeroWindow(true);
             const bool vehAllows = g_hot.perspectiveWrite.Allows(now.QuadPart,
                 g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed));
             auto* vehBones = *reinterpret_cast<uint8_t**>(desc + kDescBonesOff);
@@ -571,7 +589,14 @@ void* MappingDetour(void* aGraph, void* aContext, void* aSource, unsigned int aL
     if (rdOn)
         RdMapCapture(aGraph, aContext, rdPre);
     if (earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping)
+    {
+        // The writers of this job go to the FK call of its cycle (KeepEarlyWriters), not to whatever record this thread holds.
+        const uint32_t record = mm::corewrite::Current();
+        mm::corewrite::Begin();
         ApplyEarlyMapping(aGraph, aContext, aLod);
+        KeepEarlyWriters(mm::corewrite::Current());
+        mm::corewrite::Restore(record);
+    }
     return result;
 }
 
@@ -666,6 +691,9 @@ size_t CopyCensus(Event* aOut, size_t aCapacity)
 
 void NoteBeforeFK(void* aDesc, void* aRig, int64_t aTicks)
 {
+    // Every FK call takes the early writers of this thread, delivered below only to the FK call of their own cycle.
+    const EarlyWriters early = g_earlyWriters;
+    if (early.writers) g_earlyWriters = {};
     if ((!g_enabled.load(std::memory_order_relaxed) && !bodyhelperruntime::Enabled()) || !aDesc ||
         !g_hot.armed.load(std::memory_order_acquire))
         { ResetCycleIfActive(g_cycleWorker.state); return; }
@@ -696,6 +724,12 @@ void NoteBeforeFK(void* aDesc, void* aRig, int64_t aTicks)
                 g_qpcHz.load(std::memory_order_relaxed) / 2,
                 g_hot.perspectiveWrite.Allows(aTicks,
                     g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed)));
+            // Mapping owner: the core writers of the main mapping job of this cycle belong to this call's record.
+            if (early.writers && early.cycle == event.cycle.cycle &&
+                event.cycle.status != mm::mappingcycle::ConsumeStatus::MissingMain &&
+                event.cycle.status != mm::mappingcycle::ConsumeStatus::IdentityMismatch &&
+                earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping)
+                mm::corewrite::MarkEarly(early.writers);
         }
         if (event.cycleConfigured && bodyhelperruntime::Enabled() && !ragdoll::GameOwned())
             bodyhelperruntime::Evaluate(desc, reinterpret_cast<uint8_t*>(event.bones), event.count,

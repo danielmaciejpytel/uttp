@@ -416,6 +416,55 @@ def parse_file(path: str, start_offset=0) -> list[LogLine]:
     return parse_text(data.decode('utf-8', errors='replace'))
 
 
+# Pose owner of a session (which stage of the frame wrote the player's pose). The plugin selects it once at load: the load line below
+# appears only when the switch file selected the early mapping owner; the first "FK counters (tpp)" lines carry earlyOwner (0 = FK,
+# 1 = Mapping). Two runs on different owners are not comparable.
+_OWNER_LINE_RE = re.compile(r'UTPP early pose experiment: owner=(\w+) catalogValid=(\d+) helpers=(\d+)')
+_FK_OWNER_RE = re.compile(r'UTPP FK counters \(tpp\):.*?\searlyOwner=(\d+)')
+
+
+def pose_owner(text: str) -> dict:
+    """{'owner': 'Mapping' | 'FK' | 'unknown' | 'conflict', 'owner_line', 'early_owner', 'catalog_valid', 'helpers', 'detail'}.
+    Mapping = the load line (owner=Mapping) and no FK counters line that says 0; FK = an FK counters line with earlyOwner=0 and no
+    load line; unknown = neither line (log cut or the body never reached third person); conflict = the two sources disagree."""
+    m = _OWNER_LINE_RE.search(text)
+    early = sorted({int(x) for x in _FK_OWNER_RE.findall(text)})
+    out = {'owner': 'unknown', 'owner_line': bool(m), 'early_owner': early,
+           'catalog_valid': int(m.group(2)) if m else None, 'helpers': int(m.group(3)) if m else None, 'detail': ''}
+    if m and m.group(1) != 'Mapping':
+        out.update(owner='conflict', detail=f'load line names owner={m.group(1)}')
+    elif m and early and early != [1]:
+        out.update(owner='conflict', detail='load line says Mapping, FK counters say earlyOwner=%s' % '/'.join(map(str, early)))
+    elif m:
+        out['owner'] = 'Mapping'
+        if not out['catalog_valid']:
+            out['detail'] = 'catalogValid=0: the early owner writes no pose at all'
+    elif early == [0]:
+        out['owner'] = 'FK'
+    elif early:
+        out.update(owner='conflict', detail='FK counters say earlyOwner=%s without the load line' % '/'.join(map(str, early)))
+    else:
+        out['detail'] = 'neither the load line nor an FK counters line in the log'
+    return out
+
+
+def pose_owner_of_log(path: str | None) -> dict:
+    """pose_owner of a session log (a utpp-<start>.log includes its rotated siblings); a missing file = unknown."""
+    if not path or not os.path.isfile(path):
+        return dict(pose_owner(''), detail='no mod log')
+    return pose_owner(read_session_text(path))
+
+
+def pose_owner_label(po: dict | None) -> str:
+    """Short text for the one-line results: 'FK', 'Mapping', 'Mapping (catalogValid=0 ...)', 'unknown', 'CONFLICT (...)'."""
+    if not po:
+        return 'unknown'
+    owner = po.get('owner') or 'unknown'
+    if owner == 'conflict':
+        return f'CONFLICT ({po.get("detail")})'
+    return owner + (f' ({po["detail"]})' if owner == 'Mapping' and po.get('detail') else '')
+
+
 def newest_log(log_dir: str = DEFAULT_LOG_DIR, pattern: str = 'utpp-*.log') -> str | None:
     """The CURRENT file (utpp-<start>.log, unsuffixed) of the session written last. A rotated sibling (.1.log, .2.log)
     never wins on its own: the session is ranked by its newest member and answered by its current file."""

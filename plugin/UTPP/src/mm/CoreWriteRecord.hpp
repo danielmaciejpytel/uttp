@@ -3,6 +3,8 @@
 // (inline thread_local), so the FK hook, the vehicle and vault layers and the skin helper recompute share it without a link
 // dependency. The FK detour clears it first, every layer that writes core bones marks its bit at the write, and the helper
 // recompute of the same call (posediag::NoteBeforeFK, same thread) reads it. No atomics: one thread owns one FK call.
+// Under the Mapping owner the main mapping job writes the motion pose (and the vehicle transition) before the FK call; its writers
+// travel with the mapping-cycle receipt of the thread (PoseHook.cpp) and are added to the record of the FK call of that cycle.
 
 #include <cstdint>
 
@@ -40,4 +42,16 @@ inline void MarkPlayerCall() noexcept { t_record |= kPlayerCall; }
 inline void MarkEvaluated() noexcept { t_record |= kEvaluated; }
 inline void MarkZeroWindow(bool aVehicleThirdPerson) noexcept { t_record |= kZeroWindow | (aVehicleThirdPerson ? kVehicleThirdPerson : 0u); }
 inline uint32_t Current() noexcept { return t_record; }
+// Mapping owner: the core writes happen in the main mapping job, before the FK call of the same cycle. The mapping hook records that
+// job's writers and the weight-0 writer window it opened apart (Begin before the job, Restore after it) and hands them to the FK call
+// of the same cycle (MarkEarly).
+inline constexpr uint32_t kEarlyMask = kWriterMask | kZeroWindow | kVehicleThirdPerson;
+// The part of a mapping job's record that is handed on: its writers, and its window only when a weight-0 writer wrote in that job (the
+// FK call decides the window again itself; a job that wrote nothing at weight 0 must not keep the vehicle's third-person flag alive).
+inline constexpr uint32_t EarlyPart(uint32_t aRecord) noexcept
+{
+    return (aRecord & kZeroWriterMask) ? (aRecord & kEarlyMask) : (aRecord & kWriterMask);
+}
+inline void Restore(uint32_t aRecord) noexcept { t_record = aRecord; }
+inline void MarkEarly(uint32_t aRecord) noexcept { t_record |= aRecord & kEarlyMask; }
 } // namespace utpp::mm::corewrite
