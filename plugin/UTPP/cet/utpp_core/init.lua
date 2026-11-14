@@ -537,7 +537,7 @@ local LAYOUT = {
   { "advanced", "vehicles", { "vehicle.keepTpp", "vehicle.pullOut", "vehicle.safeTeleportExit", "vehicle.rideWatchdog",
                               "vehicle.approachWalk", "vehicle.jumpOutSidePush" } },
   { "developer", "vehicles", { "body.headGuard", "ragdoll.enabled", "ragdoll.impulseScale", "ragdoll.maxSeconds",
-                                "ragdoll.getUpPush", "ragdoll.getUp" } },
+                                "ragdoll.getUpPush", "ragdoll.getUp", "mm.helperZeroWeightWriters" } },
   -- Advanced
   { "advanced", "advanced", { "camera.mouseScale", "perspective.minGap", "camera.aim.range",
                               "camera.zoomUnarmed.steps", "camera.zoomUnarmed.distance", "camera.zoomUnarmed.lastDistance",
@@ -2764,6 +2764,11 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
       .. "for every weapon with third-person melee animations. Off: the legs come from the game's base pose and only the chest is "
       .. "turned toward the animation.",
     apply = applyMeleeFullPose })
+  M.Register({ key = "mm.helperZeroWeightWriters", section = "animation", type = "bool", default = true,
+    label = "Skin helpers: vehicle and vault frames",
+    desc = "Recomputes the skin helper bones also on the frames that the vehicle mount / exit transition, the seat guards, the seated "
+      .. "neck cut and the vault torso change, keeping the game's own helper offset. Off: those frames keep the game's helper values.",
+    apply = function(v) pcall(function() return Game.UTPPSetHelperZeroWeightWriters(v == true) end) end })
   M.Register({ key = "mm.grip", section = "animation", type = "bool", default = true,
     label = "motion: left-hand weapon grip",
     desc = "Keeps the left hand on the captured weapon grip for two-handed pistols and rifles while motion owns the upper body. Off disables this correction.",

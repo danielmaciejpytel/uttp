@@ -23,6 +23,14 @@ inline constexpr uint32_t Bit(Writer aWriter) { return 1u << static_cast<uint32_
 inline constexpr uint32_t kWriterMask = (1u << kWriterCount) - 1u;
 inline constexpr uint32_t kPlayerCall = 1u << 31; // the FK call was matched as the player's (set by the FK detour)
 inline constexpr uint32_t kEvaluated = 1u << 30;  // the helper recompute ran on this call (set by bodyhelperruntime::Evaluate)
+// Set by the FK detour before the layers run, only while the weight-0 writer recompute is switched on: a weight-0 writer (vehicle
+// transition, vehicle guards, neck cut, vault torso) can write core bones in this call and the body is shown in third person.
+inline constexpr uint32_t kZeroWindow = 1u << 29;
+// With kZeroWindow: the vehicle camera shows the third-person body in this call (mounted third-person flag of the vehicle layer).
+inline constexpr uint32_t kVehicleThirdPerson = 1u << 28;
+// Writers that run at a published motion weight of 0 (their frames are not covered by the published-pose path) and the published ones.
+inline constexpr uint32_t kZeroWriterMask = Bit(kVehicleTransition) | Bit(kNeckGuard) | Bit(kVaultTorso) | Bit(kVehicleGuards);
+inline constexpr uint32_t kPublishedMask = Bit(kDriver) | Bit(kHost);
 
 inline thread_local uint32_t t_record = 0;
 
@@ -30,5 +38,6 @@ inline void Begin() noexcept { t_record = 0; }
 inline void Mark(Writer aWriter) noexcept { t_record |= Bit(aWriter); }
 inline void MarkPlayerCall() noexcept { t_record |= kPlayerCall; }
 inline void MarkEvaluated() noexcept { t_record |= kEvaluated; }
+inline void MarkZeroWindow(bool aVehicleThirdPerson) noexcept { t_record |= kZeroWindow | (aVehicleThirdPerson ? kVehicleThirdPerson : 0u); }
 inline uint32_t Current() noexcept { return t_record; }
 } // namespace utpp::mm::corewrite

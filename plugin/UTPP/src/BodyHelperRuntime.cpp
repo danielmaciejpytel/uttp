@@ -15,6 +15,7 @@
 #include "mm/BodyDeformerProgramFile.hpp"
 #include "mm/BodyHelperBindingFile.hpp"
 #include "mm/BodyHelperAdmission.hpp"
+#include "mm/BodyHelperCarry.hpp"
 #include "mm/BodyHelperCommit.hpp"
 #include "mm/BodyDeformerTrace.hpp"
 #include "mm/CoreWriteRecord.hpp"
@@ -96,6 +97,35 @@ void Tally(uint32_t record,Outcome outcome) noexcept
 }
 thread_local mm::bodyhelpercandidate::Scratch g_scratch;
 thread_local mm::helperpatch::Patch g_patch;
+
+// Weight-0 writer recompute (mm/BodyHelperAdmission.hpp Route, mm/BodyHelperCarry.hpp). One state for the player: its FK calls run one
+// after another (on changing worker threads), so a try-lock is enough; a call that finds it busy writes nothing on a weight-0 writer's
+// frame and does not update it on a reference frame.
+std::atomic<bool> g_zeroOn{true};
+struct Carry
+{
+    const Active* active=nullptr;const Slot* slot=nullptr;uint32_t count=0;
+    int64_t updated=0;          // last call that set `offset` (any route)
+    int64_t lastWritten=0;      // last weight-0 writer's commit (start of the fade back)
+    bool valid=false,offsetIdentity=true,carriedIdentity=true;
+    mm::helpercarry::Offsets offset{},carried{},live{};
+};
+Carry g_carry;
+std::atomic_flag g_carryBusy=ATOMIC_FLAG_INIT;
+struct CarryLock
+{
+    bool held;
+    explicit CarryLock(bool take=true) noexcept:held(take&&!g_carryBusy.test_and_set(std::memory_order_acquire)){}
+    ~CarryLock(){if(held)g_carryBusy.clear(std::memory_order_release);}
+    CarryLock(const CarryLock&)=delete;CarryLock& operator=(const CarryLock&)=delete;
+};
+// A published-pose commit shows the graph: the offset the next weight-0 run carries is the identity.
+void CarryNoteGraphShown(const Active* active,const Slot* slot,uint32_t count,int64_t now) noexcept
+{
+    CarryLock lock;if(!lock.held)return;
+    g_carry.active=active;g_carry.slot=slot;g_carry.count=count;g_carry.updated=now;g_carry.lastWritten=0;
+    g_carry.valid=true;g_carry.offsetIdentity=true;g_carry.carriedIdentity=true;
+}
 
 bool ReadBounded(const std::filesystem::path& path,std::vector<uint8_t>& bytes)
 {
@@ -331,14 +361,21 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
         reinterpret_cast<uintptr_t>(bones)%alignof(float)==0;
     const int64_t maxAge=g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed);
     gi.perspectiveOk=maxAge>0&&g_hot.perspectiveWrite.Allows(now,maxAge);
+    // A weight-0 writer's call or a reference call inside its window (mm/BodyHelperAdmission.hpp Route): no motion-active requirement,
+    // and the vehicle camera showing the third-person body passes the perspective gate.
+    const auto route=ha::RouteOf(record,g_zeroOn.load(std::memory_order_relaxed));
+    const bool zeroRoute=route!=ha::Route::Published;
+    if(zeroRoute)ha::ZeroRouteInputs(gi,gi.perspectiveOk,record);
+    gi.perspectiveOk=gi.perspectiveOk&&maxAge>0;
     gi.receiptComplete=active&&receipt.status==mm::mappingcycle::ConsumeStatus::Complete&&receipt.complete&&
         receipt.required==active->requiredCount&&receipt.covered==active->requiredCount&&
         receipt.equal==active->requiredCount&&receipt.startedTicks>0&&
         receipt.lastTicks>=receipt.startedTicks&&now>=receipt.lastTicks&&now-receipt.lastTicks<=maxAge;
     if(const auto why=ha::Gate(gi);why!=ha::Reject::None)return reject(why);
     mm::integ::PoseSnapshot body;
-    if (!g_mmPose.Read(body) || body.rig!=rig || !(body.weight>0) ||
-        body.publishTicks<=0 || now<body.publishTicks || now-body.publishTicks>maxAge) return reject(ha::Reject::Body);
+    const bool bodyRead=g_mmPose.Read(body);
+    if(!ha::SnapshotUsable(route,bodyRead,bodyRead&&body.rig==rig,bodyRead?body.weight:0.0f,
+        bodyRead&&body.publishTicks>0&&now>=body.publishTicks&&now-body.publishTicks<=maxAge))return reject(ha::Reject::Body);
     // The bundle of the live body: the man and the woman bundle fit the same rig, so the pose snapshot decides which plan may run.
     // A body without a loaded bundle (missing / unapproved / refused at arm) writes nothing; the other body is not affected.
     Slot* slot=nullptr;
@@ -353,10 +390,46 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
     if(!result){g_buildFailed.fetch_add(1,std::memory_order_relaxed);Tally(record,Outcome::Build);return false;}
     g_proposed.fetch_add(1,std::memory_order_relaxed);
     g_proposedRecords.fetch_add(g_patch.count,std::memory_order_relaxed);
-    if(g_mode.load(std::memory_order_acquire)==Mode::Apply)
+    const bool apply=g_mode.load(std::memory_order_acquire)==Mode::Apply;
+    // Weight-0 writer routes (mm/BodyHelperCarry.hpp): the graph records of the patch get the engine's deviation before the commit.
+    // Written call: the offset shown on the previous call is carried. Reference call: the engine's live deviation is measured; while it
+    // fades back after a written run the call is written with the blend, otherwise the engine's values stay and the live offset is kept.
+    CarryLock carry(zeroRoute);
+    Outcome zeroOutcome=Outcome::Committed;
+    if(zeroRoute)
     {
-        struct CommitContext { Active* active;const Slot* slot;uint8_t* desc;uint8_t* bones;uint64_t rig,tag;uint32_t count;int64_t receiptTicks; };
-        CommitContext context{active,slot,desc,bones,rig,*reinterpret_cast<const uint64_t*>(desc+kDescTagOff),count,receipt.lastTicks};
+        if(!carry.held){Tally(record,route==ha::Route::ZeroWritten?Outcome::NoReference:Outcome::Reference);return route!=ha::Route::ZeroWritten;}
+        const bool samePlan=g_carry.active==active&&g_carry.slot==slot&&g_carry.count==g_patch.count;
+        const bool usable=ha::ReferenceUsable(g_carry.valid,samePlan,g_carry.updated,now,maxAge);
+        if(route==ha::Route::ZeroWritten)
+        {
+            if(!usable){Tally(record,Outcome::NoReference);return false;}
+            if(!mm::helpercarry::Apply(g_patch,g_carry.offset,g_carry.offsetIdentity))
+            { g_buildFailed.fetch_add(1,std::memory_order_relaxed);Tally(record,Outcome::Build);return false; }
+        }
+        else
+        {
+            if(!mm::helpercarry::Measure(g_patch,g_carry.live))
+            { g_buildFailed.fetch_add(1,std::memory_order_relaxed);Tally(record,Outcome::Build);return false; }
+            const float alpha=usable&&apply?mm::helpercarry::FadeAlpha(now,g_carry.lastWritten,util::QpcFrequency()):1.0f;
+            if(!(alpha<1.0f)||!mm::helpercarry::Blend(g_carry.carried,g_carry.carriedIdentity,g_carry.live,g_patch.count,alpha,g_carry.offset)||
+               !mm::helpercarry::Apply(g_patch,g_carry.offset,false))
+            {
+                std::copy_n(g_carry.live.begin(),g_patch.count,g_carry.offset.begin());
+                g_carry.active=active;g_carry.slot=slot;g_carry.count=g_patch.count;g_carry.updated=now;g_carry.lastWritten=0;
+                g_carry.valid=true;g_carry.offsetIdentity=false;
+                Tally(record,Outcome::Reference);
+                return true;
+            }
+            zeroOutcome=Outcome::Fade;
+        }
+    }
+    if(apply)
+    {
+        struct CommitContext { Active* active;const Slot* slot;uint8_t* desc;uint8_t* bones;uint64_t rig,tag;uint32_t count;int64_t receiptTicks;
+                               bool zero,vehicleThirdPerson; };
+        CommitContext context{active,slot,desc,bones,rig,*reinterpret_cast<const uint64_t*>(desc+kDescTagOff),count,receipt.lastTicks,
+                              zeroRoute,(record&mm::corewrite::kVehicleThirdPerson)!=0};
         const auto permission=[](void* opaque) noexcept
         {
             const auto& c=*static_cast<const CommitContext*>(opaque);
@@ -365,20 +438,20 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
             const auto liveOwner=earlyruntime::CurrentOwner();
             if(ragdoll::GameOwned()||!Enabled()||g_mode.load(std::memory_order_acquire)!=Mode::Apply||
                g_active.load(std::memory_order_acquire)!=c.active||g_hot.fault.load(std::memory_order_acquire)||
-               !g_hot.armed.load(std::memory_order_acquire)||!g_hot.mmActive.load(std::memory_order_acquire)||
+               !g_hot.armed.load(std::memory_order_acquire)||(!c.zero&&!g_hot.mmActive.load(std::memory_order_acquire))||
                !mm::helperadmission::OwnerAllows(liveOwner==earlyruntime::Owner::Mapping,liveOwner==earlyruntime::Owner::FK,c.slot->bundle->approved)||
                reinterpret_cast<uint64_t>(c.desc)!=g_hot.playerDesc.load(std::memory_order_relaxed)||
                c.rig!=g_hot.playerRig.load(std::memory_order_relaxed)||
                c.count!=g_hot.playerBones.load(std::memory_order_relaxed)||
-               !g_hot.perspectiveWrite.Allows(clock.QuadPart,age)||c.receiptTicks<=0||
+               !(g_hot.perspectiveWrite.Allows(clock.QuadPart,age)||(c.zero&&c.vehicleThirdPerson&&age>0))||c.receiptTicks<=0||
                clock.QuadPart<c.receiptTicks||clock.QuadPart-c.receiptTicks>age)return false;
             if(!c.tag||(c.tag!=g_hot.trackA.load(std::memory_order_relaxed)&&c.tag!=g_hot.trackB.load(std::memory_order_relaxed))||
                *reinterpret_cast<uint8_t* const*>(c.desc+kDescBonesOff)!=c.bones||
                *reinterpret_cast<const uint32_t*>(c.desc+kDescCountOff)!=c.count||
                *reinterpret_cast<const uint64_t*>(c.desc+kDescTagOff)!=c.tag)return false;
             mm::integ::PoseSnapshot current;
-            return g_mmPose.Read(current)&&mm::helperadmission::BodyMatches(c.slot->bundle->approved,c.slot->bundle->body,current.bodyType)&&current.rig==c.rig&&current.weight>0&&
-                current.publishTicks>0&&clock.QuadPart>=current.publishTicks&&clock.QuadPart-current.publishTicks<=age;
+            return g_mmPose.Read(current)&&mm::helperadmission::BodyMatches(c.slot->bundle->approved,c.slot->bundle->body,current.bodyType)&&current.rig==c.rig&&
+                (c.zero||current.weight>0)&&current.publishTicks>0&&clock.QuadPart>=current.publishTicks&&clock.QuadPart-current.publishTicks<=age;
         };
         const auto committed=mm::bodyhelpercommit::Commit(slot->plan.helperPlan,
             {reinterpret_cast<float*>(bones),size_t(count)*mm::helperpatch::kRecordFloats},g_patch,permission,&context);
@@ -386,11 +459,27 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
         {
             g_commitRejected.fetch_add(1,std::memory_order_relaxed);
             if(committed.error==mm::bodyhelpercommit::Error::TranslationJump)g_jumpRejected.fetch_add(1,std::memory_order_relaxed);
+            if(zeroRoute&&route==ha::Route::ZeroReference)
+            {
+                // the fade frame shows the engine's values: its live deviation is the shown offset, the fade ends
+                std::copy_n(g_carry.live.begin(),g_patch.count,g_carry.offset.begin());
+                g_carry.updated=now;g_carry.lastWritten=0;g_carry.offsetIdentity=false;
+            }
             Tally(record,Outcome::Commit);
             return false;
         }
         g_applied.fetch_add(1,std::memory_order_relaxed);g_appliedRecords.fetch_add(g_patch.count,std::memory_order_relaxed);
-        Tally(record,Outcome::Committed);
+        Tally(record,zeroRoute?zeroOutcome:Outcome::Committed);
+        if(!zeroRoute)
+        {
+            if(g_zeroOn.load(std::memory_order_relaxed))CarryNoteGraphShown(active,slot,g_patch.count,now);
+        }
+        else if(route==ha::Route::ZeroWritten)
+        {
+            if(!g_carry.offsetIdentity)std::copy_n(g_carry.offset.begin(),g_patch.count,g_carry.carried.begin());
+            g_carry.carriedIdentity=g_carry.offsetIdentity;g_carry.lastWritten=now;g_carry.updated=now;
+        }
+        else { g_carry.offsetIdentity=false;g_carry.updated=now; }
         // This is the first point where the local records include the applied
         // helper correction. Keep it separate from FkHook's earlier MM/Aim pair.
         if(mm::bodytrace::g_postHelperCapture.Active())
@@ -406,6 +495,15 @@ void NoteNotEvaluated(uint32_t aRecord) noexcept
 {
     if(Enabled())Tally(aRecord,Outcome::NotEvaluated);
 }
+
+void SetZeroWriterRecompute(bool aOn) noexcept
+{
+    g_zeroOn.store(aOn,std::memory_order_relaxed);
+    // a later switch-on starts from no measured offset (the first weight-0 writer's call waits for a reference call)
+    CarryLock lock;if(lock.held)g_carry.valid=false;
+}
+
+bool ZeroWriterRecompute() noexcept { return g_zeroOn.load(std::memory_order_relaxed); }
 
 Coverage ReadCoverage() noexcept
 {
@@ -442,7 +540,7 @@ std::vector<uint64_t> RequiredCatalog()
     {
         std::lock_guard<std::mutex> lock(g_coldMutex);
         if(g_mode.load(std::memory_order_relaxed)==Mode::Off)return out;
-        // Union over the approved bundles (the man bundle owns the woman bundle's helper bones plus the two right lower-leg helpers,
+        // Union over the approved bundles (the man bundle owns the woman bundle's helper bones plus the two right lower-leg helpers and hand helpers,
         // so the union is the man bundle's list).
         for(const auto& bundle:g_bundles)
         {

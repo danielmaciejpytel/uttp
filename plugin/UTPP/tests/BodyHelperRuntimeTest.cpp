@@ -6,7 +6,9 @@
 #include "../src/BodyHelperRuntime.hpp"
 #include "../src/EarlyPoseRuntime.hpp"
 #include "../src/State.hpp"
+#include "../src/mm/BodyHelperCarry.hpp"
 #include "../src/mm/CoreWriteRecord.hpp"
+#include "../src/mm/GameIntegration.hpp"
 #include "../src/ragdoll/RagdollEpisode.hpp"
 
 #include <Windows.h>
@@ -619,6 +621,171 @@ void HostPublished(Body& man,Body& woman,const fs::path& work)
         bones=R.original;g_hot.armed.store(false);
     }
 }
+
+// Weight-0 writers (vehicle transition, vehicle guards, neck cut, vault torso): the FK detour opens a window (mm/CoreWriteRecord.hpp
+// kZeroWindow); inside it a written call is recomputed keeping the engine's deviation from the graph measured on the call before, a call
+// no layer wrote is only measured, and after a written run the deviation fades back to the engine's live one (mm/BodyHelperCarry.hpp).
+void RotateZ(float* r,float deg)
+{
+    const float h=deg*3.14159265f/360.f;const float qx=r[4],qy=r[5],qz=r[6],qw=r[7];const float s=std::sin(h),c=std::cos(h);
+    r[4]=c*qx+s*qy;r[5]=c*qy-s*qx;r[6]=c*qz+s*qw;r[7]=c*qw-s*qz; // (0,0,s,c) * q
+}
+double Dist(const float* a,const float* b){return std::sqrt(std::pow(a[0]-b[0],2)+std::pow(a[1]-b[1],2)+std::pow(a[2]-b[2],2));}
+void ZeroWeightWriters(Body& man,Body& woman,const fs::path& work)
+{
+    namespace cw=mm::corewrite;
+    auto at=[](const br::Coverage& c,size_t w,br::Outcome o){return c.byWriter[w][size_t(o)];};
+    for(Body* live:{&man,&woman})
+    {
+        Body& R=*live;
+        const std::string L=std::string("weight-0 writers, ")+R.label+": ";
+        std::vector<float>& bones=R.fx.bones;
+        g_hot.armed.store(false);
+        Install(work,"APPLY\n",R.folder==std::string("man")?Of(R):kNone,R.folder==std::string("woman")?Of(R):kNone);
+        check(br::Load(work.wstring())&&br::ApplyEnabled(),L+"APPLY loads");
+        bones=R.original;Bind(R,bones.data(),R.count);
+        g_required=uint32_t(br::RequiredCatalog().size());
+        const auto catalog=br::RequiredCatalog();
+        check(br::PrepareArm(R.rig,R.fx.parents,R.names,catalog),L+"arm");
+        g_hot.armed.store(true);g_hot.mmActive.store(true);mm::integ::SetKnownBody(-1);
+        check(br::ZeroWriterRecompute(),L+"the switch is on by default");
+        // plain graph records of the current buffer (published path: driver pose, weight 1); also resets the carried offset to identity
+        auto graph=[&](const std::vector<float>& in)
+        {
+            bones=in;cw::Begin();cw::MarkPlayerCall();cw::Mark(cw::kDriver);
+            const int64_t now=Publish(R,true,R.bodyType,1.f,-1);
+            check(Call(R,bones,R.count,ReceiptAt(now,true),now),L+"test setup: the published path writes the graph");
+            return bones;
+        };
+        const std::vector<float> graphOriginal=graph(R.original);
+        std::vector<uint32_t> owned;
+        for(uint32_t i=0;i<R.count;++i)if(std::memcmp(&graphOriginal[size_t(i)*12],&R.original[size_t(i)*12],48)!=0)owned.push_back(i);
+        // an owned helper whose engine value gets a deviation from the graph, and a core bone the writer turns
+        size_t hk=R.count;for(size_t i=0;i<R.names.size()&&i<R.count;++i)if(R.names[i]==catalog[0])hk=i;
+        size_t core=R.count;for(size_t i=0;i<R.names.size()&&i<R.count;++i)if(R.names[i]==mm::integ::CNameHash("LeftArm"))core=i;
+        check(hk<R.count&&core<R.count&&!owned.empty(),L+"test setup: owned helper and left upper arm found");
+        if(hk>=R.count||core>=R.count||owned.empty()){bones=R.original;g_hot.armed.store(false);continue;}
+        // engine buffers: helpers as the graph of the unwritten pose, the owned helper moved by `cm`; a writer then turns the left upper arm by 8 deg
+        auto engine=[&](bool written,float cm)
+        {
+            std::vector<float> b=graphOriginal;b[hk*12+0]+=cm*0.01f;if(written)RotateZ(&b[core*12],8.f);return b;
+        };
+        const std::vector<float> restIn1=engine(false,1.f),writtenIn1=engine(true,1.f),restIn2=engine(false,2.f),writtenIn0=engine(true,0.f);
+        const std::vector<float> rest1=graph(restIn1),written1=graph(writtenIn1),rest2=graph(restIn2),written0=graph(writtenIn0);
+        uint32_t turned=0;for(uint32_t i:owned)if(Dist(&written1[size_t(i)*12],&rest1[size_t(i)*12])>1e-4)++turned;
+        std::printf("%s%zu owned records, %u move by more than 0.01 cm when the upper arm turns; owned helper deviation vs its graph %.5f m\n",
+                    L.c_str(),owned.size(),turned,Dist(&restIn1[hk*12],&rest1[hk*12]));
+        check(turned>0,L+"test setup: the turned upper arm moves helpers");
+        // a running clock behind the real one (the commit checks its stamps against the real clock); camera stamps are set at the call time
+        int64_t t=0;{LARGE_INTEGER q{};QueryPerformanceCounter(&q);t=q.QuadPart-15*g_hz;}
+        auto advance=[&](int64_t ticks){t+=ticks;return t;};
+        // one call: core write record (writers, window), snapshot at weight 0 with MM inactive, evaluated at `now`
+        auto zcall=[&](const std::vector<float>& in,uint32_t writers,bool window,bool vehicle,bool tpp,int64_t now)
+        {
+            bones=in;cw::Begin();cw::MarkPlayerCall();
+            for(uint32_t w=0;w<cw::kWriterCount;++w)if(writers&(1u<<w))cw::Mark(cw::Writer(w));
+            if(window)cw::MarkZeroWindow(vehicle);
+            g_hot.mmActive.store(false);
+            LARGE_INTEGER q{};QueryPerformanceCounter(&q);
+            Publish(R,tpp,R.bodyType,0.f,now-q.QuadPart-1);g_hot.perspectiveWrite.Publish(tpp,now);
+            const bool ok=Call(R,bones,R.count,ReceiptAt(now,true),now);
+            g_hot.mmActive.store(true);
+            return ok;
+        };
+        const int64_t hz=g_hz;
+        const uint32_t vt=cw::Bit(cw::kVehicleTransition);
+        // 1) a call no layer wrote, inside the window: measured only, nothing written
+        {
+            const auto before=br::ReadCoverage();
+            check(zcall(restIn1,0,true,true,false,advance(hz/10))&&bones==restIn1,L+"call without a writer inside the window: nothing written");
+            check(at(br::ReadCoverage(),br::kNoWriter,br::Outcome::Reference)==at(before,br::kNoWriter,br::Outcome::Reference)+1,
+                  L+"coverage: counted as 'ref' under 'none'");
+        }
+        // 2) the vehicle transition turns the left upper arm: helpers recomputed with the engine's 1 cm deviation kept (no step at the border)
+        double kept=0,worstOther=0,dev1=0;
+        {
+            const auto before=br::ReadCoverage();
+            check(zcall(writtenIn1,vt,true,true,false,advance(hz/10)),
+                  L+"vehicle transition call, vehicle camera in third person, MM inactive, weight 0: commits");
+            for(uint32_t i:owned)if(i!=hk)worstOther=std::fmax(worstOther,Dist(&bones[size_t(i)*12],&written1[size_t(i)*12]));
+            kept=Dist(&bones[hk*12],&written1[hk*12]);dev1=Dist(&restIn1[hk*12],&rest1[hk*12]);
+            uint32_t moved=0;for(uint32_t i:owned)if(Dist(&bones[size_t(i)*12],&writtenIn1[size_t(i)*12])>1e-4)++moved;
+            std::printf("%swritten call: %u owned records moved, deviation kept %.5f m (engine %.5f), other helpers vs graph max %.2e m\n",
+                        L.c_str(),moved,kept,dev1,worstOther);
+            check(moved>0,L+"the helpers the turned upper arm moves are recomputed");
+            check(std::fabs(kept-dev1)<2e-4,L+"the engine's deviation of the owned helper is kept on the written frame");
+            check(worstOther<1e-4,L+"the other helpers equal the graph of the written pose (no engine deviation there)");
+            check(at(br::ReadCoverage(),cw::kVehicleTransition,br::Outcome::Committed)==at(before,cw::kVehicleTransition,br::Outcome::Committed)+1,
+                  L+"coverage: the commit is counted under 'vehtrans'");
+        }
+        // 3) the next call is not written and the engine's deviation is 2 cm: written while fading, a quarter of the way (0.1 s of 0.4 s)
+        {
+            const auto before=br::ReadCoverage();
+            const double alpha=0.1/double(mm::helpercarry::kFadeSeconds);
+            check(zcall(restIn2,0,true,true,false,advance(hz/10)),L+"first call after the written run: commits (fade)");
+            const double dev=Dist(&bones[hk*12],&rest2[hk*12]),dev2=Dist(&restIn2[hk*12],&rest2[hk*12]);
+            std::printf("%sfade call: deviation %.5f m (carried %.5f, live %.5f, weight %.3f)\n",L.c_str(),dev,dev1,dev2,alpha);
+            check(std::fabs(dev-(dev1+(dev2-dev1)*alpha))<3e-4,L+"fade: the deviation moves linearly from the carried one to the live one");
+            check(at(br::ReadCoverage(),br::kNoWriter,br::Outcome::Fade)==at(before,br::kNoWriter,br::Outcome::Fade)+1,
+                  L+"coverage: counted as 'fade' under 'none'");
+        }
+        // 4) after the fade time: measured only again, nothing written
+        check(zcall(restIn2,0,true,true,false,advance(hz*35/100))&&bones==restIn2,L+"after the fade time: nothing written");
+        // 5) the switch: off = the published path only, refused at the gate; on again = no stale reference used
+        {
+            auto before=br::ReadCoverage();
+            br::SetZeroWriterRecompute(false);
+            check(!br::ZeroWriterRecompute(),L+"switch off");
+            check(!zcall(writtenIn1,vt,true,true,true,advance(hz/10))&&bones==writtenIn1,L+"switch off: the vehicle transition call writes nothing");
+            check(!zcall(restIn1,0,true,true,true,advance(hz/10))&&bones==restIn1,L+"switch off: a call without a writer writes nothing");
+            auto after=br::ReadCoverage();
+            check(at(after,cw::kVehicleTransition,br::Outcome::Gate)==at(before,cw::kVehicleTransition,br::Outcome::Gate)+1&&
+                  at(after,br::kNoWriter,br::Outcome::Gate)==at(before,br::kNoWriter,br::Outcome::Gate)+1,L+"switch off: both counted under 'gate'");
+            br::SetZeroWriterRecompute(true);
+            before=br::ReadCoverage();
+            check(!zcall(writtenIn1,vt,true,true,false,advance(hz/10))&&bones==writtenIn1,L+"switched on again: no reference yet, nothing written");
+            check(at(br::ReadCoverage(),cw::kVehicleTransition,br::Outcome::NoReference)==at(before,cw::kVehicleTransition,br::Outcome::NoReference)+1,
+                  L+"coverage: counted as 'noref'");
+        }
+        // 6) perspective: no vehicle third-person flag and a first-person camera: nothing written
+        {
+            check(zcall(restIn1,0,true,true,false,advance(hz/10)),L+"reference call");
+            const auto before=br::ReadCounters();
+            check(!zcall(writtenIn1,vt,true,false,false,advance(hz/10))&&bones==writtenIn1,L+"no vehicle third-person flag, first-person camera: nothing written");
+            check(br::ReadCounters().rejectReason[4]==before.rejectReason[4]+1,L+"counted as a perspective rejection");
+        }
+        // 7) every weight-0 writer is counted under its own row; the vault torso passes by the third-person camera
+        for(const auto w:{cw::kVehicleTransition,cw::kVehicleGuards,cw::kNeckGuard,cw::kVaultTorso})
+        {
+            const bool vault=w==cw::kVaultTorso;
+            zcall(restIn1,0,true,!vault,vault,advance(hz));
+            const auto before=br::ReadCoverage();
+            check(zcall(writtenIn1,cw::Bit(w),true,!vault,vault,advance(hz/10))&&std::fabs(Dist(&bones[hk*12],&written1[hk*12])-dev1)<2e-4,
+                  L+cw::kWriterNames[w]+": commits with the deviation kept");
+            check(at(br::ReadCoverage(),w,br::Outcome::Committed)==at(before,w,br::Outcome::Committed)+1,L+cw::kWriterNames[w]+": counted under its own writer");
+        }
+        // 8) after a published commit the carried offset is the identity: the written call equals the plain graph exactly
+        {
+            bones=writtenIn0;cw::Begin();cw::MarkPlayerCall();cw::Mark(cw::kDriver);
+            const int64_t now=advance(hz/10);
+            {LARGE_INTEGER q{};QueryPerformanceCounter(&q);Publish(R,true,R.bodyType,1.f,now-q.QuadPart-1);g_hot.perspectiveWrite.Publish(true,now);}
+            check(Call(R,bones,R.count,ReceiptAt(now,true),now)&&bones==written0,L+"published call on the same pose: writes the graph");
+            const std::vector<float> g=bones;
+            check(zcall(writtenIn0,vt,true,true,false,advance(hz/10))&&bones==g,L+"after a published commit: the written call writes exactly the graph records");
+        }
+        // 9) a published pose and a weight-0 writer in the same call: the published path, counted under both writers
+        {
+            bones=writtenIn0;cw::Begin();cw::MarkPlayerCall();cw::Mark(cw::kDriver);cw::Mark(cw::kNeckGuard);cw::MarkZeroWindow(true);
+            const int64_t now=Publish(R,true,R.bodyType,1.f,-1);
+            const auto before=br::ReadCoverage();
+            check(Call(R,bones,R.count,ReceiptAt(now,true),now)&&bones==written0,L+"driver + neck cut in one call: the published path writes the graph");
+            const auto after=br::ReadCoverage();
+            check(at(after,cw::kDriver,br::Outcome::Committed)==at(before,cw::kDriver,br::Outcome::Committed)+1&&
+                  at(after,cw::kNeckGuard,br::Outcome::Committed)==at(before,cw::kNeckGuard,br::Outcome::Committed)+1,L+"counted under 'driver' and 'neck'");
+        }
+        bones=R.original;g_hot.armed.store(false);
+    }
+}
 } // namespace
 
 int main(int argc,char** argv)
@@ -636,6 +803,7 @@ int main(int argc,char** argv)
     Suite(woman,man,root/"woman");
     Cross(man,woman,root/"both");
     HostPublished(man,woman,root/"both");
+    ZeroWeightWriters(man,woman,root/"both");
     std::error_code ec;fs::remove_all(root,ec);
     std::printf("%d checks, %d failures\n",g_checks,g_failures);
     return g_failures?1:0;

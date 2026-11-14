@@ -2390,6 +2390,19 @@ void Native_SetMotionSelectionGuards(RED4ext::IScriptable*, RED4ext::CStackFrame
         *aOut = ok;
 }
 
+// ---- skin helper recompute on the frames of the weight-0 core writers (bodyhelperruntime::SetZeroWriterRecompute; CET
+// setting mm.helperZeroWeightWriters, developer option, default on)
+void Native_SetHelperZeroWeightWriters(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = true;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    bodyhelperruntime::SetZeroWriterRecompute(on);
+    LogInfo("UTPPSetHelperZeroWeightWriters(%d)", on ? 1 : 0);
+    if (aOut)
+        *aOut = true;
+}
+
 // ---- v2 motion lean (motiondriver::SetLean / SetLeanHead / SetLeanParams; CET mm.lean, mm.leanHead, default off)
 void Native_SetMotionLean(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -3893,6 +3906,15 @@ void PostRegisterTypes()
         sg->AddParam("Bool", "on");
         sg->SetReturnType("Bool");
         rtti->RegisterFunction(sg);
+    }
+
+    // skin helper recompute on the weight-0 writers' frames
+    {
+        auto* hz = RED4ext::CGlobalFunction::Create("UTPPSetHelperZeroWeightWriters", "UTPPSetHelperZeroWeightWriters", &Native_SetHelperZeroWeightWriters);
+        hz->flags = flags;
+        hz->AddParam("Bool", "on");
+        hz->SetReturnType("Bool");
+        rtti->RegisterFunction(hz);
     }
 
     // v2 motion lean

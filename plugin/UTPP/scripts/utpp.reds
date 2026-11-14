@@ -23,6 +23,9 @@ public native func UTPPBodyPoseTraceStatus() -> String
 // Continuous capture of ALL helper bones (both stages) by a background writer thread into red4ext\logs\utpp-bodytrace-<time>.csv (+ posthelper file);
 // idempotent; refused (false) while an explicit UTPPBodyPoseTraceArm session runs; the explicit Arm refuses while this is on.
 public native func UTPPBodyPoseTraceContinuous(on: Bool) -> Bool
+// Skin helper recompute on the frames of the core writers that run at motion weight 0 (vehicle transition, vehicle guards, seated neck
+// cut, vault torso). On by default; off = only the frames of the published pose are recomputed. Always returns true.
+public native func UTPPSetHelperZeroWeightWriters(on: Bool) -> Bool
 // Compact pose capture of ALL helper bones (both stages, every frame; 16-bit values, differences between frames, block compression) into
 // red4ext\logs\utpp-pose-<time>.utpppose. keepMinutes 0 = the whole session (one file per rig); > 0 = one-minute segments named utpp-pose-ring-<time>.utpppose, only the last keepMinutes
 // minutes stay on disk. Refused (false) while the text capture above or an explicit Arm session runs, or while a capture with ANOTHER window runs

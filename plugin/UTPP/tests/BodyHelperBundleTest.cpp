@@ -6,6 +6,7 @@
 #include "../src/mm/BodyDeformerProgramFile.hpp"
 #include "../src/mm/BodyHelperAdmission.hpp"
 #include "../src/mm/BodyHelperBindingFile.hpp"
+#include "../src/mm/BodyHelperCarry.hpp"
 #include "../src/mm/BodyHelperCommit.hpp"
 #include "../src/mm/GameIntegration.hpp"
 
@@ -410,6 +411,33 @@ int main(int argc,char** argv)
         // The ceiling (argument) is about 2x the median measured when it was set, so a real slowdown of the hot path fails; the median
         // (not the mean) keeps a loaded machine from tripping it on a few slow calls.
         check(medianUs<limit,"Build+Commit median stays under the timing ceiling");
+        // The most expensive call of the weight-0 writer recompute (a frame of the fade after a written run): Build, measure the engine's
+        // deviation, blend it with the carried one, apply it to the patch, Commit. Same ceiling.
+        {
+            namespace cy=utpp::mm::helpercarry;
+            cy::Offsets carried{},live{},blended{};
+            std::vector<double> fades;fades.reserve(size_t(iterations));
+            for(int it=0;it<iterations+200;++it)
+            {
+                const size_t fi=size_t(it)%labels.size();auto& lv=lives[fi];const Frame& fr=fx.frames[labels[fi]];
+                QueryPerformanceCounter(&t0);
+                auto r=c::Build(*plan,{reinterpret_cast<const float*>(lv.data()),lv.size()*h::kRecordFloats},fr.avail,scratch,patch);
+                const bool m=r&&cy::Measure(patch,live)&&cy::Blend(carried,true,live,patch.count,0.5f,blended)&&cy::Apply(patch,blended,false);
+                auto cr=m?k::Commit(plan->helperPlan,{reinterpret_cast<float*>(lv.data()),lv.size()*h::kRecordFloats},patch,allow,nullptr):k::Result{};
+                QueryPerformanceCounter(&t1);
+                if(!r||!m||!cr){check(false,"bench fade path Build/Measure/Blend/Apply/Commit ok");break;}
+                for(uint32_t o=0;o<patch.count;++o)std::memcpy(&lv[patch.indices[o]],patch.before[o].data(),sizeof(Record)); // restore, not timed
+                if(it>=200)fades.push_back(double(t1.QuadPart-t0.QuadPart)/double(hz.QuadPart)*1e6);
+            }
+            if(!fades.empty())
+            {
+                std::sort(fades.begin(),fades.end());
+                const double fadeMedian=fades[fades.size()/2],fadeP95=fades[fades.size()*95/100];
+                std::printf("bench: weight-0 writer fade path (Build+Measure+Blend+Apply+Commit) median %.2f us, p95 %.2f us (ceiling on the median: %.0f us)\n",
+                            fadeMedian,fadeP95,limit);
+                check(fadeMedian<limit,"weight-0 writer fade path median stays under the timing ceiling");
+            }
+        }
     }
     std::printf("%d checks, %d failures\n",checks,failures);
     return failures?1:0;

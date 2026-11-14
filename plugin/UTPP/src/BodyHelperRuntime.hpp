@@ -23,10 +23,15 @@ struct Counters
 // Coverage of the recompute by core writer (mm/CoreWriteRecord.hpp): every player FK call is counted once under its outcome, for each
 // writer that wrote core bones in it, and under the row kNoWriter when no layer wrote. Outcome 0 = committed; 1..6 = the hot-gate
 // rejection reasons (same numbering as Counters::rejectReason); then build failure, commit refusal, not evaluated (the call never
-// reached Evaluate: no mapping-cycle policy for the rig, ragdoll, helpers disabled) and proposed only (PROBE).
-enum class Outcome : uint32_t { Committed, Ragdoll, Gate, Identity, Perspective, Receipt, Body, Build, Commit, NotEvaluated, ProposedOnly, Count };
+// reached Evaluate: no mapping-cycle policy for the rig, ragdoll, helpers disabled) and proposed only (PROBE). Weight-0 writer recompute
+// (SetZeroWriterRecompute): ref = a call no layer wrote inside the window, the engine's deviation from the graph was measured and nothing
+// written; fade = such a call written while the deviation fades back after a written run; noref = a weight-0 writer's call refused for
+// lack of a recent measured deviation (nothing written).
+enum class Outcome : uint32_t { Committed, Ragdoll, Gate, Identity, Perspective, Receipt, Body, Build, Commit, NotEvaluated, ProposedOnly,
+                                Reference, Fade, NoReference, Count };
 inline constexpr const char* kOutcomeNames[size_t(Outcome::Count)] = {
-    "commit", "ragdoll", "gate", "identity", "perspective", "receipt", "body", "build", "commitrej", "noeval", "probe"};
+    "commit", "ragdoll", "gate", "identity", "perspective", "receipt", "body", "build", "commitrej", "noeval", "probe",
+    "ref", "fade", "noref"};
 inline constexpr size_t kWriterRows = 7; // mm::corewrite::kWriterCount writers + kNoWriter
 inline constexpr size_t kNoWriter = 6;
 struct Coverage
@@ -59,6 +64,10 @@ bool Evaluate(uint8_t* desc,uint8_t* bones,uint32_t count,uint64_t rig,
               const mm::mappingcycle::Receipt& receipt,int64_t now) noexcept;
 // A player FK call that did not reach Evaluate (aRecord = its core write record). No-op while the helpers are disabled.
 void NoteNotEvaluated(uint32_t aRecord) noexcept;
+// Recompute on the frames of the weight-0 core writers (mm/BodyHelperAdmission.hpp Route, mm/BodyHelperCarry.hpp). On by default; off =
+// the FK detour opens no window and Evaluate takes the published-pose path only (the behaviour without this feature).
+void SetZeroWriterRecompute(bool aOn) noexcept;
+bool ZeroWriterRecompute() noexcept;
 Coverage ReadCoverage() noexcept;
 // Atomic fail-closed switch for callback fault handlers. Active storage remains
 // retained until DLL shutdown, so a concurrent animation callback cannot UAF.

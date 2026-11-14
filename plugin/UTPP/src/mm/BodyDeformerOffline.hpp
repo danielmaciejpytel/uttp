@@ -6,6 +6,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <emmintrin.h>
 
 namespace utpp::mm::deformoffline {
 inline constexpr uint32_t kMaxNodes=512, kMaxOps=1024, kMaxInputs=8, kMaxChannels=32;
@@ -60,16 +61,90 @@ inline bool Normalize(Quat a,Quat& out){
 inline Quat Conj(Quat q){return {-q.x,-q.y,-q.z,q.w};}
 inline Quat Product(Quat a,Quat b){return {a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w,a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z};}
 inline Vec3 Rotate(Quat q,Vec3 v){Vec3 u{q.x,q.y,q.z};return Add(v,Add(Mul(Cross(u,v),2*q.w),Mul(Cross(u,Cross(u,v)),2)));}
-inline bool Valid(Transform x){float n=Dot(x.q,x.q);return Finite(x.t)&&Finite(x.q)&&Finite(x.s)&&Finite(n)&&std::fabs(n-1.f)<1e-3f;}
-inline bool Compose(Transform a,Transform b,Transform& out){
- if(!Normalize(Product(a.q,b.q),out.q))return false;
- out.t=Add(a.t,Rotate(a.q,Had(a.s,b.t)));out.s=Had(a.s,b.s);return Valid(out);
+// SSE2 forms of the transform algebra used by Compose / Relative. Every lane evaluates exactly the scalar expression of Product,
+// Rotate, Had, Sub and Dot above (same operands, same left-to-right order, a - b as a + (-b), no fused or approximate instructions),
+// so the results are the same bits as the scalar definitions. Lane 3 of a 3-vector carries a finite filler that is never stored or tested.
+namespace sse {
+inline __m128 LoadT(const Transform& x){return _mm_loadu_ps(&x.t.x);}                                          // tx ty tz qx
+inline __m128 LoadQ(const Transform& x){return _mm_loadu_ps(&x.q.x);}                                          // qx qy qz qw
+inline __m128 LoadS(const Transform& x){return _mm_shuffle_ps(_mm_loadu_ps(&x.q.w),_mm_loadu_ps(&x.q.w),_MM_SHUFFLE(0,3,2,1));} // sx sy sz qw
+inline __m128 Sign(uint32_t x,uint32_t y,uint32_t z,uint32_t w){return _mm_castsi128_ps(_mm_set_epi32(int(w<<31),int(z<<31),int(y<<31),int(x<<31)));}
+template<int I> inline __m128 Splat(__m128 v){return _mm_shuffle_ps(v,v,_MM_SHUFFLE(I,I,I,I));}
+// ((a.w*b + s2*(a.x*b.wzyx)) + s3*(a.y*b.zwxy)) + s4*(a.z*b.yxwz), lane by lane the scalar Product.
+inline __m128 Product(__m128 a,__m128 b){
+ const __m128 t1=_mm_mul_ps(Splat<3>(a),b);
+ const __m128 t2=_mm_xor_ps(_mm_mul_ps(Splat<0>(a),_mm_shuffle_ps(b,b,_MM_SHUFFLE(0,1,2,3))),Sign(0,1,0,1));
+ const __m128 t3=_mm_xor_ps(_mm_mul_ps(Splat<1>(a),_mm_shuffle_ps(b,b,_MM_SHUFFLE(1,0,3,2))),Sign(0,0,1,1));
+ const __m128 t4=_mm_xor_ps(_mm_mul_ps(Splat<2>(a),_mm_shuffle_ps(b,b,_MM_SHUFFLE(2,3,0,1))),Sign(1,0,0,1));
+ return _mm_add_ps(_mm_add_ps(_mm_add_ps(t1,t2),t3),t4);
 }
-inline bool Relative(Transform a,Transform b,Transform& out){
+// a.yzx * b.zxy - a.zxy * b.yzx (lane 3 = filler).
+inline __m128 Cross(__m128 a,__m128 b){
+ const __m128 ay=_mm_shuffle_ps(a,a,_MM_SHUFFLE(3,0,2,1)),bz=_mm_shuffle_ps(b,b,_MM_SHUFFLE(3,1,0,2));
+ const __m128 az=_mm_shuffle_ps(a,a,_MM_SHUFFLE(3,1,0,2)),by=_mm_shuffle_ps(b,b,_MM_SHUFFLE(3,0,2,1));
+ return _mm_sub_ps(_mm_mul_ps(ay,bz),_mm_mul_ps(az,by));
+}
+// v + (Cross(u,v)*(2*q.w) + Cross(u,Cross(u,v))*2); u = q.xyz (lane 3 of q is never read by Cross into lanes 0..2).
+inline __m128 Rotate(__m128 q,__m128 v){
+ const __m128 c1=Cross(q,v),c2=Cross(q,c1);
+ const __m128 w2=_mm_set1_ps(2*_mm_cvtss_f32(Splat<3>(q)));
+ return _mm_add_ps(v,_mm_add_ps(_mm_mul_ps(c1,w2),_mm_mul_ps(c2,_mm_set1_ps(2.f))));
+}
+// ((x*x + y*y) + z*z) + w*w: the scalar Dot of a quaternion with itself.
+inline float Dot4(__m128 a){
+ const __m128 p=_mm_mul_ps(a,a);
+ __m128 s=_mm_add_ss(p,_mm_shuffle_ps(p,p,_MM_SHUFFLE(1,1,1,1)));
+ s=_mm_add_ss(s,_mm_shuffle_ps(p,p,_MM_SHUFFLE(2,2,2,2)));
+ return _mm_cvtss_f32(_mm_add_ss(s,_mm_shuffle_ps(p,p,_MM_SHUFFLE(3,3,3,3))));
+}
+// Finite (exponent not all ones) for the lanes selected by mask (bit k = lane k).
+inline bool Finite(__m128 v,int mask){
+ const __m128i e=_mm_set1_epi32(0x7f800000);
+ const __m128i hit=_mm_cmpeq_epi32(_mm_and_si128(_mm_castps_si128(v),e),e);
+ return (_mm_movemask_ps(_mm_castsi128_ps(hit))&mask)==0;
+}
+// Scalar Normalize(Quat) on a vector: same n, same branch and factor.
+inline bool Normalize(__m128 a,__m128& out){
+ const float n=Dot4(a);if(!detail::Finite(n)||n<1e-16f)return false;
+ const float e=n-1;float f;
+ if(e>-1e-3f&&e<1e-3f)f=1+e*(-.5f+e*.375f);else f=1/std::sqrt(n);
+ out=_mm_mul_ps(a,_mm_set1_ps(f));return true;
+}
+inline void Store(Transform& out,__m128 t,__m128 q,__m128 s){
+ _mm_storel_pi(reinterpret_cast<__m64*>(&out.t.x),t);_mm_store_ss(&out.t.z,_mm_movehl_ps(t,t));
+ _mm_storeu_ps(&out.q.x,q);
+ _mm_storel_pi(reinterpret_cast<__m64*>(&out.s.x),s);_mm_store_ss(&out.s.z,_mm_movehl_ps(s,s));
+}
+// Valid() of (t, q, s): the q dot in scalar order, finite t / q / s / n, unit within 1e-3.
+inline bool Valid(__m128 t,__m128 q,__m128 s){
+ const float n=Dot4(q);
+ return Finite(t,7)&&Finite(q,15)&&Finite(s,7)&&detail::Finite(n)&&std::fabs(n-1.f)<1e-3f;
+}
+} // namespace sse
+// Same predicate as: n = Dot(x.q,x.q); Finite(x.t) && Finite(x.q) && Finite(x.s) && Finite(n) && |n - 1| < 1e-3.
+inline bool Valid(const Transform& x){return sse::Valid(sse::LoadT(x),sse::LoadQ(x),sse::LoadS(x));}
+// Same results and the same writes to `out` as: Normalize(Product(a.q,b.q),out.q) (fails before any write when the product is degenerate),
+// then out.t=Add(a.t,Rotate(a.q,Had(a.s,b.t))), out.s=Had(a.s,b.s), return Valid(out).
+inline bool Compose(const Transform& a,const Transform& b,Transform& out){
+ const __m128 aq=sse::LoadQ(a),as=sse::LoadS(a),at=sse::LoadT(a),bt=sse::LoadT(b),bs=sse::LoadS(b);
+ __m128 q;if(!sse::Normalize(sse::Product(aq,sse::LoadQ(b)),q))return false;
+ if(!sse::Finite(q,15)){_mm_storeu_ps(&out.q.x,q);return false;}
+ const __m128 t=_mm_add_ps(at,sse::Rotate(aq,_mm_mul_ps(as,bt))),s=_mm_mul_ps(as,bs);
+ sse::Store(out,t,q,s);return sse::Valid(t,q,s);
+}
+// Same results and writes as: scale guard (no write), out.t=Rotate(Conj(a.q),Sub(b.t,a.t))/a.s, then Normalize(Product(Conj(a.q),b.q),out.q),
+// out.s=b.s/a.s, return Valid(out).
+inline bool Relative(const Transform& a,const Transform& b,Transform& out){
  if(std::fabs(a.s.x)<1e-8f||std::fabs(a.s.y)<1e-8f||std::fabs(a.s.z)<1e-8f)return false;
- Vec3 r=Rotate(Conj(a.q),Sub(b.t,a.t));out.t={r.x/a.s.x,r.y/a.s.y,r.z/a.s.z};
- if(!Normalize(Product(Conj(a.q),b.q),out.q))return false;
- out.s={b.s.x/a.s.x,b.s.y/a.s.y,b.s.z/a.s.z};return Valid(out);
+ const __m128 aq=_mm_xor_ps(sse::LoadQ(a),sse::Sign(1,1,1,0)),bq=sse::LoadQ(b),bs=sse::LoadS(b);
+ const __m128 safe=_mm_or_ps(_mm_and_ps(sse::LoadS(a),_mm_castsi128_ps(_mm_set_epi32(0,-1,-1,-1))),_mm_set_ps(1.f,0,0,0)); // lane 3 = 1 (filler)
+ const __m128 t=_mm_div_ps(sse::Rotate(aq,_mm_sub_ps(sse::LoadT(b),sse::LoadT(a))),safe);
+ _mm_storel_pi(reinterpret_cast<__m64*>(&out.t.x),t);_mm_store_ss(&out.t.z,_mm_movehl_ps(t,t));
+ __m128 q;if(!sse::Normalize(sse::Product(aq,bq),q))return false;
+ _mm_storeu_ps(&out.q.x,q);if(!sse::Finite(q,15))return false;
+ const __m128 s=_mm_div_ps(bs,safe);
+ _mm_storel_pi(reinterpret_cast<__m64*>(&out.s.x),s);_mm_store_ss(&out.s.z,_mm_movehl_ps(s,s));
+ return sse::Valid(t,q,s);
 }
 inline bool Slerp(Quat a,Quat b,float u,Quat& out){
  float dot=Dot(a,b);if(dot<0){b={-b.x,-b.y,-b.z,-b.w};dot=-dot;}
@@ -215,7 +290,8 @@ inline Result Evaluate(const Program& program,const Inputs& input,Scratch& scrat
   auto fail=[&](Error error,int32_t n=-1){return Result{error,oi,n};};
   auto ready=[&](int32_t n){return Index(n,program.nodeCount)&&scratch.initialized[n];};
   auto allowed=[&](int32_t n){return Index(n,program.nodeCount)&&program.nodes[n].kind!=NodeKind::Core;};
-  auto store=[&](int32_t n,const Transform& t){if(!allowed(n)||!Valid(t))return false;scratch.model[n]=t;scratch.initialized[n]=true;scratch.written[n]=true;return true;};
+  auto commit=[&](int32_t n,const Transform& t){scratch.model[n]=t;scratch.initialized[n]=true;scratch.written[n]=true;};
+  auto store=[&](int32_t n,const Transform& t){if(!allowed(n)||!Valid(t))return false;commit(n,t);return true;};
   if(op.kind==OpKind::Bounce||op.kind==OpKind::TrackBounce){
    if(!ready(op.a)||!ready(op.b)||op.channelCount>kMaxChannels)return fail(Error::Uninitialized);
    Transform relative;if(!Relative(scratch.model[op.a],scratch.model[op.b],relative))return fail(Error::Degenerate);
@@ -237,7 +313,8 @@ inline Result Evaluate(const Program& program,const Inputs& input,Scratch& scrat
      if(c.kind<3)SetComponent(local.t,c.kind,scalar*c.multiplier);else if(c.kind<6)SetComponent(local.s,c.kind-3,scalar*c.multiplier);
      else if(!ReplaceEuler(local.q,c.kind-6,scalar*c.multiplier,local.q))return fail(Error::Degenerate,channel.target);
     }
-    if(!Compose(parent,local,out)||!store(channel.target,out))return fail(Error::Degenerate,channel.target);
+    if(!Compose(parent,local,out))return fail(Error::Degenerate,channel.target);
+    commit(channel.target,out); // Compose already proved Valid(out); channel.target passed allowed() above
    }
    continue;
   }
@@ -247,7 +324,8 @@ inline Result Evaluate(const Program& program,const Inputs& input,Scratch& scrat
   switch(op.kind){
   case OpKind::Init:
    if(program.nodes[op.target].kind!=NodeKind::Logical||ready(op.target)||!ready(op.a))return fail(Error::InvalidParameter);
-   if(!Compose(scratch.model[op.a],op.x,result))return fail(Error::Degenerate);break;
+   if(!Compose(scratch.model[op.a],op.x,result))return fail(Error::Degenerate);
+   commit(op.target,result);continue; // Compose already proved Valid(result); op.target passed allowed() above
   case OpKind::Set:{
    int method=int(op.p[0]);if(!Integer(op.p[0],0,3))return fail(Error::InvalidParameter);
    if(method!=3){if(!ready(op.a))return fail(Error::Uninitialized);const Transform source=scratch.model[op.a];if(method==0)result=source;else if(method==1)result.t=source.t;else result.q=source.q;}

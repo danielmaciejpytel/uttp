@@ -282,6 +282,18 @@ void ApplyMotionMatching(uint8_t* aDesc, void* aRig, uint32_t aCount, int64_t aN
     // Ragdoll episode: first line, before the seated neck cut (it runs for every owner) and the FK-side vehicle transition / MM blend.
     if (ragdoll::GameOwned())
         return;
+    // Skin helper recompute on the frames of the weight-0 writers below (BodyHelperRuntime.hpp SetZeroWriterRecompute): the window of
+    // this call, opened only while one of them can write and the body is shown in third person - by the vehicle camera (mounted
+    // third-person flag of the vehicle layer) for the vehicle transition, the vehicle guards and the neck cut; by the camera's
+    // pose-write permission for the vault torso.
+    if (bodyhelperruntime::Enabled() && bodyhelperruntime::ZeroWriterRecompute())
+    {
+        const bool vehicleThirdPerson = mm::vehtrans::Wanted() && mm::vehtrans::g_mountTpp.load(std::memory_order_acquire);
+        if (vehicleThirdPerson ||
+            (mm::vaulttorso::rt::Active(aNow, util::QpcFrequency()) &&
+             g_hot.perspectiveWrite.Allows(aNow, g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed))))
+            mm::corewrite::MarkZeroWindow(vehicleThirdPerson);
+    }
     // Seated neck cut (mm/VehicleTransition.hpp SEATED NECK CUT): the game adds the seating-edge upper-body pop after the early
     // mapping job, so the guard runs on the pose the FK pass receives, for every write owner (armed only by a mount).
     if (mm::vehtrans::Wanted() &&

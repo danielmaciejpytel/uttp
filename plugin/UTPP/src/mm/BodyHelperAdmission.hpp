@@ -11,6 +11,8 @@
 // that body, reproduced the engine's helper records on raw engine poses within the recorded tolerance, and matched the
 // offline reference on recorded frames (tests/BodyHelperBundleTest.cpp). The numeric body id is the one used by the
 // motion driver pose snapshot (0 = woman, 1 = man).
+#include "CoreWriteRecord.hpp"
+
 #include <algorithm>
 #include <array>
 #include <climits>
@@ -94,8 +96,8 @@ struct Approved
 };
 
 // Entries are added only together with the offline evidence listed above. Both bundles are valid for the same rig layout: the
-// closure of the bones they read and write (151 for the man bundle, 149 for the woman bundle: the same bones without the two right
-// lower-leg helpers) is identical by name and parent name in the man and the woman rig (the woman rig is the man rig plus hair bones), so
+// closure of the bones they read and write (179 for the man bundle, 149 for the woman bundle: the same bones without the two right
+// lower-leg helpers and the man's hand helpers) is identical by name and parent name in the man and the woman rig (the woman rig is the man rig plus hair bones), so
 // the rig can not tell the two bodies apart. The body is told apart by the live pose snapshot (BodyMatches) on every call, and each bundle
 // was generated from the deformer graph of its own body.
 // Both: 68 helpers = 40 chest / scapula / deltoid / latissimus / butterfly / trapezius / upper-arm muscle and shoulder-twist helpers,
@@ -106,13 +108,17 @@ struct Approved
 // Both also own the forearm twist helpers l/r_Wrist_0..2 and l_lowLeg_back_A/B; the man bundle also owns r_lowLeg_back_A/B. On every frame of
 // 17 man and 28 woman sessions (about 330 000 frames) these reproduce the engine on the raw engine pose within 0.0002 cm and 0.06 deg. The
 // woman's r_lowLeg_back_A/B do not (short excursions of the engine value up to 0.26 deg) and are not part of the woman bundle.
+// The man bundle also owns 28 hand helpers (finger knuckle, thumb and pinky-base muscles): on every frame of 28 man recording files (about
+// 117 000 frames) they reproduce the engine on the raw engine pose within 0.0014 cm and 0.25 deg. Four more hand helpers of the man
+// (l_ind / l_ring / l_pinky_knuckle_top, r_thumb_side) exceed 0.25 deg on single frames and are not owned; the woman's hand helpers do not
+// follow her deformer graph (up to 1.3 cm) and are not owned.
 // baseMinBones 619 = the bare merged player rig (14 recorded sessions, 6 man + 8 woman; the woman rig is it plus hair bones); the
 // 294-bone loading rig is smaller and is refused by the count even though its helper bones form the same closure.
 inline constexpr std::array<Approved,2> kApproved{{
     {kBodyMan,
-     "0725185854349c283ab3c8fedbd0e4c59b3e7f0879856af14cbbcd2911d3b49b",
-     "b13265285f1310b40b29a0bf94d20b06156e4b5e07542ff218d14949873f4e46",
-     78, 0, 619, 151, 0x75142735bc53fb92ull},
+     "8b41cf108d7af855a901002bd19ab5d367e464b3bcfc4e2b9e0f16b44855ee5a",
+     "a198ac60e580fc508c4dc1760b631e12baf9dbf340af18561d44a8785ce33d06",
+     106, 0, 619, 179, 0x160563045fbd05bbull},
     {kBodyWoman,
      "826e7417e1b230da28d9bc7d9eaab85a496b8b769a294eaa0515c234fe9a4261",
      "d85610e034e84804653438daa29d6fbc9589a945765e9fa7bcb3192ee408fb63",
@@ -202,5 +208,38 @@ inline Reject Gate(const GateInputs& g)
     if (!g.receiptComplete) return Reject::Receipt;
     if (!g.bodyOk) return Reject::Body;
     return Reject::None;
+}
+
+// Weight-0 writers (mm/CoreWriteRecord.hpp kZeroWriterMask). The FK detour opens a window (kZeroWindow) only while the switch is on
+// and one of them can write with the body shown in third person. Route of one player FK call:
+//   Published      no window, or the published pose (driver / host) was written in the call: the path above, unchanged;
+//   ZeroWritten    a weight-0 writer wrote core bones and no published pose: recompute, keeping the engine's own deviation from the
+//                  graph (mm/BodyHelperCarry.hpp);
+//   ZeroReference  inside the window, no layer wrote: the engine's deviation is measured; written only while it fades back after a run.
+enum class Route : uint32_t { Published, ZeroWritten, ZeroReference };
+inline Route RouteOf(uint32_t aRecord, bool aSwitchOn)
+{
+    namespace cw = corewrite;
+    if (!aSwitchOn || !(aRecord & cw::kZeroWindow) || (aRecord & cw::kPublishedMask))
+        return Route::Published;
+    return (aRecord & cw::kZeroWriterMask) ? Route::ZeroWritten : Route::ZeroReference;
+}
+// The hot gate inputs of a zero route: the window replaces the motion-active requirement (these writers run at motion weight 0), and
+// the perspective is passed when the camera permission allows writes or the vehicle camera shows the third-person body.
+inline void ZeroRouteInputs(GateInputs& g, bool aPerspectiveWriteAllows, uint32_t aRecord)
+{
+    g.mmActive = true;
+    g.perspectiveOk = aPerspectiveWriteAllows || (aRecord & corewrite::kVehicleThirdPerson) != 0;
+}
+// The published pose snapshot identifies the body. The published path also needs a positive weight; a zero route only a fresh snapshot
+// of the same rig (the weight is 0 there by definition).
+inline bool SnapshotUsable(Route aRoute, bool aRead, bool aRigMatches, float aWeight, bool aFresh)
+{
+    return aRead && aRigMatches && aFresh && (aRoute != Route::Published || aWeight > 0.0f);
+}
+// The carried offset may be used on a written frame only when it was measured for the same plan and body within aMaxAge ticks.
+inline bool ReferenceUsable(bool aValid, bool aSamePlan, int64_t aUpdated, int64_t aNow, int64_t aMaxAge)
+{
+    return aValid && aSamePlan && aUpdated > 0 && aNow >= aUpdated && aMaxAge > 0 && aNow - aUpdated <= aMaxAge;
 }
 } // namespace utpp::mm::helperadmission

@@ -114,6 +114,7 @@ return {
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
     ["mm.headLead"] = "true",
+    ["mm.helperZeroWeightWriters"] = "true",
     ["mm.idleHold"] = "true",
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
@@ -192,6 +193,8 @@ return {
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "apply melee.fullPose(true,\"ok\")",
+    "native UTPPSetHelperZeroWeightWriters(true)",
+    "apply mm.helperZeroWeightWriters(true,\"ok\")",
     "mm setMotionGrip(true)",
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
@@ -390,6 +393,8 @@ return {
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "apply melee.fullPose(true,\"ok\")",
+    "native UTPPSetHelperZeroWeightWriters(true)",
+    "apply mm.helperZeroWeightWriters(true,\"ok\")",
     "mm setMotionGrip(true)",
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
@@ -1570,6 +1575,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.helperZeroWeightWriters"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["mm.idleHold"] = {
       ["default"] = "true",
       ["hasApply"] = true,
@@ -2218,6 +2231,7 @@ return {
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
     ["mm.headLead"] = "true",
+    ["mm.helperZeroWeightWriters"] = "true",
     ["mm.idleHold"] = "true",
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
@@ -2343,6 +2357,7 @@ return {
     "melee.guardFullBody",
     "melee.guardAimTilt",
     "melee.fullPose",
+    "mm.helperZeroWeightWriters",
     "mm.grip",
     "mm.shootTransfer",
     "mm.shinobiBonusReload",
@@ -2518,6 +2533,7 @@ return {
     "melee.guardFullBody",
     "melee.guardAimTilt",
     "melee.fullPose",
+    "mm.helperZeroWeightWriters",
     "mm.grip",
     "mm.shootTransfer",
     "mm.shinobiBonusReload",
@@ -2689,6 +2705,7 @@ return {
     "apply melee.guardFullBody(false,\"ok\")",
     "apply melee.guardAimTilt(false,\"ok\")",
     "apply melee.fullPose(true,\"ok\")",
+    "apply mm.helperZeroWeightWriters(true,\"ok\")",
     "apply mm.grip(true,\"ok\")",
     "apply mm.shootTransfer(true,\"ok\")",
     "apply mm.shinobiBonusReload(false,\"ok\")",
@@ -2857,6 +2874,7 @@ melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
 melee.fullPose=true\r\
+mm.helperZeroWeightWriters=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
 mm.shinobiBonusReload=false\r\
@@ -3014,6 +3032,7 @@ vehicle.jumpOutSidePush=true\r\
       "melee.guardFullBody",
       "melee.guardAimTilt",
       "melee.fullPose",
+      "mm.helperZeroWeightWriters",
       "mm.grip",
       "mm.shootTransfer",
       "mm.shinobiBonusReload",
@@ -3336,6 +3355,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.footReplant"] = "\"off\"",
     ["mm.grip"] = "true",
     ["mm.headLead"] = "true",
+    ["mm.helperZeroWeightWriters"] = "true",
     ["mm.idleHold"] = "true",
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
@@ -3429,6 +3449,7 @@ melee.guard=true\r\
 melee.guardFullBody=false\r\
 melee.guardAimTilt=false\r\
 melee.fullPose=true\r\
+mm.helperZeroWeightWriters=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
 mm.shinobiBonusReload=false\r\
@@ -3604,6 +3625,7 @@ other.module=42\r\
     "/utpp/animation|switch|melee.guardFullBody",
     "/utpp/animation|switch|melee.guardAimTilt",
     "/utpp/animation|switch|melee.fullPose",
+    "/utpp/animation|switch|mm.helperZeroWeightWriters",
     "/utpp/animation|switch|mm.grip",
     "/utpp/animation|switch|mm.shootTransfer",
     "/utpp/animation|switch|mm.shinobiBonusReload",

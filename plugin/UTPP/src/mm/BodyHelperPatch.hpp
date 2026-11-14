@@ -101,11 +101,15 @@ inline Result Prepare(std::span<const int32_t> parents,std::span<const uint64_t>
     if(boundaries!=compensatable.size())return {Error::Catalog};
     next.valid=true;out=next;return {};
 }
+// All 12 floats finite (nothing written otherwise), then the transform, Valid and positive scale.
 inline bool Decode(const float* raw,d::Transform& out)
 {
-    for(uint32_t k=0;k<kRecordFloats;++k)if(!d::detail::Finite(raw[k]))return false;
-    out.t={raw[0],raw[1],raw[2]};out.q={raw[4],raw[5],raw[6],raw[7]};out.s={raw[8],raw[9],raw[10]};
-    return d::detail::Valid(out)&&out.s.x>1e-6f&&out.s.y>1e-6f&&out.s.z>1e-6f;
+    namespace s=d::detail::sse;
+    const __m128 t=_mm_loadu_ps(raw),q=_mm_loadu_ps(raw+4),sc=_mm_loadu_ps(raw+8);
+    if(!s::Finite(t,15)||!s::Finite(q,15)||!s::Finite(sc,15))return false;
+    s::Store(out,t,q,sc);
+    const float n=s::Dot4(q);
+    return d::detail::Finite(n)&&std::fabs(n-1.f)<1e-3f&&out.s.x>1e-6f&&out.s.y>1e-6f&&out.s.z>1e-6f;
 }
 inline bool Near(const d::Transform& a,const d::Transform& b)
 {
