@@ -33,10 +33,17 @@ vertical by the chest heading, the hips local X / Y offset is removed (instead o
 the hips are lifted by the depth of the lower sole below the ground. Same gates.
 Source "player": the player's own first-person dodge clips (player_exploration, described above).
 
+Optional fifth montage Dodge_F_Run (--forward-run, NPC source): the forward dodge entered from a run / sprint (the runtime plays it
+for a forward dodge entered faster than its forward clip limit; without it the run goes on). One window of one NPC clip, the same
+stance removal and gates as the other clips; written after Dodge_R (COUNT 5). Without the option the file is unchanged (4 montages).
+
 usage: python -I dodgebake.py --out <dir> [--body woman|man ...] [--source npc|player] [--native-left]
+                              [--forward-run SET:CLIP:FIRST:LAST[:mirror]]
   --source player Dodge_L = the mirrored fpp_dodge_right: the native left clip pushes off later (0.267 s vs 0.133-0.200 s),
                   lasts longer (0.633 s vs 0.433 s) and is slower (hips peak 2.4 vs 3.0 m/s); the report lists both.
   --native-left   (player source) Dodge_L = the native fpp_dodge_left.
+  --forward-run   Dodge_F_Run source: NPC set without the body prefix (wa_ / ma_), clip, first and last frame (30 fps, inclusive),
+                  optional mirror, e.g. gang_unarmed_action_combat:melee_combo_01_p1_dash:0:15
 """
 import argparse
 import hashlib
@@ -72,6 +79,21 @@ NPC_CLIPS = (("F", "gang_unarmed_action_combat", "dash_foward_long", False, 3, 1
              ("B", "corpo_katana_action_combat", "dodge_back_01", False, 3, 30),
              ("L", "corpo_katana_action_combat", "dodge_right_01", True, 3, 20),
              ("R", "corpo_katana_action_combat", "dodge_right_01", False, 3, 20))
+FORWARD_RUN = "F_Run"  # montage Dodge_F_Run
+
+
+def parse_forward_run(text):
+    """'SET:CLIP:FIRST:LAST[:mirror]' -> (set, clip, mirror, first, last)."""
+    parts = text.split(":")
+    if len(parts) not in (4, 5) or (len(parts) == 5 and parts[4] != "mirror") or not parts[0] or not parts[1]:
+        raise SystemExit("--forward-run expects SET:CLIP:FIRST:LAST[:mirror], got %r" % text)
+    try:
+        f0, f1 = int(parts[2]), int(parts[3])
+    except ValueError:
+        raise SystemExit("--forward-run: frames must be integers, got %r" % text)
+    if not 0 <= f0 < f1:
+        raise SystemExit("--forward-run: first frame must be >= 0 and below the last, got %d %d" % (f0, f1))
+    return parts[0], parts[1], len(parts) == 5, f0, f1
 
 
 def _libs():
@@ -232,7 +254,10 @@ def rig_rest(root, body):
     return out
 
 
-def bake_body(root, body, out_dir, mirror_left=True, source="player"):
+def bake_body(root, body, out_dir, mirror_left=True, source="player", forward_run=None):
+    """forward_run: None, or (set, clip, mirror, first, last) of Dodge_F_Run (NPC source only)."""
+    if forward_run is not None and source != "npc":
+        raise SystemExit("--forward-run needs --source npc")
     AG, MC, NR = _libs()
     P = NR.Player(body)
     rig_names, _, rig_hash = T.rig_info(os.path.join(root, RIG_JSON[body]))
@@ -246,6 +271,11 @@ def bake_body(root, body, out_dir, mirror_left=True, source="player"):
             clips[k] = clip_data(AG, MC, NR, P, clip, mirror, rest, NPC_PREFIX[body] + set_name, (f0, f1))
             seqs[k] = "%s%s%s_%d_%d" % ("mirror_" if mirror else "", NPC_PREFIX[body], clip, f0, f1)
         report = {"body": body, "source": "npc", "clips": {k: clips[k]["rep"] for k, _ in CLIPS}}
+        if forward_run is not None:
+            set_name, clip, mirror, f0, f1 = forward_run
+            clips[FORWARD_RUN] = clip_data(AG, MC, NR, P, clip, mirror, rest, NPC_PREFIX[body] + set_name, (f0, f1))
+            seqs[FORWARD_RUN] = "%s%s%s_%d_%d" % ("mirror_" if mirror else "", NPC_PREFIX[body], clip, f0, f1)
+            report["clips"][FORWARD_RUN] = clips[FORWARD_RUN]["rep"]
     elif source == "player":
         NR.NPC_DIR = os.path.join(root, "Extracted", "game", "player-anims", "glb", "base", "animations", "player", SUB[body], "body")
         for k, clip in CLIPS:
@@ -266,9 +296,11 @@ def bake_body(root, body, out_dir, mirror_left=True, source="player"):
     rig_name = os.path.basename(RIG_JSON[body]).split(".")[0]
     names = clips["F"]["names"]
     out = ["utpp-traversal 2", "RIG %s 0x%016x %d" % (rig_name, rig_hash, len(rig_names)),
-           "POSEBONES %d %s" % (len(names), " ".join(names)), "COUNT 4"]
+           "POSEBONES %d %s" % (len(names), " ".join(names)), "COUNT %d" % (5 if FORWARD_RUN in clips else 4)]
     for k, _ in CLIPS:
         out += montage_lines("Dodge_" + k, seqs[k], clips[k])
+    if FORWARD_RUN in clips:
+        out += montage_lines("Dodge_" + FORWARD_RUN, seqs[FORWARD_RUN], clips[FORWARD_RUN])
     out.append("END")
     data = ("\n".join(out) + "\n").encode("ascii")
     os.makedirs(out_dir, exist_ok=True)
@@ -299,10 +331,12 @@ def main():
     ap.add_argument("--body", action="append", choices=("woman", "man"))
     ap.add_argument("--source", choices=("npc", "player"), default="npc")
     ap.add_argument("--native-left", action="store_true")
+    ap.add_argument("--forward-run", help="Dodge_F_Run source SET:CLIP:FIRST:LAST[:mirror] (NPC set without the body prefix)")
     a = ap.parse_args()
     root = project_root(a.root)
+    forward_run = parse_forward_run(a.forward_run) if a.forward_run else None
     for body in a.body or ["woman", "man"]:
-        r = bake_body(root, body, a.out, not a.native_left, a.source)
+        r = bake_body(root, body, a.out, not a.native_left, a.source, forward_run)
         print(body, r["file"]["name"], r["file"]["bytes"], r["file"]["sha256"])
         for k, c in r["clips"].items():
             print("  %s %s dur %.3f push %.3f rec %.3f peak %.2f off %s z %s step %.1f sole %.3f gate %s" % (

@@ -1033,7 +1033,7 @@ add_executable(utpp_loco_dodge_test tests/DodgeTest.cpp src/mm/Dodge.hpp src/mm/
 target_compile_features(utpp_loco_dodge_test PRIVATE cxx_std_20)
 target_compile_options(utpp_loco_dodge_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_loco_dodge_test COMMAND utpp_loco_dodge_test ${_utpp_dodge_args})
-foreach(_utpp_dodge_mut 1 2 3 4)
+foreach(_utpp_dodge_mut 1 2 3 4 5 6)
   add_executable(utpp_loco_dodge_mut${_utpp_dodge_mut} tests/DodgeTest.cpp src/mm/Dodge.hpp)
   target_compile_features(utpp_loco_dodge_mut${_utpp_dodge_mut} PRIVATE cxx_std_20)
   target_compile_options(utpp_loco_dodge_mut${_utpp_dodge_mut} PRIVATE ${UTPP_WARNINGS} /EHsc)
@@ -1044,6 +1044,8 @@ set_tests_properties(utpp_loco_dodge_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FA
 set_tests_properties(utpp_loco_dodge_mut2 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL 30 / 60 / 120 Hz")
 set_tests_properties(utpp_loco_dodge_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL right dodge from a forward walk")
 set_tests_properties(utpp_loco_dodge_mut4 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL rejected: a database bone without a pose bone")
+set_tests_properties(utpp_loco_dodge_mut5 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL impulse read on the recorded first impulse feeds")
+set_tests_properties(utpp_loco_dodge_mut6 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL corrected push, facing forward")
 # Dodge clips through the motion driver on recorded dodges (fixtures derived from local recordings: not shipped, live in Build/test-data;
 # the tests exist only where they do). Driver mutations 1 (the clip is never shown) and 2 (the clip's own upper body is shown) must
 # FAIL. The rate builds (EXCLUDE_FROM_ALL) print
@@ -1056,7 +1058,8 @@ endif()
 if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   file(TO_NATIVE_PATH "${_utpp_dodge_motion_data}" _utpp_dodge_motion_data_native)
   file(TO_NATIVE_PATH "${UTPP_DODGE_FIXTURE_DIR}" _utpp_dodge_fixture_native)
-  foreach(_utpp_dd_variant test mut1 mut2 rate100 rate125 blend080 blend150)
+  file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/data" _utpp_dodge_tracked_native)
+  foreach(_utpp_dd_variant test mut1 mut2 mut3 rate100 rate125 blend080 blend150)
     set(_utpp_dd_name utpp_loco_dodge_driver_${_utpp_dd_variant})
     add_executable(${_utpp_dd_name} tests/MotionDriverDodgeTest.cpp src/MotionDriver.cpp src/MotionDriver.hpp src/MotionHost.hpp src/mm/Dodge.hpp
                    src/mm/MotionAdapter.hpp src/mm/MotionPose.hpp src/mm/ChooserMatcher.hpp src/mm/MotionDatabase.hpp src/mm/TraversalFile.hpp)
@@ -1066,17 +1069,25 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   endforeach()
   target_compile_definitions(utpp_loco_dodge_driver_mut1 PRIVATE UTPP_DODGE_DRIVER_MUTATION=1)
   target_compile_definitions(utpp_loco_dodge_driver_mut2 PRIVATE UTPP_DODGE_DRIVER_MUTATION=2)
+  target_compile_definitions(utpp_loco_dodge_driver_mut3 PRIVATE UTPP_DODGE_GAIT_MUTATION=1)
   target_compile_definitions(utpp_loco_dodge_driver_rate100 PRIVATE UTPP_DODGE_RATE=1.0f)
   target_compile_definitions(utpp_loco_dodge_driver_rate125 PRIVATE UTPP_DODGE_RATE=1.25f)
   target_compile_definitions(utpp_loco_dodge_driver_blend080 PRIVATE UTPP_DODGE_BLEND_IN=0.08f)
   target_compile_definitions(utpp_loco_dodge_driver_blend150 PRIVATE UTPP_DODGE_BLEND_IN=0.15f)
   set_target_properties(utpp_loco_dodge_driver_rate100 utpp_loco_dodge_driver_rate125 utpp_loco_dodge_driver_blend080 utpp_loco_dodge_driver_blend150
                         PROPERTIES EXCLUDE_FROM_ALL TRUE)
-  add_test(NAME utpp_loco_dodge_driver_test COMMAND utpp_loco_dodge_driver_test "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}")
-  add_test(NAME utpp_loco_dodge_driver_mut1 COMMAND utpp_loco_dodge_driver_mut1 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}")
+  # third argument: the tracked scenario presses (tests/data/dodge_push_<body>.feed); mutation 3 (no dodge gait hold) must FAIL
+  add_test(NAME utpp_loco_dodge_driver_test COMMAND utpp_loco_dodge_driver_test "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
+           "${_utpp_dodge_tracked_native}")
+  add_test(NAME utpp_loco_dodge_driver_mut1 COMMAND utpp_loco_dodge_driver_mut1 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
+           "${_utpp_dodge_tracked_native}")
   set_tests_properties(utpp_loco_dodge_driver_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*legs follow the picked clip")
-  add_test(NAME utpp_loco_dodge_driver_mut2 COMMAND utpp_loco_dodge_driver_mut2 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}")
+  add_test(NAME utpp_loco_dodge_driver_mut2 COMMAND utpp_loco_dodge_driver_mut2 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
+           "${_utpp_dodge_tracked_native}")
   set_tests_properties(utpp_loco_dodge_driver_mut2 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*arms and head keep the pose shown before the clip")
+  add_test(NAME utpp_loco_dodge_driver_mut3 COMMAND utpp_loco_dodge_driver_mut3 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
+           "${_utpp_dodge_tracked_native}")
+  set_tests_properties(utpp_loco_dodge_driver_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*holds its gait through the dodge state")
 endif()
 
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----

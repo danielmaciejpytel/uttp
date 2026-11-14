@@ -4370,6 +4370,7 @@ void OnLoad()
             LogInfo("UTPP melee full pose: %s", utpp::meleepose::Status().c_str());
             utpp::motiondriver::Install(dir); // UTPP-MOTION SEAM: <dll dir>\data\ data, hooks (mm.motionDriver stays off until UTPPSetMotionEnabled)
             utpp::motiondriver::SetLocomotionReasonsProbe(&utpp::locomotion::CurrentReasons); // H2 safeguard: why the native body turn is off (read only)
+            utpp::motiondriver::SetDodgeHeadingProbe(&utpp::locomotion::LastDodgeHeading); // dodge push diagnostics (read only)
             utpp::motiondriver::SetLogger(&MMTraceLog); // UTPP-MOTION SEAM: v2 fallback reasons / fault cause, once each
             path = dir + L"data\\utpp_base.utppmm";
         }

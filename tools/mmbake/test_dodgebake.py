@@ -109,10 +109,52 @@ def test_bake_npc():
         rep2 = D.bake_body(root, "woman", tmp, source="npc")
         expect(open(os.path.join(tmp, "utpp_dodge_woman.utpptrav"), "rb").read() == texts[0] and rep2["file"]["sha256"],
                "npc deterministic: the same bytes twice")
+        # optional fifth montage Dodge_F_Run: written after the four, same gates; the four montages are byte-identical to the file without it
+        fr = ("gang_unarmed_action_combat", "melee_combo_01_p1_dash", False, 0, 15)
+        if os.path.isfile(os.path.join(root, *D.NPC_DIR.split("/"), D.NPC_PREFIX["woman"] + fr[0] + ".anims.glb")):
+            for body, four in (("woman", texts[0]), ("man", texts[1])):
+                rep5 = D.bake_body(root, body, tmp, source="npc", forward_run=fr)
+                data5 = open(os.path.join(tmp, "utpp_dodge_%s.utpptrav" % body), "rb").read().decode("ascii")
+                parsed5 = G.parse_trav(data5)
+                expect([m["name"] for m in parsed5["montages"]] == ["Dodge_F", "Dodge_B", "Dodge_L", "Dodge_R", "Dodge_F_Run"] and "\nCOUNT 5\n" in data5,
+                       "%s npc + forward run: five montages, Dodge_F_Run last" % body)
+                c5 = rep5["clips"][D.FORWARD_RUN]
+                expect(not c5["errors"] and c5["anatomy_gate"]["passed"] and c5["frames"] == 16 and c5["window"] == [0, 15],
+                       "%s npc + forward run: Dodge_F_Run passes the gates, frames = its window" % body)
+                body4 = four.decode("ascii").split("\nCOUNT 4\n", 1)[1].rsplit("END\n", 1)[0]
+                body5 = data5.split("\nCOUNT 5\n", 1)[1]
+                expect(body5.startswith(body4) and body5[len(body4):].startswith("M Dodge_F_Run "),
+                       "%s npc + forward run: the four montages unchanged, Dodge_F_Run appended" % body)
+            bad = None
+            try:
+                D.bake_body(root, "woman", tmp, source="npc", forward_run=(fr[0], fr[1], False, 0, 999))
+            except SystemExit as e:
+                bad = str(e)
+            expect(bad is not None and "outside the clip" in bad, "forward run window outside the clip: no file (SystemExit)")
+        else:
+            print("skip forward run bake: NPC set not extracted")
+
+
+def test_forward_run_option():
+    expect(D.parse_forward_run("gang_unarmed_action_combat:dash_foward_long:3:16") == ("gang_unarmed_action_combat", "dash_foward_long", False, 3, 16),
+           "--forward-run SET:CLIP:FIRST:LAST")
+    expect(D.parse_forward_run("s:c:0:5:mirror")[2] is True, "--forward-run ...:mirror")
+    for bad in ("s:c:3", "s:c:5:3", "s:c:a:5", "s:c:0:5:flip", ":c:0:5"):
+        try:
+            D.parse_forward_run(bad)
+            expect(False, "--forward-run rejects %r" % bad)
+        except SystemExit:
+            expect(True, "--forward-run rejects %r" % bad)
+    try:
+        D.bake_body(".", "woman", ".", source="player", forward_run=("s", "c", False, 0, 5))
+        expect(False, "--forward-run with the player source is refused")
+    except SystemExit as e:
+        expect("needs --source npc" in str(e), "--forward-run with the player source is refused")
 
 
 def main():
     test_helpers()
+    test_forward_run_option()
     test_bake()
     test_bake_npc()
     print("FAILED" if FAILS else "PASSED", len(FAILS))

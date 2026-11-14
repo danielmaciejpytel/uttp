@@ -193,6 +193,9 @@ void SetHipLease(bool aOn);
 // Host hook (Main.cpp): the Locomotion blocker bits (src/input/LocomotionCore.hpp Reason) of this moment, read only. Used to tell WHY the native
 // body turn is off (H2 safeguard). nullptr (offline tests) = every off state counts as armed.
 void SetLocomotionReasonsProbe(uint32_t (*aProbe)());
+// Host hook (Main.cpp): the last heading served to the game's dodge decision (locomotion::LastDodgeHeading), read only, for the
+// MOTIONDODGE push diagnostics line. nullptr (offline tests) = not reported.
+void SetDodgeHeadingProbe(bool (*aProbe)(uint64_t& aCalls, float& aServed, float& aEngine, bool& aRewritten, double& aAgeS));
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
 // test targets only: the strafe state of the last v2 Step (Shooter / H2 acceptance tests).
 struct StrafeProbe

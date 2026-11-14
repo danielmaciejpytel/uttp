@@ -428,6 +428,114 @@ static void TestScriptPsmBridge(const char* scriptPath)
     Check(c.Reasons(1.0) == kHold, "real external hold remains effective");
 }
 
+// World yaw (UTPP convention: CCW from +Y, forward (-sin, cos)) of a horizontal vector.
+static float YawOf(float aX, float aY)
+{
+    return std::atan2(-aX, aY) * 180.0f / kPi;
+}
+
+// The game's dodge impulse: Vector4.FromHeading(camera yaw + DodgeDirection). Recorded with the old served heading 0 (2026-11-14,
+// sprint_dash, both bodies): every press pushed along the camera yaw (Female camera 79.0 -> 79.0, Male 55.8 -> 55.8), so FromHeading
+// is (-sin, cos) of the angle in this convention (a clockwise FromHeading would have pushed to -79.0 / -55.8). The game's own
+// double-tap DodgeLeft stores +90, RawAngleDeg serves +90 for the stick left: the same sign.
+static void FromHeading(float aDeg, float& aX, float& aY)
+{
+    aX = -std::sin(aDeg * kPi / 180.0f);
+    aY = std::cos(aDeg * kPi / 180.0f);
+}
+
+// Dodge heading (LocomotionCore DodgeHeading): the game's dodge decision gets the camera-relative stick angle while the rewrite is
+// active, the game's own value otherwise; the other GetInputHeading readers keep the rewritten 0.
+static void TestDodgeHeading()
+{
+    Core c;
+    MakeActive(c, 20.0);
+    Core::DodgeHeadingRecord none;
+    Check(!c.LastDodgeHeading(none), "dodge heading: no record before the first decision");
+    // every stick direction: the impulse goes where the stick points in the world (camera forward / right from the camera yaw)
+    bool allMatch = true;
+    float worst = 0.0f;
+    for (float camYaw : {79.0f, 55.8f, -150.0f})
+        for (float a = -180.0f; a < 180.0f; a += 15.0f)
+        {
+            const float x = -std::sin(a * kPi / 180.0f), y = std::cos(a * kPi / 180.0f); // stick for camera-relative angle a
+            c.FilterAxis(Axis::X, x, 20.0);
+            c.FilterAxis(Axis::Y, y, 20.0);
+            const float filtered = c.FilterHeading(a, 20.0);
+            const float served = c.DodgeHeading(filtered, 20.0);
+            float px, py;
+            FromHeading(camYaw + served, px, py);
+            // the stick in the world: x along the camera right (forward turned by -90 deg), y along the camera forward
+            float fx, fy, rx, ry;
+            FromHeading(camYaw, fx, fy);
+            FromHeading(camYaw - 90.0f, rx, ry);
+            const float wx = x * rx + y * fx, wy = x * ry + y * fy;
+            const float err = std::fabs(WrapDeg(YawOf(px, py) - YawOf(wx, wy)));
+            worst = std::fmax(worst, err);
+            allMatch = allMatch && Near(filtered, 0.0f) && err < 0.01f;
+        }
+    Check(allMatch, "dodge heading: the impulse goes along the stick in the world for every direction (other readers still see 0)");
+    std::printf("INFO dodge heading: largest push - stick direction error %.4f deg\n", static_cast<double>(worst));
+    // recorded sprint_dash presses (feed records 2026-11-14: camera yaw, the stick's world direction = camera + raw angle): the served
+    // heading turns the recorded push (along the camera) onto the stick
+    struct Press
+    {
+        const char* name;
+        float cam, stickWorld, pushedBefore;
+    };
+    const Press presses[] = {{"Female forward", 79.0f, 79.0f, 79.0f},   {"Female left", 79.0f, 169.0f, 79.0f},
+                             {"Female right", 79.0f, -11.0f, 79.0f},    {"Female back", 79.0f, -101.0f, 79.0f},
+                             {"Male forward", 55.8f, 55.8f, 55.8f},     {"Male left", 55.8f, 145.8f, 55.8f},
+                             {"Male right", 55.8f, -34.2f, 55.8f},      {"Male back", 55.8f, -124.2f, 55.8f}};
+    c.Heartbeat(21.0, false, 1.5f, 0);
+    for (const Press& p : presses)
+    {
+        const float rel = WrapDeg(p.stickWorld - p.cam);
+        c.FilterAxis(Axis::X, -std::sin(rel * kPi / 180.0f), 21.0);
+        c.FilterAxis(Axis::Y, std::cos(rel * kPi / 180.0f), 21.0);
+        const float before = WrapDeg(p.cam + c.FilterHeading(rel, 21.0)); // the old decision stored the filtered 0
+        const float after = WrapDeg(p.cam + c.DodgeHeading(c.FilterHeading(rel, 21.0), 21.0));
+        char what[160];
+        std::snprintf(what, sizeof what, "dodge heading, %s: push before %.1f (recorded %.1f), after %.1f = stick %.1f", p.name,
+                      static_cast<double>(before), static_cast<double>(p.pushedBefore), static_cast<double>(after),
+                      static_cast<double>(p.stickWorld));
+        Check(Near(before, WrapDeg(p.pushedBefore), 0.05f) && Near(WrapDeg(after - p.stickWorld), 0.0f, 0.05f), what);
+    }
+    Core::DodgeHeadingRecord rec;
+    Check(c.LastDodgeHeading(rec) && rec.rewritten && Near(WrapDeg(rec.served - 180.0f), 0.0f, 0.05f) &&
+              Near(WrapDeg(rec.engine - 180.0f), 0.0f, 0.05f) &&
+              Near(rec.game, 0.0f) && rec.at == 21.0,
+          "dodge heading: the record holds the served value, the engine's own heading and the filtered one");
+    // not rewritten: the game's own value
+    c.Heartbeat(22.0, false, 1.5f, 0);
+    c.FilterAxis(Axis::X, 0.05f, 22.0);
+    c.FilterAxis(Axis::Y, 0.0f, 22.0);
+    Check(Near(c.DodgeHeading(-180.0f, 22.0), -180.0f), "dodge heading: stick in the deadzone -> the game's value (dodge without input)");
+    c.FilterAxis(Axis::X, -1.0f, 23.0);
+    c.FilterAxis(Axis::Y, 0.0f, 23.0);
+    c.Heartbeat(23.0, false, 1.5f, kAiming);
+    Check(!c.Active(23.0) && Near(c.FilterHeading(90.0f, 23.0), 90.0f) && Near(c.DodgeHeading(90.0f, 23.0), 90.0f),
+          "dodge heading: aiming (Locomotion blocked) -> the game's own heading, untouched");
+    Check(c.LastDodgeHeading(rec) && !rec.rewritten, "dodge heading: record says not rewritten");
+    Core off;
+    Check(Near(off.DodgeHeading(33.0f, 1.0), 33.0f) && Near(off.DodgeHeading(NAN, 1.0), 0.0f),
+          "dodge heading: hook not installed -> pass-through (non-finite -> 0)");
+}
+
+// The production script stores the dodge heading on the dodge key / pad button path only.
+static void TestScriptDodgeWrap(const char* scriptPath)
+{
+    std::ifstream input(scriptPath);
+    const std::string source((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const std::regex wrap(R"(@wrapMethod\(LocomotionTransition\)\s*protected const final func WantsToDodge\()");
+    const std::regex keyPath(
+        R"(wrappedMethod\(stateContext, scriptInterface\);\s*if wants && \(scriptInterface\.IsActionJustTapped\(n"Dodge"\) \|\| scriptInterface\.IsPatternJustActivated\(n"Dodge"\)\)\s*&& scriptInterface\.IsMoveInputConsiderable\(\) \{\s*stateContext\.SetConditionFloatParameter\(n"DodgeDirection", UTPPLocomotionDodgeHeading\(scriptInterface\.GetInputHeading\(\)\), true\);)");
+    Check(std::regex_search(source, wrap), "script: WantsToDodge is wrapped on LocomotionTransition");
+    Check(std::regex_search(source, keyPath), "script: DodgeDirection from UTPPLocomotionDodgeHeading on the dodge key / button path only");
+    Check(source.find("public native func UTPPLocomotionDodgeHeading(gameHeading: Float) -> Float") != std::string::npos,
+          "script: native UTPPLocomotionDodgeHeading declared");
+}
+
 int main(int argc, char** argv)
 {
     TestAngles();
@@ -437,13 +545,18 @@ int main(int argc, char** argv)
     TestCoexistence();
     TestDispatcherScan();
     TestDeterminism();
+    TestDodgeHeading();
     if (argc == 2)
+    {
         TestScriptPsmBridge(argv[1]);
+        TestScriptDodgeWrap(argv[1]);
+    }
     else
     {
         const std::string file = __FILE__;
         const std::string script = file.substr(0, file.find_last_of("/\\") + 1) + "../scripts/utpp_locomotion.reds";
         TestScriptPsmBridge(script.c_str());
+        TestScriptDodgeWrap(script.c_str());
     }
     std::printf("utpp_locomotion_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

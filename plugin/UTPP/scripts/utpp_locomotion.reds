@@ -28,6 +28,8 @@ public native func UTPPLocomotionReasons() -> Int32
 public native func UTPPLocomotionHasInput() -> Bool
 // Raw stick angle relative to the camera, degrees CCW, 0 = forward, +90 = left, -90 = right, 180 = back.
 public native func UTPPLocomotionRawAngle() -> Float
+// Heading for the game's dodge decision: the raw stick angle while the rewrite is active (Active and the stick moved), else gameHeading.
+public native func UTPPLocomotionDodgeHeading(gameHeading: Float) -> Float
 
 // Heartbeat bits (mirror of utpp::freemove::Reason 0..14). Keep the existing low-13 PSM guards except bit 64.
 // PSM bits 13+ are packed diagnostics, NOT Locomotion reasons: UpperBody=ForceEmptyHands encodes 0xC000,
@@ -94,6 +96,22 @@ protected final const func GetCameraYaw(const stateContext: ref<StateContext>, c
     return 0.0;
   }
   return wrappedMethod(stateContext, scriptInterface);
+}
+
+// Dodge direction. The game's dodge decision (ground, air, aim walk and crouch all call WantsToDodge) stores DodgeDirection =
+// GetInputHeading() when the dodge key / pad button is tapped with the stick moved, and pushes the dodge along camera yaw +
+// DodgeDirection. Under the rewrite above GetInputHeading() reads 0, so the dodge went into the screen whatever was held. On that
+// path only, the stored heading is replaced by the camera-relative stick angle (UTPPLocomotionDodgeHeading; the game's own value
+// whenever the rewrite is not active). The double-tap path (DodgeForward / DodgeLeft / DodgeRight / DodgeBack) sets explicit
+// directions from the direction keys and is left as it is; the other GetInputHeading readers keep the rewritten 0.
+@wrapMethod(LocomotionTransition)
+protected const final func WantsToDodge(const stateContext: ref<StateContext>, const scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  let wants: Bool = wrappedMethod(stateContext, scriptInterface);
+  if wants && (scriptInterface.IsActionJustTapped(n"Dodge") || scriptInterface.IsPatternJustActivated(n"Dodge"))
+    && scriptInterface.IsMoveInputConsiderable() {
+    stateContext.SetConditionFloatParameter(n"DodgeDirection", UTPPLocomotionDodgeHeading(scriptInterface.GetInputHeading()), true);
+  }
+  return wants;
 }
 
 // Chained with the utpp.reds wraps of the same method (redscript chains all wraps). Air states reach it via super.

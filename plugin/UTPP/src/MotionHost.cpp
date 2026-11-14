@@ -1542,6 +1542,7 @@ std::array<BoneTransform, integ::kMaxMMBones> g_motionPoseBuf{}; // UTPP-MOTION 
 bool g_motionStepped = false; // UTPP-MOTION SEAM step already called this feed (inside the matcher block)
 bool g_motionHeldMatcher = false; // UTPP-MOTION SEAM v2 owned a feed since the last v1 matcher update (MotionHandbackLocked)
 int g_motionStartTurnDirection = 0;
+uint64_t g_dodgeFacingHolds = 0; // body yaw commands held under a ground dodge clip (MotionSetFrame::dodgeClip)
 uint64_t g_motionHandbacks = 0; // UTPP-MOTION SEAM fresh v1 searches after a v2-owned span (ProbeMotionSeam)
 // UTPP-MOTION SEAM x AIR (merge repair): the AirState reset requested by MotionHandbackLocked is emitted on the next feed; its query bone
 // UTPP-MOTION SEAM frame (AirState's last clean frame, taken from the frozen v1 frame before the span) is not latched there.
@@ -5976,6 +5977,22 @@ float BodyYawCommand(float aCurrentYawDeg, float aBaseYawDeg)
     g_lastCmdTicks = now;
     float target = g_targetYaw;
     g_stSign = 2;
+#if !defined(UTPP_DODGE_FACING_MUTATION) || UTPP_DODGE_FACING_MUTATION != 1
+    if (g_motionHeldMatcher && g_motionFrame.dodgeClip)
+    {
+        // A ground dodge clip is shown (mm/Dodge.hpp): its sector was picked against the drawn facing, so the body does not turn toward
+        // the input under it (the clip would stop matching the travel). The capsule yaw is held; the turn resumes on the hand-back feed,
+        // where the motion search and its inertialized blend take over as after any clip. Mutation 1: the body keeps turning.
+        ++g_bodyCmds;
+        ++g_dodgeFacingHolds;
+        g_cmdFeed = g_feedCalls;
+        g_lastCmdCurDeg = aCurrentYawDeg;
+        g_lastCmdBaseDeg = aBaseYawDeg;
+        g_lastCmdDt = dt;
+        g_lastCmdDeg = aCurrentYawDeg;
+        return g_lastCmdDeg;
+    }
+#endif
     if (g_airSteerFed && !g_bodyTurnFed)
     {
         // Velocity-relative air yaw: the stick can request only a bounded lead around actual capsule momentum.

@@ -6,6 +6,9 @@
 //   GetActionValue(n"MoveY")  -> |(MoveX, MoveY)|  (vanilla magnitude kept: walk / sprint thresholds unchanged)
 //   GetInputHeading()         -> 0
 // The real direction stays available as the raw camera-relative stick angle (RawAngleDeg) for the body-turn controller.
+// Exception: the game's dodge decision (utpp_locomotion.reds, LocomotionTransition.WantsToDodge) stores DodgeDirection from
+// DodgeHeading, which serves the camera-relative stick angle while the rewrite is active (the game pushes the dodge along
+// camera yaw + DodgeDirection, so a 0 would send every dodge into the screen).
 //
 // Yaw / angle convention (same as utpp.reds): degrees, counter-clockwise about +Z, 0 = stick forward (camera forward),
 // +90 = stick left, -90 = stick right, 180 = back. RawAngleDeg(x, y) = atan2(-x, y).
@@ -231,10 +234,61 @@ public:
         m_headingReads.fetch_add(1, std::memory_order_relaxed);
         OverrideSnap ov;
         const bool haveOv = ReadOverride(aNow, ov);
+        const float unfiltered = haveOv ? ov.headingDeg : aRaw;
+        m_lastUnfilteredHeading.store(std::isfinite(unfiltered) ? unfiltered : 0.0f, std::memory_order_relaxed);
         if (!Active(aNow) || !HasInput(aNow))
-            return haveOv ? ov.headingDeg : aRaw;
+            return unfiltered;
         m_headingRewrites.fetch_add(1, std::memory_order_relaxed);
         return 0.0f;
+    }
+
+    // Heading for the game's dodge decision (the DodgeDirection it stores on the dodge key / pad button). The game pushes the dodge
+    // along camera yaw + DodgeDirection; with the rewrite active GetInputHeading() reads 0 there, so every such dodge went along the
+    // camera forward. While the rewrite is active (Active and HasInput, the condition of FilterHeading) this returns the
+    // camera-relative stick angle RawAngle (the game's heading convention: +90 = left, as the game's own DodgeLeft = 90); otherwise
+    // aGameHeading unchanged (aiming, blocked states, no stick: the game's own value). Records the decision for diagnostics.
+    float DodgeHeading(float aGameHeading, double aNow)
+    {
+        const bool rewrite = Active(aNow) && HasInput(aNow);
+        const float game = std::isfinite(aGameHeading) ? aGameHeading : 0.0f;
+        const float served = rewrite ? RawAngle(aNow) : game;
+        m_dodgeGen.fetch_add(1, std::memory_order_acq_rel); // odd: write in progress
+        m_dodgeServed.store(served, std::memory_order_relaxed);
+        m_dodgeGame.store(game, std::memory_order_relaxed);
+        m_dodgeEngine.store(m_lastUnfilteredHeading.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        m_dodgeRewritten.store(rewrite, std::memory_order_relaxed);
+        m_dodgeAt.store(aNow, std::memory_order_relaxed);
+        m_dodgeGen.fetch_add(1, std::memory_order_acq_rel);
+        m_dodgeCalls.fetch_add(1, std::memory_order_relaxed);
+        return served;
+    }
+
+    struct DodgeHeadingRecord
+    {
+        uint64_t calls = 0;       // DodgeHeading calls so far (0 = none)
+        float served = 0.0f;      // value returned to the game
+        float game = 0.0f;        // the heading the game's decision stored (the filtered GetInputHeading)
+        float engine = 0.0f;      // the engine's own GetInputHeading value of the last read before the call (before the rewrite)
+        bool rewritten = false;   // served = RawAngle (the rewrite was active)
+        double at = -1.0;         // time of the call
+    };
+    // Consistent copy of the last DodgeHeading decision (false = none yet or a write in progress).
+    bool LastDodgeHeading(DodgeHeadingRecord& aOut) const
+    {
+        const uint32_t g1 = m_dodgeGen.load(std::memory_order_acquire);
+        if ((g1 & 1u) != 0)
+            return false;
+        DodgeHeadingRecord r;
+        r.calls = m_dodgeCalls.load(std::memory_order_relaxed);
+        r.served = m_dodgeServed.load(std::memory_order_relaxed);
+        r.game = m_dodgeGame.load(std::memory_order_relaxed);
+        r.engine = m_dodgeEngine.load(std::memory_order_relaxed);
+        r.rewritten = m_dodgeRewritten.load(std::memory_order_relaxed);
+        r.at = m_dodgeAt.load(std::memory_order_relaxed);
+        if (m_dodgeGen.load(std::memory_order_acquire) != g1 || r.calls == 0)
+            return false;
+        aOut = r;
+        return true;
     }
 
     // Raw stick from the last script reads (both axes fresh and above the deadzone).
@@ -417,6 +471,16 @@ private:
     std::atomic<double> m_ovUntil{-1.0};
     std::atomic<uint64_t> m_overrideSets{0};
     std::atomic<uint64_t> m_overrideAxisReads{0};
+
+    // dodge heading diagnostics (seqlock: odd generation = write in progress)
+    std::atomic<float> m_lastUnfilteredHeading{0.0f};
+    std::atomic<uint32_t> m_dodgeGen{0};
+    std::atomic<float> m_dodgeServed{0.0f};
+    std::atomic<float> m_dodgeGame{0.0f};
+    std::atomic<float> m_dodgeEngine{0.0f};
+    std::atomic<bool> m_dodgeRewritten{false};
+    std::atomic<double> m_dodgeAt{-1.0};
+    std::atomic<uint64_t> m_dodgeCalls{0};
 
     std::atomic<uint64_t> m_axisReads{0};
     std::atomic<uint64_t> m_axisRewrites{0};

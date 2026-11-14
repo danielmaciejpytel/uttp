@@ -25,4 +25,8 @@ void Shutdown();
 // Read only (no behaviour): the LocomotionCore::Reasons bits (freemove::Reason) of this moment. The v2 driver uses them to tell why the native
 // body turn is off (H2 safeguard, MotionDriver SetLocomotionReasonsProbe). Thread-safe (atomics in the core).
 uint32_t CurrentReasons();
+// Read only (diagnostics): the last heading served to the game's dodge decision (UTPPLocomotionDodgeHeading). aCalls = decisions so far,
+// aServed = the DodgeDirection the game stored, aEngine = the engine's own GetInputHeading value before the rewrite, aRewritten = the
+// served value is the camera-relative stick angle, aAgeS = seconds since the decision. False = none yet. Thread-safe (atomics in the core).
+bool LastDodgeHeading(uint64_t& aCalls, float& aServed, float& aEngine, bool& aRewritten, double& aAgeS);
 } // namespace utpp::locomotion

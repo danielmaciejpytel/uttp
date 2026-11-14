@@ -293,8 +293,24 @@ struct DodgeState
     // clip or time, the previous timeline plays on (prevClip / prevTime) and the target fades to the new one over dodge::kTargetFadeS
     int32_t releaseClip = -1, prevClip = -1;
     float releaseTime = 0.0f, prevTime = 0.0f, targetFade = 1.0f;
+    // diagnostics (MOTIONDODGE push line): every ground / air dodge, the capsule travel over kPushWindowS from its first feed against
+    // the camera yaw + the heading served to the game's dodge decision (requirement: the push goes where the stick points)
+    int32_t pushPrevDetail = -1;
+    bool pushArmed = false;
+    bool pushGround = true;
+    float pushT = 0.0f, pushStart[2] = {0.0f, 0.0f}, pushCam = 0.0f, pushFacing = 0.0f;
+    bool pushPicked = false;
+    dodge::Frame pushPick{};
 };
 DodgeState g_dodgeSt;
+inline constexpr float kPushWindowS = 0.30f;
+// teleport test during a dodge: the dodge impulse peak with margin (m/s; a larger capsule step in one feed is a teleport), applied on
+// the dodge detail and this long after it (its speed decay); elsewhere a teleport is any capsule step above 0.5 m per feed
+inline constexpr float kMaxGroundSpeedMs = 20.0f;
+inline constexpr float kDodgeTeleportDecayS = 0.5f;
+float g_sinceDodgeDetailS = 1.0e9f; // seconds since the last feed with the dodge detail
+// Locomotion's last dodge heading decision (Main.cpp: locomotion::LastDodgeHeading; nullptr offline): diagnostics only
+bool (*g_dodgeHeadingProbe)(uint64_t&, float&, float&, bool&, double&) = nullptr;
 static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "dodge::SampleDodge writes 7 floats per bone");
 // Opt-in motion lean (CET mm.lean -> SetLean, default OFF): mm/LeanRuntime.hpp leans the v2 pose into the turn from the lateral
 // acceleration of the feed velocity (Step + Apply per v2 feed on b.pose in StepLocked, before the orientation warp and the leg tail).
@@ -2184,6 +2200,12 @@ void SetLocomotionReasonsProbe(uint32_t (*aProbe)())
 {
     std::lock_guard lock(g_m);
     g_locomotionProbe = aProbe;
+}
+
+void SetDodgeHeadingProbe(bool (*aProbe)(uint64_t&, float&, float&, bool&, double&))
+{
+    std::lock_guard lock(g_m);
+    g_dodgeHeadingProbe = aProbe;
 }
 
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -4429,8 +4451,17 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     const float dt = (std::isfinite(aDt) && aDt > 0.0f) ? std::fmin(aDt, 0.25f) : 0.0f;
     const bool reentry = !g_wasRunning; // UTPP-MOTION SEAM trav: handback turn below starts only without a re-entry
     const bool rootWanted = aRaw.haveRootContext && aRaw.nativeRootEnabled;
+    // a jump of the capsule counts as a teleport above 0.5 m per feed; during a dodge (ground / air detail and kDodgeTeleportDecayS after
+    // it) above what the dodge impulse covers in the feed: it peaks at ~18 m/s, 0.6 m in a 30 Hz feed, which reset the matcher and the
+    // gait in the middle of the dodge
+    {
+        const int32_t det = adapter::DetailFromFeed(aRaw.psmBlock, aRaw.locoState);
+        g_sinceDodgeDetailS = (det == adapter::kPsmDodge || det == adapter::kPsmDodgeAir) ? 0.0f : g_sinceDodgeDetailS + dt;
+    }
+    const float teleportM = g_sinceDodgeDetailS <= kDodgeTeleportDecayS ?
+        std::fmax(.5f, kMaxGroundSpeedMs * (std::isfinite(aRaw.dt) ? aRaw.dt : 0.0f)) : .5f;
     const bool rootDiscontinuity =
-        rootWanted && (aRaw.dt > .25f || std::hypot(aRaw.capsuleDeltaCurrent[0], aRaw.capsuleDeltaCurrent[1]) > .5f);
+        rootWanted && (aRaw.dt > .25f || std::hypot(aRaw.capsuleDeltaCurrent[0], aRaw.capsuleDeltaCurrent[1]) > teleportM);
     if (reentry || rootWanted != b.rootPolicyEnabled || rootDiscontinuity)
     {
         b.startTurn.Reset();
@@ -4871,6 +4902,11 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         // the game's standing walk / run speeds (m/s): faster than halfway between them is a run
         di.forwardClipMaxEntryMps = 0.5f * (mc.gameStandPoints[0] + mc.gameStandPoints[1]);
         dodgeFr = g_dodgeSt.player.Tick(di, b.dodgeClips.length);
+        if (dodgeFr.pick)
+        {
+            g_dodgeSt.pushPicked = true;
+            g_dodgeSt.pushPick = dodgeFr;
+        }
         if (dodgeFr.handback) // back to the motion search like a traversal handback: new timeline, inertialized, no foot contacts
         {
             r.jumped = true;
@@ -4887,15 +4923,76 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         // in over dodge::kBlendOutS
         if (g_trace && g_log && ((dodgeFr.active && dodgeFr.start) || dodgeFr.handback))
         {
-            char line[128];
+            char line[192];
             if (dodgeFr.handback)
                 std::snprintf(line, sizeof line, "UTPP MOTIONDODGE end t=%.3f blend=%.2f", static_cast<double>(g_traceClock + dt),
                               static_cast<double>(dodge::kBlendOutS));
             else
-                std::snprintf(line, sizeof line, "UTPP MOTIONDODGE start t=%.3f sector=%s", static_cast<double>(g_traceClock + dt),
-                              dodge::SectorName(dodgeFr.sector));
+                std::snprintf(line, sizeof line, "UTPP MOTIONDODGE start t=%.3f sector=%s push=%.1f rel=%.1f facing=%.1f entry=%.2f",
+                              static_cast<double>(g_traceClock + dt), dodge::SectorName(dodgeFr.sector),
+                              static_cast<double>(g_dodgeSt.pushPick.pushYawDeg), static_cast<double>(g_dodgeSt.pushPick.pushRelDeg),
+                              static_cast<double>(di.facingYawDeg), static_cast<double>(g_dodgeSt.pushPick.entrySpeed));
             g_log(line);
         }
+    }
+    // Push diagnostics (diagnostic logs only): one line per ground / air dodge kPushWindowS after its first feed - the capsule travel
+    // (yaw, metres) against want = camera yaw + the heading the game's dodge decision stored (served; engine = the engine's own heading
+    // before the rewrite, rw = 1 when the served value is the stick angle). With the push fixed, travel ~ want (plus some of the entry
+    // velocity); served=- = no key / button decision for this dodge (double-tap path, or Locomotion off).
+    if (g_trace && g_log)
+    {
+        DodgeState& ds = g_dodgeSt;
+        const int32_t det = f.psmDetailed;
+        const bool dodgeDet = det == adapter::kPsmDodge || det == adapter::kPsmDodgeAir;
+        if (dodgeDet && ds.pushPrevDetail != det)
+        {
+            ds.pushArmed = true;
+            ds.pushGround = det == adapter::kPsmDodge;
+            ds.pushT = 0.0f;
+            ds.pushStart[0] = aRaw.capsulePos[0];
+            ds.pushStart[1] = aRaw.capsulePos[1];
+            ds.pushCam = f.cameraYawDeg;
+            ds.pushFacing = rootWanted ? b.root.PreviousVisualWorldYaw() / integ::kDegToRad : aRaw.playerYawDeg;
+            ds.pushPicked = false;
+        }
+        else if (ds.pushArmed)
+        {
+            ds.pushT += std::fmax(0.0f, aRaw.dt);
+            if (ds.pushT >= kPushWindowS - 1e-4f)
+            {
+                ds.pushArmed = false;
+                const float tx = aRaw.capsulePos[0] - ds.pushStart[0], ty = aRaw.capsulePos[1] - ds.pushStart[1];
+                const float travelYaw = std::atan2(-tx, ty) / integ::kDegToRad;
+                uint64_t calls = 0;
+                float served = 0.0f, engine = 0.0f;
+                bool rewritten = false;
+                double age = 1e9;
+                const bool fresh = g_dodgeHeadingProbe != nullptr && g_dodgeHeadingProbe(calls, served, engine, rewritten, age) &&
+                                   age <= static_cast<double>(ds.pushT) + 0.25;
+                char line[320];
+                if (fresh)
+                    std::snprintf(line, sizeof line,
+                                  "UTPP MOTIONDODGE push t=%.3f kind=%s cam=%.1f served=%.1f engine=%.1f rw=%d want=%.1f travel=%.1f/%.2fm err=%.1f "
+                                  "facing=%.1f pick=%s clip=%s rel=%.1f",
+                                  static_cast<double>(g_traceClock + dt), ds.pushGround ? "ground" : "air", static_cast<double>(ds.pushCam),
+                                  static_cast<double>(served), static_cast<double>(engine), rewritten ? 1 : 0,
+                                  static_cast<double>(dodge::WrapDeg(ds.pushCam + served)), static_cast<double>(travelYaw),
+                                  static_cast<double>(std::hypot(tx, ty)), static_cast<double>(dodge::WrapDeg(travelYaw - ds.pushCam - served)),
+                                  static_cast<double>(ds.pushFacing), ds.pushPicked ? dodge::SectorName(ds.pushPick.pickSector) : "-",
+                                  ds.pushPicked && ds.pushPick.active ? dodge::SectorName(ds.pushPick.sector) : "none",
+                                  static_cast<double>(ds.pushPicked ? ds.pushPick.pushRelDeg : 0.0f));
+                else
+                    std::snprintf(line, sizeof line,
+                                  "UTPP MOTIONDODGE push t=%.3f kind=%s cam=%.1f served=- travel=%.1f/%.2fm facing=%.1f pick=%s clip=%s rel=%.1f",
+                                  static_cast<double>(g_traceClock + dt), ds.pushGround ? "ground" : "air", static_cast<double>(ds.pushCam),
+                                  static_cast<double>(travelYaw), static_cast<double>(std::hypot(tx, ty)), static_cast<double>(ds.pushFacing),
+                                  ds.pushPicked ? dodge::SectorName(ds.pushPick.pickSector) : "-",
+                                  ds.pushPicked && ds.pushPick.active ? dodge::SectorName(ds.pushPick.sector) : "none",
+                                  static_cast<double>(ds.pushPicked ? ds.pushPick.pushRelDeg : 0.0f));
+                g_log(line);
+            }
+        }
+        ds.pushPrevDetail = det;
     }
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_dodgeProbe.active = dodgeFr.active;
@@ -5292,6 +5389,7 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     aOut.rootVel[1] = signals.rootVel[1];
     aOut.rootYawRate = signals.rootYawRate;
     aOut.startTurnDirection = b.startTurn.direction;
+    aOut.dodgeClip = g_dodgeSt.frame;
     aOut.cancelStartSupport = b.eval.CancelledStartSupport();
     if (g_trav.noContactLeft > 0.0f)
         aOut.contact[0] = aOut.contact[1] = 0.0f;

@@ -769,6 +769,12 @@ struct MapConfig
     // Gait return hold (0 = off, the pre-guard behaviour): a RISING stick keeps the Run gait for this long after the last Run frame while the capsule is still
     // running (the stick that passed the centre when the direction reversed); see the comment at the use in MapToChooser.
     float gaitReturnHoldS = 0.3f;
+    // Dodge gait hold (0 = off): the game's ground Dodge (PSM detail 7) replaces the Sprint detail for ~0.2 s and its impulse decays
+    // over a few feeds after it (one Stand feed between them in the recorded sprint dashes). The Sprint input of the feed before the
+    // dodge is kept through the detail and, after it, while the capsule speed keeps falling (at most this long), and the chooser's
+    // dodge flag (MatcherConfig::dodgeHold) is kept over the same decay: the search no longer drops Sprint -> Run under the impulse and
+    // back (Sprint_Loop -> Transition_Sprint_to_Run -> Run_Loop -> Transition_Run_to_Sprint in 0.2 s).
+    float dodgeGaitHoldS = 0.4f;
     // Gait return hold: the stick counts as rising when it grows faster than this (stick magnitude per second; 0.3 = 0.005 per feed at 60 feeds per second)
     float gaitReturnRiseRate = 0.3f;
     // Digital heading step (ChooserState::headingStepAgeS, MatcherConfig::headingCatchUpS): the wanted run direction turns by at least this many
@@ -1100,6 +1106,10 @@ struct MapState
     float prevStick = 0.0f;  // gait return hold: stick magnitude of the previous feed
     float sinceRunS = 1.0e9f; // gait return hold: seconds since the gait was Run (the stick's own gait, not the forced one)
     bool gaitHeld = false;    // gait return hold: the previous feed's gait was forced to Run by the hold
+    // dodge gait hold (MapConfig::dodgeGaitHoldS): the previous feed's sprint input / dodge detail / game speed (m/s), the sprint input
+    // kept from the feed before the dodge, the decay after the detail (on, seconds)
+    bool dodgePrevSprint = false, dodgePrevDetail = false, dodgeSprint = false, dodgeDecay = false;
+    float dodgePrevSpeed = 0.0f, dodgeDecayS = 0.0f;
     bool headingValid = false;      // heading step: the previous feed had a wanted direction (OrientToMovement on the ground)
     float headingYawDeg = 0.0f;     // heading step: that direction (game yaw convention)
     float headingStepAgeS = 1.0e9f; // heading step: seconds since the last step (ChooserState::headingStepAgeS)
@@ -1424,11 +1434,43 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     const float sp = motiontraj::SizeXY(vel);
     const bool visualStrafe = c.visualStrafe && mode == 0 && PsmGround(f.psmDetailed);
     // fix/slide-exit: CrouchSprint is sprint only once the (filtered) stance is Stand; with the filter off stance == Stand there
-    const bool sprintInput = PsmSprint(f.psmDetailed) && !visualStrafe // No strafe Sprint assets.
+    bool sprintInput = PsmSprint(f.psmDetailed) && !visualStrafe // No strafe Sprint assets.
 #if UTPP_SLIDEEXIT_MUTATION != 5
         && !(stance == 1) // a Sprint feed (4 or CrouchSprint 30) inside the filtered crouch is no sprint yet
 #endif
         ;
+    // Dodge gait hold (MapConfig::dodgeGaitHoldS): the sprint input of the feed before a ground dodge is kept through the dodge detail and
+    // its decay (ground feeds while the speed keeps falling, at most dodgeGaitHoldS after the detail); the chooser keeps its dodge flag
+    // over the decay. Mutation UTPP_DODGE_GAIT_MUTATION 1: no hold (the detail drops the sprint input as before).
+    bool dodgeHeld = false;
+    {
+        const bool detail = f.psmDetailed == kPsmDodge;
+#if UTPP_DODGE_GAIT_MUTATION != 1
+        const bool on = c.dodgeGaitHoldS > 0.0f;
+#else
+        const bool on = false;
+#endif
+        if (on && detail)
+        {
+            if (!m.dodgePrevDetail)
+                m.dodgeSprint = m.dodgePrevSprint;
+            m.dodgeDecay = true;
+            m.dodgeDecayS = 0.0f;
+        }
+        else if (on && m.dodgeDecay && mode == 0 && PsmGround(f.psmDetailed) && gameSp < m.dodgePrevSpeed && m.dodgeDecayS + dt <= c.dodgeGaitHoldS)
+        {
+            m.dodgeDecayS += dt;
+            dodgeHeld = true;
+        }
+        else
+            m.dodgeDecay = m.dodgeSprint = false;
+        // the sprint input of the feed before the dodge (kept also through an air feed inside the detail), on ground feeds only
+        if ((dodgeHeld || (on && detail)) && m.dodgeSprint && mode == 0 && !visualStrafe && stance != 1)
+            sprintInput = true;
+        m.dodgePrevDetail = detail;
+        m.dodgePrevSpeed = gameSp;
+        m.dodgePrevSprint = sprintInput;
+    }
 
     // CBP UpdateMovement_PreCMC (l. 1130-1140): Gait = GetDesiredGait() from the input, then MaxAcceleration of that gait.
     // [P] same-frame inputs: motion sets MaxAcceleration / GroundFriction / MaxWalkSpeed (CalculateMaxSpeed) in PreCMC, before
@@ -1847,7 +1889,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
 #else
     s.stanceRaw = PsmCrouchStance(f.psmDetailed) ? 1 : 0; // fix/slide-exit: the PSM stance without the debounce (ChooserState::stanceRaw)
 #endif
-    s.dodge = f.psmDetailed == kPsmDodge;
+    s.dodge = f.psmDetailed == kPsmDodge || dodgeHeld; // dodgeHeld: the decay after it (MapConfig::dodgeGaitHoldS)
     s.psmJump = integ::PsmIsJumpDetail(f.psmDetailed); // fix5/jump: game jump vs walk-off (MatcherConfig::jumpRiseNoOff)
     s.jumpOutFlight = jumpOutFlight; // fix/jumpout-cam (MatcherConfig::jumpOutNoBack / jumpOutFallHandover)
     // Chooser MovementMode / MovementMode_LastFrame / MovementDirection. Slide off: movementMode = st.movementMode (0 / 1) as

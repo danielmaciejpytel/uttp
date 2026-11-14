@@ -3,16 +3,23 @@
 // The game's ground dodge (PSM detail 7) moves the capsule with a short impulse: the first dodge feed still carries the old
 // velocity, the next one the impulse (9 - 15 m/s) that decays within about 0.2 s. This header provides the pieces to show one of
 // four dodge clips of utpp_dodge_<body>.utpptrav during it (the traversal file grammar, version 2: montages Dodge_F, Dodge_B,
-// Dodge_L, Dodge_R, Root-relative in-place poses); the clip's own root travel is not part of the pose (the capsule moves the
-// body). The motion driver (MotionDriver.cpp) shows the clips on the standing ground.
+// Dodge_L, Dodge_R, Root-relative in-place poses; optional fifth montage Dodge_F_Run, the forward dodge entered from a run or
+// sprint); the clip's own root travel is not part of the pose (the capsule moves the body). The motion driver (MotionDriver.cpp)
+// shows the clips on the standing ground.
 //
 //   DodgeClips    validation of the parsed file against the database bones (fail closed: ok = false, err set).
 //   SampleDodge   the local pose of a clip at a clip time (frame lerp + quaternion nlerp), 7 floats per database bone.
 //   ClassifySector  direction of the impulse relative to the body's facing, four sectors with hysteresis at the borders.
+//   ImpulseDirection  the impulse on a dodge feed: the capsule velocity minus the part of the entry velocity the game keeps.
 //   UpperBodyMask / KeepUpperBody / UpperBodyRelease  the bones above Spine3 keep the pose shown before the clip and move to
 //                 the motion pose underneath over the last kUpperReleaseS of the clip.
 //   DodgePlayer   per feed: arms on the dodge's first feed, picks the clip on the impulse feed, runs the clip clock at kRate,
-//                 hands back at the clip end or when the body leaves the standing ground state.
+//                 hands back at the clip end or when the body leaves the standing ground state. A forward dodge entered faster
+//                 than Input::forwardClipMaxEntryMps plays Dodge_F_Run when the file has it, else the playing locomotion goes on.
+//
+// Facing while a clip plays (rule, MotionHost BodyYawCommand / MotionSetFrame::dodgeClip): the body turn holds the capsule yaw, so
+// the drawn facing the sector was picked against does not turn toward the input under the clip; the turn toward the movement
+// direction resumes on the hand-back feed (the inertialized hand-back blend, kBlendOutS).
 //
 // Yaw convention: 0 = +Y, counter-clockwise positive (a velocity (vx, vy) has yaw atan2(-vx, vy); positive = to the left).
 #pragma once
@@ -30,7 +37,9 @@
 namespace utpp::mm::dodge
 {
 // Test mutations: 0 / undefined = production. 1 no hysteresis at the sector borders, 2 the clip clock counts feeds instead of
-// time, 3 the clip is picked on the dodge's first feed (old velocity), 4 the loader accepts a clip with a missing pose bone.
+// time, 3 the clip is picked on the dodge's first feed (old velocity), 4 the loader accepts a clip with a missing pose bone,
+// 5 the pick reads the capsule velocity as it is (the kept part of the entry velocity is not removed), 6 a forward dodge from a run
+// never plays Dodge_F_Run.
 #ifndef UTPP_DODGE_MUTATION
 #define UTPP_DODGE_MUTATION 0
 #endif
@@ -42,12 +51,20 @@ enum class Sector : int32_t
     Back = 1,
     Left = 2,
     Right = 3,
+    ForwardRun = 4, // not a direction: the clip of a Forward dodge entered from a run / sprint (ClassifySector never returns it)
 };
-inline constexpr int kSectorCount = 4;
-inline constexpr const char* kMontageNames[kSectorCount] = {"Dodge_F", "Dodge_B", "Dodge_L", "Dodge_R"};
+inline constexpr int kSectorCount = 4; // the directions ClassifySector returns (the required montages)
+inline constexpr int kClipCount = 5;   // + the optional Dodge_F_Run
+inline constexpr const char* kMontageNames[kClipCount] = {"Dodge_F", "Dodge_B", "Dodge_L", "Dodge_R", "Dodge_F_Run"};
 inline const char* SectorName(Sector s)
 {
-    return s == Sector::None ? "-" : kMontageNames[static_cast<int>(s)] + 6;
+    const int i = static_cast<int>(s);
+    return i < 0 || i >= kClipCount ? "-" : kMontageNames[i] + 6;
+}
+// direction of a sector (ForwardRun is a Forward dodge)
+inline Sector Direction(Sector s)
+{
+    return s == Sector::ForwardRun ? Sector::Forward : s;
 }
 
 // clip clock rate (the recovery ends about when the dodge impulse has died out); UTPP_DODGE_RATE overrides it in measurement builds only
@@ -68,6 +85,21 @@ inline constexpr float kImpulseWaitS = 0.06f;  // without a rise the direction i
 inline constexpr float kMinImpulseMps = 1.0f;  // slower than this on the impulse feed: no clip (no direction)
 inline constexpr float kSettleS = 0.05f;       // the sector may still change (past the hysteresis) this long after the pick
 inline constexpr float kMaxStepS = 0.1f;       // one feed counts for at most this much time
+// Part of the entry velocity (the last feed before the impulse) the capsule keeps under the dodge impulse. Fit of
+// v = impulse + k * entry on the first impulse feeds of the recorded side and back presses (2026-11-14 sprint_dash, both bodies):
+// k = 0.45 - 0.73; without removing it the first impulse feed of a side press read 24 deg (Female left: 103.4 vs push 79.0) and
+// 14 deg (right: 64.6) off the push, with it 8 and 2 deg.
+inline constexpr float kEntryKeep = 0.5f;
+
+// Impulse direction on a dodge feed (world velocity minus the kept part of the entry velocity); aOutX / aOutY = that vector.
+inline void ImpulseDirection(float aVelX, float aVelY, float aEntryX, float aEntryY, float& aOutX, float& aOutY)
+{
+#if UTPP_DODGE_MUTATION == 5
+    aEntryX = aEntryY = 0.0f;
+#endif
+    aOutX = aVelX - kEntryKeep * aEntryX;
+    aOutY = aVelY - kEntryKeep * aEntryY;
+}
 
 inline float WrapDeg(float a)
 {
@@ -84,6 +116,7 @@ inline float WrapDeg(float a)
 inline Sector ClassifySector(float aRelDeg, Sector aPrev = Sector::None, float aHystDeg = kHysteresisDeg)
 {
     const float a = WrapDeg(aRelDeg);
+    aPrev = Direction(aPrev);
 #if UTPP_DODGE_MUTATION == 1
     aHystDeg = 0.0f;
 #endif
@@ -113,12 +146,14 @@ struct DodgeClips
     std::string err = "missing";
     size_t poseBones = 0;
     std::vector<int32_t> poseMap; // pose bone of every database bone
-    std::array<const traversal::TravMontage*, kSectorCount> clip{};
-    std::array<float, kSectorCount> length{}; // seconds of clip time
+    std::array<const traversal::TravMontage*, kClipCount> clip{}; // [ForwardRun] null when the file has no Dodge_F_Run
+    std::array<float, kClipCount> length{}; // seconds of clip time (0 = no clip)
+    bool HasForwardRun() const { return ok && clip[static_cast<int>(Sector::ForwardRun)] != nullptr; }
 };
 
 // Validates aFile (kept alive by the caller: the clip pointers point into it) against the database bones. aName(i) = name of
-// database bone i. Every database bone must have a pose bone; all four montages must exist with >= 2 frames and finite poses.
+// database bone i. Every database bone must have a pose bone; the four direction montages must exist with >= 2 frames and finite
+// poses; Dodge_F_Run is optional (absent: length 0, null), but when present it must pass the same checks.
 template <class NameFn>
 inline bool BuildDodgeClips(const traversal::TraversalFile& aFile, const std::string& aRigName, uint32_t aN, NameFn&& aName, DodgeClips& aOut)
 {
@@ -150,9 +185,11 @@ inline bool BuildDodgeClips(const traversal::TraversalFile& aFile, const std::st
         if (aOut.poseMap[i] < 0)
             return fail("pose bone missing: " + std::string(nm));
     }
-    for (int s = 0; s < kSectorCount; ++s)
+    for (int s = 0; s < kClipCount; ++s)
     {
         const traversal::TravMontage* m = aFile.Find(kMontageNames[s]);
+        if (m == nullptr && s >= kSectorCount)
+            continue; // optional clip
         if (m == nullptr)
             return fail(std::string("montage missing: ") + kMontageNames[s]);
         if (!(m->fps > 0.0) || m->frames < 2 || m->pose.size() != static_cast<size_t>(m->frames) * nb * 7)
@@ -171,9 +208,10 @@ inline bool BuildDodgeClips(const traversal::TraversalFile& aFile, const std::st
 // Local pose (x y z qx qy qz qw per database bone) of clip aSector at aTime (clamped to the clip).
 inline bool SampleDodge(const DodgeClips& aC, Sector aSector, double aTime, float* aOut)
 {
-    if (!aC.ok || aSector == Sector::None || aOut == nullptr)
+    const int ci = static_cast<int>(aSector);
+    if (!aC.ok || ci < 0 || ci >= kClipCount || aC.clip[ci] == nullptr || aOut == nullptr)
         return false;
-    const traversal::TravMontage& m = *aC.clip[static_cast<int>(aSector)];
+    const traversal::TravMontage& m = *aC.clip[ci];
     double ft = (std::isfinite(aTime) ? aTime : 0.0) * m.fps;
     ft = std::clamp(ft, 0.0, static_cast<double>(m.frames - 1));
     const int f0 = static_cast<int>(ft);
@@ -290,7 +328,7 @@ struct Input
     bool standingGround = false; // on the ground, standing stance, no slide / traversal / air / fallback (the clip may play)
     float velX = 0.0f, velY = 0.0f; // capsule velocity (world, m/s)
     float facingYawDeg = 0.0f;      // the body's facing (world yaw, degrees)
-    float forwardClipMaxEntryMps = 0.0f; // a forward dodge entered faster than this keeps the playing clip (the run / sprint goes on)
+    float forwardClipMaxEntryMps = 0.0f; // a forward dodge entered faster than this: Dodge_F_Run when loaded, else the run goes on
 };
 
 struct Frame
@@ -298,8 +336,13 @@ struct Frame
     bool active = false;   // this feed shows the dodge clip
     bool start = false;    // first feed of a clip (inertialized entry over kBlendInS)
     bool handback = false; // first feed after the clip (the motion search, inertialized over kBlendOutS)
-    Sector sector = Sector::None;
+    Sector sector = Sector::None; // the clip shown (ForwardRun = Dodge_F_Run)
     float clipTime = 0.0f;
+    // the pick of this feed (every dodge that reaches it, also a forward one without a clip): direction picked, the impulse's world
+    // yaw (ImpulseDirection) and its yaw relative to the facing, the entry speed
+    bool pick = false;
+    Sector pickSector = Sector::None;
+    float pushYawDeg = 0.0f, pushRelDeg = 0.0f, entrySpeed = 0.0f;
 };
 
 class DodgePlayer
@@ -311,8 +354,17 @@ public:
     float ClipTime() const { return m_clipTime; }
     float EntrySpeed() const { return m_entrySpeed; }
 
-    // aLength: clip lengths (seconds of clip time) of the loaded clips.
+    // aLength: clip lengths (seconds of clip time) of the loaded clips (four directions: no Dodge_F_Run).
     Frame Tick(const Input& aIn, const std::array<float, kSectorCount>& aLength)
+    {
+        std::array<float, kClipCount> l{};
+        for (int s = 0; s < kSectorCount; ++s)
+            l[s] = aLength[s];
+        return Tick(aIn, l);
+    }
+
+    // aLength: clip lengths of the loaded clips; aLength[ForwardRun] <= 0 = no Dodge_F_Run.
+    Frame Tick(const Input& aIn, const std::array<float, kClipCount>& aLength)
     {
         Frame out;
         const float dt = std::isfinite(aIn.dt) ? std::clamp(aIn.dt, 0.0f, kMaxStepS) : 0.0f;
@@ -325,6 +377,8 @@ public:
             out.handback = m_playing;
             m_playing = m_armed = false;
             m_sector = Sector::None;
+            m_lastVel[0] = vx;
+            m_lastVel[1] = vy;
             return out;
         }
         if (edge)
@@ -332,16 +386,28 @@ public:
             m_armed = true;
             m_armedT = 0.0f;
             m_entrySpeed = speed;
+            m_entryVel[0] = vx;
+            m_entryVel[1] = vy;
 #if UTPP_DODGE_MUTATION != 3
             if (!(speed > m_lastSpeed + kImpulseRiseMps))
             {
                 m_lastSpeed = speed;
+                m_lastVel[0] = vx;
+                m_lastVel[1] = vy;
                 return Continue(out, dt, aLength);
             }
             m_entrySpeed = m_lastSpeed; // the impulse is already in the first dodge feed
+            m_entryVel[0] = m_lastVel[0];
+            m_entryVel[1] = m_lastVel[1];
 #endif
         }
         m_lastSpeed = speed;
+        m_lastVel[0] = vx;
+        m_lastVel[1] = vy;
+        float ix = 0.0f, iy = 0.0f;
+        ImpulseDirection(vx, vy, m_entryVel[0], m_entryVel[1], ix, iy);
+        const float pushYaw = std::atan2(-ix, iy) * 57.29578f;
+        const float rel = WrapDeg(pushYaw - aIn.facingYawDeg);
         if (m_armed)
         {
             m_armedT += edge ? 0.0f : dt;
@@ -356,15 +422,28 @@ public:
             m_armed = false;
             if (speed < kMinImpulseMps)
                 return Continue(out, dt, aLength);
-            const float rel = WrapDeg(std::atan2(-vx, vy) * 57.29578f - aIn.facingYawDeg);
-            const Sector s = ClassifySector(rel, m_playing ? m_sector : Sector::None);
+            Sector s = ClassifySector(rel, m_playing ? m_sector : Sector::None);
+            out.pick = true;
+            out.pickSector = s;
+            out.pushYawDeg = WrapDeg(pushYaw);
+            out.pushRelDeg = rel;
+            out.entrySpeed = m_entrySpeed;
             if (s == Sector::Forward && m_entrySpeed >= aIn.forwardClipMaxEntryMps)
             {
-                // forward from a run / sprint: the playing locomotion goes on (a clip still playing hands back)
-                out.handback = m_playing;
-                m_playing = false;
-                m_sector = Sector::None;
-                return out;
+#if UTPP_DODGE_MUTATION != 6
+                const bool runClip = aLength[static_cast<int>(Sector::ForwardRun)] > 0.0f;
+#else
+                const bool runClip = false;
+#endif
+                if (!runClip)
+                {
+                    // forward from a run / sprint without Dodge_F_Run: the playing locomotion goes on (a clip still playing hands back)
+                    out.handback = m_playing;
+                    m_playing = false;
+                    m_sector = Sector::None;
+                    return out;
+                }
+                s = Sector::ForwardRun; // entered from the run / sprint pose, handed back to the search at speed
             }
             m_playing = true;
             m_sector = s;
@@ -377,7 +456,11 @@ public:
         }
         if (m_playing && m_sinceStart < kSettleS && aIn.dodgeDetail && speed >= kMinImpulseMps)
         {
-            const Sector s = ClassifySector(WrapDeg(std::atan2(-vx, vy) * 57.29578f - aIn.facingYawDeg), m_sector);
+            Sector s = ClassifySector(rel, m_sector);
+            if (s == Sector::Forward && m_sector == Sector::ForwardRun)
+                s = Sector::ForwardRun; // still the forward dodge of the run
+            else if (s == Sector::Forward && m_entrySpeed >= aIn.forwardClipMaxEntryMps && aLength[static_cast<int>(Sector::ForwardRun)] > 0.0f)
+                s = Sector::ForwardRun;
             if (s != m_sector)
             {
                 m_sector = s;
@@ -388,7 +471,7 @@ public:
     }
 
 private:
-    Frame Continue(Frame aOut, float aDt, const std::array<float, kSectorCount>& aLength)
+    Frame Continue(Frame aOut, float aDt, const std::array<float, kClipCount>& aLength)
     {
         if (!m_playing)
             return aOut;
@@ -416,6 +499,7 @@ private:
 
     bool m_prevDetail = false, m_armed = false, m_playing = false;
     float m_armedT = 0.0f, m_entrySpeed = 0.0f, m_lastSpeed = 0.0f, m_clipTime = 0.0f, m_sinceStart = 0.0f;
+    float m_entryVel[2] = {0.0f, 0.0f}, m_lastVel[2] = {0.0f, 0.0f};
     Sector m_sector = Sector::None;
 };
 } // namespace utpp::mm::dodge

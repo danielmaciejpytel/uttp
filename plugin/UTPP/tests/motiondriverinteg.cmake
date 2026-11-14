@@ -115,6 +115,27 @@ foreach(_m "YAW_AHEAD;applied first: the derived turn stays 0" "ROOT_AHEAD;game 
     add_test(NAME utpp_bodyturn_ahead_host_mut_${_tag} COMMAND utpp_bodyturn_ahead_host_mut_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
     set_tests_properties(utpp_bodyturn_ahead_host_mut_${_tag} PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ${_what}")
 endforeach()
+# Facing while a ground dodge clip plays (tests/DodgeFacingHostTest.cpp, real host + driver, the baked Female dodge clips): the body yaw
+# commands hold under the clip, the turn resumes after the hand-back. Mutant DODGE_FACING 1 = the body keeps turning; it MUST print its FAIL line.
+set(_utpp_dodge_facing_file "${CMAKE_CURRENT_SOURCE_DIR}/../../../Data/dodge/utpp_dodge_woman.utpptrav")
+set(_utpp_dodge_facing_man "${CMAKE_CURRENT_SOURCE_DIR}/../../../Data/dodge/utpp_dodge_man.utpptrav")
+if(EXISTS "${_utpp_dodge_facing_file}" AND EXISTS "${_utpp_dodge_facing_man}")
+  file(TO_NATIVE_PATH "${_utpp_dodge_facing_file}" _utpp_dodge_facing_native)
+  file(TO_NATIVE_PATH "${_utpp_dodge_facing_man}" _utpp_dodge_facing_man_native)
+  foreach(_v "test;0" "mut1;1")
+    list(GET _v 0 _tag)
+    list(GET _v 1 _mut)
+    add_executable(utpp_loco_dodge_facing_host_${_tag} tests/DodgeFacingHostTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+    target_compile_features(utpp_loco_dodge_facing_host_${_tag} PRIVATE cxx_std_20)
+    target_compile_options(utpp_loco_dodge_facing_host_${_tag} PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_loco_dodge_facing_host_${_tag} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV
+                               UTPP_DODGE_FACING_MUTATION=${_mut})
+    target_link_libraries(utpp_loco_dodge_facing_host_${_tag} PRIVATE bcrypt)
+    add_test(NAME utpp_loco_dodge_facing_host_${_tag} COMMAND utpp_loco_dodge_facing_host_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}"
+             "${_utpp_dodge_facing_native}" "${_utpp_dodge_facing_man_native}")
+  endforeach()
+  set_tests_properties(utpp_loco_dodge_facing_host_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*drawn heading holds")
+endif()
 # StanceGuard on a one-feed ground loss reported only by the physics probe: fade instead of a one-feed cut (tests/StanceGroundLossFadeTest.cpp).
 # Mutant: STANCE_FADE 1 = the ground loss cuts the guard in one feed; it MUST print its FAIL line.
 foreach(_v "test;0" "mut_stance_fade;1")

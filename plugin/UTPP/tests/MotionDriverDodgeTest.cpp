@@ -1,5 +1,8 @@
 // Ground dodge clips through the motion driver (src/MotionDriver.cpp + src/mm/Dodge.hpp) on recorded dodges.
-// Usage: utpp_motion_driver_dodge_test <data dir> <fixture dir>
+// Usage: utpp_motion_driver_dodge_test <data dir> <fixture dir> [<tracked data dir>]
+//   <tracked data dir>: tests/data with dodge_push_woman.feed / dodge_push_man.feed (forward / left / right / back presses with the stick
+//   held, sprint and run entry): replayed as recorded and with the push the game now gives (CorrectPush); checks the sectors and that the
+//   motion search holds its gait through each dodge and its speed decay (MapConfig::dodgeGaitHoldS; mutation 3 = no hold must FAIL).
 //   <data dir>: the motion data (utpp_motion_<body>.utppmm + .chooser.json, motion\, traversal\), as utpp_motion_driver_unit_test.
 //   <fixture dir>: utpp_dodge_<body>.utpptrav and the recorded feed windows dodge_feed_woman_a.txt, dodge_feed_woman_b.txt,
 //   dodge_feed_man.txt (31-column feed dump rows around four ground dodges each). A missing file makes the test FAIL.
@@ -53,7 +56,7 @@ struct Db
 {
     std::vector<uint64_t> hashes;
     std::vector<int16_t> parents;
-    std::vector<std::string> names;
+    std::vector<std::string> names, clips;
     uint32_t bones = 0;
 };
 bool LoadDb(const std::string& aPath, Db& aDb)
@@ -77,6 +80,8 @@ bool LoadDb(const std::string& aPath, Db& aDb)
         aDb.parents.push_back(static_cast<int16_t>(db.BoneParent(i)));
         aDb.names.emplace_back(db.BoneName(i));
     }
+    for (uint32_t i = 0; i < db.NumClips(); ++i)
+        aDb.clips.emplace_back(db.ClipName(i));
     return true;
 }
 int BoneIndex(const Db& aDb, const char* aName)
@@ -181,12 +186,15 @@ std::vector<Row> Resample(const std::vector<Row>& aRows, float aHz)
 
 struct Frame
 {
-    float t = 0, dt = 0, speed = 0, velYawDeg = 0, yawDeg = 0, rootYawDeg = 0, cap[3] = {};
+    float t = 0, dt = 0, speed = 0, velYawDeg = 0, yawDeg = 0, rootYawDeg = 0, cap[3] = {}, vel[2] = {};
     bool applied = false, dodgeFeed = false;
     motiondriver::DodgeProbe probe;
     float offset[3] = {}; // visual - capsule (x, y m, yaw rad), capsule axes
     int32_t shown = -1;   // db clip, or -(sector + 2) on a dodge clip frame
     int32_t under = -1;   // db clip of the motion search (also under a dodge clip)
+    int32_t mode = -1;    // movement mode of the motion search (status "air: ... mode="; 0 = ground)
+    int32_t detail = -1;  // recorded PSM detail column
+    int32_t gait = -1, interrupt = -1; // chooser gait / interrupt of the update (SelectionDiagnostics)
     std::vector<float> pose;
 };
 
@@ -277,6 +285,8 @@ std::vector<Frame> Replay(const std::vector<Row>& aRows, const Db& aDb)
         fr.dt = f.dt;
         fr.speed = std::hypot(r.v[0], r.v[1]);
         fr.velYawDeg = std::atan2(-r.v[0], r.v[1]) * 57.29578f;
+        fr.vel[0] = r.v[0];
+        fr.vel[1] = r.v[1];
         fr.yawDeg = r.yaw;
         fr.rootYawDeg = rootYawBefore;
         fr.cap[0] = r.cap[0];
@@ -289,7 +299,14 @@ std::vector<Frame> Replay(const std::vector<Row>& aRows, const Db& aDb)
         mm::integ::PoseSnapshot s = BaseLikeSnapshot(kRigPtr, aDb.bones);
         fr.applied = motiondriver::ApplyToSnapshot(s);
         fr.pose.assign(s.pose, s.pose + size_t(aDb.bones) * 7);
-        fr.under = PickClip(motiondriver::Status());
+        const std::string status = motiondriver::Status();
+        fr.under = PickClip(status);
+        const size_t modeAt = status.find(" mode=");
+        fr.mode = modeAt == std::string::npos ? -1 : std::atoi(status.c_str() + modeAt + 6);
+        fr.detail = r.detail;
+        const motiondriver::SelectionDiag sd = motiondriver::SelectionDiagnostics();
+        fr.gait = sd.gait;
+        fr.interrupt = sd.interrupt;
         fr.shown = fr.probe.active ? -(fr.probe.sector + 2) : fr.under;
         out.push_back(std::move(fr));
     }
@@ -373,6 +390,14 @@ struct Metrics
     float upperMaxDeg = 0;                         // arms / head vs the frame before the clip, clip frames before the release
     int upperFrames = 0;                           // clip frames measured for upperMaxDeg
     float offsetMax = 0, offsetMaxBase = 0, slideCm = 0, changesMax = 0, changesMaxBase = 0, stopLagMax = 0;
+    // per clip: start time, first sector, speed of the feed before the clip (m/s), entry single-frame steps (feet / hands deg, hips cm),
+    // planted-foot slide (cm) and capsule travel (m) over the clip and its hand-back blend
+    struct ClipReport
+    {
+        float t = 0, entrySpeed = 0, entryEndsDeg = 0, entryHipsCm = 0, slideCm = 0, travelM = 0;
+        int32_t sector = -1;
+    };
+    std::vector<ClipReport> clipReports;
     size_t firstDodge = 0;
 };
 
@@ -417,12 +442,14 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
             continue;
         ++m.dodges;
         float entry = aWith[i - 1].speed;
+        const float* entryVel = aWith[i - 1].vel;
         size_t j = i;
         if (aWith[i].speed > entry + dodge::kImpulseRiseMps)
             entry = aWith[i - 1].speed;
         else
         {
             entry = aWith[i].speed;
+            entryVel = aWith[i].vel;
             j = i + 1;
             while (j + 1 < aWith.size() && !(aWith[j].speed > entry + dodge::kImpulseRiseMps) && aWith[j].t - aWith[i].t < dodge::kImpulseWaitS &&
                    aWith[j].dodgeFeed)
@@ -430,8 +457,15 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         }
         if (j >= aWith.size())
             continue;
-        const dodge::Sector s = dodge::ClassifySector(WrapDeg(aWith[j].velYawDeg - aWith[j].rootYawDeg));
+        // the impulse: the capsule velocity minus the part of the entry velocity the game keeps (mm/Dodge.hpp ImpulseDirection; the
+        // raw velocity of a side press out of a run points 13-24 deg toward the run)
+        float ix = 0, iy = 0;
+        dodge::ImpulseDirection(aWith[j].vel[0], aWith[j].vel[1], entryVel[0], entryVel[1], ix, iy);
+        dodge::Sector s = dodge::ClassifySector(WrapDeg(std::atan2(-ix, iy) * 57.29578f - aWith[j].rootYawDeg));
         const bool runOn = s == dodge::Sector::Forward && entry >= 0.5f * (1.6f + 3.85f);
+        if (runOn && aC.HasForwardRun())
+            s = dodge::Sector::ForwardRun;
+        const bool runOnNoClip = runOn && !aC.HasForwardRun();
         bool shown = false;
         int32_t sec = -1;
         for (size_t k = i; k < aWith.size() && aWith[k].t - aWith[i].t < 0.15f; ++k)
@@ -441,7 +475,7 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
                 sec = aWith[k].probe.sector;
                 break;
             }
-        const bool ok = runOn ? !shown : (shown && sec == static_cast<int32_t>(s));
+        const bool ok = runOnNoClip ? !shown : (shown && sec == static_cast<int32_t>(s));
         m.outcomeOk += ok ? 1 : 0;
         if (aPrint)
             std::printf("INFO %s dodge at t=%.3f: entry %.2f m/s, impulse sector %s -> %s (%s)\n", aTag.c_str(), aWith[i].t, entry,
@@ -619,10 +653,21 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         m.hipsExcess = std::fmax(m.hipsExcess, std::fmax(hIn, hOut) - ownH);
         m.endsExcess = std::fmax(m.endsExcess, std::fmax(eIn, eOut) - ownE);
         // sector: impulse direction (the feed of the pick) against the drawn heading before that feed
+        // (impulse = velocity minus the kept part of the entry velocity, ImpulseDirection; entry = the feed before the dodge detail
+        // when the impulse is already in its first feed, else that first feed - the DodgePlayer rule)
         const Frame& pf = aWith[e.start];
-        e.expectRel = WrapDeg(pf.velYawDeg - pf.rootYawDeg);
-        e.actorRel = WrapDeg(pf.velYawDeg - pf.yawDeg);
+        size_t edge = e.start;
+        while (edge > 0 && aWith[edge - 1].dodgeFeed)
+            --edge;
+        const float* ev = (edge > 0 && aWith[edge].speed > aWith[edge - 1].speed + dodge::kImpulseRiseMps) ? aWith[edge - 1].vel : aWith[edge].vel;
+        float ix = 0, iy = 0;
+        dodge::ImpulseDirection(pf.vel[0], pf.vel[1], ev[0], ev[1], ix, iy);
+        const float pushYaw = std::atan2(-ix, iy) * 57.29578f;
+        e.expectRel = WrapDeg(pushYaw - pf.rootYawDeg);
+        e.actorRel = WrapDeg(pushYaw - pf.yawDeg);
         e.expected = static_cast<int32_t>(dodge::ClassifySector(e.expectRel));
+        if (e.expected == static_cast<int32_t>(dodge::Sector::Forward) && e.firstSector == static_cast<int32_t>(dodge::Sector::ForwardRun))
+            e.expected = e.firstSector; // the forward dodge out of a run with Dodge_F_Run loaded
         m.sectorOk += e.expected == e.firstSector ? 1 : 0; // a later change inside the settle window is DodgePlayer logic (utpp_loco_dodge_test)
         // offset (visual - capsule) over the episode + blend-out, with and without the clips
         for (size_t i = e.start; i <= exitEnd; ++i)
@@ -640,6 +685,7 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         if (exitEnd < aBase.size())
             m.offsetEndBase = std::fmax(m.offsetEndBase, std::hypot(aBase[exitEnd].offset[0], aBase[exitEnd].offset[1]));
         // planted-foot slide: world foot (capsule + visual frame + model) of the lower foot while both frames are below 12 cm
+        const float slideBefore = m.slideCm;
         for (size_t i = e.start + 1; i <= exitEnd; ++i)
         {
             auto world = [&](const Frame& f, int bone, float& z) {
@@ -665,6 +711,19 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
             }
             if (best < 1e8f)
                 m.slideCm += best * 100.0f;
+        }
+        // per clip: entry steps, planted-foot slide and capsule travel over the clip and its hand-back blend (the Dodge_F_Run report)
+        {
+            Metrics::ClipReport cr;
+            cr.t = aWith[e.start].t;
+            cr.sector = e.firstSector;
+            cr.entrySpeed = e.start > 0 ? aWith[e.start - 1].speed : 0.0f;
+            cr.entryEndsDeg = eIn;
+            cr.entryHipsCm = hIn * 100.0f;
+            cr.slideCm = m.slideCm - slideBefore;
+            for (size_t i = e.start + 1; i <= exitEnd; ++i)
+                cr.travelM += std::hypot(aWith[i].cap[0] - aWith[i - 1].cap[0], aWith[i].cap[1] - aWith[i - 1].cap[1]);
+            m.clipReports.push_back(cr);
         }
         // hand-back vs the capsule stop (speed < 0.5 m/s after the dodge)
         size_t stop = e.start;
@@ -729,6 +788,116 @@ std::vector<Row> TurnImpulse(const std::vector<Row>& aRows, const std::vector<Fr
         out[i].cap[1] = aRows[i].cap[1] + shift[1];
     }
     return out;
+}
+
+// The push records (tests/data/dodge_push_<body>.feed) were taken before the key dodge followed the stick: the game pushed along the
+// camera (heading 0). CorrectPush rebuilds the push the game now gives (heading = the stick relative to the camera): for every rising
+// dodge detail at feed i, theta = targetYaw[i] - camera[i] (the heading now served) and e = the velocity of feed i - 1 (the entry). On
+// the impulse feeds (from i when the speed already rose on feed i, else from i + 1) while the detail lasts, and on the following feeds
+// while the speed keeps falling (the decay), the velocity becomes R(theta) (v - kEntryKeep e) + kEntryKeep e (the measured model: the
+// game keeps ~half of the entry velocity and adds the push). Capsule positions are integrated from the velocity change (later feeds
+// shifted by the same amount); body yaw, camera, stick, PSM and locomotion stay as recorded.
+std::vector<Row> CorrectPush(const std::vector<Row>& aRows)
+{
+    std::vector<Row> out = aRows;
+    float shift[2] = {0.0f, 0.0f};
+    for (size_t i = 1; i < aRows.size(); ++i)
+    {
+        if (aRows[i].detail != 7 || aRows[i - 1].detail == 7)
+            continue;
+        const float theta = WrapDeg(aRows[i].tgtYaw - aRows[i].cam) * mm::integ::kDegToRad;
+        const float c = std::cos(theta), s = std::sin(theta), ex = aRows[i - 1].v[0], ey = aRows[i - 1].v[1];
+        const float entry = std::hypot(ex, ey);
+        size_t j = std::hypot(aRows[i].v[0], aRows[i].v[1]) > entry + dodge::kImpulseRiseMps ? i : i + 1;
+        bool decay = false;
+        for (; j < aRows.size(); ++j)
+        {
+            if (aRows[j].detail == 7 && decay)
+                break; // the next dodge
+            if (aRows[j].detail != 7)
+            {
+                decay = true;
+                if (!(std::hypot(aRows[j].v[0], aRows[j].v[1]) < std::hypot(aRows[j - 1].v[0], aRows[j - 1].v[1])))
+                    break;
+            }
+            const float px = aRows[j].v[0] - dodge::kEntryKeep * ex, py = aRows[j].v[1] - dodge::kEntryKeep * ey;
+            out[j].v[0] = c * px - s * py + dodge::kEntryKeep * ex;
+            out[j].v[1] = s * px + c * py + dodge::kEntryKeep * ey;
+        }
+    }
+    for (size_t i = 1; i < out.size(); ++i)
+    {
+        const float dt = aRows[i].t - aRows[i - 1].t;
+        shift[0] += (out[i].v[0] - aRows[i].v[0]) * dt;
+        shift[1] += (out[i].v[1] - aRows[i].v[1]) * dt;
+        out[i].cap[0] = aRows[i].cap[0] + shift[0];
+        out[i].cap[1] = aRows[i].cap[1] + shift[1];
+    }
+    return out;
+}
+
+// Gait changes of the motion search under the impulse: over each rising dodge detail, its feeds and the following feeds while the speed
+// keeps falling (the decay, at most 0.8 s), the number of changes of the clip under the search on feeds that show no dodge clip.
+struct GaitHops
+{
+    int dodges = 0, hops = 0, worst = 0;
+    std::string detail;
+};
+GaitHops CountGaitHops(const std::vector<Frame>& aFrames, const Db& aDb)
+{
+    GaitHops g;
+    for (size_t i = 1; i < aFrames.size(); ++i)
+    {
+        if (!aFrames[i].dodgeFeed || aFrames[i - 1].dodgeFeed)
+            continue;
+        ++g.dodges;
+        int hops = 0;
+        std::string seq = F("t=%.3f:", aFrames[i].t);
+        int32_t last = aFrames[i - 1].under;
+        float detailEnd = -1.0f;
+        for (size_t j = i; j < aFrames.size(); ++j)
+        {
+            if (!aFrames[j].dodgeFeed)
+            {
+                if (detailEnd < 0.0f)
+                    detailEnd = aFrames[j].t;
+                if (!(aFrames[j].speed < aFrames[j - 1].speed) || aFrames[j].t - detailEnd > 0.8f)
+                    break;
+            }
+            else if (detailEnd >= 0.0f)
+                break; // the next dodge
+            if (aFrames[j].detail > 0 && aFrames[j].detail != mm::adapter::kPsmDodge && !mm::adapter::PsmGround(aFrames[j].detail))
+                break; // the game left the ground (a fall off a slope after the dodge): the air search owns it
+            if (aFrames[j].mode != 0)
+            {
+                last = -1; // the motion search is in the air (the capsule fell faster than a ground contact allows)
+                continue;
+            }
+            if (aFrames[j].probe.active)
+            {
+                last = -1;
+                continue;
+            }
+            const auto nm = [&](int32_t c) { return c >= 0 && size_t(c) < aDb.clips.size() ? aDb.clips[size_t(c)] : std::string("?"); };
+            if (last >= 0 && aFrames[j].under >= 0 && aFrames[j].under != last)
+            {
+                // a gait transition that runs into the loop of its target gait (Transition_Run_to_Sprint -> Sprint_Loop) is the gait going on
+                const std::string from = nm(last), to = nm(aFrames[j].under);
+                const size_t tr = from.find("Transition_"), toAt = from.find("_to_");
+                const std::string target = tr != std::string::npos && toAt != std::string::npos ? from.substr(toAt + 4, from.find('_', toAt + 4) - toAt - 4) : "";
+                const bool finishes = !target.empty() && to.find(target + "_Loop") != std::string::npos;
+                hops += finishes ? 0 : 1;
+                seq += " " + from + "->" + to + F("@%.3f gait %.0f interrupt %.0f", aFrames[j].t, aFrames[j].gait, aFrames[j].interrupt) +
+                    (finishes ? " (transition ends)" : "");
+            }
+            if (aFrames[j].under >= 0)
+                last = aFrames[j].under;
+        }
+        g.hops += hops;
+        g.worst = std::max(g.worst, hops);
+        g.detail += (g.detail.empty() ? "" : "; ") + seq + F(" %.0f", hops);
+    }
+    return g;
 }
 
 // UTPP_DODGE_DUMP=<folder>: one binary file <tag>_<variant>.bin per replay: int32 frames, int32 bones, then per frame 10 floats
@@ -996,6 +1165,114 @@ int main(int argc, char** argv)
             Check(r.changesMax <= 3.0f, t + ": shown clip changes per second <= 3.0", F("%.2f (without the clips %.2f)", r.changesMax, r.changesMaxBase));
             Dump(t, "without", b, db);
             Dump(t, "with", w, db);
+        }
+    }
+    // the scenario presses (forward / left / right / back with the stick held, run and sprint entry) of both bodies: as recorded (push
+    // along the camera) and with the push the game now gives (CorrectPush); recorded rate and 30 / 60 Hz
+    if (argc >= 4)
+    {
+        const std::string tracked = argv[3];
+        const Rec push[] = {{"woman", 0, "dodge_push_woman.feed"}, {"man", 1, "dodge_push_man.feed"}};
+        for (const Rec& rec : push)
+        {
+            motiondriver::Paths base = DataPaths(data, rec.body);
+            Db db;
+            const std::vector<Row> rows = ReadRows(tracked + "\\" + rec.feed);
+            Check(LoadDb(base.files.db, db) && rows.size() > 300, std::string(rec.feed) + ": database and recorded rows", std::to_string(rows.size()));
+            const std::string dodgeFile = fix + "\\utpp_dodge_" + rec.body + ".utpptrav";
+            mm::traversal::TraversalFile tf;
+            dodge::DodgeClips clips;
+            std::string err;
+            const bool clipsOk = db.bones > 0 && mm::traversal::LoadTraversalFile(dodgeFile, tf, err) &&
+                dodge::BuildDodgeClips(tf, std::string("player_") + rec.body + "_skeleton", db.bones,
+                                       [&](uint32_t i) { return std::string_view(db.names[i]); }, clips);
+            if (!clipsOk || rows.size() <= 300)
+                continue;
+            Bones bn;
+            bn.hips = BoneIndex(db, "Hips");
+            const char* legs[4] = {"LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg"};
+            const char* ends[4] = {"LeftFoot", "RightFoot", "LeftHand", "RightHand"};
+            for (int k = 0; k < 4; ++k)
+            {
+                bn.legs[k] = BoneIndex(db, legs[k]);
+                bn.ends[k] = BoneIndex(db, ends[k]);
+            }
+            for (const char* u : {"LeftArm", "RightArm", "LeftForeArm", "RightForeArm", "Head"})
+                bn.upper.push_back(BoneIndex(db, u));
+            motiondriver::Paths missing = base, with = base;
+            missing.dodge = fix + "\\does-not-exist.utpptrav";
+            with.dodge = dodgeFile;
+            const std::vector<Row> corrected = CorrectPush(rows);
+            for (int variant = 0; variant < 2; ++variant)
+                for (float hz : {0.0f, 60.0f, 30.0f})
+                {
+                    const std::vector<Row>& src = variant == 0 ? rows : corrected;
+                    const std::vector<Row> v = hz > 0.0f ? Resample(src, hz) : src;
+                    const std::string t = std::string(rec.feed) + (variant == 0 ? " as recorded" : " push on the stick") +
+                        (hz > 0.0f ? F(" %.0f Hz", hz) : std::string(" recorded rate"));
+                    Check(Session(rec.index, missing, db), t + ": session without the file");
+                    const std::vector<Frame> b = Replay(v, db);
+                    Check(Session(rec.index, with, db), t + ": session with the file");
+                    const std::vector<Frame> w = Replay(v, db);
+                    const Metrics r = Analyse(t, w, b, clips, db, bn, true);
+                    Check(r.dodges == 4 && r.outcomeOk == r.dodges && r.sectorOk == r.clips,
+                          t + ": every press shows the clip of the impulse sector relative to the drawn heading, or none for forward out of a run",
+                          F("%.0f / %.0f dodges, sectors %.0f / %.0f", r.outcomeOk, r.dodges, r.sectorOk, r.clips));
+                    // the stick held left / back had already turned the body: those pushes are forward (the run goes on). The right press comes
+                    // in the middle of the 180 deg turn back from the left press: its sector depends on how far the drawn heading has turned
+                    // (R -69 / -74 deg at the recorded rate, B 147 / 158 at 60 Hz, L 135 / R -94 at 30 Hz; Analyse checks it against the impulse)
+                    if (variant == 1)
+                        Check(r.clips == 1 && (r.sectorBits & 1u) == 0, t + ": forward / left / back presses go on running (forward relative to the turned body), "
+                              "the right press shows one side / back clip", F("%.0f clips, sector bits %.0f", r.clips, r.sectorBits));
+                    const GaitHops g = CountGaitHops(w, db);
+                    std::printf("INFO %s gait under the impulse: %d changes over %d dodges (%s)\n", t.c_str(), g.hops, g.dodges, g.detail.c_str());
+                    Check(g.dodges == 4 && g.hops == 0, t + ": the motion search holds its gait through the dodge state and its speed decay",
+                          F("%.0f changes over %.0f dodges, worst %.0f", g.hops, g.dodges, g.worst) + " | " + g.detail);
+                }
+            // Dodge_F_Run: the test-only five-clip file utpp_dodge_<body>_frun_test.utpptrav (dodgebake.py --forward-run, placeholder clip;
+            // the test runs where the file exists) on the corrected presses: the forward presses out of the sprint (8.2 m/s) and the run
+            // (3.1 - 3.9 m/s) show Dodge_F_Run, the right press its side / back clip. Prints the entry steps, the planted-foot slide and the
+            // capsule travel of each Dodge_F_Run.
+            const std::string frunFile = fix + "\\utpp_dodge_" + rec.body + "_frun_test.utpptrav";
+            if (std::ifstream(frunFile).good())
+            {
+                mm::traversal::TraversalFile tf5;
+                dodge::DodgeClips clips5;
+                std::string err5;
+                const bool ok5 = mm::traversal::LoadTraversalFile(frunFile, tf5, err5) &&
+                    dodge::BuildDodgeClips(tf5, std::string("player_") + rec.body + "_skeleton", db.bones,
+                                           [&](uint32_t i) { return std::string_view(db.names[i]); }, clips5);
+                Check(ok5 && clips5.HasForwardRun(), std::string(rec.feed) + ": five-clip file with Dodge_F_Run loads", ok5 ? frunFile : err5 + clips5.err);
+                motiondriver::Paths with5 = base;
+                with5.dodge = frunFile;
+                for (float hz : {0.0f, 60.0f, 30.0f})
+                {
+                    if (!ok5)
+                        break;
+                    const std::vector<Row> v = hz > 0.0f ? Resample(corrected, hz) : corrected;
+                    const std::string t = std::string(rec.feed) + " push on the stick, Dodge_F_Run" + (hz > 0.0f ? F(" %.0f Hz", hz) : std::string(" recorded rate"));
+                    Check(Session(rec.index, missing, db), t + ": session without the file");
+                    const std::vector<Frame> b = Replay(v, db);
+                    Check(Session(rec.index, with5, db), t + ": session with the five-clip file");
+                    const std::vector<Frame> w = Replay(v, db);
+                    const Metrics r = Analyse(t, w, b, clips5, db, bn, true);
+                    const uint32_t runBit = 1u << static_cast<int>(dodge::Sector::ForwardRun);
+                    int runClips = 0;
+                    for (const Metrics::ClipReport& cr : r.clipReports)
+                        if (cr.sector == static_cast<int32_t>(dodge::Sector::ForwardRun))
+                        {
+                            ++runClips;
+                            std::printf("INFO %s Dodge_F_Run at t=%.3f, %s entry %.2f m/s: entry step feet / hands %.1f deg, hips %.1f cm; planted-foot slide "
+                                        "%.1f cm over %.2f m of capsule travel (clip + hand-back)\n",
+                                        t.c_str(), cr.t, cr.entrySpeed > 6.0f ? "sprint" : "run", cr.entrySpeed, cr.entryEndsDeg, cr.entryHipsCm,
+                                        cr.slideCm, cr.travelM);
+                        }
+                    Check(r.dodges == 4 && r.outcomeOk == r.dodges && r.sectorOk == r.clips && (r.sectorBits & runBit) != 0 && runClips == 3,
+                          t + ": the forward presses out of the sprint / run show Dodge_F_Run, the right press its own clip",
+                          F("%.0f / %.0f dodges, sectors %.0f / %.0f", r.outcomeOk, r.dodges, r.sectorOk, r.clips) + F(", %.0f Dodge_F_Run", runClips));
+                    Check(r.legMaxDeg < 3.0f, t + ": legs follow the picked clip", F("max %.2f deg", r.legMaxDeg));
+                }
+            }
         }
     }
     std::remove(corrupt.c_str());

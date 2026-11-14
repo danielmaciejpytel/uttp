@@ -622,6 +622,7 @@ struct MotionSetFrame // UTPP-MOTION SEAM
     bool stops = false; // UTPP-MOTION SEAM idle / stop database (replant Stops profile)
     bool travFrame = false;                  // UTPP-MOTION SEAM trav: traversal montage frame (root already
                                              // warped onto the capsule: offset root gets animVel = capVel)
+    bool dodgeClip = false; // a ground dodge clip is shown (mm/Dodge.hpp): the body turn holds the capsule yaw (BodyYawCommand)
     // Prepared from the same live base as pose/AO. Host applies once, bypassing
     // legacy integration.
     bool providedRoot = false;

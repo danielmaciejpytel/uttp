@@ -998,6 +998,17 @@ void N_RawAngle(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, float* aOut
         *aOut = g_core.RawAngle(Now());
 }
 
+// Script thread (the PSM dodge decision, utpp_locomotion.reds): the DodgeDirection to store (LocomotionCore DodgeHeading).
+void N_DodgeHeading(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, float* aOut, int64_t)
+{
+    float game = 0.0f;
+    RED4ext::GetParameter(aFrame, &game);
+    aFrame->code++;
+    const float served = g_core.DodgeHeading(game, Now());
+    if (aOut)
+        *aOut = served;
+}
+
 // ---- move override / vehicle approach walk (src/input/LocomotionCore.hpp override, src/input/ApproachCore.hpp planner) ----
 // Game thread only. The approach walk is a pure consumer of the override channel: every step it writes a short-lived stick.
 
@@ -1240,6 +1251,11 @@ void RegisterNatives()
     f->SetReturnType("Float");
     rtti->RegisterFunction(f);
 
+    f = Make("UTPPLocomotionDodgeHeading", &N_DodgeHeading);
+    f->AddParam("Float", "gameHeading");
+    f->SetReturnType("Float");
+    rtti->RegisterFunction(f);
+
     f = Make("UTPPLocomotionSetMoveOverride", &N_SetMoveOverride);
     f->AddParam("Float", "x");
     f->AddParam("Float", "y");
@@ -1369,6 +1385,19 @@ void OnRunning()
 uint32_t CurrentReasons()
 {
     return g_core.Reasons(Now());
+}
+
+bool LastDodgeHeading(uint64_t& aCalls, float& aServed, float& aEngine, bool& aRewritten, double& aAgeS)
+{
+    freemove::Core::DodgeHeadingRecord r;
+    if (!g_core.LastDodgeHeading(r))
+        return false;
+    aCalls = r.calls;
+    aServed = r.served;
+    aEngine = r.engine;
+    aRewritten = r.rewritten;
+    aAgeS = Now() - r.at;
+    return true;
 }
 
 void Shutdown()
