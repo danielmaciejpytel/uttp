@@ -1,0 +1,41 @@
+[2026-11-13 23:04:10.062] [info    ] [ 74320] [UTPP] UTPP MOTION t=43.343 db=18:PSD_Dense_Stand_Run_Starts clip=415:M_Neutral_Run_Start_F_Rfoot ct=0.233 cost=0 body=woman
+[2026-11-13 23:04:10.389] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(off mode=0 chest=0.50 maxYaw=100 valid=0) -> 1
+[2026-11-13 23:04:10.579] [info    ] [ 61316] [UTPP] UTPP MOTION t=43.858 db=18:PSD_Dense_Stand_Run_Starts clip=415:M_Neutral_Run_Start_F_Rfoot ct=0.692 cost=0 body=woman
+[2026-11-13 23:04:10.915] [info    ] [ 28780] [UTPP] UTPP MOTION t=44.196 db=30:PSD_Dense_Stand_Walk_Loops clip=508:M_Neutral_Transition_Run_to_Walk_Rfoot ct=0.700 cost=0 body=woman
+[2026-11-13 23:04:10.933] [info    ] [ 55248] [UTPP] UTPP MOTION t=44.213 db=19:PSD_Dense_Stand_Run_Stops clip=434:M_Neutral_Run_Stop_F_Lfoot ct=0.767 cost=0 body=woman
+[2026-11-13 23:04:11.161] [info    ] [ 54892] [UTPP] UTPP MOTION t=44.441 db=18:PSD_Dense_Stand_Run_Starts clip=411:M_Neutral_Run_Start_FL_Rfoot ct=0.000 cost=0 body=woman
+[2026-11-13 23:04:11.342] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(on mode=0 chest=0.50 maxYaw=100 valid=1) -> 1
+[2026-11-13 23:04:11.422] [info    ] [ 44668] [UTPP] UTPP MOTION t=44.702 db=18:PSD_Dense_Stand_Run_Starts clip=415:M_Neutral_Run_Start_F_Rfoot ct=0.167 cost=0 body=woman
+[2026-11-13 23:04:11.792] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(off mode=0 chest=0.50 maxYaw=100 valid=0) -> 1
+[2026-11-13 23:04:11.931] [info    ] [ 90052] [UTPP] UTPP MOTION t=45.210 db=18:PSD_Dense_Stand_Run_Starts clip=415:M_Neutral_Run_Start_F_Rfoot ct=0.632 cost=0 body=woman
+[2026-11-13 23:04:11.982] [info    ] [ 28356] [UTPP] UTPP MOTION t=45.262 db=18:PSD_Dense_Stand_Run_Starts clip=415:M_Neutral_Run_Start_F_Rfoot ct=0.677 cost=0 body=woman
+[2026-11-13 23:04:12.206] [info    ] [ 77372] [UTPP] UTPP MOTION t=45.485 db=30:PSD_Dense_Stand_Walk_Loops clip=507:M_Neutral_Transition_Run_to_Walk_Lfoot ct=0.800 cost=0 body=woman
+[2026-11-13 23:04:12.223] [info    ] [ 46952] [UTPP] UTPP MOTION t=45.502 db=19:PSD_Dense_Stand_Run_Stops clip=434:M_Neutral_Run_Stop_F_Lfoot ct=0.767 cost=0 body=woman
+[2026-11-13 23:04:12.632] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(on mode=0 chest=0.50 maxYaw=100 valid=1) -> 1
+[2026-11-13 23:04:12.735] [info    ] [ 28356] [UTPP] UTPP MOTION t=46.015 db=19:PSD_Dense_Stand_Run_Stops clip=434:M_Neutral_Run_Stop_F_Lfoot ct=1.261 cost=0 body=woman
+[2026-11-13 23:04:12.968] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(on mode=1 chest=0.50 maxYaw=100 valid=1) -> 1
+[2026-11-13 23:04:13.243] [info    ] [ 12592] [UTPP] UTPP MOTION t=46.522 db=19:PSD_Dense_Stand_Run_Stops clip=434:M_Neutral_Run_Stop_F_Lfoot ct=1.769 cost=0 body=woman
+[2026-11-13 23:04:13.747] [info    ] [ 27656] [UTPP] UTPP MOTION t=47.027 db=19:PSD_Dense_Stand_Run_Stops clip=434:M_Neutral_Run_Stop_F_Lfoot ct=2.273 cost=0 body=woman
+[2026-11-13 23:04:14.259] [info    ] [ 12592] [UTPP] UTPP MOTION t=47.538 db=19:PSD_Dense_Stand_Run_Stops clip=434:M_Neutral_Run_Stop_F_Lfoot ct=2.784 cost=0 body=woman
+[2026-11-13 23:04:14.594] [info    ] [ 74320] [UTPP] UTPP MOTION t=47.873 db=18:PSD_Dense_Stand_Run_Starts clip=399:M_Neutral_Run_Reface_Start_F_R_180 ct=0.233 cost=0 body=woman
+[2026-11-13 23:04:14.846] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(on mode=0 chest=0.50 maxYaw=100 valid=1) -> 1
+[2026-11-13 23:04:15.104] [info    ] [ 61316] [UTPP] UTPP MOTION t=48.383 db=18:PSD_Dense_Stand_Run_Starts clip=399:M_Neutral_Run_Reface_Start_F_R_180 ct=0.667 cost=0 body=woman
+[2026-11-13 23:04:15.236] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(off mode=0 chest=0.50 maxYaw=100 valid=0) -> 1
+[2026-11-13 23:04:15.272] [info    ] [ 54892] [UTPP] UTPP MOTION t=48.551 db=30:PSD_Dense_Stand_Walk_Loops clip=507:M_Neutral_Transition_Run_to_Walk_Lfoot ct=1.100 cost=0 body=woman
+[2026-11-13 23:04:15.289] [info    ] [ 77372] [UTPP] UTPP MOTION t=48.568 db=34:PSD_Dense_Stand_Walk_Stops clip=708:M_Neutral_Walk_Stop_F_Lfoot ct=1.267 cost=0 body=woman
+[2026-11-13 23:04:15.523] [info    ] [ 28780] [UTPP] UTPP MOTION t=48.803 db=18:PSD_Dense_Stand_Run_Starts clip=398:M_Neutral_Run_Reface_Start_F_R_090 ct=0.000 cost=0 body=woman
+[2026-11-13 23:04:15.641] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(on mode=0 chest=0.50 maxYaw=100 valid=1) -> 1
+[2026-11-13 23:04:16.037] [info    ] [ 55248] [UTPP] UTPP MOTION t=49.316 db=18:PSD_Dense_Stand_Run_Starts clip=398:M_Neutral_Run_Reface_Start_F_R_090 ct=0.441 cost=0 body=woman
+[2026-11-13 23:04:16.151] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(off mode=0 chest=0.50 maxYaw=100 valid=0) -> 1
+[2026-11-13 23:04:16.204] [info    ] [ 70412] [UTPP] UTPP MOTION t=49.483 db=30:PSD_Dense_Stand_Walk_Loops clip=629:M_Neutral_Walk_Loop_F ct=3.867 cost=0 body=woman
+[2026-11-13 23:04:16.221] [info    ] [ 77372] [UTPP] UTPP MOTION t=49.500 db=34:PSD_Dense_Stand_Walk_Stops clip=708:M_Neutral_Walk_Stop_F_Lfoot ct=1.267 cost=0 body=woman
+[2026-11-13 23:04:16.473] [info    ] [ 55248] [UTPP] UTPP MOTION t=49.752 db=18:PSD_Dense_Stand_Run_Starts clip=414:M_Neutral_Run_Start_F_Lfoot ct=0.000 cost=0 body=woman
+[2026-11-13 23:04:16.571] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(on mode=0 chest=0.50 maxYaw=100 valid=1) -> 1
+[2026-11-13 23:04:16.975] [info    ] [ 46952] [UTPP] UTPP MOTION t=50.254 db=18:PSD_Dense_Stand_Run_Starts clip=414:M_Neutral_Run_Start_F_Lfoot ct=0.438 cost=0 body=woman
+[2026-11-13 23:04:17.091] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(off mode=0 chest=0.50 maxYaw=100 valid=0) -> 1
+[2026-11-13 23:04:17.276] [info    ] [ 12592] [UTPP] UTPP MOTION t=50.556 db=18:PSD_Dense_Stand_Run_Starts clip=414:M_Neutral_Run_Start_F_Lfoot ct=0.699 cost=0 body=woman
+[2026-11-13 23:04:17.393] [info    ] [ 74320] [UTPP] UTPP MOTION t=50.672 db=18:PSD_Dense_Stand_Run_Starts clip=414:M_Neutral_Run_Start_F_Lfoot ct=0.798 cost=0 body=woman
+[2026-11-13 23:04:17.443] [info    ] [ 70412] [UTPP] UTPP MOTION t=50.722 db=30:PSD_Dense_Stand_Walk_Loops clip=508:M_Neutral_Transition_Run_to_Walk_Rfoot ct=1.100 cost=0 body=woman
+[2026-11-13 23:04:17.460] [info    ] [ 28356] [UTPP] UTPP MOTION t=50.739 db=34:PSD_Dense_Stand_Walk_Stops clip=708:M_Neutral_Walk_Stop_F_Lfoot ct=1.267 cost=0 body=woman
+[2026-11-13 23:04:17.718] [info    ] [ 12592] [UTPP] UTPP MOTION t=50.998 db=18:PSD_Dense_Stand_Run_Starts clip=399:M_Neutral_Run_Reface_Start_F_R_180 ct=0.000 cost=0 body=woman
+[2026-11-13 23:04:17.819] [info    ] [ 57788] [UTPP] UTPPSetHeadLook(on mode=1 chest=0.50 maxYaw=100 valid=1) -> 1

@@ -102,6 +102,7 @@ REGISTRY = {
     'gametest/test_gt_capture.py': {},
     'gametest/test_log_rotation.py': {},
     'gametest/test_night.py': {'note': 'test_real_frames_cycle5 SKIPs: the night cycle-5 frame PNGs are gone'},
+    'gametest/test_pose_metrics.py': {'note': 'the helper mismatch case SKIPs without the extracted deformer graph'},
     'gametest/test_select_save.py': {},
     'lua-tests/test_utpp_camera_run.py': {'markers': {'slow'}, 'note': 'Lua 5.1 DLL replay, ~140 s'},
     'melee/test_anatomy_gate.py': {},
