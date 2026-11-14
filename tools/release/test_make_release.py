@@ -124,8 +124,8 @@ class DayOfBuild(unittest.TestCase):
         for g, files in want.items():
             have = {p for p, v in data.items() if v[0] == g} | {p for p, v in code.items() if v[0] == g}
             self.assertEqual(have, files)
-        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (4534272,
-                         "844d00f643fcb36da421cf0ee2e4d1747ddac3622fca0dd8ed13495d689e82fe"))  # combined fists pack, new final_attack_03
+        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (22454272,
+                         "770bb02a4c952ff55bbcee589d410c9e81f03ae550e115d9d472dcf373a75c6d"))  # fists + knife, katana, blunt, baton
         # the bike archive was checked in game (2026-11-10) and is pinned in the core DATA list, not in a day-of group
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", [r for r, _ in mr.DATA_PENDING])
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", data)
@@ -224,9 +224,14 @@ class ParriedGraph(unittest.TestCase):
         # the combined fists archive of the game copy (d683748f..., to be pinned): fists generic too
         combined = "d683748f5339f7b6955f7f79c9a39a5f1a7602016967881dc0df64d4258656cf"
         self.assertEqual(mr.parried_graph_rule(t(("w_melee_fists", 3669472)), combined), (False, []))
-        # the real script of the tree: same
+        # the real script of the tree with the pinned pack: knife, katana, blunt and baton have per-strike parried clips -> graph
         real =(mr.ROOT / "Source" / "plugin" / "UTPP" / "scripts" / "utpp_melee.reds").read_text(encoding="utf-8")
-        self.assertEqual(mr.parried_graph_rule(real, MELEE_SHA), (False, []))
+        self.assertEqual(mr.parried_graph_rule(real, MELEE_SHA), (True, []))
+        self.assertEqual(mr.parse_states_table(real), ({"w_melee_fists": 3669472, "w_melee_knife": 3668192, "w_melee_katana": 3669472,
+                                                        "w_melee_one_hand_blunt": 3669472, "w_melee_baton": 3669472}, []))
+        # the same lines without the Parried bit (graph-less fallback): not needed
+        self.assertEqual(mr.parried_graph_rule(t(("w_melee_knife", 3668160), ("w_melee_katana", 3669440),
+                                                 ("w_melee_one_hand_blunt", 3669440), ("w_melee_baton", 3669440)), MELEE_SHA), (False, []))
         from unittest import mock
         with mock.patch.dict(mr.PARRIED_CLIPS, {MELEE_SHA: self.KNIFE}):
             self.assertEqual(mr.parried_graph_rule(t(("w_melee_knife", 3668192)), MELEE_SHA), (True, []))
@@ -267,14 +272,18 @@ class ParriedGraph(unittest.TestCase):
         self.assertEqual(len(errs), 1)
         self.assertNotIn(mr.GRAPH_REL, {e.rel for e in ents})
 
-    def test_current_configuration_has_no_graph(self):
+    def test_current_configuration_includes_graph(self):
         import argparse
         a = argparse.Namespace(game=r"X:\nogame", code_tree=str(mr.ROOT / "Source"), dll=r"X:\none.dll", dry_run=False, nue=True,
                                dayof={"melee": "ship", "car": "ship"}, data_roots=[r"X:\nodata"])
         errs = []
         ents = mr.build_plan(a, errs)
-        self.assertNotIn(mr.GRAPH_REL, {e.rel for e in ents})
-        self.assertFalse([e for e in errs if "parried graph" in e], errs)
+        g = [e for e in ents if e.rel == mr.GRAPH_REL]
+        self.assertEqual([(e.group, e.expect_sha, e.expect_size) for e in g], [("melee", mr.GRAPH_SHA, mr.GRAPH_SIZE)])
+        self.assertFalse([e for e in errs if e.startswith("parried graph rule:")], errs)
+        # melee skipped: no graph
+        a.dayof = {"melee": "skip", "car": "ship"}
+        self.assertNotIn(mr.GRAPH_REL, {e.rel for e in mr.build_plan(a, [])})
 
     def test_texts_unchanged_without_graph_and_licence_with_it(self):
         self.assertEqual(mr.gen_readme(True), mr.gen_readme(True, False))

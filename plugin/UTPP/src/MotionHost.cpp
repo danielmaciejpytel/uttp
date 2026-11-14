@@ -1842,10 +1842,12 @@ void PublishLocked(float aWeight)
     // melee full body: the other bones at weight x (1 - full body); melee aim tilt weight (mm/MeleeAim.hpp, FK detour)
     g_snap.lowerScale = g_upperMask.ok ? 1.0f - g_meleeFullBlend.Weight() : 1.0f;
     g_snap.meleeAimWeight = g_meleeAimBlend.Weight();
-    // chest base correction: only for the fists flag (the script sets it for w_melee_fists without arm cyberware) and only standing / walking
-    // on the ground (the table holds the standing guard family; sprint / crouch / slide / air clips are not in it)
+    // chest base correction: only for fists and only standing / walking on the ground (the table holds the standing guard family of the
+    // fists clips; sprint / crouch / slide / air clips are not in it). The full-body flag also covers other melee weapons, so the guard
+    // flag (the script's fists-only guard list, sent whatever the guard setting) restricts the correction to fists. If the guard list
+    // ever covers more weapons, this needs its own signal.
     {
-        g_snap.meleeBase = (g_meleeFullFlag && g_meleeFullGate.StandingGrounded()) ? 1u : 0u; // explicit predicate, whichever reason fails first
+        g_snap.meleeBase = (g_meleeFullFlag && g_meleeGuardFlag && g_meleeFullGate.StandingGrounded()) ? 1u : 0u; // explicit predicate, whichever reason fails first
     }
     for (uint32_t b = 0; b < kMaxMMBones; ++b)
         g_snap.gameIndex[b] = g_map.ok ? g_map.gameIndex[b] : -1;

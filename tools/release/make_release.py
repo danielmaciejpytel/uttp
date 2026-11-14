@@ -247,8 +247,9 @@ CODE_EXPECT = {
 # scripts of a group are self-contained: no other shipped script references them).
 # group -> (title, what to check in game on the day of the build)
 DAYOF_GROUPS = {
-    "melee": ("Third-person fists (NPC-derived)",
-              "fist combat in third person (idle, punches, movement, equip/unequip, guard) with the UTPP body; "
+    "melee": ("Third-person melee: fists, knife, katana, one-handed blunt, baton",
+              "fist combat in third person (idle, punches, movement, equip/unequip, guard) with the UTPP body; knife, katana, "
+              "one-handed blunt and baton: combo, heavy, block (not knife), parried from left / right; "
               "Male V only in the single short pre-release test"),
     "car": ("Third-person car entry/exit",
             "entering and leaving cars as driver and passenger (door, approach, exit clips, camera transitions), "
@@ -260,7 +261,9 @@ DAYOF_DATA = [
     # stage melee-fists-combined-20261109; game copy of 2026-11-10 is identical (re-pinned 2026-11-10, was 827a8841... of npc1-fists)
     # Re-pinned 2026-11-14 (was d683748f..., 4530176 bytes): new final_attack_03 (+ _hit, _deflect) of both fists sets; the other fists
     # clips and the default / StrongArms sets are unchanged.
-    ("melee", P_ARC + "utpp_melee.archive", 4534272, "844d00f643fcb36da421cf0ee2e4d1747ddac3622fca0dd8ed13495d689e82fe"),
+    # Re-pinned 2026-11-14 (was 844d00f6..., 4534272 bytes): knife, katana, one-handed blunt and baton sets for both bodies added; the
+    # six fists / default / StrongArms sets are byte-identical to 844d00f6...
+    ("melee", P_ARC + "utpp_melee.archive", 22454272, "770bb02a4c952ff55bbcee589d410c9e81f03ae550e115d9d472dcf373a75c6d"),
     # stage Build\stages\vehexit6-20261109 (game copy of 2026-11-09 15:30 is identical)
     ("car", P_ARC + "utpp_vehicle_car.archive", 7102464, "3843163c100787fc0669c6f5091e58597e83a312cc1f21da1542fc09771119d5"),
 ]
@@ -277,11 +280,15 @@ DAYOF_DATA = [
 #                                                           on 11 file-scope functions; redscript 0.5.32 compiles both to identical decompiled code;
 #                                                           the UTPP_STATES_TABLE lines are unchanged
 #   utpp_vehicle_approach.reds 70773283... -> 2dd3b901... `new Vector4(` -> `Vector4(` (1 site)
+# Re-pinned 2026-11-14 (knife, katana, one-handed blunt and baton sets):
+#   utpp_melee.reds           411d1dbe... -> 6c0dd8f3...  FUNCTIONAL: four covered names and state lines added; the strike-turn signal
+#                                                           keys on the guard list (fists only, unchanged behaviour for fists)
+#   utpp_melee_tpp.archive.xl c30ed152... -> 31a76cca...  FUNCTIONAL: eight entries added; the six existing entries are unchanged
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "411d1dbe06da50579fee1eb725881e18e7485a4be27397709ca805f0d6a794bd"),
+     "6c0dd8f3d7a474fedbbbb98cd8fa806011460e0a0429261e3f3ca0bc06ed9c37"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
-     "c30ed15246195549b5c6c2a57480583d37f10b2b664cabf1daa67f0dc9cf5386"),
+     "31a76cca00cf288af9c9a2d107dc7f95e6f0991706a6ce2e855b0ea0b4a9251b"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",
      "2dd3b9017b668236a21e6e7cb2b604fbf2a3f199a57f413856fecbae8f0f905e"),
     ("car", P_REDS + "utpp_vehicle_approach_table.reds", "scripts/utpp_vehicle_approach_table.reds",
@@ -314,6 +321,10 @@ PARRIED_CLIPS = {
     "d683748f5339f7b6955f7f79c9a39a5f1a7602016967881dc0df64d4258656cf": {"w_melee_fists": "generic"},
     # the same pack with the new final_attack_03 clips (parried clips unchanged: generic)
     "844d00f643fcb36da421cf0ee2e4d1747ddac3622fca0dd8ed13495d689e82fe": {"w_melee_fists": "generic"},
+    # the same fists sets + knife, katana, one-handed blunt and baton (parried_<left|right>_<strike> per strike: the graph is needed)
+    "770bb02a4c952ff55bbcee589d410c9e81f03ae550e115d9d472dcf373a75c6d": {
+        "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
+        "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike"},
 }
 STATES_RX = re.compile(r'^if\s+Equals\(n,\s*n"([A-Za-z0-9_]+)"\)\s*\{\s*return\s+(\d+);\s*\}$')
 

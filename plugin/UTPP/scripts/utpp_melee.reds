@@ -42,11 +42,12 @@ public native func UTPPSetMeleeAimTarget(feet: Vector4, valid: Bool) -> Void
 // (vanilla SetAnimWrapperBasedOnItemFriendlyName / GetMeleeWeaponFriendlyName). Only the variables whose UTPP sets are packed and
 // registered (standing lower body, planted feet, behind utpp_foot_tpp) get the full body; the item type is not enough (batons
 // share Wea_OneHandedClub with w_melee_one_hand_blunt but use w_melee_baton; long blades use w_melee_one_hand_blunt).
-// The list follows the installed clip export: only the variables packed for both rigs. the NPC-based pack npc1 has
-// the fists only. Knife, katana and blunt return here when their NPC-based clips are packed; until then they take the upper
-// body from the game and keep the legs on motion matching.
+// The list follows the installed clip export: only the variables packed for both rigs. The pack has fists, knife, katana,
+// one-handed blunt and baton sets for both bodies. Other melee variables (two-handed blunt, hammer, ...) take the upper body
+// from the game and keep the legs on motion matching.
 public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
-  return Equals(n, n"w_melee_fists");
+  return Equals(n, n"w_melee_fists") || Equals(n, n"w_melee_knife") || Equals(n, n"w_melee_katana")
+    || Equals(n, n"w_melee_one_hand_blunt") || Equals(n, n"w_melee_baton");
 }
 
 // PSM.MeleeWeapon states (gamePSMMeleeWeapon, bit = 1 << state) that may take the full body, per weapon: a table keyed by the
@@ -70,6 +71,10 @@ public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
 // pack. With a pack that keeps any of them vanilla, set the fists line back to 3667968 (or drop that bit). The two-body pack
 // (pwa_fists + pma_fists) covers the same states for Male V; the female-only pack (pwa_fists) leaves
 // Male V fists on the vanilla first-person clips.
+// Knife: the default + Parried 5 + Hold 6 + ChargedHold 7 (no block for the knife) = 3668192. Katana, one-handed blunt and
+// baton: the same states as the fists = 3669472. The per-strike parried clips of these weapons (parried_left_<strike> /
+// parried_right_<strike>) are picked by the melee parried graph archive; without that archive drop Parried 5 (knife 3668160,
+// the other three 3669440).
 // Format: one line per variable between the UTPP_STATES_TABLE markers (read by the melee stage installer).
 public func UTPPMeleeStatesDefault() -> Int32 {
   return 3667968;
@@ -78,6 +83,10 @@ public func UTPPMeleeStatesDefault() -> Int32 {
 public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
   // UTPP_STATES_TABLE begin
   if Equals(n, n"w_melee_fists") { return 3669472; }
+  if Equals(n, n"w_melee_knife") { return 3668192; }
+  if Equals(n, n"w_melee_katana") { return 3669472; }
+  if Equals(n, n"w_melee_one_hand_blunt") { return 3669472; }
+  if Equals(n, n"w_melee_baton") { return 3669472; }
   // UTPP_STATES_TABLE end
   return UTPPMeleeStatesDefault();
 }
@@ -248,9 +257,10 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
 // Returns the world yaw in degrees (the UTPPYawDegFromForward convention, as the body yaw) from the FPP camera component to the
 // tracked target while a UTPP third-person fists strike state runs (PSM.MeleeWeapon attack states 11..21 without ThrowAttack 19);
 // 1000.0 = no signal: other weapons and arm cyberware, no UTPP third-person fists pack, first person, mounted, no tracked target,
-// target farther than 5 m (vanilla melee target range) or closer than 0.3 m.
+// target farther than 5 m (vanilla melee target range) or closer than 0.3 m. The weapon check uses the guard list
+// (UTPPMeleeGuardWanted, fists only), not the full-body list, which also covers weapons with their own strike directions.
 public func UTPPMeleeStrikeYawOf(player: ref<PlayerPuppet>) -> Float {
-  if !IsDefined(player) || !UTPPMeleeFullBodyWanted(player) {
+  if !IsDefined(player) || !UTPPMeleeGuardWanted(player) {
     return 1000.0;
   }
   let game: GameInstance = player.GetGame();

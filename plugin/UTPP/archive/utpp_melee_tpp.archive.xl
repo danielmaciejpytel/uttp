@@ -4,7 +4,8 @@
 # Registration (static analysis of the 2.5 player entities):
 #   the 2.5 player entities (player_wa_fpp.ent / player_ma_fpp.ent and the ep1 *_ep1.ent, which carry the same entries) register the vanilla
 #   sets on the root animated component: default_melee_weapon / pma_default_melee_weapon at 200 without variables, and per weapon
-#   p?a_<weapon>.anims at 128 with the weapon variable (w_melee_fists, w_melee_katana, w_melee_knife, w_melee_one_hand_blunt, w_two_hand_blunt);
+#   p?a_<weapon>.anims at 128 with the weapon variable (w_melee_fists, w_melee_katana, w_melee_knife, w_melee_one_hand_blunt, w_melee_baton,
+#   w_two_hand_blunt);
 #   the ep1 entities add the Gorilla Arms set p?a_strongarms_melee_fists.anims at 128 [StrongArms] on the extension component "EP1 animsets".
 #   Each entry written below mirrors one of those vanilla entries: same entities and component, the variables of the vanilla entry + the UTPP
 #   wrapper variable utpp_melee_tpp (the default set, which has no variable in vanilla, gets the variable of the weapon family it serves
@@ -29,6 +30,14 @@
 #   utpp\melee\utpp_pma_fists.anims | root | [w_melee_fists, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
 #   utpp\melee\utpp_pwa_strongarms_melee_fists.anims | EP1 animsets | [StrongArms, utpp_melee_tpp] | 127 | player_wa_fpp_ep1.ent
 #   utpp\melee\utpp_pma_strongarms_melee_fists.anims | EP1 animsets | [StrongArms, utpp_melee_tpp] | 127 | player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_knife.anims | root | [w_melee_knife, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_knife.anims | root | [w_melee_knife, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_katana.anims | root | [w_melee_katana, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_katana.anims | root | [w_melee_katana, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_one_handed_blunt.anims | root | [w_melee_one_hand_blunt, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_one_handed_blunt.anims | root | [w_melee_one_hand_blunt, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
+#   utpp\melee\utpp_pwa_baton.anims | root | [w_melee_baton, utpp_melee_tpp] | 127 | player_wa_fpp.ent, player_wa_fpp_ep1.ent
+#   utpp\melee\utpp_pma_baton.anims | root | [w_melee_baton, utpp_melee_tpp] | 127 | player_ma_fpp.ent, player_ma_fpp_ep1.ent
 # Not mirrored (the clips of these paths stay vanilla): paths gated by a modifier variable of the vanilla entities - the fists set gated by
 #   StrongArms on the root component (the ep1 entities add the Gorilla Arms set at the same priority on an extension component; a mirrored entry
 #   would outrank or tie with it), the one-handed blunt set gated by additives (an extra
@@ -37,6 +46,10 @@
 # Not mirrored in this file (set, path of the vanilla entity):
 #   vanilla set of pwa_fists, component root, variables [StrongArms]: modifier-gated path stays vanilla
 #   vanilla set of pma_fists, component root, variables [StrongArms]: modifier-gated path stays vanilla
+#   vanilla set of pwa_knife, component root, variables [knife_thumb_override]: modifier-gated path stays vanilla
+#   vanilla set of pma_knife, component root, variables [knife_thumb_override]: modifier-gated path stays vanilla
+#   vanilla set of pwa_one_handed_blunt, component root, variables [additives]: modifier-gated path stays vanilla
+#   vanilla set of pma_one_handed_blunt, component root, variables [additives]: modifier-gated path stays vanilla
 # Clip names that stay vanilla (another entry that can be active at the same time has the same priority as the new entry or as the vanilla
 #   one, so the order would be unknown): melee_first_equip in the weapon sets (p?a_one_handed_blunt_dildo.anims at 127 [dildo]) and,
 #   male default set only, vault (pma_default_weapon.anims at 200, no variable). Held pose clips of fewer than 6 frames (melee_idlepose,
@@ -97,4 +110,60 @@ animations:
     component: EP1 animsets
     set: utpp\melee\utpp_pma_strongarms_melee_fists.anims
     vars: [StrongArms, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pwa_knife.anims
+    vars: [w_melee_knife, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_knife.anims
+    vars: [w_melee_knife, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pwa_katana.anims
+    vars: [w_melee_katana, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_katana.anims
+    vars: [w_melee_katana, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pwa_one_handed_blunt.anims
+    vars: [w_melee_one_hand_blunt, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_one_handed_blunt.anims
+    vars: [w_melee_one_hand_blunt, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_wa_fpp.ent
+      - ep1\characters\entities\player\player_wa_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pwa_baton.anims
+    vars: [w_melee_baton, utpp_melee_tpp]
+    priority: 127
+  - entity:
+      - base\characters\entities\player\player_ma_fpp.ent
+      - ep1\characters\entities\player\player_ma_fpp_ep1.ent
+    component: root
+    set: utpp\melee\utpp_pma_baton.anims
+    vars: [w_melee_baton, utpp_melee_tpp]
     priority: 127
