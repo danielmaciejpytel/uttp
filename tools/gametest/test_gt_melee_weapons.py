@@ -151,8 +151,9 @@ class ScriptTables(unittest.TestCase):
         self.assertFalse(gw.is_covered(t, 'w_melee_hammer'))
         self.assertFalse(gw.is_covered(t, 'mantis_blade'))
         sa = gw.WEAPONS['strong_arms']
-        self.assertTrue(gw.is_covered(t, sa['anim_var']))           # the fists variable the record inherits ...
-        self.assertFalse(gw.weapon_covered(sa, t))                  # ... but the script excludes arm cyberware
+        self.assertEqual(sa['anim_var'], 'w_strong_arms')           # its own variable in the hand, not the fists one
+        self.assertFalse(gw.is_covered(t, sa['anim_var']))
+        self.assertFalse(gw.weapon_covered(sa, t))                  # the script excludes arm cyberware
         self.assertEqual(gw.weapon_states(sa, t), t['default_states'])
         self.assertEqual(gw.weapon_covered(gw.WEAPONS['katana'], t), True)
         for tag in gw.PACK_WEAPONS:
@@ -657,7 +658,7 @@ class Macro(unittest.TestCase):
                 held['now'] = True
                 return ['CET [night] MW_CW_DRAW ok=true eqsystem']
             if event == 'MW_INHAND':
-                return [f'CET [night] MW_INHAND ok=true {"w_melee_fists" if held["now"] else "none"} | meleefull flag=0']
+                return [f'CET [night] MW_INHAND ok=true {"w_strong_arms" if held["now"] else "none"} | meleefull flag=0']
             if event in ('play:mw_light_combo', 'play:mw_strong_attack', 'play:melee_block'):
                 out = [MASK_ON.format(why='flag')] if event == 'play:mw_light_combo' else []
                 out.append(FULL.format(onoff='on' if full_on else 'off', why='on' if full_on else 'flag', speed='0.00', state=11,

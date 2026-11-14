@@ -83,11 +83,11 @@ WEAPONS = {
     # arm cyberware: needs the cyberware loadout change, see cyberware_equip_cmd
     'mantis': {'label': 'mantis blades', 'anim_var': 'mantis_blade', 'block': True, 'kind': 'cyberware',
                'records': ('Items.MantisBlades',)},
-    # strong arms: arm cyberware whose record inherits the fists anim variable; the pack registers third-person fist sets for it
-    # behind the StrongArms variable. The script never switches the full body (nor the full pose layer) on for arm cyberware, so
-    # 'covered' is False whatever the script's list says about the fists variable, and the state mask is the default one.
+    # strong arms: arm cyberware with its own anim variable in the hand (w_strong_arms, read in game 2.5); the pack registers
+    # third-person fist sets for it behind the StrongArms variable. The script never switches the full body (nor the full pose
+    # layer) on for arm cyberware, so 'covered' is False and the state mask is the default one.
     # 'phases' = the standing phases only; 'pose' = the run needs the pose recording (diagnostic logs on) to measure the body.
-    'strong_arms': {'label': 'strong arms (fists cyberware)', 'anim_var': 'w_melee_fists', 'block': True, 'kind': 'cyberware',
+    'strong_arms': {'label': 'strong arms (fists cyberware)', 'anim_var': 'w_strong_arms', 'block': True, 'kind': 'cyberware',
                     'records': ('Items.StrongArms',), 'covered': False, 'states_default': True,
                     'phases': ('light_combo', 'strong_attack', 'block'), 'pose': True},
 }
