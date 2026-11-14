@@ -969,6 +969,9 @@ def run_ranged_macro(night, pad, guard, plan, set_name: str, out: dict | None = 
             _setup_walk(night, pad, guard, plan, out)
         for tag in fams:
             r = None
+            near = getattr(night, 'keep_near_home', None)     # nothing in the hand here: the place to put V back
+            if near is not None:
+                near(pad, guard, plan, f'before {tag}')
             try:
                 r = run_one(night, pad, guard, plan, tag, records[tag], out, run_no=int(out.get('run', 1) or 1))
             finally:

@@ -1449,9 +1449,28 @@ def recompute_verdict(rec: dict) -> str | None:
 
 
 BLOCK_WAIT_S = 30.0              # how long the harness waits for the game's weapon block to lift before it gives up
+HOME_RADIUS_M = 30.0             # default of --home-radius: farther than this from the start point, V is put back
+HOME_SETTLE_S = 1.5              # after the teleport, before the next POS read
+HOME_ECHO = '[night] HOME ok='
 BLOCK_POLL_S = 3.0
 FORCE_EMPTY_UPPER_BODY = 5       # UpperBody state ForceEmptyHands in the POS lines (ub=5)
 UB_RE = re.compile(r'\[night\] POS .*?\bub=(-?\d+)')
+
+
+def home_cmd(home) -> str:
+    """Console command that puts V back at `home` (x, y, z), facing as now; echo '[night] HOME ok=<bool> <error>'."""
+    x, y, z = (float(v) for v in home[:3])
+    return ("local ok,e=pcall(function() local p=Game.GetPlayer() "
+            f"Game.GetTeleportationFacility():Teleport(p,Vector4.new({x:.2f},{y:.2f},{z + 0.3:.2f},1),"
+            "EulerAngles.new(0,0,p:GetWorldYaw())) end) "
+            "Game.UTPPLogLine('[night] HOME ok='..tostring(ok)..' '..tostring(e))")
+
+
+def home_distance(pos: dict | None, home) -> float | None:
+    """Horizontal distance (m) between a POS record and the start point; None when either is unknown."""
+    if not pos or not pos.get('p') or not home:
+        return None
+    return math.hypot(pos['p'][0] - home[0], pos['p'][1] - home[1])
 
 
 def latest_upper_body(text: str) -> int | None:

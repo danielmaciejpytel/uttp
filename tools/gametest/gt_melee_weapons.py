@@ -931,6 +931,9 @@ def run_weapon_macro(night, pad, guard, plan, set_name: str, out: dict | None = 
         out['warnings'].append('script tables not readable: coverage and state masks are not judged')
     for tag in WEAPON_SETS[set_name]:
         r = None
+        near = getattr(night, 'keep_near_home', None)         # nothing in the hand here: the place to put V back
+        if near is not None:
+            near(pad, guard, plan, f'before {tag}')
         try:
             r = run_one(night, pad, guard, plan, tag, tables, out)
         finally:

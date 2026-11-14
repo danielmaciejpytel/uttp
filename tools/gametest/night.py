@@ -476,6 +476,7 @@ class Night:
         self.meter_job = None                  # gt_posemeter.MeterJob (worker processes)
         self.budget = gb.Budget()              # where the wall time of the cycle went (printed at the end)
         self.probe_cache = gt_flow.ProbeCache()   # look-ahead probes of this cycle that came back clear
+        self.home = None                       # (x, y, z) where V stood on foot when the scenarios began (--home-radius)
         self.early = gt_flow.EarlyStop(getattr(args, 'early_stop', 2))
         self.deep_check = None                 # background thread: full decode of the recording after the quit
         self.body = None                       # --body: 'female' | 'male' | None (the game's own save)
@@ -2705,6 +2706,7 @@ class Night:
                  f'{", ".join(inv["macros"]) or "the macro"} not scored (INVALID), waiting up to {gn.BLOCK_WAIT_S:g} s for the block to lift')
         t0 = time.monotonic()
         try:
+            info['returned_home'] = self.keep_near_home(pad, guard, plan, f'{key}: weapon blocked', force=True)
             info['lifted'] = self.wait_block_lift(pad, guard)
         finally:
             info['waited_s'] = round(time.monotonic() - t0, 1)
@@ -2730,6 +2732,54 @@ class Night:
         gn.recompute_verdict(rec)
         info['verdict_after'] = rec.get('verdict')
         self.log(f'[weapon-block] {key}: second try done, verdict {rec.get("verdict")}')
+
+    def note_home(self, pad, guard) -> None:
+        """Remembers where V stands on foot when the scenarios begin: the place the session returns to (keep_near_home)."""
+        self.home = None
+        if float(getattr(self.args, 'home_radius', 0.0) or 0.0) <= 0.0:
+            return
+        try:
+            pos = self.poll_pos(guard, pad)
+        except ScenarioTimeout:
+            pos = None
+        if pos and pos.get('p') and not pos.get('mounted'):
+            self.home = tuple(pos['p'][:3])
+            self.cycle['home'] = [round(v, 2) for v in self.home]
+            self.log('[home] start point %.1f, %.1f, %.1f (V is put back when farther than %g m)'
+                     % (self.home + (float(self.args.home_radius),)))
+
+    def keep_near_home(self, pad, guard, plan, why: str, force: bool = False) -> bool:
+        """The scenarios move V forward and never back, so a long session drifts hundreds of metres from where it began
+        (2026-11-14: three Female sessions walked into a place where the game takes the weapon away). When V is on foot and
+        farther than --home-radius m from the start point (`force`: farther than 5 m), V is teleported back there, facing as
+        before. True = V was put back. Each return is recorded in cycle['home_returns']."""
+        radius = float(getattr(self.args, 'home_radius', 0.0) or 0.0)
+        if self.home is None or radius <= 0.0:
+            return False
+        try:
+            pos = self.poll_pos(guard, pad)
+        except ScenarioTimeout:
+            return False
+        dist = gn.home_distance(pos, self.home)
+        if dist is None or pos.get('mounted') or dist <= (5.0 if force else radius):
+            return False
+        info = {'why': why, 'from': [round(v, 2) for v in pos['p'][:3]], 'dist_m': round(dist, 1), 'ok': False}
+        self.cycle.setdefault('home_returns', []).append(info)
+        text = self.console_verified(pad, guard, gn.home_cmd(self.home), lambda t: gn.HOME_ECHO in t, 'home', 3.0)
+        if text is None or gn.HOME_ECHO + 'true' not in text:
+            self.log(f'[home] {why}: V is {dist:.0f} m from the start point, the return did not run')
+            return False
+        guard.wait(gn.HOME_SETTLE_S)
+        try:
+            after = gn.home_distance(self.poll_pos(guard, pad), self.home)
+        except ScenarioTimeout:
+            after = None
+        info['ok'] = after is not None and after <= 5.0
+        info['after_m'] = None if after is None else round(after, 1)
+        self.last_known = None
+        self.log(f'[home] {why}: V was {dist:.0f} m from the start point -> put back'
+                 + (f' (now {after:.1f} m)' if after is not None else ' (position not read)'))
+        return info['ok']
 
     def scan_weapon_blocks(self) -> None:
         """Adds the ForceEmptyHands entries of the plugin log since the start of the current scenario to self.weapon_blocks (called after
@@ -3723,10 +3773,13 @@ class Night:
             except NeedsKeyboard as e:
                 self.log(f'[scenarios] vehicle exit before the scenarios skipped: {e}')
             self.level_camera(pad, guard, plan)
+            self.note_home(pad, guard)
             with TimerResolution():
                 for name in self.names:
                     for r in range(1, self.args.repeat + 1):
                         self.check_continue()
+                        if name not in ('vehicle_mount_exit', gtv.SET_NAME):   # those work at the vehicle, wherever it is
+                            self.keep_near_home(pad, guard, plan, f'before {name}')
                         t_scen = time.monotonic()
                         self.budget.begin(f'{name}#{r}')
                         live = None            # a walking scenario that ran: (play result, log offset) for the early-stop check
@@ -4921,6 +4974,9 @@ def build_parser() -> argparse.ArgumentParser:
                         'executables, Python tools outside this run) to idle priority, so a busy machine does not take processor '
                         'time from the game; the priority is not restored')
     p.add_argument('--pause-between', type=float, default=30.0, help='seconds between cycles')
+    p.add_argument('--home-radius', type=float, default=gn.HOME_RADIUS_M,
+                   help='metres: before a scenario, and between the weapons of a weapon set, V is teleported back to where the '
+                        'session began on foot when farther than this from it (the scenarios only move V forward); 0 = never')
     p.add_argument('--cmd-channel', default='console', choices=['console', 'file', 'auto'], action=_ExplicitChannel,
                    help='how commands reach the game: console = typed into the CET overlay; file = cmd.txt of the test '
                         'module utpp_testcmd, confirmed by its ACK in the UTPP log (no overlay, no keys, no clicks); '
