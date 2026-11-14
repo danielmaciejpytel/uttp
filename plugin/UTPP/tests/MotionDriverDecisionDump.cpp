@@ -110,6 +110,8 @@ FeedFile ClosedLoop(const FeedFile& aOpen, float aRateDegS, int aRepeat)
 int g_dumpBody = 0; // UTPP_DUMP_BODY=man: the Male V bundle (body slot 1)
 bool g_dumpCorr = false; // UTPP_DUMP_SLIDE=3: the foot lock correction of each foot after every frame
 std::vector<float> g_corr; // 2 per frame (cm): corrL, corrR of motionhost::Status()
+bool g_dumpDiag = false; // UTPP_DUMP_DIAG=1 (full-feed dump): the chooser inputs and the match result of every frame
+std::vector<motiondriver::SelectionDiag> g_diag; // 1 per frame
 
 void ReadFootLockCorr(float& aL, float& aR)
 {
@@ -138,21 +140,26 @@ std::vector<FrameOut> RunDriver(const Rig& aRig, const FeedFile& aF)
     motiondriver::SetEnabled(false);
     motiondriver::SetEnabled(true);
     g_corr.clear();
-    if (!g_dumpCorr)
+    g_diag.clear();
+    if (!g_dumpCorr && !g_dumpDiag)
         return RunFeed(aF, kNoop);
     // the callback runs before each frame: it reads the state the previous frame left
-    std::vector<FrameOut> run = RunFeed(aF, [](size_t aI) {
-        if (aI == 0)
-            return;
-        float l = 0.0f, r = 0.0f;
-        ReadFootLockCorr(l, r);
-        g_corr.push_back(l);
-        g_corr.push_back(r);
+    const auto read = [] {
+        if (g_dumpCorr)
+        {
+            float l = 0.0f, r = 0.0f;
+            ReadFootLockCorr(l, r);
+            g_corr.push_back(l);
+            g_corr.push_back(r);
+        }
+        if (g_dumpDiag)
+            g_diag.push_back(motiondriver::SelectionDiagnostics());
+    };
+    std::vector<FrameOut> run = RunFeed(aF, [&read](size_t aI) {
+        if (aI != 0)
+            read();
     });
-    float l = 0.0f, r = 0.0f;
-    ReadFootLockCorr(l, r);
-    g_corr.push_back(l);
-    g_corr.push_back(r);
+    read();
     return run;
 }
 
@@ -200,6 +207,11 @@ int DumpMain(const std::string& aOut, const std::string& aData, const std::strin
     // UTPP_DUMP_SLIDE=2: four more columns, the world position (m, x / y) of the left and the right toe (the planted-foot drift of a contact phase)
     // UTPP_DUMP_SLIDE=3: as 2, plus two columns, the foot lock correction (cm) of the left and the right foot after the frame
     g_dumpCorr = slideEnv && std::strcmp(slideEnv, "3") == 0;
+    char* diagEnv = nullptr;
+    size_t diagEnvLen = 0;
+    _dupenv_s(&diagEnv, &diagEnvLen, "UTPP_DUMP_DIAG");
+    g_dumpDiag = g_fullFeed && diagEnv && std::strcmp(diagEnv, "1") == 0;
+    std::free(diagEnv);
     const bool slideToe = slideEnv && (std::strcmp(slideEnv, "2") == 0 || g_dumpCorr);
     std::free(slideEnv);
     if (slideCols)
@@ -275,12 +287,20 @@ int DumpMain(const std::string& aOut, const std::string& aData, const std::strin
                              static_cast<double>(run[i].toeW[1][1]));
                 if (g_dumpCorr && 2 * i + 1 < g_corr.size())
                     std::fprintf(o, " %.1f %.1f", static_cast<double>(g_corr[2 * i]), static_cast<double>(g_corr[2 * i + 1]));
-                std::fputc('\n', o);
             }
             else if (slideCols)
-                std::fprintf(o, " %.5f %.5f\n", static_cast<double>(run[i].slide[0]), static_cast<double>(run[i].slide[1]));
-            else
-                std::fputc('\n', o);
+                std::fprintf(o, " %.5f %.5f", static_cast<double>(run[i].slide[0]), static_cast<double>(run[i].slide[1]));
+            // UTPP_DUMP_DIAG=1: key=value columns after the others (gait / movement state / movement mode, pivoting / starting, interrupt,
+            // searched / jumped, selected and continuing cost, turn hold, chooser speed, published pose step in deg)
+            if (g_dumpDiag && i < g_diag.size())
+            {
+                const motiondriver::SelectionDiag& d = g_diag[i];
+                std::fprintf(o, " g=%d ms=%d mm=%d piv=%d st=%d int=%d se=%d ju=%d c=%.3f cc=%.3f th=%d v=%.0f sp=%.2f", d.gait, d.movementState,
+                             d.movementMode, d.isPivoting ? 1 : 0, d.isStarting ? 1 : 0, d.interrupt, d.searched ? 1 : 0, d.jumped ? 1 : 0,
+                             static_cast<double>(d.cost), static_cast<double>(d.continuingCost), d.turnHold ? 1 : 0,
+                             static_cast<double>(d.speedCmS), static_cast<double>(run[i].stepP));
+            }
+            std::fputc('\n', o);
         }
         total += run.size();
         // diagnostics go to stdout only (the dump file holds nothing but decisions)

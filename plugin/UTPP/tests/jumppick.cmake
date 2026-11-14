@@ -22,8 +22,8 @@ if(EXISTS "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide.utppmm"
                  "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261021_1213.txt"
                  "${_utpp_jp_data}/utpp_motion_man_knee_slide"
                  --rig man --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt")
-        # Enabled 2026-11-11: with --rig man two limits are looser (JumpPickTest.cpp) - slide family switch rotation <= 82.5 deg
-        # (71.975 on 2026-11-06, 77.105 on 2026-11-11: growth to investigate in the next update) and the JO1 control >= 8 frames (measured 9;
+        # With --rig man two limits are looser (JumpPickTest.cpp): the slide family switch rotation <= 82.5 deg (77.1 measured with the
+        # ankle floor of the blend, 72.0 without it) and the JO1 control >= 8 frames (measured 9;
         # the man bundle does not reproduce the woman log). The man jump
         # data is still not retargeted with the twistfix clips.
     endif()

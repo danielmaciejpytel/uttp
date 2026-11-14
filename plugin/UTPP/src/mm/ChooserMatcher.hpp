@@ -555,6 +555,16 @@ struct MatcherConfig
     float startRestartDwellS = 1.0f;
     float startRestartOverride = 0.3f;
     float startStalledSpeedCmS = 30.0f;
+
+    // TURN COMMIT. On a reversal of the stick the capsule velocity flips within one or two frames; the pivot query then matches the
+    // straight run of the new direction and the continuing cost of a just picked 180 deg turn lost to a loop half way through its turn
+    // (the turn was dropped while the authored root still had to rotate, a loop / reface chain followed and the planted foot drifted).
+    // turnCommit: a pivot or moving-turn clip (steer::IsPivot / IsMoveTurn) selected with isPivoting on the stand ground while moving is
+    // kept (the other databases are not searched, gait / movement state edges do not interrupt it) until its authored root yaw is done
+    // (less than 1 deg left). A new reversal (isPivoting rising again after it had dropped during the commit), a stick release (movement
+    // state 0, so the Stop is picked on the release frame), a stance change, air, a landing / traversal, a forced interrupt, an aim / shot /
+    // spin / reface start or a missing continuing row release it in the same update. false = off.
+    bool turnCommit = true;
 };
 #ifndef UTPP_LOCOMATCHER_MUTATION
 #define UTPP_LOCOMATCHER_MUTATION 0
@@ -597,6 +607,7 @@ struct MatchResult
     bool jumped = false;
     bool searched = false;
     bool continuingOutsideSet = false; // continuing pose kept although its database is not a chooser database (UE DoNotInterrupt)
+    bool turnHold = false;             // MatcherConfig::turnCommit kept the playing turn clip on this update
     Interrupt interrupt = Interrupt::DoNotInterrupt;
     BlendRequest blend;
     uint64_t dbMask = 0; // chooser databases (DBAS bits)
@@ -652,6 +663,7 @@ public:
                                           !(aDb->Clip(c).flags & kClipLoop) ? 1 : 0;
         m_exitHoldClip = -1;
         m_stopHoldClip = -1;
+        m_turnHoldClip = -1;
         m_dbSlideExit.assign(aDb->NumDatabases(), 0);
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbSlideExit[d] = aDb->DbName(d).starts_with("PSD_Slide_ExitTo") ? 1 : 0;
@@ -772,6 +784,27 @@ public:
         m_clipStop.assign(aDb->NumClips(), 0);
         for (uint32_t c = 0; c < aDb->NumClips(); ++c)
             m_clipStop[c] = steer::ClassifyClip(aDb->ClipName(c)) == steer::kClassStop ? 1 : 0;
+        // turnCommit: clip time at which less than 1 deg of the authored root turn of a pivot / moving-turn clip is left (-1 = no such clip)
+        m_clipTurnEndS.assign(aDb->NumClips(), -1.0f);
+        for (uint32_t c = 0; c < aDb->NumClips(); ++c)
+        {
+            const uint8_t cls = steer::ClassifyClip(aDb->ClipName(c));
+            if (!steer::IsPivot(cls) && !steer::IsMoveTurn(cls))
+                continue;
+            const MotionClipRecord& cl = aDb->Clip(c);
+            double total = 0.0, done = 0.0;
+            for (uint32_t f = 0; f < cl.numFrames; ++f)
+                total += std::fabs(aDb->Root(cl.firstFrame + f).dyaw);
+            for (uint32_t f = 0; f < cl.numFrames; ++f)
+            {
+                done += std::fabs(aDb->Root(cl.firstFrame + f).dyaw);
+                if (total - done <= math::kPi / 180.0)
+                {
+                    m_clipTurnEndS[c] = static_cast<float>(f) / aDb->Header().fps;
+                    break;
+                }
+            }
+        }
         m_clipStart.assign(aDb->NumClips(), 0);
         for (uint32_t c = 0; c < aDb->NumClips(); ++c)
         {
@@ -884,6 +917,7 @@ public:
         m_riseHoldLeft = 0.0f;
         m_exitHoldClip = -1;
         m_stopHoldClip = -1;
+        m_turnHoldClip = -1;
         m_slideExitAge = 1.0e9f;
         m_sinceJumpS = 1.0e9f;
         m_sinceSlideS = 1.0e9f;
@@ -1172,6 +1206,30 @@ public:
         else if ((holdReleasedNow || (holdExpiredNow && gaitStateDiffers)) && !aForce && res.interrupt == Interrupt::DoNotInterrupt &&
                  m_cur.valid && m_cur.db >= 0 && m_dbSlideExit[static_cast<uint32_t>(m_cur.db)])
             res.interrupt = Interrupt::InterruptOnDatabaseChange; // the deferred / swallowed edge: the exit clip leaves the search now
+        // MatcherConfig::turnCommit: the selected turn clip plays on through its authored root turn; gait / movement state edges do not interrupt it
+        bool turnHold = false;
+        if (m_turnHoldClip >= 0)
+        {
+            if (!aState.isPivoting)
+                m_turnHoldPivotDropped = true;
+            const bool keep = m_cfg.turnCommit && contValid && m_cur.valid && m_cur.clip == m_turnHoldClip && !aForce &&
+                              aState.movementMode == 0 && aState.stance == m_turnHoldStance && !aState.justLandedLight &&
+                              !aState.justLandedHeavy && !aState.justTraversed && !(aState.isPivoting && m_turnHoldPivotDropped) &&
+                              aState.movementState != 0 && (HoldFlags(aState) & ~4 & ~m_turnHoldFlags) == 0 &&
+                              m_cur.clipTime < m_clipTurnEndS[static_cast<uint32_t>(m_cur.clip)];
+            if (keep)
+            {
+                turnHold = true;
+                res.interrupt = Interrupt::DoNotInterrupt;
+            }
+            else
+            {
+                m_turnHoldClip = -1;
+                // the gait / movement state edge swallowed during the commit is delivered once
+                if (gaitStateDiffers && !aForce && res.interrupt == Interrupt::DoNotInterrupt && aState.movementMode == 0)
+                    res.interrupt = Interrupt::InterruptOnDatabaseChange;
+            }
+        }
         // churn guard 4 (MatcherConfig::startUpshiftHoldS): a gait upshift during a young start is not an interrupting edge for a short time;
         // when the time is up the deferred edge re-searches (a held DoNotInterrupt would keep the outdated start competing for its whole length)
         if (UTPP_AND_NOT(JUMPPICK, 28) m_guardsOn && m_cfg.startUpshiftHoldS > 0.0f && contValid && m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 0 && !aForce &&
@@ -1550,9 +1608,13 @@ public:
         // churn guard 3 (MatcherConfig::dodgeHold): the playing clip is kept through the game's ground Dodge
         const bool continueDodge = UTPP_AND_NOT(JUMPPICK, 26) m_guardsOn && m_cfg.dodgeHold && contEvaluated && aState.dodge && aState.movementMode == 0 &&
             last.movementMode == 0 && aState.stance == 0 && !aForce;
+        const bool continueTurn = turnHold && contEvaluated;
+        if (turnHold && !contEvaluated)
+            m_turnHoldClip = -1;
+        res.turnHold = continueTurn;
         // ---- search every chooser database
         for (uint32_t i = 0; i < numDb && !continueShotTurn && !continueAimTurn && !continueStartTurn && !continueSlideExit && !continueRise &&
-                                  !continueExitClip && !continueStopClip && !continueDodge; ++i)
+                                  !continueExitClip && !continueStopClip && !continueDodge && !continueTurn; ++i)
         {
             const uint32_t d = dbList[i];
             BuildQuery(d, true, allowLastPose);
@@ -1681,6 +1743,13 @@ public:
                                  (aState.stance == 0 || m_cfg.stopCommitCrouch) && steer::ClassifyClip(db.ClipName(en.clip)) == steer::kClassStop ? static_cast<int32_t>(en.clip) : -1;
                 m_stopHoldStance = aState.stance;
                 m_stopHoldStart = newTime;
+                // turnCommit: armed only by a pivot / moving-turn clip selected on a reversal while moving on the stand ground
+                // mutation 32: no turn commit (the selected turn competes on cost from its next update on)
+                m_turnHoldClip = UTPP_AND_NOT(JUMPPICK, 32) m_cfg.turnCommit && aState.isPivoting && aState.movementMode == 0 && aState.movementState == 1 &&
+                                 aState.stance == 0 && m_clipTurnEndS[en.clip] > newTime ? static_cast<int32_t>(en.clip) : -1;
+                m_turnHoldStance = aState.stance;
+                m_turnHoldFlags = HoldFlags(aState) & ~4;
+                m_turnHoldPivotDropped = false;
                 m_stopHoldFlags = HoldFlags(aState);
                 m_exitHoldFlags = HoldFlags(aState);
                 res.blend.valid = m_cur.valid;
@@ -2629,6 +2698,10 @@ private:
     int32_t m_stopHoldClip = -1;            // stopCommitTailS: the held Stop clip (-1 = none)
     int m_stopHoldStance = 0, m_stopHoldFlags = 0; // stopCommitTailS: stance / HoldFlags when it was selected
     float m_stopHoldStart = 0.0f;           // stopCommitMaxS: clip time of the held Stop clip at its selection
+    std::vector<float> m_clipTurnEndS;      // turnCommit: clip index -> clip time where the authored root turn is done (-1 = not a turn clip)
+    int32_t m_turnHoldClip = -1;            // turnCommit: the held turn clip (-1 = none)
+    int m_turnHoldStance = 0, m_turnHoldFlags = 0; // turnCommit: stance / HoldFlags (pivot bit cleared) when it was selected
+    bool m_turnHoldPivotDropped = false;    // turnCommit: isPivoting dropped since the selection (a rise afterwards is a new reversal)
     int m_exitHoldStance = 0, m_exitHoldFlags = 0; // exitTransitionTailS: stance / HoldFlags when it was selected
     int m_slideExitFamily = 0;          // fix/slide-exit: family the exit search of this update is restricted to (0 = none)
     bool m_slideExitSettled = false;    // fix/slide-exit: this update is the first after a slide that had settled (slideExitSettledS)

@@ -426,6 +426,17 @@ struct AirDiag
     int32_t stance = 0;         // chooser Stance of that Step (0 Stand, 1 Crouch; vehicle batch CAR-1 exit window check)
 };
 AirDiag AirDiagnostics();
+// Selection diagnostics of the last Step that ran the chooser (tests / offline replay): the chooser inputs and the match result.
+struct SelectionDiag
+{
+    int32_t gait = 0, movementState = 0, movementMode = 0, stance = 0;
+    bool isStarting = false, isPivoting = false, shouldSpin = false;
+    float speedCmS = 0.0f;
+    int32_t interrupt = 0; // motion::Interrupt of the update
+    bool searched = false, jumped = false, turnHold = false;
+    float cost = 0.0f, continuingCost = 0.0f;
+};
+SelectionDiag SelectionDiagnostics();
 void SetLogger(void (*aLog)(const char*));          // fallback reason lines / the first fault cause
 // UTPP-MOTION SEAM motionfix (item 4, male V test): "UTPP mm.motionDriver fallback=<reason> [cause=..] body= bundle= rig= map= .." on every
 // change of the Step's reason (also back to none = "v2 path"; was once per reason per session), at most 4 lines per 1 s of

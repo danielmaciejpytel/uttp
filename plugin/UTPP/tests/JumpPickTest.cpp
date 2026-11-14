@@ -792,8 +792,8 @@ void SlideComboChecks(Model& m, const std::vector<Section>& aSecs, const Variant
     const ComboStats onF = MeasureCombos(m, aSecs, famOn);
     const ComboStats preF = MeasureCombos(m, aSecs, famPre);
     Check(onF.family.events >= 1, "fixture: >= 1 FootOut <-> KneesOut switch inside a slide (251.6, slideIntoHandover off)", onF.family.events);
-    // Male V bundle: 71.975 deg measured 2026-11-06, 77.105 on 2026-11-11; limit 82.5 for 0.1.0
-    // (woman stays 70). The growth is to be investigated and fixed in the next update, then the limit goes back down.
+    // Male V: 82.5 (77.1 measured; 72.0 without the ankle floor of the blend, MotionBlendStack KeepAnklesAboveLayers, which lifts a sinking
+    // ankle through the longer Male V leg during the 0.25 s family fade).
     const float familyRotMax = g_rigIdentity == motion::kRigIdentityMan ? 82.5f : 70.0f;
     Check(onF.family.rot <= familyRotMax, "slide family switch: worst rotation per 50 ms (deg)", onF.family.rot);
     Check(preF.family.rot >= 75.0f, "pre-fix slide family switch pops (0.2 s fade): rotation per 50 ms (deg)", preF.family.rot);

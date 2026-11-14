@@ -214,6 +214,8 @@ bool SetKnob(Variant& v, const std::string& aName, float aValue)
         v.mc.stanceHoldInDodge = aValue != 0.0f;
     else if (aName == "blendSlide")
         v.cfg.blendSlide = aValue;
+    else if (aName == "blendSlideFamily") // FootOut <-> KneesOut fade inside a slide
+        v.cfg.blendSlideFamily = aValue;
     else if (aName == "slideEntryMaxS") // RC2 slide entry cap (0 = off)
         v.cfg.slideEntryMaxS = aValue;
     else if (aName == "slideIntoHandover") // RC3 Into -> Loop handover mid-slide

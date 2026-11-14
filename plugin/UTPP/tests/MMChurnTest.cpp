@@ -21,16 +21,21 @@
 //   D (churn guard 7, MatcherConfig::startRestartDwellS, churn_stalled_start.feed = the Female 2026-11-11 17:37 weapon_aim / walk_armed, aim_walk and
 //   weapon_walk / walk_unarmed windows, the stick held against a blocked capsule): no start clip is restarted from its first frame by another start of
 //   the same speed class more than once per window (game: Run_Start_F_Lfoot <-> Run_Start_F_Rfoot every 0.217 s at ct 0, 13 changes in 3 s = 4.3 per
-//   second; the same with every guard off). churn_sprint_flick_man.feed (Male 17:19, needs the Male bundle) pins its 9 changes: NOT fixed.
+//   second; the same with every guard off). churn_sprint_flick_man.feed (Male 17:19, needs the Male bundle): 6 changes (9 without the turn commit).
 //   E (gait return hold, adapter::MapToChooser, no data files): a slow rising stick 0.3 -> 0.6 after a short run keeps the Run gait for 0.3 s from the last
 //   real Run frame, once, without flicker (RunGaitReturnHold; mutation 27 removes the hold: "keeps Run" fails too).
 //   B an ordinary release at speed still picks its Stop clip on the release frame (no stick latency): none of the guards may delay a stick edge
 //   (the start upshift guard only defers the swap of a young start clip to the faster gait's start; the first start of a press and every release / stop are not held).
 //   F (gait return hold, no data files): the hold of check E driven by time with uneven frame times (1/43, 1/60, 1/120 s in turn) lasts as long and
 //   changes the gait as often as at a fixed 60 feeds per second (the stick's rise is a rate per second, MapConfig::gaitReturnRiseRate).
+//   G (turn commit, MatcherConfig::turnCommit; the flick windows): the turn clip picked on the reversal plays until its authored root turn is done
+//   (without the commit the Male sprint flick dropped Run_Turn_L_180 at clip time 0.80 for Run_Loop_B, then a loop / reface chain followed).
+//   H (turn commit and release, churn_turn_release.feed = Female keyboard-like strafe taps): the keys released while a committed turn clip
+//   plays end the commit at once and the Stop clip is picked on the release frame, as in check B.
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
-// (check D), 31 the gait return hold's rise test per feed instead of per second (check F). Each must fail its check
+// (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets).
+// Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
 #include "MotionDriverDecisionDump.cpp"
@@ -44,7 +49,60 @@ struct Window
     int budget;   // clip / database changes allowed in [t0, t1)
     bool reface = false; // check C applies: the Walk reface start swaps of this window
     bool restarts = false; // check D applies: no start clip restarted from its first frame over and over
+    bool turnHeld = false; // check G applies: a turn clip picked on the reversal plays through its authored root turn
 };
+
+// check G (MatcherConfig::turnCommit): pivot / moving-turn clips (steer::IsPivot / IsMoveTurn) picked in [aT0, aT1) that were replaced before their authored
+// root turn was done (more than 1 deg of root yaw left); aPicks = how many such clips were picked
+struct TurnDrops
+{
+    int picks = 0, drops = 0;
+    std::string first; // the first early replacement: "clip ct -> clip"
+};
+float TurnEndS(const mm::motion::MotionDatabase& aDb, uint32_t aClip)
+{
+    const auto& cl = aDb.Clip(aClip);
+    double total = 0.0, done = 0.0;
+    for (uint32_t f = 0; f < cl.numFrames; ++f)
+        total += std::fabs(aDb.Root(cl.firstFrame + f).dyaw);
+    for (uint32_t f = 0; f < cl.numFrames; ++f)
+    {
+        done += std::fabs(aDb.Root(cl.firstFrame + f).dyaw);
+        if (total - done <= 3.14159265358979 / 180.0)
+            return static_cast<float>(f) / aDb.Header().fps;
+    }
+    return 0.0f;
+}
+TurnDrops FindTurnDrops(const mm::motion::MotionDatabase& aDb, const FeedFile& aFeed, const std::vector<FrameOut>& aRun, float aT0, float aT1)
+{
+    TurnDrops r;
+    int32_t clip = -1;
+    float ct = 0.0f, pickT = 0.0f;
+    bool turn = false;
+    for (size_t i = 0; i < aRun.size() && i < aFeed.fr.size(); ++i)
+    {
+        if (!aRun[i].stepped || aRun[i].clip < 0)
+            continue;
+        const float t = aFeed.fr[i].t;
+        if (aRun[i].clip != clip)
+        {
+            // the clip time shown last is one update before the replacement: 0.05 s of tolerance (a 20 Hz update)
+            if (turn && pickT >= aT0 && pickT < aT1 && ct + 0.05f < TurnEndS(aDb, static_cast<uint32_t>(clip)))
+            {
+                if (!r.drops++)
+                    r.first = std::string(aDb.ClipName(static_cast<uint32_t>(clip))) + " ct " + std::to_string(ct) + " -> " +
+                              std::string(aDb.ClipName(static_cast<uint32_t>(aRun[i].clip)));
+            }
+            const uint8_t cls = mm::steer::ClassifyClip(aDb.ClipName(static_cast<uint32_t>(aRun[i].clip)));
+            turn = mm::steer::IsPivot(cls) || mm::steer::IsMoveTurn(cls);
+            pickT = t;
+            r.picks += turn && t >= aT0 && t < aT1;
+        }
+        clip = aRun[i].clip;
+        ct = aRun[i].clipTime;
+    }
+    return r;
+}
 
 // check C: a Walk reface start that is replaced by another reface start (the opposite turn side) is replaced by the gait edge, not later: 0.1 s after
 // the pick at most (the swap before the start-upshift hold came 50-67 ms after the pick; the 0.35 s hold deferred it to 183 ms, where the foot lock
@@ -305,16 +363,16 @@ int main(int argc, char** argv)
 
     const std::vector<Slice> slices = {
         {"churn_slalom.feed", {{"slalom", 118.203f, 126.203f, 16}}},
-        {"churn_flick_run.feed", {{"flick_180_run flick", 151.308f, 153.808f, 7}}},
+        {"churn_flick_run.feed", {{"flick_180_run flick", 151.308f, 153.808f, 6, false, false, true}}},
         {"churn_flick_sprint.feed", {{"flick_180_sprint accel", 162.384f, 163.884f, 4, true}}},
         {"churn_reface_sprint.feed", {{"flick_180_sprint accel (second run)", 169.529f, 171.029f, 4, true}}},
         {"churn_reface_whip.feed", {{"camera_whip_180 accel", 185.111f, 187.111f, 3, true}}},
         // Female 2026-11-11 17:37: the stick held against a blocked capsule (weapon armed / unarmed walk): the start clips restarted every 0.2 s (13 changes in 3 s)
         {"churn_stalled_start.feed", {{"weapon_aim walk_armed", 307.026f, 310.026f, 6, false, true}, {"weapon_aim aim_walk", 310.026f, 313.026f, 3, false, true},
                                        {"weapon_walk walk_unarmed", 318.44f, 321.442f, 6, false, true}}},
-        // Male 2026-11-11 17:19: sprint flick; NOT fixed: 9 changes in 2.5 s (3.6 per second, game 9), the budget pins the count
-        {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male, not fixed)", 181.397f, 183.897f, 9}}, true},
-        {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 4}, {"sprint_dash sprint_again", 264.284f, 267.284f, 8}}},
+        // Male 2026-11-11 17:19: sprint flick; 9 changes in 2.5 s (3.6 per second, game 9) before the turn commit, 6 with it
+        {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male)", 181.397f, 183.897f, 6, false, false, true}}, true},
+        {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 3}, {"sprint_dash sprint_again", 264.284f, 267.284f, 7}}},
     };
     for (const Slice& s : slices)
     {
@@ -354,44 +412,70 @@ int main(int argc, char** argv)
                 std::snprintf(rd, sizeof(rd), "%d start clips restarted from their first frame by another start (limit %d)", nr, kMaxStartRestarts);
                 Check(nr <= kMaxStartRestarts, std::string("start restart ") + w.name, rd);
             }
+            if (w.turnHeld)
+            {
+                const TurnDrops td = FindTurnDrops(sdb, f, run, w.t0, w.t1);
+                const std::string tdd = std::to_string(td.picks) + " turn clips picked, " + std::to_string(td.drops) + " replaced before their turn was done" +
+                                        (td.first.empty() ? std::string() : " (" + td.first + ")");
+                Check(td.picks >= 1 && td.drops == 0, std::string("turn played through ") + w.name, tdd);
+            }
         }
     }
 
     g_dumpBody = 0;
-    // B: an ordinary release at speed (run_arc_left / stop of the same session): the Stop clip is picked on the release frame
-    {
+    // the first stick release (move input > 0.5, then < 0.05) at or after aFrom: feeds from it to the first Stop clip picked before aTo (-1 = none)
+    const auto stopAfterRelease = [&](const char* aFile, float aFrom, float aTo, int& aStopFrame) {
         FeedFile f;
-        if (!LoadFeedAny(sliceDir + "\\churn_stop.feed", f))
-        {
-            std::printf("FAIL slice churn_stop.feed missing / unreadable\n");
-            return 3;
-        }
+        if (!LoadFeedAny(sliceDir + "\\" + aFile, f))
+            return false;
         const std::vector<FrameOut> run = RunDriver(rig, f);
-        const float tStop0 = 89.092f, tStop1 = 91.591f; // the report window of the 'stop' step
         size_t rel = f.fr.size();
         bool high = false;
         for (size_t i = 0; i < f.fr.size(); ++i)
         {
             const float mag = std::hypot(f.fr[i].mvx, f.fr[i].mvy);
-            high = high || (mag > 0.5f && f.fr[i].t >= tStop0 - 0.5f);
-            if (high && mag < 0.05f && f.fr[i].t >= tStop0 - 0.5f)
+            high = high || (mag > 0.5f && f.fr[i].t >= aFrom);
+            if (high && mag < 0.05f && f.fr[i].t >= aFrom)
             {
                 rel = i;
                 break;
             }
         }
-        Check(rel < f.fr.size(), "stop slice: the stick release is in the feed");
-        int stopFrame = -1;
+        Check(rel < f.fr.size(), std::string(aFile) + ": the stick release is in the feed");
+        aStopFrame = -1;
         int32_t last = -1;
-        for (size_t i = rel < f.fr.size() ? rel : 0; i < run.size() && f.fr[i].t < tStop1; ++i)
+        for (size_t i = rel < f.fr.size() ? rel : 0; i < run.size() && f.fr[i].t < aTo; ++i)
         {
             if (!run[i].stepped || run[i].clip < 0 || run[i].clip == last)
                 continue;
             last = run[i].clip;
-            if (stopFrame < 0 && db->ClipName(static_cast<uint32_t>(run[i].clip)).find("_Stop_") != std::string_view::npos)
-                stopFrame = static_cast<int>(i - rel);
+            if (aStopFrame < 0 && db->ClipName(static_cast<uint32_t>(run[i].clip)).find("_Stop_") != std::string_view::npos)
+                aStopFrame = static_cast<int>(i - rel);
+        }
+        return true;
+    };
+    // B: an ordinary release at speed (run_arc_left / stop of the same session): the Stop clip is picked on the release frame
+    {
+        const float tStop0 = 89.092f, tStop1 = 91.591f; // the report window of the 'stop' step
+        int stopFrame = -1;
+        if (!stopAfterRelease("churn_stop.feed", tStop0 - 0.5f, tStop1, stopFrame))
+        {
+            std::printf("FAIL slice churn_stop.feed missing / unreadable\n");
+            return 3;
         }
         Check(stopFrame >= 0 && stopFrame <= 1, "a stick release at speed picks its Stop clip on the release frame (no stick latency)",
+              "stop clip " + std::to_string(stopFrame) + " feeds after the release");
+    }
+    // H (turn commit and release, churn_turn_release.feed = Female keyboard-like strafe taps, the keys released while Run_Turn_L_135 plays):
+    // a release ends the turn commit at once; the Stop clip is picked on the release frame (with a held turn: no Stop, idle 0.2 s later)
+    {
+        int stopFrame = -1;
+        if (!stopAfterRelease("churn_turn_release.feed", 107.0f, 109.41f, stopFrame))
+        {
+            std::printf("FAIL slice churn_turn_release.feed missing / unreadable\n");
+            return 3;
+        }
+        Check(stopFrame >= 0 && stopFrame <= 1, "a stick release during a turn picks its Stop clip on the release frame (turn commit released)",
               "stop clip " + std::to_string(stopFrame) + " feeds after the release");
     }
     std::printf("%s: %d passed, %d failed\n", g_fail ? "FAIL" : "OK", g_pass, g_fail);

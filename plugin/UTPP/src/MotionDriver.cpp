@@ -656,6 +656,7 @@ const char* g_lastSkip = "none"; // static strings only: no per-frame allocation
 uint64_t g_steps = 0, g_frames = 0, g_applied = 0, g_skipGate = 0, g_skipPsm = 0, g_skipRelease = 0,
          g_evalFail = 0;
 motion::MatchResult g_last{};
+SelectionDiag g_selDiag{}; // SelectionDiagnostics: the chooser inputs and the match result of the last Step that ran the chooser
 // MapContext of the offline replay (FeedReplayMotion.cpp RunFeed, the reference adapter path): root yaw = motion OffsetRoot rotation in
 // RotationMode Accumulate (follows the playing frame's ROOT dyaw only, seeded with the actor yaw on (re)entry) and the database of
 // the previous valid pick (motion CurrentDatabaseTags "Pivots").
@@ -2336,6 +2337,12 @@ AirDiag AirDiagnostics()
 {
     std::lock_guard lock(g_m);
     return g_airDiag;
+}
+
+SelectionDiag SelectionDiagnostics()
+{
+    std::lock_guard lock(g_m);
+    return g_selDiag;
 }
 
 void OnArmed(uint64_t aRig, const std::vector<uint64_t>& aGameHashes, const std::vector<int16_t>& aGameParents)
@@ -4603,6 +4610,20 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     else if (g_trav.noContactLeft > 0.0f)
         g_trav.noContactLeft = std::fmax(0.0f, g_trav.noContactLeft - dt);
     g_last = r;
+    g_selDiag.gait = cs.gait;
+    g_selDiag.movementState = cs.movementState;
+    g_selDiag.movementMode = cs.movementMode;
+    g_selDiag.stance = cs.stance;
+    g_selDiag.isStarting = cs.isStarting;
+    g_selDiag.isPivoting = cs.isPivoting;
+    g_selDiag.shouldSpin = cs.shouldSpinTransition;
+    g_selDiag.speedCmS = cs.speed2dCmS;
+    g_selDiag.interrupt = static_cast<int32_t>(r.interrupt);
+    g_selDiag.searched = r.searched;
+    g_selDiag.jumped = r.jumped;
+    g_selDiag.cost = r.cost < 1e30f ? r.cost : -1.0f;
+    g_selDiag.continuingCost = r.continuingCost < 1e30f ? r.continuingCost : -1.0f;
+    g_selDiag.turnHold = r.turnHold;
     AirStepLocked(b, cs, air, vzFeed, dt);
     g_airDiag.chooserDbMask = r.dbMask;
     g_airDiag.takeoffSeed = airSeedUsed;
