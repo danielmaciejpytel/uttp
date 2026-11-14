@@ -1276,7 +1276,7 @@ static void TestStandingGrounded()
 // The Feed wiring of the melee mask (MotionHost.cpp Feed: MeleeGate -> GuardGate -> CombineDriverTerms -> MaskTimeTracker ->
 // UpperMaskBlend, the tilt and the leg fades), driven with the real header classes over a PSM timeline: punch - pause - punch - walk
 // - sprint - stand. With UTPP_GUARD_TIMELINE_DIR set the per-frame weights are written as CSV for the offline figures
-// (Source\tools\melee\fists_guard_figures.py).
+// (tools\melee\fists_guard_figures.py).
 namespace
 {
 struct Seg

@@ -473,7 +473,7 @@ def enemy_evaluate(spawn: dict | None, phases: list[dict], min_drop: float = ENE
 
 
 def punch_report_cmd(python: str, script: str, log_path: str) -> list[str]:
-    """Command line of the offline measuring tool (Source\\tools\\analysis\\punch_direction_report.py, another worker): the
+    """Command line of the offline measuring tool (tools\\analysis\\punch_direction_report.py): the
     UTPP log of the run as its only argument. The one place to adapt when its interface is fixed."""
     return [python, '-I', script, log_path]
 
