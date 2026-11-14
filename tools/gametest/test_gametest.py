@@ -739,6 +739,19 @@ class MotionLogTests(unittest.TestCase):
         self.assertEqual((m['mm_driver'], m['motion_samples'], m['motion_changes']), ('v2', 0, 0))
         self.assertIn('no MOTION lines in window: motion_samples=0 < 1', gt_log.evaluate(m, gt_log.DEFAULT_THRESHOLDS))
 
+    def test_window_shorter_than_the_trace_period_may_fall_between_two_trace_lines(self):
+        thr = gt_log.DEFAULT_THRESHOLDS
+        short = {'duration_s': 0.9, 'samples': 0, 'motion_samples': 2}
+        self.assertTrue(gt_log.trace_gap(short))
+        self.assertEqual(gt_log.evaluate(short, thr), [])
+        # a window of a full trace period must hold a sample; no motion lines is still a failure of a short window
+        self.assertEqual(gt_log.evaluate({**short, 'duration_s': 1.0}, thr), ['samples=0 < 1'])
+        self.assertEqual(gt_log.evaluate({**short, 'motion_samples': 0}, thr),
+                         ['samples=0 < 1', 'no MOTION lines in window: motion_samples=0 < 1'])
+        self.assertEqual(gt_log.evaluate({**short, 'motion_samples': None}, thr), ['samples=0 < 1'])
+        # the other limits of the window still apply
+        self.assertEqual(gt_log.evaluate({**short, 'motion_transitions_per_s': 3.3}, thr), ['motion_transitions_per_s=3.3 > 3.0'])
+
     def test_frozen_tick_without_motion_is_never_base(self):
         # review L1: in a v2 log, a step whose window (and lookback) has no MOTION line but a frozen v1 tick is scored as v2
         # (motion_samples=0 fails) instead of silently as v1

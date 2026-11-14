@@ -116,6 +116,32 @@ class DiagTests(Base):
         self.assertFalse(os.path.exists(n.settings.pending_path))
         self.assertEqual(n.cycle['settings_restore']['restored'], 1)
 
+    def test_recording_modes_ask_for_the_post_helper_stream_before_the_logs_go_on(self):
+        for answer, want in (('UTPPSetPostHelperStream(1) -> 1', True), ('UTPPSetPostHelperStream(1) -> 0', False), (None, None)):
+            n = self.make('--diag', 'until')
+            io = tgs.FakeIo(tgs.START, n.settings.pending_path)
+            sent = self.wire_settings(n, io)
+            settings_cv = n.console_verified
+
+            def cv(pad, g, cmd, echo, label, timeout=3.0, answer=answer, sent=sent, settings_cv=settings_cv):
+                if cmd == night.POST_HELPER_ON:
+                    sent.append(cmd)
+                    self.assertTrue(answer is None or echo(answer))
+                    return answer
+                return settings_cv(pad, g, cmd, echo, label, timeout)
+            n.console_verified = cv
+            info = {}
+            n.apply_diag(_Guard(), info)
+            self.assertIs(info['post_helper_stream'], want)
+            self.assertEqual(sent[0], night.POST_HELPER_ON)                   # before the setting is read or changed
+            self.assertEqual(io.store[gs.DIAG_KEY], 'until')                  # the logs go on whatever the answer was
+        n = self.make('--diag', 'off')                                         # no recording: nothing is asked
+        sent = self.wire_settings(n, tgs.FakeIo(tgs.START, n.settings.pending_path))
+        info = {}
+        n.apply_diag(_Guard(), info)
+        self.assertNotIn('post_helper_stream', info)
+        self.assertNotIn(night.POST_HELPER_ON, sent)
+
     def test_diag_that_cannot_be_read_is_not_changed_and_the_run_says_so(self):
         n = self.make('--diag', 'timed')
         io = tgs.FakeIo(tgs.START, lose=['get'])

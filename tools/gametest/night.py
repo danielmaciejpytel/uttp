@@ -186,6 +186,8 @@ QUIT_TIMEOUT_S = 60.0      # --quit-timeout default: a game that echoed ExitGame
 RECORDER_GRACE_S = 8.0     # --recorder-grace default: seconds a recorder gets after 'q' before it is ended (fragmented mp4 stays decodable)
 BG_INPUT_ON = 'Game.UTPPTestBackgroundInput(true)'     # --background: test host plugin UTPPTestHost (test installs only)
 BG_INPUT_OFF = 'Game.UTPPTestBackgroundInput(false)'
+POST_HELPER_ON = 'Game.UTPPSetPostHelperStream(true)'   # --diag timed|until: the recording also gets the helper bones after the commit
+POST_HELPER_ECHO = 'UTPPSetPostHelperStream(1)'
 TS = '%Y-%m-%d %H:%M:%S.%f'
 
 
@@ -740,10 +742,24 @@ class Night:
         mode = getattr(self.args, 'diag', 'keep')
         if mode == 'keep':
             return
+        if mode in ('timed', 'until'):
+            info['post_helper_stream'] = self.request_post_helper_stream(guard)
         ent = self.settings.apply(self.settings_io(None, guard), gs.DIAG_KEY, gs.DIAG_VALUES[mode], '--diag', deps=gs.DIAG_DEPS)
         info['diag'] = {k: ent[k] for k in ('requested', 'state', 'previous', 'note')}
         if ent['state'] != 'applied':
             self.log(f'[arm] WARNING: --diag {mode} not applied ({ent["note"]}): the run has no diagnostic recording')
+
+    def request_post_helper_stream(self, guard) -> bool | None:
+        """The helper reports compare the recorded pose with the helper bones the engine holds after the mod's commit. Only a
+        recording that starts after this request has that stream, so it is sent before the diagnostic logs are switched on. It
+        lasts for the game session. True = granted, False = refused (the helper recompute does not write), None = no answer."""
+        txt = self.console_verified(None, guard, POST_HELPER_ON, lambda t: POST_HELPER_ECHO in t, 'post_helper_stream')
+        got = None if txt is None else (POST_HELPER_ECHO + ' -> 1') in txt
+        if not got:
+            self.log('[arm] WARNING: the recording will have no post-helper stream ('
+                     + ('no answer' if got is None else 'refused: the helper recompute does not write')
+                     + '): the helper residual report cannot check the engine pose')
+        return got
 
     # -- recording safety (gt_collect) --
     def secure_session_files(self, phase: str, final: bool = False) -> dict | None:

@@ -926,6 +926,17 @@ def selection_unscored(metrics: dict, thresholds: dict, step: str = '', slow: bo
     return not any(eff.get(k) and metrics.get(k) is not None for k in keys)
 
 
+TRACE_PERIOD_S = 1.0   # the trace line is written about once a second
+
+
+def trace_gap(metrics: dict) -> bool:
+    """True when a window without a trace sample is shorter than the trace period while the motion lines show the driver ran in it:
+    the window fell between two trace lines, which says nothing about the mod. Its sample-and-hold metrics are not measured then."""
+    dur = metrics.get('duration_s')
+    return (dur is not None and dur < TRACE_PERIOD_S and metrics.get('samples') == 0
+            and (metrics.get('motion_samples') or 0) >= 1)
+
+
 def evaluate(metrics: dict, thresholds: dict, step: str = '', slow: bool = False) -> list[str]:
     """Return failure messages.
 
@@ -939,6 +950,8 @@ def evaluate(metrics: dict, thresholds: dict, step: str = '', slow: bool = False
             continue
         val = metrics.get(metric)
         if val is None:
+            continue
+        if metric == 'samples' and trace_gap(metrics):
             continue
         # optional 'msg' in a limit gives the failure a clear prefix (e.g. "crouch not engaged")
         pre = f'{lim["msg"]}: ' if lim.get('msg') else ''
