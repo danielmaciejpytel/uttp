@@ -337,7 +337,9 @@ class GroupTest(unittest.TestCase):
         self.assertEqual(g('l_thumb_side_mscl_JNT'), 'hand')
         self.assertEqual(g('r_sternocleidomastoid_bot_mscl_JNT'), 'sterno')
 
-    def test_current_bundles_partition_into_40_16_6_6(self):
+    def test_current_bundles_partition_into_groups(self):
+        want = {'man': {'upper': 40, 'lower': 16, 'elbow': 6, 'wrist_muscle': 6, 'wrist_roll': 6, 'lower_leg_back': 4, 'hand': 28},
+                'woman': {'upper': 40, 'lower': 16, 'elbow': 6, 'wrist_muscle': 6, 'wrist_roll': 6, 'lower_leg_back': 2}}
         for body in ('man', 'woman'):
             d = hrr.default_bundle_dir(body)
             if not os.path.isfile(os.path.join(d, 'owned.txt')):
@@ -346,7 +348,7 @@ class GroupTest(unittest.TestCase):
             counts = {}
             for n in owned:
                 counts[hrr.helper_group(n)] = counts.get(hrr.helper_group(n), 0) + 1
-            self.assertEqual(counts, {'upper': 40, 'lower': 16, 'elbow': 6, 'wrist_muscle': 6}, body)
+            self.assertEqual(counts, want[body], body)
 
 
 if __name__ == '__main__':
