@@ -17,6 +17,12 @@ void OnArmed(void* aRig, const std::vector<uint64_t>& aHashes, const std::vector
 void OnDisarmed();
 // Script: the anim variable (CName hash) of the drawn melee weapon; 0 = none / unknown (the fists section is used).
 void SetWeapon(uint64_t aVariableHash);
+// Feed: the PSM melee weapon state (-1 = not reported) and the planar capsule speed (m/s). Held states (hold, charged hold, block,
+// targeting, deflect) stand the clip clock while the upper body is still; a moving capsule holds no foot.
+void SetMeleeState(int32_t aState, float aPlanarSpeed);
+// Game thread, about once per second while diagnostic logs are on: 'UTPP MELEEPOSE key=value ...' with the cumulative counters of the
+// layer, its borders and the reference pose guard. False = nothing ran since the last line (no line).
+bool FormatLogLine(char* aBuf, size_t aLen);
 // User setting melee.fullPose (default on): off = the chest correction alone, as before.
 void SetEnabled(bool aOn);
 std::string Status();
@@ -36,6 +42,7 @@ struct Counters
 {
     uint64_t calls = 0, written = 0, held = 0, relocks = 0, noTable = 0, noWeapon = 0, busy = 0;
     uint64_t guardCalls = 0, guardHeld = 0, guardPassed = 0, guardBusy = 0;
+    uint64_t frozen = 0, toBase = 0, borderCalls = 0, tailCalls = 0, planted = 0, steps = 0, hipsLimited = 0;
     double meanMicros = 0.0, maxMicros = 0.0;
 };
 Counters GetCounters();
@@ -43,6 +50,7 @@ struct LastStep // the last Apply that ran the layer (tests / the offline replay
 {
     int32_t body = -1, clip = -1; // clip: global clip index of the body's table
     float clockRow = 0.0f, weight = 0.0f, rmsDeg = 0.0f;
+    float hipsOffset = 0.0f; // borders: Hips height shown minus the layer's written height (m)
     bool matched = false, held = false;
 };
 LastStep GetLastStep();

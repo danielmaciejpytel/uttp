@@ -953,7 +953,10 @@ target_sources(UTPP PRIVATE src/mm/MeleePose.cpp src/mm/MeleePose.hpp src/mm/Mel
 add_executable(utpp_melee_pose_test tests/MeleePoseTest.cpp src/mm/MeleePose.hpp src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp
                src/mm/AimOffset.hpp src/mm/GameIntegration.hpp src/mm/MMMath.hpp)
 target_compile_options(utpp_melee_pose_test PRIVATE ${UTPP_WARNINGS} /EHsc)
-add_test(NAME utpp_melee_pose_test COMMAND utpp_melee_pose_test "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose")
+add_test(NAME utpp_melee_pose_test COMMAND utpp_melee_pose_test "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose"
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose/melee_pose_guard_male.bin"
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose/melee_pose_guard_female_helpers.bin"
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose/melee_pose_border_female.bin")
 # recorded fists sequences through the production glue (MeleeBaseReplay.hpp with the full pose step)
 add_executable(utpp_melee_pose_replay_test tests/MeleePoseReplayTest.cpp tests/MeleeBaseReplay.hpp src/mm/MeleePose.cpp src/mm/MeleeBase.cpp
                src/mm/MeleeBaseData.cpp src/mm/MeleePose.hpp src/mm/MeleePoseRuntime.hpp src/mm/MeleeBase.hpp src/mm/MeleeBaseData.hpp

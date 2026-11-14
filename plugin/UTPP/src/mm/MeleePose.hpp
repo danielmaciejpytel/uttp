@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "GameIntegration.hpp"
+#include "LegIk.hpp"
 #include "MeleeBase.hpp"
 
 namespace utpp::mm::meleepose
@@ -57,6 +58,9 @@ inline constexpr int kHoldCalls = 2;            // a lost match holds the last l
 inline constexpr float kGateRiseSeconds = 0.12f; // match gate ease in ...
 inline constexpr float kGateFallSeconds = 0.15f; // ... and out (after the hold)
 inline constexpr float kMaxDt = 0.1f;
+inline constexpr float kVariantToleranceDeg = 1.5f; // a fresh lock on a _hit / _deflect clip takes its base clip while that explains the pose within this
+inline constexpr float kStillDegPerSec = 25.0f;     // held states: the upper body counts as still below this key speed (rms, smoothed) ...
+inline constexpr float kStillSmoothSeconds = 0.08f; // ... smoothed with this time constant; while still, the clip clock stands
 
 // ------------------------------------------------------------------------------------------------ data file
 
@@ -78,6 +82,7 @@ struct PoseTables
     std::vector<Weapon> weapons;
     std::vector<const char*> clipNames; // global clip index -> name
     std::vector<uint32_t> clipFirstRow, clipRowCount;
+    std::vector<int32_t> baseOf; // global clip index -> its base clip ("x_hit" / "x_deflect" -> "x" of the same weapon), -1 = none
     const int16_t* keys = nullptr;
     const int16_t* lower = nullptr;
     const uint8_t* clipOf = nullptr;
@@ -166,6 +171,21 @@ inline bool ParseTables(std::vector<uint8_t> aBytes, PoseTables& aOut)
     }
     if (rowsSeen != nR || clipsSeen != nC)
         return false;
+    aOut.baseOf.assign(nC, -1);
+    for (const Weapon& w : aOut.weapons)
+        for (uint32_t c = w.firstClip; c < w.firstClip + w.clipCount; ++c)
+        {
+            const std::string_view n(aOut.clipNames[c]);
+            for (const std::string_view suffix : {std::string_view("_hit"), std::string_view("_deflect")})
+            {
+                if (n.size() <= suffix.size() || n.substr(n.size() - suffix.size()) != suffix)
+                    continue;
+                const std::string_view base = n.substr(0, n.size() - suffix.size());
+                for (uint32_t bc = w.firstClip; bc < w.firstClip + w.clipCount; ++bc)
+                    if (std::string_view(aOut.clipNames[bc]) == base)
+                        aOut.baseOf[c] = int32_t(bc);
+            }
+        }
     for (Weapon& w : aOut.weapons)
         w.table = TableData{aOut.keys + size_t(w.firstRow) * meleebase::kRowInts, w.rowCount, aOut.clipOf + w.firstRow, w.clipCount,
                             aOut.clipNames.data() + w.firstClip};
@@ -178,14 +198,20 @@ inline bool ParseTables(std::vector<uint8_t> aBytes, PoseTables& aOut)
 
 // ------------------------------------------------------------------------------------------------ rig
 
+inline constexpr int kMaxHipsAncestors = 4;
+
 struct LowerRig
 {
     int32_t bone[kLowerBones];
+    int32_t anc[kMaxHipsAncestors]; // ancestors of Hips, root first (their locals give the frame the Hips translation is in)
+    int32_t ancCount = 0;
     uint32_t ok = 0;
     LowerRig()
     {
         for (int32_t& b : bone)
             b = -1;
+        for (int32_t& a : anc)
+            a = -1;
     }
 };
 
@@ -212,6 +238,18 @@ inline LowerRig ResolveLowerRig(std::span<const uint64_t> aHashes, std::span<con
     if (aParents[size_t(b[1])] != b[0] || aParents[size_t(b[2])] != b[0] || aParents[size_t(b[5])] != b[0] || aParents[size_t(b[3])] != b[2] ||
         aParents[size_t(b[4])] != b[3] || aParents[size_t(b[6])] != b[5] || aParents[size_t(b[7])] != b[6])
         return LowerRig{};
+    // ancestors of Hips (at most kMaxHipsAncestors; a longer chain or an index out of range fails closed)
+    int32_t chain[kMaxHipsAncestors];
+    int32_t n = 0;
+    for (int32_t p = aParents[size_t(b[0])]; p >= 0; p = aParents[size_t(p)])
+    {
+        if (n >= kMaxHipsAncestors || size_t(p) >= aParents.size())
+            return LowerRig{};
+        chain[n++] = p;
+    }
+    for (int32_t i = 0; i < n; ++i)
+        r.anc[i] = chain[n - 1 - i];
+    r.ancCount = n;
     r.ok = 1;
     return r;
 }
@@ -301,20 +339,28 @@ struct State
     LowerPose from{};      // pose the relock cross-fade starts from
     float xfade = 1.0f;    // relock cross-fade progress (1 = done)
     float heldTime = 0.0f; // seconds of lost calls since the last match (the clock did not advance meanwhile)
+    Quat prevKey[meleebase::kMotionKeys]{}; // motion keys of the previous call (upper body speed)
+    bool havePrevKey = false;
+    float keySpeed = 0.0f; // smoothed rms angular speed of the motion keys (deg/s)
 };
 
 struct StepInfo
 {
     bool matched = false, held = false, relocked = false;
+    bool toBase = false; // a fresh lock took the base clip instead of its _hit / _deflect variant
+    bool frozen = false; // held state with a still upper body: the clip clock stood
     int32_t clip = -1;
     float matchRow = 0.0f, clockRow = 0.0f, rmsDeg = 0.0f, conf = 0.0f, gate = 0.0f, weight = 0.0f;
 };
 
 // Advances the state by one FK call. aKey = key bone locals of the game pose (kKeyNames order); aWeapon = the drawn weapon's section
 // (null: nothing matches, the layer fades out). Returns the share (0..1) with which the clip's lower body is to be written; aPose
-// receives that pose. aShare = full-body fade x user switch (0 = the layer is off: the state resets).
+// receives that pose. aShare = full-body fade x user switch (0 = the layer is off: the state resets). aHoldState = the melee weapon is
+// in a held state (hold, charged hold, block, targeting, deflect): while its upper body is still the clip clock stands (the legs stop with it).
+// aPreferBase = a fresh lock on a _hit / _deflect clip takes its base clip while that explains the pose within kVariantToleranceDeg
+// (false: the matched clip as it is).
 inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const Quat* aKey, float aShare, float aDt, LowerPose& aPose,
-                  StepInfo* aInfo = nullptr)
+                  StepInfo* aInfo = nullptr, bool aHoldState = false, bool aPreferBase = true)
 {
     StepInfo info;
     const float dt = (std::isfinite(aDt) && aDt > 0.0f) ? (aDt > kMaxDt ? kMaxDt : aDt) : 0.0f;
@@ -333,6 +379,31 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
         aS.hint = -1;
         aS.weapon = aWeapon ? aWeapon->hash : 0;
     }
+    // upper body speed: rms angle of the motion keys against the previous call, smoothed
+    if (aKey)
+    {
+        if (aS.havePrevKey && dt > 0.0f)
+        {
+            float sum = 0.0f;
+            for (int k = 0; k < meleebase::kMotionKeys; ++k)
+            {
+                const float d = std::fabs(math::QuatDot(math::QuatNormalize(aKey[k]), aS.prevKey[k]));
+                sum += 1.0f - (d > 1.0f ? 1.0f : d);
+            }
+            const float v = std::sqrt(8.0f * sum / float(meleebase::kMotionKeys)) * meleebase::kRadToDeg / dt;
+            aS.keySpeed += (v - aS.keySpeed) * (1.0f - std::exp(-dt / kStillSmoothSeconds));
+        }
+        else if (!aS.havePrevKey)
+            aS.keySpeed = 1e3f; // unknown speed: not still
+        for (int k = 0; k < meleebase::kMotionKeys; ++k)
+            aS.prevKey[k] = math::QuatNormalize(aKey[k]);
+        aS.havePrevKey = true;
+    }
+    else
+        aS.havePrevKey = false;
+    const bool frozen = aHoldState && aS.havePrevKey && aS.keySpeed < kStillDegPerSec && aS.clip >= 0;
+    const float rateEff = frozen ? 0.0f : aS.rate;
+    info.frozen = frozen;
     meleebase::Match m;
     float conf = 0.0f;
     float predicted = -1.0f; // >= 0: the locked clip's predicted row was kept
@@ -347,7 +418,7 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
         if (aS.clip >= 0 && dt > 0.0f && uint32_t(aS.clip) >= aWeapon->firstClip && uint32_t(aS.clip) < aWeapon->firstClip + aWeapon->clipCount)
         {
             const float first = float(aT.clipFirstRow[uint32_t(aS.clip)]), last = first + float(aT.clipRowCount[uint32_t(aS.clip)] - 1);
-            const float pred = aim::Clampf(aS.row + aS.rate * (dt + aS.heldTime), first, last);
+            const float pred = aim::Clampf(aS.row + rateEff * (dt + aS.heldTime), first, last);
             const float rmsPred = RowRmsDeg(aWeapon->table, pred - float(aWeapon->firstRow), aKey);
             if (rmsPred <= info.rmsDeg + kClockToleranceDeg && rmsPred <= meleebase::kConfFullDeg)
             {
@@ -364,9 +435,28 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
     }
     if (conf > 0.0f)
     {
-        const int32_t gclip = int32_t(aWeapon->firstClip + m.clip);
-        const float matchRow = predicted >= 0.0f ? predicted
-                                                 : float(aWeapon->firstRow) + float(m.frame) + (m.neighbour >= 0 ? m.t * float(m.neighbour - m.frame) : 0.0f);
+        int32_t gclip = int32_t(aWeapon->firstClip + m.clip);
+        float matchRow = predicted >= 0.0f ? predicted
+                                           : float(aWeapon->firstRow) + float(m.frame) + (m.neighbour >= 0 ? m.t * float(m.neighbour - m.frame) : 0.0f);
+        // a _hit / _deflect variant shares the start of its base clip; it is taken only while it explains the pose clearly better (the
+        // game plays the variant after a hit or a deflect, the upper body then leaves the base clip)
+        const int32_t base = (aPreferBase && predicted < 0.0f && size_t(gclip) < aT.baseOf.size()) ? aT.baseOf[size_t(gclip)] : -1;
+        if (base >= 0 && aS.clip != gclip)
+        {
+            const float bFirst = float(aT.clipFirstRow[size_t(base)]);
+            const float bRow = bFirst + aim::Clampf(matchRow - float(aT.clipFirstRow[size_t(gclip)]), 0.0f, float(aT.clipRowCount[size_t(base)] - 1));
+            const float rmsBase = RowRmsDeg(aWeapon->table, bRow - float(aWeapon->firstRow), aKey);
+            if (rmsBase <= info.rmsDeg + kVariantToleranceDeg && rmsBase <= meleebase::kConfFullDeg)
+            {
+                gclip = base;
+                matchRow = bRow;
+                info.rmsDeg = rmsBase;
+                info.toBase = true;
+                conf = meleebase::Confidence(rmsBase);
+                aS.hint = int32_t(bRow - float(aWeapon->firstRow) + 0.5f);
+                hint = aS.hint;
+            }
+        }
         info.matchRow = matchRow;
         aS.hint = hint; // only a confident match steers the sticky search (a reference-pose frame must not move it)
         if (aS.clip != gclip || std::fabs(matchRow - aS.row) > kRelockRows)
@@ -387,10 +477,11 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
             // alpha-beta tracker of the matched time: the clock moves at the observed playback rate (the engine may play a clip slower,
             // hold its last frame or blend out), the residual pulls position and rate; no steady-state lag on a held clip end
             const float a = 1.0f - std::exp(-kPullHz * dt);
-            const float pred = aS.row + aS.rate * (dt + aS.heldTime);
+            const float pred = aS.row + rateEff * (dt + aS.heldTime);
             const float r = matchRow - pred;
             aS.row = pred + a * r;
-            aS.rate = aim::Clampf(aS.rate + kRateGain * a * a * r / dt, 0.0f, 2.0f * aT.rowsPerSecond);
+            if (!frozen) // a standing clock keeps its rate for when the upper body moves on
+                aS.rate = aim::Clampf(aS.rate + kRateGain * a * a * r / dt, 0.0f, 2.0f * aT.rowsPerSecond);
         }
         aS.xfade = aS.xfade < 1.0f ? std::fmin(1.0f, aS.xfade + (info.relocked ? 0.0f : dt / kRelockBlendSeconds)) : 1.0f;
         const LowerPose clip = SamplePose(aT, uint32_t(aS.clip), aS.row);
@@ -401,6 +492,10 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
         aS.heldTime = 0.0f;
         if (!(dt > 0.0f))
             aS.gate = conf; // first call of an episode: the share (full-body fade) eases it in
+        else if (frozen && conf < aS.gate)
+        {
+            // held state, upper body still: the gate keeps its value (a weaker match of the held guard does not hand the legs back)
+        }
         else if (aS.gate < conf)
             aS.gate = std::fmin(conf, aS.gate + dt / kGateRiseSeconds);
         else
@@ -410,7 +505,13 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
     else
     {
         ++aS.lost;
-        if (aS.lost > kHoldCalls)
+        if (frozen && aS.havePose)
+        {
+            // held state, upper body still: the pose the upper body holds may lie between the clip rows (the game layers the guard over
+            // it); the legs stay where the clip clock stands instead of fading back to the engine's base pose
+            info.held = true;
+        }
+        else if (aS.lost > kHoldCalls)
         {
             aS.gate = aS.gate - dt / kGateFallSeconds;
             aS.heldTime += dt; // the clock stands from here on: a regained match predicts across the gap
@@ -421,7 +522,7 @@ inline float Step(State& aS, const PoseTables& aT, const Weapon* aWeapon, const 
             // the clock instead of freezing, so the next matched frame does not catch up two frames of motion at once
             info.held = true;
             const float first = float(aT.clipFirstRow[uint32_t(aS.clip)]), last = first + float(aT.clipRowCount[uint32_t(aS.clip)] - 1);
-            aS.row = aim::Clampf(aS.row + aS.rate * dt, first, last);
+            aS.row = aim::Clampf(aS.row + rateEff * dt, first, last);
             aS.xfade = aS.xfade < 1.0f ? std::fmin(1.0f, aS.xfade + dt / kRelockBlendSeconds) : 1.0f;
             const LowerPose clip = SamplePose(aT, uint32_t(aS.clip), aS.row);
             const float x = aS.xfade * aS.xfade * (3.0f - 2.0f * aS.xfade);
@@ -466,6 +567,340 @@ inline bool WriteLower(uint8_t* aBones, uint32_t aCount, const LowerRig& aRig, c
             r[2] = p.z;
         }
     }
+    return true;
+}
+
+// ------------------------------------------------------------------------------------------------ borders: feet and Hips height
+//
+// Runs on the written lower body (after WriteLower), from the first call the layer writes until shortly after it stopped writing.
+// Frame: the parent of Hips (model space of the character, z up; the capsule stands while the layer runs).
+//   * Hips height: while the layer's weight is below 1 and after it stopped, the Hips height moves toward the written height at most
+//     kHipsSpeed; at full weight a remaining offset decays at the same speed (the clip's own motion passes unchanged).
+//   * Feet: each ankle is planted where it stood when the layer started (the pose before the first write) and held there by a two-bone
+//     leg IK while the written ankle stays within kLiftHeight of the plant height. A written ankle that rises above that height is a
+//     real step of the clip: the foot follows it and is planted again where it lands. A written ankle that moves more than
+//     kStepDistance along the ground (a stance change without lift) gets a short step with lift toward it. When the layer stops
+//     writing, a planted foot more than kSlideTolerance from the incoming pose steps there; a closer one is released over
+//     kReleaseSeconds. The plants live in the character frame: while the capsule moves (an attack that carries V forward) no foot is
+//     held, the written pose is shown as it is (a release fades over kReleaseSeconds) and the feet are planted again when it stands.
+
+inline constexpr float kHipsSpeed = 0.35f;       // m/s, vertical speed of the Hips height offset in the fades
+inline constexpr float kLiftHeight = 0.03f;      // m, written ankle above its plant height = the foot is lifted
+inline constexpr float kStepDistance = 0.10f;    // m, horizontal distance of the written ankle from the plant that starts a step
+inline constexpr float kSlideTolerance = 0.03f;  // m, at the end a planted foot this close to the incoming pose is released
+inline constexpr float kStepSpeed = 0.8f;        // m/s, horizontal speed of a step (no faster than the clips' own feet)
+inline constexpr float kStepLiftShare = 0.25f;   // step height = this share of the step length ...
+inline constexpr float kStepLiftMin = 0.045f, kStepLiftMax = 0.07f; // ... clamped (m; above kLiftHeight: a step never moves on the ground)
+inline constexpr float kStepUpSeconds = 0.06f;   // a step rises to its height in place and sets down in place in this time
+inline constexpr float kReleaseSeconds = 0.1f;   // a released foot reaches the written ankle in this time
+inline constexpr float kTailSeconds = 0.6f;      // after the last write: the borders end at the latest after this time
+inline constexpr float kCapsuleMoveSpeed = 0.3f; // m/s, planar capsule speed above which no foot is held (the plants are in the character frame)
+inline constexpr float kLegMaxExtension = 0.995f, kLegSoftExtension = 0.97f;
+
+enum class FootMode : uint8_t
+{
+    Free,     // follows the written ankle (a release fades in over kReleaseSeconds)
+    Planted,  // held at lock
+    Stepping  // rises in place, moves toward the written ankle at kStepSpeed, sets down in place
+};
+
+struct FootState
+{
+    FootMode mode = FootMode::Free;
+    Vec3 lock{}, from{};
+    float lift = 0.0f, h = 0.0f; // Stepping: step height, current height above 'from'
+    uint8_t phase = 0;           // Stepping: 0 rise, 1 move, 2 set down
+    float release = 1.0f;  // Free: progress of the release from 'from' (1 = done)
+    Vec3 prevIn{};         // written ankle of the previous call
+    bool havePrev = false;
+};
+
+struct BorderState
+{
+    bool active = false;
+    bool writing = false;   // the layer wrote on the previous call
+    float tail = 0.0f;      // seconds since the layer stopped writing
+    float hipsOut = 0.0f;   // Hips height (local z) shown on the previous call
+    float hipsOffset = 0.0f; // shown - written
+    float floorZ = 0.0f;    // lowest plant height (the ground in the parent frame of Hips)
+    FootState foot[2];
+};
+
+struct BorderInfo
+{
+    bool active = false, hipsLimited = false, stepStarted = false;
+    int planted = 0; // feet held at their plant this call
+    float hipsOffset = 0.0f;
+};
+
+// Model transforms of the lower chain from the local records: parent of Hips (root first through the ancestors), Hips, and per leg
+// UpLeg, Leg, Foot. False for a bad rig / record.
+struct LowerModel
+{
+    mm::BoneTransform parent, hips, leg[2][3];
+    float hipsLocalZ = 0.0f; // Hips translation z in its parent frame (the record)
+};
+
+inline bool ComputeLowerModel(const uint8_t* aBones, uint32_t aCount, const LowerRig& aRig, LowerModel& aOut)
+{
+    if (!aRig.ok || !aBones)
+        return false;
+    for (int k = 0; k < kLowerBones; ++k)
+        if (aRig.bone[k] < 0 || uint32_t(aRig.bone[k]) >= aCount)
+            return false;
+    mm::BoneTransform m{Vec3{}, Quat{0.0f, 0.0f, 0.0f, 1.0f}};
+    for (int32_t i = 0; i < aRig.ancCount; ++i)
+    {
+        if (aRig.anc[i] < 0 || uint32_t(aRig.anc[i]) >= aCount)
+            return false;
+        const Xf l = aim::ReadLocal(aBones, uint32_t(aRig.anc[i]));
+        m.p = m.p + math::QuatRotate(m.q, l.p);
+        m.q = math::QuatNormalize(math::QuatMul(m.q, l.q));
+    }
+    aOut.parent = m;
+    auto child = [&](const mm::BoneTransform& aP, int32_t aBone) {
+        const Xf l = aim::ReadLocal(aBones, uint32_t(aBone));
+        return mm::BoneTransform{aP.p + math::QuatRotate(aP.q, l.p), math::QuatNormalize(math::QuatMul(aP.q, l.q))};
+    };
+    aOut.hips = child(m, aRig.bone[0]);
+    aOut.hipsLocalZ = aim::ReadLocal(aBones, uint32_t(aRig.bone[0])).p.z;
+    for (int s = 0; s < 2; ++s)
+    {
+        aOut.leg[s][0] = child(aOut.hips, aRig.bone[2 + 3 * s]);
+        aOut.leg[s][1] = child(aOut.leg[s][0], aRig.bone[3 + 3 * s]);
+        aOut.leg[s][2] = child(aOut.leg[s][1], aRig.bone[4 + 3 * s]);
+    }
+    return math::IsFinite(aOut.hips.p) && math::IsFinite(aOut.leg[0][2].p) && math::IsFinite(aOut.leg[1][2].p);
+}
+
+inline float Smooth01(float aX)
+{
+    const float x = aX < 0.0f ? 0.0f : (aX > 1.0f ? 1.0f : aX);
+    return x * x * (3.0f - 2.0f * x);
+}
+
+inline float MoveToward(float aFrom, float aTo, float aMaxStep)
+{
+    const float d = aTo - aFrom;
+    return d > aMaxStep ? aFrom + aMaxStep : (d < -aMaxStep ? aFrom - aMaxStep : aTo);
+}
+
+inline float Horizontal(Vec3 aA, Vec3 aB) { return std::sqrt((aA.x - aB.x) * (aA.x - aB.x) + (aA.y - aB.y) * (aA.y - aB.y)); }
+
+inline void StartStep(FootState& aF, Vec3 aFrom, Vec3 aTo)
+{
+    const float d = Horizontal(aFrom, aTo);
+    aF.mode = FootMode::Stepping;
+    aF.from = aFrom;
+    aF.lift = aim::Clampf(d * kStepLiftShare, kStepLiftMin, kStepLiftMax);
+    aF.h = 0.0f;
+    aF.phase = 0;
+}
+
+// One FK call. aWriting = the layer wrote this call (weight aWeight > 0); aPre = the lower chain before the layer's write of this call
+// (used when the borders start). Returns true while the borders are active (records possibly changed). The records keep their bone
+// translations except the Hips height; only UpLeg / Leg / Foot rotations change for the feet.
+inline bool BorderStep(BorderState& aS, uint8_t* aBones, uint32_t aCount, const LowerRig& aRig, const LowerModel* aPre, bool aWriting,
+                       float aWeight, float aDt, BorderInfo* aInfo = nullptr, bool aCapsuleMoving = false)
+{
+    BorderInfo info;
+    const float dt = (std::isfinite(aDt) && aDt > 0.0f) ? (aDt > kMaxDt ? kMaxDt : aDt) : 0.0f;
+    LowerModel in;
+    if ((!aWriting && !aS.active) || !ComputeLowerModel(aBones, aCount, aRig, in))
+    {
+        aS = BorderState{};
+        if (aInfo)
+            *aInfo = info;
+        return false;
+    }
+    const float* hipsRec = reinterpret_cast<const float*>(aBones + size_t(aRig.bone[0]) * integ::kGameBoneStride);
+    const float writtenZ = hipsRec[2];
+    Vec3 inAnkle[2] = {in.leg[0][2].p, in.leg[1][2].p};
+    if (!aS.active)
+    {
+        // start: the feet and the Hips height where the pose before the first write had them
+        aS = BorderState{};
+        aS.active = true;
+        const LowerModel& p = aPre ? *aPre : in;
+        for (int s = 0; s < 2; ++s)
+        {
+            aS.foot[s].mode = FootMode::Planted;
+            aS.foot[s].lock = p.leg[s][2].p;
+        }
+        aS.floorZ = std::fmin(aS.foot[0].lock.z, aS.foot[1].lock.z);
+        aS.hipsOut = p.hipsLocalZ;
+        aS.hipsOffset = aS.hipsOut - writtenZ;
+    }
+    const bool ending = !aWriting && aS.writing;
+    if (!aWriting)
+        aS.tail += dt;
+    else
+        aS.tail = 0.0f;
+    // Hips height
+    const bool fading = !aWriting || !(aWeight >= 0.999f);
+    float outZ;
+    if (fading)
+        outZ = MoveToward(aS.hipsOut, writtenZ, kHipsSpeed * dt);
+    else
+        outZ = writtenZ + MoveToward(aS.hipsOffset, 0.0f, kHipsSpeed * dt);
+    info.hipsLimited = std::fabs(outZ - writtenZ) > 1e-4f;
+    aS.hipsOut = outZ;
+    aS.hipsOffset = outZ - writtenZ;
+    info.hipsOffset = aS.hipsOffset;
+    {
+        float* r = reinterpret_cast<float*>(aBones + size_t(aRig.bone[0]) * integ::kGameBoneStride);
+        r[2] = outZ;
+    }
+    LowerModel cur;
+    if (!ComputeLowerModel(aBones, aCount, aRig, cur))
+    {
+        aS = BorderState{};
+        if (aInfo)
+            *aInfo = info;
+        return false;
+    }
+    bool anyCorrection = info.hipsLimited;
+    for (int s = 0; s < 2; ++s)
+    {
+        FootState& f = aS.foot[s];
+        const Vec3 w = inAnkle[s];
+        f.prevIn = w;
+        f.havePrev = true;
+        if (ending && f.mode == FootMode::Planted)
+        {
+            if (Horizontal(w, f.lock) > kSlideTolerance || std::fabs(w.z - f.lock.z) > kSlideTolerance)
+            {
+                StartStep(f, f.lock, w);
+                info.stepStarted = true;
+            }
+            else
+            {
+                f.mode = FootMode::Free;
+                f.from = f.lock;
+                f.release = 0.0f;
+            }
+        }
+        if (aCapsuleMoving && f.mode == FootMode::Planted)
+        {
+            f.mode = FootMode::Free;
+            f.from = f.lock;
+            f.release = 0.0f;
+        }
+        Vec3 target = w;
+        switch (f.mode)
+        {
+        case FootMode::Planted:
+            if (w.z > f.lock.z + kLiftHeight)
+            {
+                // the clip lifts the foot: a real step. A foot far from its plant joins it with a step of its own.
+                if (Horizontal(w, f.lock) > kSlideTolerance)
+                {
+                    StartStep(f, f.lock, w);
+                    info.stepStarted = true;
+                }
+                else
+                {
+                    f.mode = FootMode::Free;
+                    f.from = f.lock;
+                    f.release = 0.0f;
+                }
+            }
+            else if (Horizontal(w, f.lock) > kStepDistance)
+            {
+                StartStep(f, f.lock, w);
+                info.stepStarted = true;
+            }
+            else
+            {
+                target = f.lock;
+                ++info.planted;
+            }
+            break;
+        case FootMode::Free:
+            if (aWriting && !aCapsuleMoving && f.release >= 1.0f && w.z <= aS.floorZ + kLiftHeight)
+            {
+                f.mode = FootMode::Planted;
+                f.lock = w;
+                aS.floorZ = std::fmin(aS.floorZ, w.z);
+                target = w;
+                ++info.planted;
+            }
+            break;
+        case FootMode::Stepping:
+            break;
+        }
+        if (f.mode == FootMode::Stepping)
+        {
+            // rise in place, move the ground point toward the written ankle at step speed (it may move on meanwhile), set down in place
+            const float maxStep = kStepSpeed * dt, maxRise = f.lift / kStepUpSeconds * dt;
+            if (f.phase == 0)
+            {
+                f.h = std::fmin(f.lift, f.h + maxRise);
+                if (f.h >= f.lift)
+                    f.phase = 1;
+            }
+            else if (f.phase == 1)
+            {
+                const float rem0 = Horizontal(w, f.from);
+                const float adv = rem0 < maxStep ? rem0 : maxStep;
+                if (rem0 > 1e-6f)
+                {
+                    f.from.x += (w.x - f.from.x) * (adv / rem0);
+                    f.from.y += (w.y - f.from.y) * (adv / rem0);
+                }
+                if (Horizontal(w, f.from) < 1e-3f)
+                    f.phase = 2;
+            }
+            else
+                f.h = std::fmax(0.0f, f.h - maxRise);
+            f.from.z = MoveToward(f.from.z, w.z, maxStep);
+            target = f.from;
+            target.z += f.h;
+            if (f.phase == 2 && f.h <= 0.0f)
+            {
+                // set down: planted where it landed (while the layer writes), else released toward the incoming pose
+                if (aWriting)
+                {
+                    f.mode = FootMode::Planted;
+                    f.lock = f.from;
+                }
+                else
+                {
+                    f.mode = FootMode::Free;
+                    f.release = 0.0f;
+                }
+                target = f.from;
+            }
+        }
+        else if (f.mode == FootMode::Free && f.release < 1.0f)
+        {
+            f.release = std::fmin(1.0f, f.release + (dt > 0.0f ? dt / kReleaseSeconds : 1.0f));
+            target = f.from + (w - f.from) * Smooth01(f.release);
+        }
+        // IK whenever the shown ankle is not on the target (also a free foot under a Hips height offset)
+        const Vec3 c = cur.leg[s][2].p;
+        const Vec3 d = target - c;
+        if (math::Dot(d, d) > 1e-8f)
+        {
+            const legik::TwoBoneSolution sol = legik::SolveTwoBone(cur.hips, cur.leg[s][0], cur.leg[s][1], cur.leg[s][2], target,
+                                                                    cur.leg[s][2].p + math::QuatRotate(cur.leg[s][2].q, Vec3{0.0f, 0.1f, 0.0f}),
+                                                                    kLegMaxExtension, kLegSoftExtension, true, true);
+            if (sol.status == legik::TwoBoneStatus::kOk)
+            {
+                for (int j = 0; j < 3; ++j)
+                    aim::WriteLocalRot(aBones, uint32_t(aRig.bone[2 + j + 3 * s]), sol.local[j]);
+                anyCorrection = true;
+            }
+        }
+        if (f.mode != FootMode::Free || f.release < 1.0f)
+            anyCorrection = true;
+    }
+    aS.writing = aWriting;
+    info.active = true;
+    if (!aWriting && (!anyCorrection || aS.tail >= kTailSeconds))
+        aS = BorderState{}; // done: the next call shows the incoming pose unchanged
+    if (aInfo)
+        *aInfo = info;
     return true;
 }
 } // namespace utpp::mm::meleepose

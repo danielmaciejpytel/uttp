@@ -60,9 +60,19 @@ struct LastWrite
 integ::SeqlockBuffer<LastWrite> g_last;
 
 std::atomic<uint64_t> g_calls{0}, g_written{0}, g_held{0}, g_relocks{0}, g_noTable{0}, g_noWeapon{0}, g_busySkips{0};
+std::atomic<uint64_t> g_frozen{0}, g_toBase{0};
+std::atomic<int32_t> g_meleeState{-1}; // PSM melee weapon state of the last feed (-1 = not reported)
+std::atomic<float> g_capsuleSpeed{0.0f}; // planar capsule speed of the last feed (m/s)
+
+// borders (feet plant, Hips height in the fades): detour side, owned through g_busy like g_state
+core::BorderState g_border;
+int64_t g_borderTicks = 0;
+std::atomic<bool> g_borderActive{false};
+std::atomic<uint64_t> g_borderCalls{0}, g_planted{0}, g_steps{0}, g_hipsLimited{0}, g_tailCalls{0};
+uint64_t g_loggedCalls = 0, g_loggedGuardCalls = 0, g_loggedBorderCalls = 0; // game thread (FormatLogLine)
 std::atomic<int64_t> g_costTicks{0}, g_costMax{0};
 std::atomic<int32_t> g_lastClip{-1};
-std::atomic<float> g_lastWeight{0.0f}, g_lastRms{0.0f}, g_lastClock{0.0f};
+std::atomic<float> g_lastWeight{0.0f}, g_lastRms{0.0f}, g_lastClock{0.0f}, g_lastHipsOffset{0.0f};
 std::atomic<int32_t> g_lastBody{-1};
 std::atomic<bool> g_lastMatched{false}, g_lastHeld{false};
 
@@ -106,6 +116,10 @@ float Age(int64_t aNow, int64_t aThen)
     return static_cast<float>(static_cast<double>(aNow - aThen) / Freq());
 }
 
+// held melee weapon states: hold, charged hold, block, targeting, deflect (a held block reports deflect from its start); the clip clock
+// stands there while the upper body is still
+bool HoldState(int32_t aState) { return aState >= 6 && aState <= 10; }
+
 void HardReset()
 {
     while (g_busy.test_and_set(std::memory_order_acquire))
@@ -114,6 +128,9 @@ void HardReset()
     g_state = core::State{};
     g_stateBody = -1;
     g_lastTicks = 0;
+    g_border = core::BorderState{};
+    g_borderTicks = 0;
+    g_borderActive.store(false, std::memory_order_relaxed);
     g_last.Publish(LastWrite{});
     g_busy.clear(std::memory_order_release);
 }
@@ -204,6 +221,46 @@ void GuardEngine(uint8_t* aBones, uint32_t aCount, void* aRig, float aMeleeWeigh
 }
 
 void SetWeapon(uint64_t aVariableHash) { g_weapon.store(aVariableHash, std::memory_order_relaxed); }
+void SetMeleeState(int32_t aState, float aPlanarSpeed)
+{
+    g_meleeState.store(aState, std::memory_order_relaxed);
+    g_capsuleSpeed.store(std::isfinite(aPlanarSpeed) ? aPlanarSpeed : 0.0f, std::memory_order_relaxed);
+}
+
+namespace
+{
+// Borders after the layer stopped writing (the incoming pose of the following calls): a planted foot steps to it or is released, the
+// Hips height offset decays. Ends by itself (BorderState::active = false).
+void BorderTail(uint8_t* aBones, uint32_t aCount, void* aRig, int64_t aNowTicks)
+{
+    if (!g_borderActive.load(std::memory_order_relaxed) || !aBones)
+        return;
+    if (g_busy.test_and_set(std::memory_order_acquire))
+        return;
+    RigMsg rm;
+    if (!g_rig.Read(rm) || rm.rigPtr != reinterpret_cast<uint64_t>(aRig) || !(Age(aNowTicks, g_borderTicks) <= mm::meleebase::kMaxGapSeconds))
+    {
+        g_border = core::BorderState{};
+        g_borderActive.store(false, std::memory_order_relaxed);
+        g_busy.clear(std::memory_order_release);
+        return;
+    }
+    const float dt = g_borderTicks != 0 ? Age(aNowTicks, g_borderTicks) : 0.0f;
+    g_borderTicks = aNowTicks;
+    core::BorderInfo bi;
+    core::BorderStep(g_border, aBones, aCount, rm.lower, nullptr, false, 0.0f, dt, &bi,
+                     g_capsuleSpeed.load(std::memory_order_relaxed) > core::kCapsuleMoveSpeed);
+    g_tailCalls.fetch_add(1, std::memory_order_relaxed);
+    if (bi.planted > 0)
+        g_planted.fetch_add(1, std::memory_order_relaxed);
+    if (bi.stepStarted)
+        g_steps.fetch_add(1, std::memory_order_relaxed);
+    if (bi.hipsLimited)
+        g_hipsLimited.fetch_add(1, std::memory_order_relaxed);
+    g_borderActive.store(g_border.active, std::memory_order_relaxed);
+    g_busy.clear(std::memory_order_release);
+}
+} // namespace
 void SetEnabled(bool aOn) { g_enabled.store(aOn, std::memory_order_relaxed); }
 
 void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int64_t aNowTicks)
@@ -218,6 +275,8 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
             g_lastTicks = 0;
             g_busy.clear(std::memory_order_release);
         }
+        if (g_rigOk.load(std::memory_order_acquire))
+            BorderTail(aBones, aCount, aRig, aNowTicks);
         return;
     }
     LARGE_INTEGER start;
@@ -255,6 +314,11 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
         g_stateBody = body;
         g_lastTicks = 0;
     }
+    if (g_borderTicks != 0 && !(Age(aNowTicks, g_borderTicks) <= mm::meleebase::kMaxGapSeconds))
+    {
+        g_border = core::BorderState{}; // a gap (no FK calls): the plants are stale
+        g_borderTicks = 0;
+    }
     const float dt = g_lastTicks != 0 ? Age(aNowTicks, g_lastTicks) : 0.0f;
     g_lastTicks = aNowTicks;
     uint64_t wh = g_weapon.load(std::memory_order_relaxed);
@@ -266,14 +330,43 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
     const bool haveKeys = utpp::meleebase::PeekEngineKeys(aRig, key) || mm::meleebase::ReadKeys(aBones, aCount, rm.keyRig, key);
     core::LowerPose pose;
     core::StepInfo si;
-    const float w = core::Step(g_state, t, weapon, haveKeys ? key : nullptr, 1.0f, dt, pose, &si);
+    const float w = core::Step(g_state, t, weapon, haveKeys ? key : nullptr, 1.0f, dt, pose, &si,
+                               HoldState(g_meleeState.load(std::memory_order_relaxed)));
     // the full-body fade multiplies the write (the state keeps easing on its own timeline)
     const float wEff = w * fade;
+    core::LowerModel pre;
+    const bool havePre = wEff > 0.0f && !g_border.active && core::ComputeLowerModel(aBones, aCount, rm.lower, pre);
+    bool wrote = false;
     if (wEff > 0.0f && core::WriteLower(aBones, aCount, rm.lower, pose, wEff))
     {
+        wrote = true;
         g_written.fetch_add(1, std::memory_order_relaxed);
         utpp::meleebase::SetFullPoseShare(wEff);
     }
+    // borders: feet planted / short steps and the Hips height speed limit, on the written pose (and after it, see BorderTail)
+    {
+        const float bdt = g_borderTicks != 0 ? Age(aNowTicks, g_borderTicks) : 0.0f;
+        g_borderTicks = aNowTicks;
+        core::BorderInfo bi;
+        const bool border = core::BorderStep(g_border, aBones, aCount, rm.lower, havePre ? &pre : nullptr, wrote, wEff, bdt, &bi,
+                                             g_capsuleSpeed.load(std::memory_order_relaxed) > core::kCapsuleMoveSpeed);
+        g_lastHipsOffset.store(bi.hipsOffset, std::memory_order_relaxed);
+        if (border)
+        {
+            g_borderCalls.fetch_add(1, std::memory_order_relaxed);
+            if (bi.planted > 0)
+                g_planted.fetch_add(1, std::memory_order_relaxed);
+            if (bi.stepStarted)
+                g_steps.fetch_add(1, std::memory_order_relaxed);
+            if (bi.hipsLimited)
+                g_hipsLimited.fetch_add(1, std::memory_order_relaxed);
+        }
+        g_borderActive.store(g_border.active, std::memory_order_relaxed);
+    }
+    if (si.frozen)
+        g_frozen.fetch_add(1, std::memory_order_relaxed);
+    if (si.toBase)
+        g_toBase.fetch_add(1, std::memory_order_relaxed);
     if (si.held)
         g_held.fetch_add(1, std::memory_order_relaxed);
     if (si.relocked)
@@ -304,6 +397,13 @@ Counters GetCounters()
     c.guardHeld = g_guardHeld.load();
     c.guardPassed = g_guardPassed.load();
     c.guardBusy = g_guardBusySkips.load();
+    c.frozen = g_frozen.load();
+    c.toBase = g_toBase.load();
+    c.borderCalls = g_borderCalls.load();
+    c.tailCalls = g_tailCalls.load();
+    c.planted = g_planted.load();
+    c.steps = g_steps.load();
+    c.hipsLimited = g_hipsLimited.load();
     const double us = 1e6 / Freq();
     c.meanMicros = c.calls ? double(g_costTicks.load()) * us / double(c.calls) : 0.0;
     c.maxMicros = double(g_costMax.load()) * us;
@@ -318,9 +418,38 @@ LastStep GetLastStep()
     s.clockRow = g_lastClock.load();
     s.weight = g_lastWeight.load();
     s.rmsDeg = g_lastRms.load();
+    s.hipsOffset = g_lastHipsOffset.load();
     s.matched = g_lastMatched.load();
     s.held = g_lastHeld.load();
     return s;
+}
+
+bool FormatLogLine(char* aBuf, size_t aLen)
+{
+    if (!aBuf || aLen == 0)
+        return false;
+    const uint64_t calls = g_calls.load(std::memory_order_relaxed), guardCalls = g_guardCalls.load(std::memory_order_relaxed),
+                   borderCalls = g_borderCalls.load(std::memory_order_relaxed) + g_tailCalls.load(std::memory_order_relaxed);
+    if (calls == g_loggedCalls && guardCalls == g_loggedGuardCalls && borderCalls == g_loggedBorderCalls)
+        return false; // nothing ran since the last line
+    g_loggedCalls = calls;
+    g_loggedGuardCalls = guardCalls;
+    g_loggedBorderCalls = borderCalls;
+    const Counters c = GetCounters();
+    const int n = std::snprintf(
+        aBuf, aLen,
+        "UTPP MELEEPOSE calls=%llu written=%llu held=%llu relocks=%llu frozen=%llu toBase=%llu busy=%llu noTable=%llu noWeapon=%llu "
+        "border=%llu tail=%llu planted=%llu steps=%llu hipsLimited=%llu guardCalls=%llu guardReplaced=%llu guardPassed=%llu "
+        "guardBusy=%llu w=%.2f state=%d",
+        static_cast<unsigned long long>(c.calls), static_cast<unsigned long long>(c.written), static_cast<unsigned long long>(c.held),
+        static_cast<unsigned long long>(c.relocks), static_cast<unsigned long long>(c.frozen), static_cast<unsigned long long>(c.toBase),
+        static_cast<unsigned long long>(c.busy), static_cast<unsigned long long>(c.noTable), static_cast<unsigned long long>(c.noWeapon),
+        static_cast<unsigned long long>(c.borderCalls), static_cast<unsigned long long>(c.tailCalls),
+        static_cast<unsigned long long>(c.planted), static_cast<unsigned long long>(c.steps),
+        static_cast<unsigned long long>(c.hipsLimited), static_cast<unsigned long long>(c.guardCalls),
+        static_cast<unsigned long long>(c.guardHeld), static_cast<unsigned long long>(c.guardPassed),
+        static_cast<unsigned long long>(c.guardBusy), static_cast<double>(g_lastWeight.load()), g_meleeState.load());
+    return n > 0 && size_t(n) < aLen;
 }
 
 std::string Status()

@@ -685,6 +685,9 @@ int32_t g_meleeFullGround = -1;         // last feed: 1 / 0 = air feed on / off 
 uint64_t g_meleeFullSwitches = 0;       // wanted off -> on
 int64_t g_meleeAimLogTicks = 0;         // last 'UTPP MELEEAIM' line (trace, 4 Hz)
 bool (*g_meleeAimLogSource)(char*, size_t) = nullptr; // Main.cpp: meleeaim::FormatLogLine (null in the offline builds)
+int64_t g_meleePoseLogTicks = 0;        // last 'UTPP MELEEPOSE' line (trace, 1 Hz)
+bool (*g_meleePoseLogSource)(char*, size_t) = nullptr; // Main.cpp: meleepose::FormatLogLine (null in the offline builds)
+void (*g_meleePoseStateSink)(int32_t, float) = nullptr; // Main.cpp: meleepose::SetMeleeState (null in the offline builds)
 // melee round 3 (2026-11-09 review, mm/MeleeFullBody.hpp): full-body allowed PSM.MeleeWeapon states + the melee guard
 uint32_t g_meleeFullStates = mm::melee::kFullBodyDefaultStates; // UTPPSetMeleeFullBodyStates (a setting: kept by resets)
 bool g_meleeGuardFlag = false;          // UTPPSetMeleeGuard (script: guard-capable melee weapon drawn, UTPP third person on foot)
@@ -3624,6 +3627,10 @@ void Feed(const FeedInput& aRawIn)
     // 0.6.0: melee bits (kGateMelee through g_meleeGate) and the UpperBody / MeleeWeapon diagnostic fields
     g_meleeBits = PsmMeleeBits(conditioned.psmBlock);
     g_meleeState = PsmMeleeStateOf(conditioned.psmBlock);
+    if (g_meleePoseStateSink) // melee full pose: held states stand its clip clock, a moving capsule holds no foot
+        g_meleePoseStateSink(g_meleeState, (std::isfinite(aRaw.velWorld[0]) && std::isfinite(aRaw.velWorld[1]))
+                                               ? std::sqrt(aRaw.velWorld[0] * aRaw.velWorld[0] + aRaw.velWorld[1] * aRaw.velWorld[1])
+                                               : 0.0f);
     g_upperBody = PsmUpperBodyOf(conditioned.psmBlock);
     const bool prevWeaponKnown = g_weaponKnown, prevWeaponHeld = g_weaponHeld;
     g_weaponKnown = PsmWeaponKnown(conditioned.psmBlock);
@@ -5099,6 +5106,20 @@ void Feed(const FeedInput& aRawIn)
                 if (g_meleeAimLogSource(line, sizeof line))
                 {
                     g_meleeAimLogTicks = nowTicks;
+                    g_log(line);
+                }
+            }
+        }
+        // melee full pose and reference pose guard counters (cumulative): about once per second while a melee weapon is out
+        if (g_trace && g_log && g_meleePoseLogSource && g_meleeState >= mm::melee::kMwEquipping && g_meleeState <= mm::melee::kMwLastState)
+        {
+            const int64_t nowTicks = Qpc();
+            if (nowTicks - g_meleePoseLogTicks > static_cast<int64_t>(QpcFreq() * 1.0))
+            {
+                char line[512];
+                if (g_meleePoseLogSource(line, sizeof line))
+                {
+                    g_meleePoseLogTicks = nowTicks;
                     g_log(line);
                 }
             }
@@ -7393,6 +7414,18 @@ void SetMeleeAimLogSource(bool (*aSource)(char*, size_t))
 {
     std::lock_guard lock(g_mutex);
     g_meleeAimLogSource = aSource;
+}
+
+void SetMeleePoseLogSource(bool (*aSource)(char*, size_t))
+{
+    std::lock_guard lock(g_mutex);
+    g_meleePoseLogSource = aSource;
+}
+
+void SetMeleePoseStateSink(void (*aSink)(int32_t, float))
+{
+    std::lock_guard lock(g_mutex);
+    g_meleePoseStateSink = aSink;
 }
 
 std::string MeleeFullBodyStatus()

@@ -259,6 +259,12 @@ void SetMeleeGuardFullSetting(bool aOn);
 void SetMeleeGuardTiltSetting(bool aOn);
 // Melee aim tilt log line source (Main.cpp: meleeaim::FormatLogLine; null = no 'UTPP MELEEAIM' lines). Trace only, 4 Hz.
 void SetMeleeAimLogSource(bool (*aSource)(char*, size_t));
+// Melee full pose log line source (Main.cpp: meleepose::FormatLogLine; null = no 'UTPP MELEEPOSE' lines). Trace only, about 1 Hz
+// while a melee weapon is out.
+void SetMeleePoseLogSource(bool (*aSource)(char*, size_t));
+// Melee full pose: receives the PSM melee weapon state and the planar capsule speed (m/s) of every feed (Main.cpp:
+// meleepose::SetMeleeState; null = none).
+void SetMeleePoseStateSink(void (*aSink)(int32_t, float));
 std::string MeleeFullBodyStatus();
 // Hold last pose (default on; off = 0.6.1). In TPP the game's own full-body pose is a T-pose outside the states
 // it animates, so a closure keeps the MM body (no fade-out, no reopen hold; without feeds Tick republishes the last pose):

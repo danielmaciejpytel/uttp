@@ -4331,6 +4331,8 @@ void OnLoad()
         }
         motionhost::SetLogger(&MMTraceLog); // 0.5.2: speed calibration / database switch lines (trace stays off)
         motionhost::SetMeleeAimLogSource(&utpp::meleeaim::FormatLogLine); // 'UTPP MELEEAIM' (trace only, 4 Hz)
+        motionhost::SetMeleePoseLogSource(&utpp::meleepose::FormatLogLine); // 'UTPP MELEEPOSE' (trace only, 1 Hz)
+        motionhost::SetMeleePoseStateSink(&utpp::meleepose::SetMeleeState); // melee full pose: PSM melee weapon state
         const bool dbOk = !path.empty() && motionhost::LoadDatabase(path);
         const std::string st = motionhost::Status();
         if (dbOk)

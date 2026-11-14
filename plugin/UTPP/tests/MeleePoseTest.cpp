@@ -2,7 +2,8 @@
 // 60 fps between the 30 fps rows) runs on a foreign lower body; the layer must write the clip's own lower body time-synchronised with
 // the clip, continuously at entry, between strikes and at the hand-back, and hold over a one-frame reference pose.
 // Reference pose guard (mm/MeleePoseGuard.hpp): synthetic rigs and the recorded engine poses of <dir>/melee_pose_guard_female.bin.
-// usage: utpp_melee_pose_test <dir with utpp_melee_pose_female.bin / utpp_melee_pose_male.bin / melee_pose_guard_female.bin> [<guard fixture> ...]
+// usage: utpp_melee_pose_test <dir with utpp_melee_pose_female.bin / utpp_melee_pose_male.bin / melee_pose_guard_female.bin> [<fixture> ...]
+// (further fixtures by their magic: "MPG1" reference pose guard, "MPB1" borders and clip choice on recorded frames)
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -552,6 +553,257 @@ void TestGuardRecorded(const std::string& aPath)
     // what stays: the cuts between two clips whose poses differ (no reference frame) and the jump from the held pose to the next clip
     Check(r.popsOut * 2 < r.popsIn, "hand steps above 100 deg at least halved", r.popsOut);
 }
+// ------------------------------------------------------------------------------------------------ borders and clip choice on recorded frames
+//
+// "MPB1" (tools/melee/melee_pose_border_fixture.py): full-body episodes of a melee run, both recorded stages (stage 0 = the engine pose,
+// stage 1 = the pose shown, with the layer as it ran in that session) and the layer's fade per frame.
+//   * borders: BorderStep runs on the shown lower body as the written pose. Per foot the ground travel (horizontal path while the ankle is
+//     within kLiftHeight of its lowest height in the window) is measured in the entry (0.35 s from the start), at full weight and in the
+//     hand-back (from the end on), and the vertical Hips speed in the entry and the hand-back; recorded (as shown) against after the
+//     borders. Judged on the windows where the capsule stands.
+//   * clip choice: Step runs on the engine keys of stage 0 with the window's weapon section, without the held state and the base
+//     preference (free clock) and with them (held clock); reported per window: clip changes, frames on _hit / _deflect clips, and the ground
+//     travel of the clip's own feet at full weight.
+
+struct TravelMetrics
+{
+    float entry = 0.0f, full = 0.0f, handback = 0.0f, hipsSpeed = 0.0f;
+};
+
+// aPhase per frame: 0 none, 1 entry, 2 full weight, 3 hand-back; aFade per frame: 1 = the layer's fade is below full (the Hips speed
+// is judged there; at full weight the clip's own Hips motion passes)
+TravelMetrics MeasureTravel(const std::vector<math::Vec3>& aL, const std::vector<math::Vec3>& aR, const std::vector<float>& aHipsZ,
+                            const std::vector<float>& aDt, const std::vector<uint8_t>& aPhase, const std::vector<uint8_t>& aFade)
+{
+    TravelMetrics m;
+    const size_t n = aL.size();
+    for (int s = 0; s < 2; ++s)
+    {
+        const std::vector<math::Vec3>& a = s == 0 ? aL : aR;
+        float lowest = 1e9f;
+        for (const math::Vec3& p : a)
+            lowest = std::fmin(lowest, p.z);
+        float seg = 0.0f;
+        for (size_t i = 1; i < n; ++i)
+        {
+            const bool ground = a[i].z <= lowest + meleepose::kLiftHeight && a[i - 1].z <= lowest + meleepose::kLiftHeight;
+            if (!ground || aPhase[i] == 0 || aPhase[i] != aPhase[i - 1])
+            {
+                seg = 0.0f;
+                continue;
+            }
+            seg += meleepose::Horizontal(a[i], a[i - 1]);
+            float& slot = aPhase[i] == 1 ? m.entry : (aPhase[i] == 2 ? m.full : m.handback);
+            slot = std::fmax(slot, seg);
+        }
+    }
+    for (size_t i = 1; i < n; ++i)
+        if (aFade[i] && aFade[i - 1] && aDt[i] > 0.0f)
+            m.hipsSpeed = std::fmax(m.hipsSpeed, std::fabs(aHipsZ[i] - aHipsZ[i - 1]) / aDt[i]);
+    return m;
+}
+
+bool IsVariant(const char* aName)
+{
+    const std::string n(aName);
+    auto ends = [&](const char* aSuf) {
+        const size_t k = std::strlen(aSuf);
+        return n.size() > k && n.compare(n.size() - k, k, aSuf) == 0;
+    };
+    return ends("_hit") || ends("_deflect");
+}
+
+struct ChoiceMetrics
+{
+    int changes = 0, variantFrames = 0, fullFrames = 0;
+    int lowFrames = 0; // frames the full-body fade is full but the layer's own weight is below 0.5 (the legs go back to the engine pose)
+    float footTravel = 0.0f;
+};
+
+void RunBorderFixture(const std::string& aPath, const PoseTables* aTables)
+{
+    const std::vector<uint8_t> in = ReadFile(aPath);
+    if (in.size() < 12 || std::memcmp(in.data(), "MPB1", 4) != 0)
+    {
+        Check(false, ("border fixture missing or bad: " + aPath).c_str());
+        return;
+    }
+    size_t o = 4;
+    auto rd = [&](void* aDst, size_t aN) {
+        if (o + aN > in.size())
+            throw 1;
+        std::memcpy(aDst, in.data() + o, aN);
+        o += aN;
+    };
+    try
+    {
+        int32_t nb = 0;
+        rd(&nb, 4);
+        std::vector<int16_t> par(static_cast<size_t>(nb));
+        std::vector<uint64_t> hashes(static_cast<size_t>(nb));
+        for (int32_t i = 0; i < nb; ++i)
+        {
+            char s[33] = {};
+            rd(&par[size_t(i)], 2);
+            rd(s, 32);
+            hashes[size_t(i)] = integ::CNameHash(s);
+        }
+        int32_t body = 0, nwin = 0;
+        rd(&body, 4);
+        rd(&nwin, 4);
+        const PoseTables& t = aTables[body == 1 ? 1 : 0];
+        const meleepose::LowerRig lower = meleepose::ResolveLowerRig(hashes, par);
+        const meleebase::Rig keyRig = meleebase::ResolveRig(hashes, par);
+        Check(lower.ok == 1 && keyRig.ok == 1, "border fixture: lower and key rig of the recorded catalogue");
+        if (!lower.ok || !keyRig.ok)
+            return;
+        std::vector<int16_t> P(size_t(nb) * 3), Q(size_t(nb) * 4);
+        auto fill = [&](std::vector<uint8_t>& aB) {
+            for (int32_t i = 0; i < nb; ++i)
+                SetRec(aB, uint32_t(i), math::Vec3{P[size_t(i) * 3] * 1e-4f, P[size_t(i) * 3 + 1] * 1e-4f, P[size_t(i) * 3 + 2] * 1e-4f},
+                       math::QuatNormalize(math::Quat{Q[size_t(i) * 4] / 32767.0f, Q[size_t(i) * 4 + 1] / 32767.0f,
+                                                      Q[size_t(i) * 4 + 2] / 32767.0f, Q[size_t(i) * 4 + 3] / 32767.0f}));
+        };
+        int judged = 0, beforeOver = 0;
+        float worstAfter = 0.0f, worstHipsAfter = 0.0f;
+        std::printf("border fixture %s (body %d)\n", aPath.c_str(), body);
+        std::printf("  window             capsule | ground travel cm entry / full / hand-back, Hips speed m/s: recorded -> borders | "
+                    "clip choice changes / variant frames / frames below half weight / clip feet travel cm: free clock -> held clock\n");
+        for (int32_t w = 0; w < nwin; ++w)
+        {
+            char label[33] = {}, weapon[33] = {};
+            int32_t hold = 0, nf = 0;
+            float cap = 0.0f, on = 0.0f, off = 0.0f;
+            rd(label, 32);
+            rd(weapon, 32);
+            rd(&hold, 4);
+            rd(&cap, 4);
+            rd(&on, 4);
+            rd(&off, 4);
+            rd(&nf, 4);
+            const meleepose::Weapon* wp = t.Find(integ::CNameHash(weapon));
+            const size_t frames = static_cast<size_t>(nf);
+            std::vector<std::vector<uint8_t>> s0(frames), s1(frames);
+            std::vector<float> dt(frames), weight(frames);
+            std::vector<int32_t> writing(frames);
+            std::vector<uint8_t> phase(size_t(nf), 0);
+            double tm = 0.0;
+            for (int32_t f = 0; f < nf; ++f)
+            {
+                rd(&dt[size_t(f)], 4);
+                rd(&weight[size_t(f)], 4);
+                rd(&writing[size_t(f)], 4);
+                tm += f > 0 ? double(dt[size_t(f)]) : 0.0;
+                phase[size_t(f)] = tm < on ? 0 : (tm < on + 0.35 ? 1 : (tm < off ? 2 : 3));
+                for (std::vector<uint8_t>* st : {&s0[size_t(f)], &s1[size_t(f)]})
+                {
+                    rd(P.data(), P.size() * 2);
+                    rd(Q.data(), Q.size() * 2);
+                    st->assign(size_t(nb) * integ::kGameBoneStride, 0);
+                    fill(*st);
+                }
+            }
+            // borders: recorded (stage 1) against after the borders on the same written pose
+            std::vector<math::Vec3> l0, r0, l1, r1;
+            std::vector<float> h0, h1;
+            meleepose::BorderState bs;
+            for (int32_t f = 0; f < nf; ++f)
+            {
+                meleepose::LowerModel m;
+                meleepose::ComputeLowerModel(s1[size_t(f)].data(), uint32_t(nb), lower, m);
+                l0.push_back(m.leg[0][2].p);
+                r0.push_back(m.leg[1][2].p);
+                h0.push_back(m.hipsLocalZ);
+                std::vector<uint8_t> b = s1[size_t(f)];
+                meleepose::LowerModel pre;
+                const bool havePre = f > 0 && meleepose::ComputeLowerModel(s1[size_t(f) - 1].data(), uint32_t(nb), lower, pre);
+                meleepose::BorderStep(bs, b.data(), uint32_t(nb), lower, havePre ? &pre : nullptr, writing[size_t(f)] != 0, weight[size_t(f)],
+                                      dt[size_t(f)]);
+                meleepose::ComputeLowerModel(b.data(), uint32_t(nb), lower, m);
+                l1.push_back(m.leg[0][2].p);
+                r1.push_back(m.leg[1][2].p);
+                h1.push_back(m.hipsLocalZ);
+            }
+            std::vector<uint8_t> fadeMask(frames, 0);
+            for (size_t f = 0; f < frames; ++f)
+                fadeMask[f] = (phase[f] == 1 || phase[f] == 3) && weight[f] < 0.999f ? 1 : 0;
+            const TravelMetrics before = MeasureTravel(l0, r0, h0, dt, phase, fadeMask), after = MeasureTravel(l1, r1, h1, dt, phase, fadeMask);
+            // clip choice: free clock (no held state, variants taken as matched) and held clock
+            ChoiceMetrics cm[2];
+            for (int v = 0; v < 2 && wp; ++v)
+            {
+                meleepose::State st;
+                int32_t lastClip = -1;
+                std::vector<math::Vec3> cl, cr;
+                std::vector<float> ch, cdt;
+                std::vector<uint8_t> cph;
+                for (int32_t f = 0; f < nf; ++f)
+                {
+                    math::Quat key[meleebase::kKeyBones];
+                    const bool haveKeys = meleebase::ReadKeys(s0[size_t(f)].data(), uint32_t(nb), keyRig, key);
+                    LowerPose pose;
+                    meleepose::StepInfo si;
+                    const float wgt = meleepose::Step(st, t, wp, haveKeys ? key : nullptr, writing[size_t(f)] ? 1.0f : 0.0f, dt[size_t(f)], pose,
+                                                      &si, v == 1 && hold != 0, v == 1);
+                    if (weight[size_t(f)] >= 0.999f && wgt < 0.5f)
+                        ++cm[v].lowFrames;
+                    if (!(wgt > 0.99f) || weight[size_t(f)] < 0.999f || si.clip < 0)
+                        continue;
+                    ++cm[v].fullFrames;
+                    if (lastClip >= 0 && si.clip != lastClip)
+                        ++cm[v].changes;
+                    lastClip = si.clip;
+                    if (IsVariant(t.clipNames[size_t(si.clip)]))
+                        ++cm[v].variantFrames;
+                    std::vector<uint8_t> b = s0[size_t(f)];
+                    meleepose::WriteLower(b.data(), uint32_t(nb), lower, pose, 1.0f);
+                    meleepose::LowerModel m;
+                    meleepose::ComputeLowerModel(b.data(), uint32_t(nb), lower, m);
+                    cl.push_back(m.leg[0][2].p);
+                    cr.push_back(m.leg[1][2].p);
+                    ch.push_back(m.hipsLocalZ);
+                    cdt.push_back(dt[size_t(f)]);
+                    cph.push_back(2);
+                }
+                if (!cl.empty())
+                    cm[v].footTravel = MeasureTravel(cl, cr, ch, cdt, cph, std::vector<uint8_t>(cph.size(), 0)).full;
+            }
+            const bool stands = cap < 0.05f;
+            std::printf("  %-16s %5.2f m%s | %5.1f %5.1f %5.1f %4.2f -> %5.1f %5.1f %5.1f %4.2f | %d %d %d %5.1f -> %d %d %d %5.1f%s\n", label, cap,
+                        stands ? " " : "*", before.entry * 100.0f, before.full * 100.0f, before.handback * 100.0f, before.hipsSpeed,
+                        after.entry * 100.0f, after.full * 100.0f, after.handback * 100.0f, after.hipsSpeed, cm[0].changes, cm[0].variantFrames, cm[0].lowFrames,
+                        cm[0].footTravel * 100.0f, cm[1].changes, cm[1].variantFrames, cm[1].lowFrames, cm[1].footTravel * 100.0f, hold ? " (held state)" : "");
+            if (!stands)
+                continue; // the plants live in the character frame: judged where the capsule stands
+            ++judged;
+            if (std::fmax(before.entry, std::fmax(before.full, before.handback)) > 0.03f || before.hipsSpeed > meleepose::kHipsSpeed + 0.02f)
+                ++beforeOver;
+            worstAfter = std::fmax(worstAfter, std::fmax(after.entry, std::fmax(after.full, after.handback)));
+            worstHipsAfter = std::fmax(worstHipsAfter, after.hipsSpeed);
+            if (wp)
+            {
+                Check(cm[1].variantFrames <= cm[0].variantFrames, "clip choice: no more _hit / _deflect frames than the free clock", cm[1].variantFrames);
+                if (hold)
+                {
+                    Check(cm[1].footTravel <= cm[0].footTravel + 0.005f, "clip choice: held state, clip feet travel not above the free clock (m)",
+                          cm[1].footTravel);
+                    Check(cm[1].lowFrames <= cm[0].lowFrames, "clip choice: held state, frames below half weight not above the free clock",
+                          cm[1].lowFrames);
+                }
+            }
+        }
+        std::printf("  (* capsule moved: reported only)\n");
+        Check(judged > 0, "border fixture: windows with a standing capsule", judged);
+        Check(beforeOver > 0, "border fixture: the recording shows the slides / Hips speed the borders remove", beforeOver);
+        Check(worstAfter <= 0.03f, "borders: foot ground travel at entry, full weight and hand-back <= 3 cm (m)", worstAfter);
+        Check(worstHipsAfter <= meleepose::kHipsSpeed + 0.02f, "borders: Hips vertical speed in entry and hand-back (m/s)", worstHipsAfter);
+    }
+    catch (int)
+    {
+        Check(false, ("border fixture truncated: " + aPath).c_str());
+    }
+}
+
 } // namespace
 
 int main(int aArgc, char** aArgv)
@@ -587,10 +839,23 @@ int main(int aArgc, char** aArgv)
     Check(tot.strikes == 10, "weapon runs (5 weapons x 2 bodies)", tot.strikes);
     TestGuardSynthetic();
     TestGuardRecorded(dir + "/melee_pose_guard_female.bin");
-    // optional further recordings (e.g. a whole run cut with --all): reported, judged only for frames that must not change
+    // further recordings by magic: guard fixtures (e.g. a whole run cut with --all; reported, judged only for frames that must not change)
+    // and border / clip choice fixtures
+    PoseTables both[2];
+    meleepose::ParseTables(ReadFile(dir + "/utpp_melee_pose_female.bin"), both[0]);
+    meleepose::ParseTables(ReadFile(dir + "/utpp_melee_pose_male.bin"), both[1]);
     for (int i = 2; i < aArgc; ++i)
     {
-        const GuardFixtureResult r = RunGuardFixture(aArgv[i], false);
+        const std::vector<uint8_t> head = ReadFile(aArgv[i]);
+        if (head.size() >= 4 && std::memcmp(head.data(), "MPB1", 4) == 0)
+        {
+            RunBorderFixture(aArgv[i], both);
+            continue;
+        }
+        const GuardFixtureResult r = RunGuardFixture(aArgv[i], true);
+        std::printf("extra guard fixture %s: frames %d, reference frames in %d, replaced %d, passed %d, out %d, other frames changed %d, "
+                    "hand steps >100 deg %d -> %d\n",
+                    aArgv[i], r.frames, r.signatureIn, r.held, r.passed, r.signatureOut, r.changedOther, r.popsIn, r.popsOut);
         Check(r.changedOther == 0 && r.signatureOut <= r.passed, "extra guard fixture: only reference frames change", r.changedOther);
     }
     std::printf(g_fail ? "FAILED %d\n" : "OK\n", g_fail);

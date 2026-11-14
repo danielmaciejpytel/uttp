@@ -20,6 +20,9 @@ using utpp::replay::Replay;
 namespace
 {
 int g_fail = 0;
+// the borders' Hips offset decays at kHipsSpeed: an offset of about 7 cm is gone within this time at full weight
+constexpr float kSettleSeconds = 0.25f;
+
 void Check(bool aOk, const char* aWhat, double aValue)
 {
     std::printf("[%s] %s -- %.3f\n", aOk ? "PASS" : "FAIL", aWhat, aValue);
@@ -42,6 +45,10 @@ struct Result
     float stepFootJudged = 0.0f; // largest foot step between two consecutive judged frames (full weight)
     float footZMin = 1e9f, footZMax = -1e9f;
     float ownFootStep = 0.0f; // the clip's own largest foot step between judged frames (the rig's bone lengths, the clip's rotations)
+    float hipsOffsetMax = 0.0f;   // largest Hips height offset of the borders (shown - written)
+    float fadeHipsSpeed = 0.0f;   // fastest vertical Hips speed (shown) on frames inside the full-body fades
+    float settledOffsetMax = 0.0f; // largest Hips height offset at full weight once the fade in has been over for kSettleSeconds
+    int settledFrames = 0;
 };
 
 struct RefFrame
@@ -85,9 +92,30 @@ Result Run(const std::string& aFixture, bool aFullPose, const meleepose::PoseTab
     if (aFullPose)
         aRef.assign(rp.frames.size(), RefFrame{});
     RefFrame lastJudged;
+    float lastHipsZ = 0.0f;
+    float fullFor = 0.0f; // time at full weight (recorded lowerScale < 0.01 and the layer's own weight full) since the last fade frame
     for (size_t i = 0; i < rp.frames.size(); ++i)
     {
         rp.Step(i);
+        {
+            const float hzShown = aim::ReadLocal(rp.records.data(), uint32_t(hips)).p.z;
+            const float ls = rp.frames[i].lowerScale;
+            if (rp.frames[i].dt > 0.0f && i > 0 && ls > 0.01f && ls < 0.99f)
+                r.fadeHipsSpeed = std::fmax(r.fadeHipsSpeed, std::fabs(hzShown - lastHipsZ) / rp.frames[i].dt);
+            lastHipsZ = hzShown;
+            if (aFullPose)
+            {
+                const utpp::meleepose::LastStep st = utpp::meleepose::GetLastStep();
+                fullFor = ls < 0.01f && st.weight >= 0.999f ? fullFor + std::fmax(rp.frames[i].dt, 0.0f) : 0.0f;
+                const float off = std::fabs(st.hipsOffset);
+                r.hipsOffsetMax = std::fmax(r.hipsOffsetMax, off);
+                if (fullFor > kSettleSeconds)
+                {
+                    r.settledOffsetMax = std::fmax(r.settledOffsetMax, off);
+                    ++r.settledFrames;
+                }
+            }
+        }
         const std::vector<aim::Xf> m = rp.Model();
         ++r.frames;
         if (havePrev && rp.frames[i].dt >= 0.0f)
@@ -124,7 +152,8 @@ Result Run(const std::string& aFixture, bool aFullPose, const meleepose::PoseTab
                 r.stepFootJudged = std::fmax(r.stepFootJudged, std::fmax(aim::Length(m[size_t(lf)].p - prev2[size_t(lf)].p),
                                                                          aim::Length(m[size_t(rf)].p - prev2[size_t(rf)].p)));
             lastJudged = ls;
-            const float hz = aim::ReadLocal(rp.records.data(), uint32_t(hips)).p.z;
+            // the layer's written Hips height (the shown height minus the borders' offset, which eases a height change in the fades)
+            const float hz = aim::ReadLocal(rp.records.data(), uint32_t(hips)).p.z - (aFullPose ? utpp::meleepose::GetLastStep().hipsOffset : 0.0f);
             r.hipsErrMax = std::fmax(r.hipsErrMax, std::fabs(hz - clip.hips.z));
             // the clip's chest (model orientation) at the clock row
             const uint32_t i0 = uint32_t(ls.clock);
@@ -179,6 +208,14 @@ int main(int aArgc, char** aArgv)
                     on.stepFoot * 1000.0f, on.stepChest, on.footZMin * 1000.0f, on.footZMax * 1000.0f, on.ownFootStep * 1000.0f);
         Check(on.full > 20, "frames written at full weight", on.full);
         Check(on.hipsErrMax < 0.02f, "hips height vs the clip at the clock (m)", on.hipsErrMax);
+        // inside the full-body fades the shown Hips height moves at most at the borders' speed limit
+        std::printf("  borders: Hips offset max %.0f mm | Hips vertical speed in the fades: on %.2f m/s, off %.2f m/s\n", on.hipsOffsetMax * 1000.0f,
+                    on.fadeHipsSpeed, off.fadeHipsSpeed);
+        Check(on.fadeHipsSpeed <= meleepose::kHipsSpeed + 0.02f, "borders: Hips vertical speed in the fades (m/s)", on.fadeHipsSpeed);
+        std::printf("  borders: Hips offset at full weight %.2f s after a fade: max %.1f mm over %d frames\n", kSettleSeconds,
+                    on.settledOffsetMax * 1000.0f, on.settledFrames);
+        Check(on.settledFrames > 0 && on.settledOffsetMax <= 0.001f, "borders: Hips offset gone at full weight after a fade (m)",
+              on.settledOffsetMax);
         Check(on.chestErrMax < off.chestErrMax, "chest vs the clip: full pose below the chest correction alone (max deg)", on.chestErrMax);
         // continuity: no step beyond the off run's own (+ 2 cm / 5 deg for the clip's own faster legs)
         Check(on.stepHips <= off.stepHips + 0.02f, "largest hips step vs the off run (m)", on.stepHips - off.stepHips);
