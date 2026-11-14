@@ -315,6 +315,11 @@ struct MatcherConfig
     // F_Off_Run competed with F_Start_Run: 8 of 20 running jumps of the recording played F_Off_Run the whole flight. A walk-off (no jump
     // detail) keeps the F Off rows. false = off.
     bool jumpRiseNoOff = true;
+    // airKeepLeadFootS: in a flight without a PSM jump detail (a fall / walk-off), from its second update until this many seconds into it, the
+    // run-off / take-off rows (F Off, B / LL / RL / F Start) of the other lead foot than the jump clip on display are out: the air entry keeps the
+    // foot it started on (a running ledge fall flipped Off_Run_Lfoot -> Off_Run_Rfoot -> F_Start_Run_Lfoot within 33 ms). Later picks of the
+    // flight and game jumps (their take-off / impulse picks are set by the rules above) are unchanged. 0 = off.
+    float airKeepLeadFootS = 0.15f;
     // fix/jumpout-cam (game log 2026-11-03 16:28:47, car jump-outs JO1 / JO2): the flight of a vehicle jump-out (ChooserState::jumpOutFlight)
     //  - jumpOutNoBack: takes no B / LL / RL Start row. The jump-out launches along the exit; the stick held against the momentum (brake) pulled the
     //    capsule's horizontal speed through zero and back (JO1: 5 m/s -> 0.05 m/s at 1.0 s -> -1.4 m/s) and the query then asked for a jump BACKWARDS
@@ -875,6 +880,7 @@ public:
                 for (int k = static_cast<int>(b); k >= 0; k = aDb->BoneParent(static_cast<uint32_t>(k)))
                     m_hipsChain.insert(m_hipsChain.begin(), k);
         m_clipJumpKind.assign(aDb->NumClips(), 0);
+        m_clipJumpFoot.assign(aDb->NumClips(), 0);
         for (uint32_t c = 0; c < aDb->NumClips(); ++c)
         {
             const auto n = aDb->ClipName(c);
@@ -885,6 +891,8 @@ public:
                 m_clipJumpKind[c] = 2;
             else if (n.find("Jump_F_Off_") != std::string_view::npos)
                 m_clipJumpKind[c] = 3;
+            if (m_clipJumpKind[c] != 0)
+                m_clipJumpFoot[c] = n.find("_Lfoot") != std::string_view::npos ? 1 : n.find("_Rfoot") != std::string_view::npos ? 2 : 0;
         }
         // fix/jumpout-cam: databases that index a fall clip (rows searchable): only there may the jump-out hand-over drop the Start / Off rows
         m_dbHasFall.assign(aDb->NumDatabases(), 0);
@@ -1421,6 +1429,7 @@ public:
                 m_flightAge = 0.0f;
                 m_flightStanding = aState.movementState == 0 && aState.speed2dCmS < m_cfg.standingJumpMaxSpeedCmS;
                 m_flightJump = aState.psmJump;
+                m_flightFoot = 0; // taken from the clip this update picks (next update)
                 // review r2 finding 15: the jump-out latch lives for the FLIGHT (reset when a new flight starts, not on a re-jump): the exit window can close
                 // mid-flight (gate 0 and weight 1) and a bump of the capsule against the exiting car reads as a re-jump; a rebuilt-from-the-flag latch
                 // would drop jumpOutNoBack (JO1 failure) for the rest of the flight. A real second jump in the air keeps the rules of the flight too
@@ -1439,6 +1448,8 @@ public:
             else
             {
                 m_flightAge += aDt;
+                if (m_flightFoot == 0 && m_cur.clip >= 0)
+                    m_flightFoot = m_clipJumpFoot[static_cast<uint32_t>(m_cur.clip)];
                 UTPP_IF_NOT_MUT(JUMPPICK, 13)
                     m_flightJump = m_flightJump || aState.psmJump; // the PSM jump may arrive one feed after the first InAir update
             }
@@ -1456,6 +1467,7 @@ public:
             standing = m_cfg.standingJumpMaxSpeedCmS > 0.0f && aState.movementMode == 1 && aState.movementState == 0 &&
                        aState.speed2dCmS < m_cfg.standingJumpMaxSpeedCmS; // mutation 8: decided again on every update (stick touch in the air)
         m_standJumpBack = standing && m_cfg.standingJumpExcludeBack;
+        m_airFootLock = aState.movementMode == 1 && m_flightActive && !m_flightJump && m_flightFoot != 0 && m_flightAge < m_cfg.airKeepLeadFootS;
         UTPP_IF_MUT(JUMPPICK, 1)
             m_standJumpBack = false; // mutation 1: B / LL / RL Start rows stay selectable
         m_standJumpTakeoff = standing && aState.timeToLand < m_cfg.standingJumpLandBlockS;
@@ -2365,7 +2377,7 @@ private:
                 n += en.numRows;
             }
         }
-        if (m_standJumpBack || m_standJumpTakeoff || m_standJumpOff || m_jumpRiseOff || m_jumpOutBack || m_jumpOutFall)
+        if (m_standJumpBack || m_standJumpTakeoff || m_standJumpOff || m_jumpRiseOff || m_jumpOutBack || m_jumpOutFall || m_airFootLock)
         {
             // fix3/jump: a standing jump takes no B / LL / RL Start row, no F Off row on the take-off and, near touchdown, no take-off-phase row;
             // fix5/jump: a jump in motion no F Off row from its first airborne update to the apex
@@ -2378,6 +2390,13 @@ private:
                 if (!kind || en.numRows == 0)
                     continue;
                 const uint32_t r0 = en.firstRow - D.firstRow;
+                // airKeepLeadFootS: no take-off / run-off row of the other lead foot inside the flight
+                if (m_airFootLock && m_clipJumpFoot[en.clip] != 0 && m_clipJumpFoot[en.clip] != m_flightFoot)
+                {
+                    std::memset(m_excluded.data() + r0, 1, en.numRows);
+                    n += en.numRows;
+                    continue;
+                }
                 // fix/jumpout-cam: a jump-out flight takes no B / LL / RL Start row; past its apex no Start / Off row at all (the fall loop of this
                 // database is the only jump clip left)
                 if ((kind == 1 && (m_standJumpBack || m_jumpOutBack)) || (m_jumpOutFall && (m_dbHasFall[d] || m_jumpOutFallMask)))
@@ -2719,6 +2738,9 @@ private:
     std::vector<uint8_t> m_fallClip; // motionfix item 5: clip index -> 1 = kAirFallClipNames
     bool m_anyFallClip = false;
     std::vector<uint8_t> m_clipJumpKind; // fix3/jump: clip index -> 1 B / LL / RL Start, 2 F Start, 3 F Off, 0 other (by name)
+    std::vector<uint8_t> m_clipJumpFoot; // clip index -> lead foot of a jump clip (m_clipJumpKind != 0): 1 Lfoot, 2 Rfoot, 0 none
+    uint8_t m_flightFoot = 0;            // airKeepLeadFootS: lead foot of the jump clip this flight started on (0 = not yet known)
+    bool m_airFootLock = false;          // airKeepLeadFootS: this update excludes the other lead foot's jump rows
     bool m_standJumpBack = false;        // fix3/jump: this update is a standing jump: no B / LL / RL Start row
     bool m_standJumpTakeoff = false;     // fix3/jump: ... and near touchdown: no take-off-phase row either
     bool m_standJumpOff = false;         // fix3/jump: ... and in the first standingJumpOffBlockS of the flight: no F Off row either

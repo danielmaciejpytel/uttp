@@ -53,6 +53,9 @@ constexpr bool IsReleaseDetail(int d) noexcept { return integ::PsmDetailReleases
 constexpr bool IsClimbDetail(int d) noexcept { return integ::PsmIsClimbDetail(d); }
 constexpr bool IsNoTriggerDetail(int d) noexcept { return integ::PsmIsNoTriggerDetail(d); }
 
+// AirConfig::stepDownS the runtime uses (= MapConfig::groundDropGraceS of the chooser mapping, so both sides agree on a step-down).
+inline constexpr float kStepDownSeconds = 0.12f;
+
 enum class Mode : uint8_t { Off, Hold, Clips };
 enum class Phase : uint8_t { Ground, TakeOff, Descend, FallLoop, LandApproach, Recover };
 enum class Action : uint8_t { None, PlayTakeOff, PlayOff, PlayFallLoop, PlayLand, HandBack, Reset };
@@ -150,6 +153,11 @@ struct AirConfig
     float falseTouchVz = 3.0f;      // m/s downward
     // CAR-2 (vehicle batch): planar speed cap while AirInput::vehicleExit (motion sprint cap; 0 = no clamp)
     float vehicleExitMaxSpeed = 7.0f; // m/s
+    // stepDownS: a fall out of the Ground phase (ledge fall or physics fall) whose only evidence is a falling capsule needs this much
+    // continuous air time (and at least minAir): a step-down off a curb or a ledge edge the capsule clips (0.05-0.10 s, 3-10 cm) keeps the
+    // ground clips. Not waited for: a PSM air detail, a rising capsule (vz > physFallVz), a probe farther than physFallDist, a vehicle exit.
+    // 0 = off (minAir alone, the previous machine).
+    float stepDownS = 0.0f;
 };
 
 struct AirInput
@@ -284,12 +292,14 @@ public:
                 ++stats_.resets;
             }
             airTime_ = grounded ? 0.0f : airTime_ + in.dt;
+            airFeeds_ = grounded ? 0 : airFeeds_ + 1;
             Finish(d, eff, in);
             return d;
         }
         if (eff == Mode::Off)
         {
             airTime_ = 0.0f;
+            airFeeds_ = 0;
             lockout_ = false;
             armTime_ = -1.0f;
             Finish(d, eff, in);
@@ -307,6 +317,7 @@ public:
         // Time bookkeeping and gravity estimate.
         const bool wasAirborne = airTime_ > 0.0f;
         airTime_ = grounded ? 0.0f : airTime_ + in.dt;
+        airFeeds_ = grounded ? 0 : airFeeds_ + 1;
         if (phase_ != Phase::Ground) episodeTime_ += in.dt;
         if (!grounded && wasAirborne && phase_ != Phase::Ground && in.dt > 1e-4f) LearnGravity(in.vz, in.dt);
         // Dead reckoning (trapezoid) and probe fusion.
@@ -364,7 +375,11 @@ public:
             }
             // Ledge fall: hDR is not valid (no jump); the probe (if any) has been fused above.
             const float fallTtl = hValid_ ? TimeToLand(h_, in.vz, gUp_, gDown_) : cfg_.noHitTtl;
-            if (!noTrigger && !grounded && airTime_ >= cfg_.minAir && in.vz <= cfg_.fallVz &&
+            // stepDownS: only a capsule that keeps falling past a step-down counts; the other fall evidence starts at once
+            const bool fallEvidence = IsAirDetail(in.psmDetail) || in.vehicleExit || in.distToGround > cfg_.physFallDist;
+            const bool stepDownOver = cfg_.stepDownS <= 0.0f || fallEvidence || (airTime_ >= cfg_.stepDownS && airFeeds_ >= 2); // one long frame is no fall
+            const bool physStepDownOver = stepDownOver || in.vz > cfg_.physFallVz;
+            if (!noTrigger && !grounded && airTime_ >= cfg_.minAir && stepDownOver && in.vz <= cfg_.fallVz &&
                 (fallTtl >= cfg_.fallMinTtl || probeMiss))
             {
                 BeginEpisode(in);
@@ -382,7 +397,7 @@ public:
                     Play(d, eff, Action::PlayFallLoop, PickKind::FallLoop, Entry::LoopStart, 0, cfg_.fallHalflife, in);
                 }
             }
-            else if (cfg_.physFall && physRun_ >= cfg_.physFallTicks)
+            else if (cfg_.physFall && physRun_ >= cfg_.physFallTicks && physStepDownOver)
             {
                 // BATCH 6 AIR stage: physics fall (no jump, any detail): straight to LandApproach on a short probed drop,
                 // FallLoop while rising (vehicle launch) or standing, Descend (Off clip) at walk or faster.
@@ -869,6 +884,7 @@ private:
     bool dirty_ = false, lockout_ = false, resetPending_ = false;
     bool lockoutHard_ = false, landAborted_ = false; // BATCH 6 AIR stage
     int physRun_ = 0, groundRun_ = 0;
+    int airFeeds_ = 0; // consecutive not-grounded feeds (AirConfig::stepDownS)
     float lastAirVz_ = 0.0f;
     bool exitEpisode_ = false; // a feed of this episode carried AirInput::vehicleExit (false-touch take-back only)
 };

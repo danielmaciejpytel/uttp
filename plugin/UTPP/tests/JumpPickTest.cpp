@@ -192,6 +192,7 @@ struct Variant
         // tests/LocoStartTest.cpp.
         mc.jumpTakeoffHoldS = 0.0f;
         mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam: production value (acts inside the exit window / a jump-out flight only)
+        mc.groundDropGraceS = adapter::kGroundDropGraceSeconds; // production value: a short unconfirmed contact loss stays ground
     }
 };
 
@@ -1898,6 +1899,261 @@ void JumpOutChecks(Model& m, const Variant& aProd)
 }
 } // namespace
 
+// ---- short contact losses on the ground (MapConfig::groundDropGraceS). Recorded feeds (tests/data/air_ground_flicker_feeds.txt): V running into an edge
+// (one !onGround feed every 5-8 feeds, no PSM air detail), small step-downs (3-6 airborne feeds, 3-10 cm) and a real fall (PSM Fall from its fourth
+// airborne feed); synthetic one- and three-feed losses at 30 / 60 / 120 Hz out of a steady run; the take-off timing of every recorded jump.
+bool IsAirDb(const std::string& aDb) { return Has(aDb, "Jumps") || Has(aDb, "Lands"); }
+
+struct FlickerStats
+{
+    int airFrames = 0;     // frames playing a clip of a jump / landing database
+    int inAirFrames = 0;   // frames with the chooser MovementMode InAir
+    int clipChanges = 0;   // frames whose clip differs from the previous frame
+    double seconds = 0.0;  // replayed time
+};
+
+FlickerStats MeasureFlicker(const std::vector<Frame>& aFr)
+{
+    FlickerStats s;
+    for (size_t i = 0; i < aFr.size(); ++i)
+    {
+        s.airFrames += IsAirDb(aFr[i].db);
+        s.inAirFrames += aFr[i].mode == 1;
+        if (i > 0 && aFr[i].clip != aFr[i - 1].clip)
+            ++s.clipChanges;
+    }
+    if (aFr.size() > 1)
+        s.seconds = aFr.back().t - aFr.front().t;
+    return s;
+}
+
+Section MakeContactLoss(const Row& aRun, float aHz, int aLostFeeds)
+{
+    Section out;
+    out.name = "contact-loss";
+    const int n = int(1.5f * aHz);
+    const float dt = 1.0f / aHz;
+    for (int i = 0; i < n; ++i)
+    {
+        Row r = aRun;
+        r.t = double(i) * double(dt);
+        r.dt = dt;
+        r.onGround = 1;
+        r.vel[2] = -0.3f;
+        r.dist = -2.0f;
+        const int k = i - n / 2;
+        if (aLostFeeds > 0 && k >= 0 && k < aLostFeeds)
+        {
+            r.onGround = 0;
+            r.vel[2] = -1.5f - 0.25f * float(k);
+        }
+        out.rows.push_back(r);
+    }
+    return out;
+}
+
+// lead-foot changes between the take-off / run-off clips in the first aWindowS seconds of a flight (MatcherConfig::airKeepLeadFootS)
+int FootFlips(const std::vector<Frame>& aFr, double aWindowS)
+{
+    int flips = 0;
+    for (const Flight& f : Flights(aFr))
+    {
+        int foot = 0;
+        for (size_t k = f.first; k <= f.last && aFr[k].t - aFr[f.first].t < aWindowS; ++k)
+        {
+            const std::string& c = aFr[k].clip;
+            if (!(Has(c, "Jump_") && (Has(c, "_Start_") || Has(c, "_Off_"))))
+                continue;
+            const int ft = Has(c, "_Lfoot") ? 1 : Has(c, "_Rfoot") ? 2 : 0;
+            if (ft && foot && ft != foot)
+            {
+                ++flips;
+                if (g_report)
+                    std::printf("  foot change t=%.3f (flight %.3f) %s %s\n", aFr[k].t, aFr[f.first].t, aFr[k - 1].clip.c_str(), c.c_str());
+            }
+            if (ft)
+                foot = ft;
+        }
+    }
+    return flips;
+}
+
+float LegDiffDeg(const Frame& a, const Frame& b)
+{
+    return std::fmax(std::fmax(AngleDeg(a.qUpLegL, b.qUpLegL), AngleDeg(a.qUpLegR, b.qUpLegR)), std::fmax(AngleDeg(a.qLegL, b.qLegL), AngleDeg(a.qLegR, b.qLegR)));
+}
+
+void GroundFlickerChecks(Model& m, const char* aPath, const std::vector<Section>& aJumpSecs, const Variant& aProd)
+{
+    std::vector<Section> secs;
+    if (!LoadFixture(aPath, secs))
+    {
+        Check(false, "contact loss fixture loads");
+        return;
+    }
+    Variant pre = aProd;
+    pre.mc.groundDropGraceS = 0.0f; // the previous mapping: every !onGround feed is InAir
+    const Section* run = nullptr;
+    for (const Section& s : secs)
+    {
+        const std::vector<Frame> on = Replay(m, s, aProd);
+        const std::vector<Frame> off = Replay(m, s, pre);
+        const FlickerStats a = MeasureFlicker(on), b = MeasureFlicker(off);
+        if (g_report)
+            for (const Frame& f : on)
+                if (f.mode == 1 || f.modeLast == 1 || IsAirDb(f.db) || f.jumped)
+                    std::printf("  %s t=%.3f onGround %d detail %d mode %d/%d vz %.0f cm/s %s %s%s\n", s.name.c_str(), f.t, f.onGround, f.detail, f.mode, f.modeLast,
+                                double(f.vzCmS), f.db.c_str(), f.clip.c_str(), f.jumped ? " (new)" : "");
+        std::printf("contact loss %s: jump / land frames %d (pre-fix %d), InAir frames %d (%d), clip changes %d in %.2f s (%d)\n", s.name.c_str(), a.airFrames,
+                    b.airFrames, a.inAirFrames, b.inAirFrames, a.clipChanges, a.seconds, b.clipChanges);
+        if (s.name == "edge_flicker")
+        {
+            // the flicker itself: feed t 137.06 .. 138.60 (V pressed against the edge after the collision at 136.84)
+            auto window = [](const std::vector<Frame>& aFr) {
+                std::vector<Frame> w;
+                for (const Frame& f : aFr)
+                    if (f.t >= 137.06 && f.t <= 138.60)
+                        w.push_back(f);
+                return MeasureFlicker(w);
+            };
+            Section ground = s; // the same feeds with the contact flag held and no PSM air detail: the ground selection alone
+            for (Row& r : ground.rows)
+            {
+                r.onGround = 1;
+                if (adapter::PsmAir(adapter::DetailFromFeed(r.psm, r.loco)))
+                    r.psm &= ~integ::kPsmDetailFieldMask;
+            }
+            Section flat = ground; // ... and the vertical speed of a level floor (no gravity ramp between the contact losses)
+            for (Row& r : flat.rows)
+                r.vel[2] = -0.3f;
+            const FlickerStats wa = window(on), wb = window(off), wg = window(Replay(m, ground, aProd)), wf = window(Replay(m, flat, aProd));
+            std::printf("edge flicker window: clip changes %d in %.2f s (pre-fix %d, contact flag held %d, and level vertical speed %d)\n", wa.clipChanges, wa.seconds,
+                        wb.clipChanges, wg.clipChanges, wf.clipChanges);
+            Check(b.airFrames >= 20 && wb.clipChanges >= 20, "edge flicker: the pre-fix replay reproduces the jump / land flips (frames, clip changes)", b.airFrames, wb.clipChanges);
+            Check(a.airFrames == 0 && a.inAirFrames == 0, "edge flicker: no jump / land clip and no InAir update while the capsule stays on the ground (frames)", a.airFrames,
+                  a.inAirFrames);
+            Check(wa.clipChanges <= wg.clipChanges, "edge flicker: no clip change beyond the ground selection of the same feeds (changes, contact flag held)", wa.clipChanges,
+                  wg.clipChanges);
+            // measurement only: the remaining changes are the ground selection of these feeds (pivots / run starts while V is held at the edge)
+            std::printf("edge flicker window: %.2f clip changes per second (target 3.0; ground selection alone %.2f)\n", wa.seconds > 0 ? wa.clipChanges / wa.seconds : 0.0,
+                        wg.seconds > 0 ? wg.clipChanges / wg.seconds : 0.0);
+        }
+        else if (s.name.rfind("step_down", 0) == 0)
+        {
+            if (!run)
+                run = &s;
+            Check(b.airFrames > 0, "step-down: the pre-fix replay picks a jump / land clip (frames)", b.airFrames);
+            Check(a.airFrames == 0 && a.inAirFrames == 0, "step-down (<= 6 airborne feeds, <= 10 cm): the ground clips stay (jump / land frames, InAir frames)",
+                  a.airFrames, a.inAirFrames);
+        }
+        else if (s.name == "real_fall")
+        {
+            double firstPsmAir = -1.0, firstInAir = -1.0;
+            for (const Row& r : s.rows)
+                if (firstPsmAir < 0.0 && adapter::PsmAir(adapter::DetailFromFeed(r.psm, r.loco)))
+                    firstPsmAir = r.t;
+            for (const Frame& f : on)
+                if (firstInAir < 0.0 && f.mode == 1)
+                    firstInAir = f.t;
+            Check(firstPsmAir > 0.0 && firstInAir > 0.0 && firstInAir <= firstPsmAir + 1.0e-6,
+                  "real fall: InAir no later than the first PSM Fall feed (feed times)", firstInAir, firstPsmAir);
+            Check(a.airFrames > 0, "real fall: the fall / landing clips are still played (frames)", a.airFrames);
+            Variant anyFoot = aProd;
+            anyFoot.cfg.airKeepLeadFootS = 0.0f;
+            const double w = double(aProd.cfg.airKeepLeadFootS);
+            const int flips = FootFlips(on, w), flipsPre = FootFlips(Replay(m, s, anyFoot), w);
+            std::printf("real fall: lead-foot changes in the air entry %d (airKeepLeadFootS off %d)\n", flips, flipsPre);
+            Check(flips == 0, "real fall: the air entry keeps the lead foot of its first jump clip (changes)", flips, flipsPre);
+        }
+    }
+    // the same sections with the floor distance of the production rule (motiondriver::AirFloorStep) instead of the dumped probe
+    {
+        Variant rf = aProd;
+        rf.runtimeFloor = true;
+        for (const Section& s : secs)
+        {
+            const FlickerStats a = MeasureFlicker(Replay(m, s, rf));
+            std::printf("contact loss %s (runtime floor): jump / land frames %d, InAir frames %d\n", s.name.c_str(), a.airFrames, a.inAirFrames);
+            if (s.name == "real_fall")
+                Check(a.inAirFrames > 0, "real fall (runtime floor): InAir (frames)", a.inAirFrames);
+            else
+                Check(a.airFrames == 0 && a.inAirFrames == 0, "contact loss / step-down (runtime floor): the ground clips stay (jump / land frames, InAir frames)",
+                      a.airFrames, a.inAirFrames);
+        }
+    }
+    // synthetic losses out of a steady run: no clip change and no leg drift against the same run without the loss
+    if (run && !run->rows.empty())
+    {
+        const float hz[3] = {30.0f, 60.0f, 120.0f};
+        for (float h : hz)
+            for (int lost : {1, 3})
+            {
+                const Section clean = MakeContactLoss(run->rows.front(), h, 0);
+                const Section loss = MakeContactLoss(run->rows.front(), h, lost);
+                const std::vector<Frame> c = Replay(m, clean, aProd);
+                const std::vector<Frame> l = Replay(m, loss, aProd);
+                const std::vector<Frame> p = Replay(m, loss, pre);
+                int diff = c.size() != l.size() ? 1 : 0, diffPre = c.size() != p.size() ? 1 : 0;
+                float drift = 0.0f, driftPre = 0.0f;
+                for (size_t i = 0; i < c.size() && i < l.size(); ++i)
+                {
+                    diff += c[i].clip != l[i].clip;
+                    drift = std::fmax(drift, LegDiffDeg(c[i], l[i]));
+                }
+                for (size_t i = 0; i < c.size() && i < p.size(); ++i)
+                {
+                    diffPre += c[i].clip != p[i].clip;
+                    driftPre = std::fmax(driftPre, LegDiffDeg(c[i], p[i]));
+                }
+                char what[200];
+                std::snprintf(what, sizeof what, "%d-feed contact loss at %.0f Hz: no clip change against the clean run, leg drift <= 6 deg (frames, deg)", lost, double(h));
+                std::printf("%d-feed loss at %.0f Hz: differing frames %d (pre-fix %d), leg drift %.1f deg (pre-fix %.1f)\n", lost, double(h), diff, diffPre,
+                            double(drift), double(driftPre));
+                Check(diff == 0 && drift <= 6.0f, what, diff, drift);
+                if (lost == 1 && h == 60.0f)
+                    Check(diffPre > 0 && driftPre > 6.0f, "1-feed loss at 60 Hz: the pre-fix replay switches clips and turns the legs (frames, deg)", diffPre, driftPre);
+            }
+    }
+    else
+        Check(false, "contact loss fixture: a step_down section");
+    // real jumps: the first InAir update of every recorded jump flight is not delayed by the grace (PSM Jump detail or a rising capsule)
+    int jumps = 0, delayed = 0, worst = 0, flipsOn = 0, flipsOff = 0;
+    Variant anyFoot = aProd;
+    anyFoot.cfg.airKeepLeadFootS = 0.0f;
+    const double footWindow = double(aProd.cfg.airKeepLeadFootS);
+    for (const Section& s : aJumpSecs)
+    {
+        const std::vector<Frame> on = Replay(m, s, aProd);
+        const std::vector<Frame> off = Replay(m, s, pre);
+        flipsOn += FootFlips(on, footWindow);
+        flipsOff += FootFlips(Replay(m, s, anyFoot), footWindow);
+        for (const Flight& f : Flights(off))
+        {
+            const Frame& first = off[f.first];
+            if (!adapter::PsmAir(first.detail) && first.vzCmS < adapter::kExitAirRiseMs * 100.0f)
+                continue; // not a jump (a fall without the PSM detail)
+            ++jumps;
+            int d = -1;
+            for (size_t k = 0; k < on.size(); ++k)
+                if (on[k].t >= first.t - 1.0e-6 && on[k].mode == 1)
+                {
+                    size_t j = 0;
+                    while (j < off.size() && off[j].t < on[k].t - 1.0e-6)
+                        ++j;
+                    d = int(j) - int(f.first);
+                    break;
+                }
+            if (d < 0 || d > 0)
+                ++delayed;
+            worst = std::max(worst, d < 0 ? 999 : d);
+        }
+    }
+    std::printf("real jumps: %d flights, %d with a later first InAir update, worst delay %d updates\n", jumps, delayed, worst);
+    Check(jumps >= 20 && worst <= 1, "real jumps: the first InAir update is at most one update later than without the grace (flights, worst delay)", jumps, worst);
+    std::printf("recorded jumps: lead-foot changes in the air entry %d (airKeepLeadFootS off %d)\n", flipsOn, flipsOff);
+    Check(flipsOn == flipsOff, "recorded jumps: the lead-foot rule leaves game jumps as they were (changes, off)", flipsOn, flipsOff);
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 3)
@@ -1905,7 +2161,7 @@ int main(int argc, char** argv)
         std::printf("usage: utpp_mm_jump_pick_test <jump_feeds.txt> <bundle path without extension> [--report] [--csv out.csv] [--set <knob> <value>]...\n");
         return 2;
     }
-    std::string csvPath, runningPath;
+    std::string csvPath, runningPath, flickerPath;
     Variant prod;
     for (int i = 3; i < argc; ++i)
     {
@@ -1915,6 +2171,8 @@ int main(int argc, char** argv)
             csvPath = argv[++i];
         else if (!std::strcmp(argv[i], "--running") && i + 1 < argc)
             runningPath = argv[++i];
+        else if (!std::strcmp(argv[i], "--flicker") && i + 1 < argc)
+            flickerPath = argv[++i];
         else if (!std::strcmp(argv[i], "--rig") && i + 1 < argc)
         {
             const std::string rig = argv[++i];
@@ -1989,6 +2247,12 @@ int main(int argc, char** argv)
         }
         RunningJumpChecks(*model, running, secs, prod);
         WalkOffChecks(*model, running, prod);
+        if (!flickerPath.empty())
+        {
+            std::vector<Section> jumps = secs;
+            jumps.insert(jumps.end(), running.begin(), running.end());
+            GroundFlickerChecks(*model, flickerPath.c_str(), jumps, prod);
+        }
     }
     else
         std::printf("note: no --running fixture, the jump-in-motion checks (fix5/jump) are skipped\n");

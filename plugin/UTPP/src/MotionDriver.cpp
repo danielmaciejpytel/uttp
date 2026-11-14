@@ -4551,6 +4551,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     // CrouchSprint 30) and the 0.2 s Dodge 7 from the crouch do not reach the chooser (tests/SlideExitTest.cpp)
     mc.slideAirGraceS = mc.slide ? adapter::kSlideAirGraceSeconds : 0.0f;
     mc.exitAirGraceS = adapter::kExitAirGraceSeconds;
+    mc.groundDropGraceS = adapter::kGroundDropGraceSeconds; // a short unconfirmed contact loss (ledge edge, step-down) stays ground
     mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam
     // the exit window of the gate can close on the first open feed; the grace keeps its own short tail
     g_exitAirTail = aRaw.vehicleExitWindow ? 0.6f : std::fmax(0.0f, g_exitAirTail - std::fmax(aRaw.dt, 0.0f));

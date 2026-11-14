@@ -643,6 +643,12 @@ inline constexpr float kExitAirRiseMs = 1.5f;         // m/s: a feed rising at l
 // next feed (16-17 ms at 60 Hz); 0.1 s covers a 30 Hz frame pair with margin without holding a capsule that stays on the ground.
 inline constexpr float kJumpTakeoffHoldSeconds = 0.1f;
 inline constexpr float kSlideAirGraceSeconds = 0.2f;   // MapConfig::slideAirGraceS the runtime uses [P] (drops seen: 0.08-0.10 s)
+// MapConfig::groundDropGraceS the runtime uses: longer than the recorded step-downs (<= 6 feeds, 0.10 s, 10 cm) and short enough that a
+// fall without the PSM Fall detail still turns InAir after ~4 cm more of free fall. Two feeds at least, so one long frame cannot pass it.
+inline constexpr float kGroundDropGraceSeconds = 0.12f;
+inline constexpr int kGroundDropMinFeeds = 2;
+inline constexpr float kGroundDropFallM = 0.2f; // m of capsule drop that is a fall inside the grace (fast or long frames)
+inline constexpr float kGroundDropProbeM = 0.5f; // m: a floor probe farther below than this is a fall at once (step-downs probed <= 0.24 m)
 inline constexpr float kStanceFilterSeconds = 0.15f;    // MapConfig::stanceFilterS the runtime uses (task bound: changes < ~0.15 s filtered)
 // P1 fix batch 2 (2026-10-21 12:15 recording, tests/P1StanceLatencyTest.cpp): the clean Stand <-> Crouch edge bypasses the filter
 // (MapConfig::stanceCleanEdge). The previous raw value must have held kStanceCleanHoldSeconds (= the filter time), a crouch ENTRY
@@ -836,6 +842,13 @@ struct MapConfig
     // the ground from the exit workspot: Jump_F_Start then Land_Stand_Light squat on a standing exit, night run 20261024-145425) counts
     // as ground for this long. A real jump-out (PSM Jump or vz >= kExitAirRiseMs) is not delayed.
     float exitAirGraceS = 0.0f;
+    // groundDropGraceS: everywhere else a !onGround feed out of a ground frame that the PSM does not confirm (no air detail) and that
+    // does not rise counts as ground for this long (and at least kGroundDropMinFeeds feeds), unless the capsule dropped kGroundDropFallM or
+    // the floor probe reports more than kGroundDropProbeM below.
+    // A one-feed contact loss while V runs against a ledge edge (capsule sinks 2-3 cm, then depenetrates up) or a step-down off a curb
+    // (0.05-0.10 s, 3-10 cm) then keeps the ground clips; a real fall gets the PSM Fall detail within ~0.05 s or outlasts the grace,
+    // a real jump rises (vz >= kExitAirRiseMs) or carries the PSM Jump detail and is never delayed. 0 = off (the previous mapping).
+    float groundDropGraceS = 0.0f;
     // contactHoldS (fix/jumpout-cam, log 2026-11-03 17:34:36 jump-out B): inside the vehicle exit window / jump-out flight a ground-contact feed (onGround, no air
     // PSM detail) while the capsule still falls faster than kContactFallMs is no landing (it grazed the exiting car at 0.23 m, vz -11 m/s, for 2 feeds): the
     // chooser stays InAir for at most this many seconds of such feeds, so the heavy land database is not picked 0.1 s early. The real landing zeroes the vertical
@@ -1119,7 +1132,10 @@ struct MapState
     bool jumpOutLanded = false;
     float takeoffHoldAge = 0.0f; // seconds of grounded PSM Jump 18 feeds kept OnGround before the launch (MapConfig::jumpTakeoffHoldS)
     bool takeoffHoldActive = false; // this feed is a held take-off feed (TakeoffHoldFeed): mapped with the previous feed's PSM detail
-    bool airGraceActive = false; // this feed's !onGround was kept as ground by MapConfig::slideAirGraceS (the host mirrors it to its v2 consumers)
+    bool airGraceActive = false; // this feed's !onGround was kept as ground by MapConfig::slideAirGraceS / groundDropGraceS (the host mirrors it to its v2 consumers)
+    float groundDropAge = 0.0f; // seconds / feeds / metres of the current unconfirmed contact loss (MapConfig::groundDropGraceS)
+    int groundDropFeeds = 0;
+    float groundDropM = 0.0f;
     int stanceOut = -1;
     int stanceRawLast = -1; // last raw stance of a feed that was not a Dodge
     bool stanceProvisional = false; // stanceOut came from a pass-through feed (slide / first feed after it), not yet held for the filter time
@@ -1261,7 +1277,39 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         else
             m.slideAirAge = 0.0f;
     }
+    // MapConfig::groundDropGraceS: a contact loss out of a ground frame that the PSM does not confirm (no air detail) and that does not
+    // rise stays ground until it lasted groundDropGraceS over at least kGroundDropMinFeeds feeds, or the capsule fell kGroundDropFallM.
+    // The vehicle exit / jump-out flight keep their own rules below.
+    {
+        const bool dropCandidate = c.groundDropGraceS > 0.0f && f.air.valid && !f.air.onGround && !PsmTraversal(f.psmDetailed) &&
+                                   !PsmAir(f.psmDetailed) && velIn[2] < kExitAirRiseMs && !(f.air.distanceToGround > kGroundDropProbeM) &&
+                                   st.movementMode == 0 && !x.vehicleExit && !x.jumpOutFlight;
+        if (dropCandidate)
+        {
+            m.groundDropAge += dt;
+            ++m.groundDropFeeds;
+            if (velIn[2] < 0.0f)
+                m.groundDropM -= velIn[2] * dt;
+            const bool fall = m.groundDropFeeds >= kGroundDropMinFeeds &&
+                              (m.groundDropAge >= c.groundDropGraceS || m.groundDropM >= kGroundDropFallM);
+            if (!fall && airFeed)
+            {
+                airFeed = false;
+                m.airGraceActive = true;
+            }
+        }
+        else
+        {
+            m.groundDropAge = m.groundDropM = 0.0f;
+            m.groundDropFeeds = 0;
+        }
+    }
     bool psmAir = PsmAir(f.psmDetailed);
+    // groundDropGraceS: the PSM Fall detail on a feed whose fresh contact still reports the ground, out of a ground frame, is no fall yet (the
+    // PSM flickers it for one feed at a ledge edge); a real fall loses the contact on the same or the next feed and is InAir then.
+    if (c.groundDropGraceS > 0.0f && psmAir && f.psmDetailed == kPsmFall && f.air.valid && f.air.onGround && st.movementMode == 0 && !x.vehicleExit &&
+        !x.jumpOutFlight)
+        psmAir = false;
     // only an air episode that BEGAN inside the window without a rise is graced (st.movementMode is still last frame's here): the
     // descending half of a real jump-out never goes back to ground
     const bool exitGraceActiveLast = m.exitGraceActive;

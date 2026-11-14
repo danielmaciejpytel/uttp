@@ -1362,6 +1362,118 @@ static void TestContactRampZeroAtTouch()
     }
 }
 
+// AirConfig::stepDownS with the runtime configuration. Feed values taken from recorded game feeds: a step-down off a small ledge (3 airborne
+// feeds, vz -1.41 / -1.70 / -1.95, probe 0.08 m: the previous machine played a land clip), a 6-feed step-down, V pressed against an edge
+// (one airborne feed every 7), one long frame (0.3 s) without contact, a real fall (PSM Fall 14 from its fourth airborne feed) and a jump.
+struct StepFeed
+{
+    float dt, vz, dist;
+    bool onGround;
+    int detail;
+};
+
+static Trace RunSteps(AirState& s, const std::vector<StepFeed>& aFeeds, int* aFirstAction = nullptr)
+{
+    Trace tr;
+    int frame = 500;
+    std::vector<StepFeed> all(20, StepFeed{1.0f / 60.0f, -0.3f, -2.0f, true, 0});
+    all.insert(all.end(), aFeeds.begin(), aFeeds.end());
+    all.insert(all.end(), 40, StepFeed{1.0f / 60.0f, -0.3f, -2.0f, true, 0});
+    float t = 0.0f;
+    for (size_t i = 0; i < all.size(); ++i)
+    {
+        AirInput in;
+        in.dt = all[i].dt;
+        in.vz = all[i].vz;
+        in.distToGround = all[i].dist;
+        in.onGround = all[i].onGround;
+        in.psmDetail = all[i].detail;
+        in.planarSpeed = 3.67f;
+        in.velBodyY = 3.67f;
+        in.stickMagnitude = 1.0f;
+        in.tableValid = true;
+        in.currentFrame = frame++;
+        t += in.dt;
+        const AirDecision d = s.Update(in);
+        if (aFirstAction && *aFirstAction < 0 && d.action != Action::None)
+            *aFirstAction = int(i) - 20;
+        tr.Add(d, t);
+    }
+    return tr;
+}
+
+static AirState MakeRuntime(bool aStepDown)
+{
+    AirConfig c;
+    c.heavyVz = 8.7f;
+    c.physFall = c.touchGuard = true;
+    c.stepDownS = aStepDown ? kStepDownSeconds : 0.0f;
+    AirState s(c);
+    s.SetMode(Mode::Clips);
+    return s;
+}
+
+static void TestStepDown()
+{
+    const std::vector<StepFeed> ledge3 = {{0.0181f, -1.41f, -2.0f, false, 0}, {0.0159f, -1.70f, -2.0f, false, 0}, {0.0169f, -1.95f, 0.081f, false, 0},
+                                          {0.0167f, -2.20f, -2.0f, true, 0}};
+    const std::vector<StepFeed> ledge6 = {{0.0171f, -0.41f, -2.0f, false, 0}, {0.0169f, -0.69f, 0.239f, false, 0}, {0.0172f, -0.96f, -2.0f, false, 0},
+                                          {0.0158f, -1.23f, 0.202f, false, 0}, {0.0165f, -1.48f, -2.0f, false, 0}, {0.0167f, -1.75f, 0.149f, false, 0},
+                                          {0.0170f, -2.00f, -2.0f, true, 0}};
+    std::vector<StepFeed> edge;
+    for (int c = 0; c < 15; ++c)
+    {
+        for (int k = 0; k < 6; ++k)
+            edge.push_back({1.0f / 60.0f, -0.3f - 0.3f * float(k), -2.0f, true, 0});
+        edge.push_back({1.0f / 60.0f, -1.9f, -2.0f, false, 0});
+    }
+    const std::vector<StepFeed> hitch = {{0.30f, -2.0f, -2.0f, false, 0}, {1.0f / 60.0f, -0.3f, -2.0f, true, 0}};
+    std::vector<StepFeed> fall = {{0.0172f, -1.89f, -2.0f, false, 0}, {0.0166f, -2.17f, 0.261f, false, 0}, {0.0160f, -2.43f, -2.0f, false, 0},
+                                  {0.0167f, -2.69f, 0.195f, false, 14}, {0.0172f, -2.95f, -2.0f, false, 14}, {0.0161f, -3.23f, 0.109f, false, 14},
+                                  {0.0163f, -3.49f, -2.0f, false, 14}, {0.0166f, -3.75f, 0.03f, false, 14}, {0.0166f, 0.0f, -2.0f, true, 23},
+                                  {0.0166f, 0.0f, -2.0f, true, 23}};
+    struct Case
+    {
+        const char* name;
+        const std::vector<StepFeed>* feeds;
+        bool baseEpisode; // the previous machine starts an episode on it (the test must fail without stepDownS)
+    } cases[] = {{"step-down 3 feeds", &ledge3, true}, {"step-down 6 feeds", &ledge6, false}, {"edge flicker", &edge, false}, {"one 0.3 s frame", &hitch, true}};
+    for (const Case& c : cases)
+    {
+        AirState base = MakeRuntime(false), on = MakeRuntime(true);
+        const Trace a = RunSteps(base, *c.feeds), b = RunSteps(on, *c.feeds);
+        if (c.baseEpisode)
+            CHECK(base.Stats().episodes >= 1, "%s: the machine without stepDownS starts an episode (%u) %s", c.name, base.Stats().episodes, a.Seq().c_str());
+        CHECK(on.Stats().episodes == 0 && b.plays[static_cast<int>(Action::PlayLand)] == 0 && b.plays[static_cast<int>(Action::PlayOff)] == 0 &&
+                  b.plays[static_cast<int>(Action::PlayFallLoop)] == 0,
+              "%s: no air episode and no air clip with stepDownS (episodes %u) %s", c.name, on.Stats().episodes, b.Seq().c_str());
+    }
+    {
+        int firstBase = -1, firstOn = -1;
+        AirState base = MakeRuntime(false), on = MakeRuntime(true);
+        RunSteps(base, fall, &firstBase);
+        const Trace b = RunSteps(on, fall, &firstOn);
+        CHECK(on.Stats().episodes == 1 && b.plays[static_cast<int>(Action::PlayLand)] == 1, "real fall: one episode with a land clip (%u, %d) %s", on.Stats().episodes,
+              b.plays[static_cast<int>(Action::PlayLand)], b.Seq().c_str());
+        CHECK(firstOn >= 0 && firstOn <= 3, "real fall: the episode starts no later than the first PSM Fall feed (feed %d, without stepDownS %d)", firstOn, firstBase);
+    }
+    {
+        // jump: PSM Jump 18 on the last grounded feed, launch +5 m/s on the next one
+        std::vector<StepFeed> jump = {{1.0f / 60.0f, 0.0f, -2.0f, true, 18}};
+        for (int k = 0; k < 36; ++k)
+        {
+            const float vz = 5.0f - 16.0f * float(k) / 60.0f;
+            jump.push_back({1.0f / 60.0f, vz, -2.0f, false, 18});
+        }
+        jump.push_back({1.0f / 60.0f, 0.0f, -2.0f, true, 23});
+        int firstBase = -1, firstOn = -1;
+        AirState base = MakeRuntime(false), on = MakeRuntime(true);
+        RunSteps(base, jump, &firstBase);
+        RunSteps(on, jump, &firstOn);
+        CHECK(firstBase >= 0 && firstOn == firstBase, "jump: the take-off feed is unchanged by stepDownS (%d vs %d)", firstOn, firstBase);
+    }
+}
+
 int main()
 {
     TestTtlSign();
@@ -1389,6 +1501,7 @@ int main()
     TestStaleLandDetailWhileFalling();
     TestJumpEdgeRequiresImpulse();
     TestContactRampZeroAtTouch();
+    TestStepDown();
     std::printf("MMAirStateTest: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

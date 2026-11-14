@@ -15,13 +15,15 @@ if(EXISTS "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide.utppmm"
     add_test(NAME utpp_mm_jump_pick_test COMMAND utpp_mm_jump_pick_test
              "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261021_1213.txt"
              "${_utpp_jp_data}/utpp_motion_woman_knee_twistfix_slide"
-             --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt")
+             --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt"
+             --flicker "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/air_ground_flicker_feeds.txt")
     # TR-dll male parity: the same fixtures (the chooser inputs are body-independent) on the man slide bundle, --rig man = the man skeleton identity.
     if(EXISTS "${_utpp_jp_data}/utpp_motion_man_knee_slide.utppmm" AND EXISTS "${_utpp_jp_data}/utpp_motion_man_knee_slide.chooser.json")
         add_test(NAME utpp_mm_jump_pick_man_test COMMAND utpp_mm_jump_pick_test
                  "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261021_1213.txt"
                  "${_utpp_jp_data}/utpp_motion_man_knee_slide"
-                 --rig man --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt")
+                 --rig man --running "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/jump_feeds_20261025_1341.txt"
+                 --flicker "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/air_ground_flicker_feeds.txt")
         # With --rig man one limit is looser (JumpPickTest.cpp): the JO1 control >= 8 frames (measured 9; the man bundle does not reproduce the
         # woman log). The slide family switch rotation has the same bound on both bodies (<= 70 deg per 50 ms). The man jump data is still not
         # retargeted with the twistfix clips.
