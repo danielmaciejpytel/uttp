@@ -225,9 +225,13 @@ bool BuildJobs()
 }
 
 // ---- arming (disarmed -> owner -> receipt plan, helper plans, early policy -> armed), as the plugin does at arm time
-bool Arm(er::Owner aOwner, const fs::path& aWork)
+// The owner goes through the plugin's arm-path choice (ArmOwnerForRig); aEarlyCatalog replaces the early helper catalog (nullptr = the
+// bundle's catalog), aChoice receives the choice. True = everything armed and the requested owner took the rig.
+er::ArmChoice g_lastChoice;
+bool Arm(er::Owner aOwner, const fs::path& aWork, const std::vector<uint64_t>* aEarlyCatalog = nullptr)
 {
     g_hot.armed.store(false);
+    er::Disarm(); shadowcopy::Disarm();
     if (!er::SelectOwner(aOwner)) return false;
     g_bones = g_fx.bones;
     Put<float*>(g_desc, 0x00, g_bones.data()); Put<uint32_t>(g_desc, 0x0C, uint32_t(g_fx.names.size())); Put<uint64_t>(g_desc, 0x18, kTag);
@@ -240,8 +244,10 @@ bool Arm(er::Owner aOwner, const fs::path& aWork)
     bool ok = br::Load(aWork.wstring()) && br::ApplyEnabled();
     ok = posediag::PrepareCycleCensus(rig, g_fx.names, g_catalog) && ok;
     ok = br::PrepareArm(rig, g_fx.parents, g_fx.names, g_catalog) && ok;
-    if (aOwner == er::Owner::Mapping)
-        ok = er::PrepareArm(rig, uint32_t(g_fx.names.size()), kTag, 0, g_fx.names, g_catalog) && ok;
+    ok = er::ArmOwnerForRig(true, rig, uint32_t(g_fx.names.size()), kTag, 0, g_fx.names, aEarlyCatalog ? *aEarlyCatalog : g_catalog,
+                            g_lastChoice) && ok;
+    ok = ok && g_lastChoice.owner == aOwner && !g_lastChoice.fellBack;
+    shadowcopy::Arm(rig, g_fx.names, g_fx.parents);
     mm::vaulttorso::rt::OnArmed(g_metaRig, g_fx.names, g_fx.parents);
     g_hot.armed.store(true);
     return ok;
@@ -253,6 +259,7 @@ struct FrameSpec
     float weight = 1.f; bool mmActive = true; bool mainJob = true; bool mainOnOtherThread = false; bool rigMismatch = false;
     bool vault = false; int32_t overlay = 0; bool reloadEligible = false; bool authored = false;
     bool endTransitionBeforeFk = false; // the game thread ends the vehicle transition between the mapping jobs and the FK call
+    bool firstPerson = false;           // the camera withdraws the third-person write window
 };
 struct FrameOut
 {
@@ -272,7 +279,7 @@ FrameOut RunFrame(const FrameSpec& f)
                    fin0 = g_hot.rcFinishWritten.value.load();
     const int64_t t = Now();
     g_hot.mmActive.store(f.mmActive);
-    g_hot.perspectiveWrite.Publish(true, t);
+    g_hot.perspectiveWrite.Publish(!f.firstPerson, t);
     auto snap = MotionPose(f.weight, t);
     if (f.rigMismatch) snap.rig += 8;
     snap.traceOverlay = f.overlay; snap.reloadContactsEligible = f.reloadEligible; snap.reloadAuthoredClip = f.authored && f.reloadEligible;
@@ -338,6 +345,8 @@ Run RunAll(er::Owner aOwner, const fs::path& aWork)
     const std::string L = aOwner == er::Owner::Mapping ? "Mapping: " : "FK: ";
     check(Arm(aOwner, aWork), L + "arm (bundle, receipt plan, helper plans" + (aOwner == er::Owner::Mapping ? ", early policy)" : ")"));
     check(er::CurrentOwner() == aOwner, L + "owner selected");
+    check(shadowcopy::Status() == shadowcopy::ArmStatus::Ready,
+          L + "the recorded merged rig's shadow skeleton has the expected shape (" + shadowcopy::StatusName() + ")");
     r.normal = RunFrame({});
     r.normalAgain = RunFrame({});
     // the main job is there but not admitted (motion pose of another rig): nothing writes under either owner
@@ -401,6 +410,7 @@ void Report(const char* aName, const FrameOut& m, const FrameOut& k)
     std::printf("  %-18s Mapping: writers 0x%02x %-28s | FK: writers 0x%02x %-28s record 0x%08x bones %016llx\n", aName, Writers(m),
                 Row(m).c_str(), Writers(k), Row(k).c_str(), k.record, static_cast<unsigned long long>(Fnv(k.bones)));
 }
+double MaxDiffMain(const std::vector<float>& a, const std::vector<float>& b);
 // The helper evaluation of the Mapping frame saw the writers of the FK frame and ended with the same outcome.
 void Same(const char* aName, const FrameOut& m, const FrameOut& k, bool aBones)
 {
@@ -408,8 +418,81 @@ void Same(const char* aName, const FrameOut& m, const FrameOut& k, bool aBones)
     check(Writers(m) == Writers(k), L + "the helper evaluation sees the same core writers under both owners");
     check(m.rowCalls == k.rowCalls && m.outcome == k.outcome, L + "same coverage row and outcome under both owners (" + Row(m) + " vs " + Row(k) + ")");
     if (aBones)
-        check(MaxDiff(m.bones, k.bones) < 1e-6, L + "the frame leaves the same records under both owners (max diff " +
-              std::to_string(MaxDiff(m.bones, k.bones)) + ")");
+        check(MaxDiffMain(m.bones, k.bones) < 1e-6, L + "the frame leaves the same records under both owners, shadow skeleton apart (max diff " +
+              std::to_string(MaxDiffMain(m.bones, k.bones)) + ")");
+}
+
+// ---- shadow skeleton: the fixture rig with the game's 26 shadow bones appended, parents as in the game's shadow rig (shadow_X under
+// shadow_(parent of X), shadow_Hips under the hips' parent, shadow_ToeBase under shadow_Foot)
+constexpr const char* kShadowMain[24] = {
+    "Hips", "Spine", "Spine1", "Spine2", "Spine3", "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "LeftFoot", "RightFoot",
+    "LeftShoulder", "RightShoulder", "Neck", "Neck1", "Head", "LeftArm", "RightArm", "LeftForeArm", "RightForeArm", "LeftHand",
+    "RightHand", "WeaponLeft", "WeaponRight"};
+struct ShadowRig { std::vector<int32_t> main, shadow; int32_t toe[2]{}, heel[2]{}, shadowToe[2]{}; };
+int32_t FindIn(const Fixture& fx, const std::string& aName)
+{
+    const uint64_t h = mm::integ::CNameHash(aName);
+    for (size_t i = 0; i < fx.names.size(); ++i) if (fx.names[i] == h) return int32_t(i);
+    return -1;
+}
+// The recorded merged rig carries the shadow skeleton (its records are not part of the recorded frame, so they start at 0).
+bool FindShadow(const Fixture& fx, ShadowRig& s)
+{
+    for (const char* n : kShadowMain)
+    {
+        s.main.push_back(FindIn(fx, n)); s.shadow.push_back(FindIn(fx, std::string("shadow_") + n));
+        if (s.main.back() < 0 || s.shadow.back() < 0) return false;
+    }
+    const char* sides[2] = {"Left", "Right"};
+    for (int k = 0; k < 2; ++k)
+    {
+        s.toe[k] = FindIn(fx, std::string(sides[k]) + "ToeBase"); s.heel[k] = FindIn(fx, std::string(sides[k]) + "Heel");
+        s.shadowToe[k] = FindIn(fx, std::string("shadow_") + sides[k] + "ToeBase");
+        if (s.toe[k] < 0 || s.heel[k] < 0 || s.shadowToe[k] < 0) return false;
+    }
+    return true;
+}
+ShadowRig g_shadow;
+bool IsShadow(size_t aBone)
+{
+    if (std::find(g_shadow.shadow.begin(), g_shadow.shadow.end(), int32_t(aBone)) != g_shadow.shadow.end()) return true;
+    return int32_t(aBone) == g_shadow.shadowToe[0] || int32_t(aBone) == g_shadow.shadowToe[1];
+}
+// Records outside the shadow skeleton. The test has no game shadow pass (it runs after the early owner's write in the game), so under
+// the Mapping owner the shadow records keep their start values while the FK owner sets them; they are checked on their own.
+double MaxDiffMain(const std::vector<float>& a, const std::vector<float>& b)
+{
+    if (a.size() != b.size()) return 1e9;
+    double m = 0;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (!IsShadow(i / 12)) m = std::fmax(m, std::fabs(double(a[i]) - double(b[i])));
+    return m;
+}
+double RecordDiff(const std::vector<float>& a, int32_t ia, const std::vector<float>& b, int32_t ib)
+{
+    double m = 0;
+    for (int c = 0; c < 12; ++c) m = std::fmax(m, std::fabs(double(a[size_t(ia) * 12 + c]) - double(b[size_t(ib) * 12 + c])));
+    return m;
+}
+// local(Heel) * local(ToeBase) in double (translation, rotation, scale), compared with the shadow toe record
+double ToeDiff(const std::vector<float>& b, int32_t aHeel, int32_t aToe, int32_t aShadowToe)
+{
+    const float* h = &b[size_t(aHeel) * 12]; const float* t = &b[size_t(aToe) * 12]; const float* s = &b[size_t(aShadowToe) * 12];
+    const double hx = h[4], hy = h[5], hz = h[6], hw = h[7];
+    const double v[3] = {double(h[8]) * t[0], double(h[9]) * t[1], double(h[10]) * t[2]};
+    // rotate v by (hx, hy, hz, hw) through the rotation matrix
+    const double r[3] = {
+        (1 - 2 * (hy * hy + hz * hz)) * v[0] + 2 * (hx * hy - hz * hw) * v[1] + 2 * (hx * hz + hy * hw) * v[2],
+        2 * (hx * hy + hz * hw) * v[0] + (1 - 2 * (hx * hx + hz * hz)) * v[1] + 2 * (hy * hz - hx * hw) * v[2],
+        2 * (hx * hz - hy * hw) * v[0] + 2 * (hy * hz + hx * hw) * v[1] + (1 - 2 * (hx * hx + hy * hy)) * v[2]};
+    const double tx = t[4], ty = t[5], tz = t[6], tw = t[7];
+    const double q[4] = {hw * tx + hx * tw + hy * tz - hz * ty, hw * ty - hx * tz + hy * tw + hz * tx,
+                         hw * tz + hx * ty - hy * tx + hz * tw, hw * tw - hx * tx - hy * ty - hz * tz};
+    const double want[11] = {h[0] + r[0], h[1] + r[1], h[2] + r[2], double(t[3]), q[0], q[1], q[2], q[3],
+                             double(h[8]) * t[8], double(h[9]) * t[9], double(h[10]) * t[10]};
+    double m = 0;
+    for (int c = 0; c < 11; ++c) m = std::fmax(m, std::fabs(want[c] - double(s[c])));
+    return m;
 }
 } // namespace
 
@@ -429,6 +512,7 @@ int main(int argc, char** argv)
     check(br::Load(work.wstring()) && br::ApplyEnabled(), "APPLY bundle loads");
     g_catalog = br::RequiredCatalog();
     check(!g_catalog.empty() && BuildJobs(), "jobs built from the fixture rig");
+    check(FindShadow(g_fx, g_shadow), "the fixture rig holds the 24 shadow bones and both shadow toes");
     if (g_failures) return 1;
     *MappingOriginalSlot() = &FakeMapping;
     *FkOriginalSlot() = &FakeFk;
@@ -496,6 +580,114 @@ int main(int argc, char** argv)
     check(Writers(m.otherThread) == 0 && m.otherThread.rowCalls[br::kNoWriter] == 1,
           "other thread (Mapping): no writer is credited to a call outside the job's cycle");
     Same("after other thread", m.afterOtherThread, k.afterOtherThread, true);
+
+    // ---- health check of the Mapping owner (the periodic warning): quiet while jobs are admitted or the motion pose is legitimately
+    // refused (weight 0, first person); reported when jobs arrive and none is admitted
+    {
+        er::Counters a{}, b{};
+        b.calls = 10; b.notReady = 10;
+        check(er::MappingStalled(a, b), "health: jobs without an admitted one are reported");
+        b.applied = 1; check(!er::MappingStalled(a, b), "health: one admitted job is healthy");
+        b.applied = 0; b.poseRejected = 1; check(!er::MappingStalled(a, b), "health: a pose rejection (weight 0 / stale) stays quiet");
+        b.poseRejected = 0; b.perspectiveRejected = 1; check(!er::MappingStalled(a, b), "health: a first-person rejection stays quiet");
+        check(!er::MappingStalled(a, a), "health: no jobs, nothing to report");
+        check(Arm(er::Owner::Mapping, work), "health: Mapping armed");
+        const auto c0 = er::ReadCounters(); RunFrame({});
+        const auto c1 = er::ReadCounters(); { FrameSpec f; f.weight = 0.f; RunFrame(f); }
+        const auto c2 = er::ReadCounters(); { FrameSpec f; f.firstPerson = true; RunFrame(f); }
+        const auto c3 = er::ReadCounters();
+        er::Disarm(); RunFrame({}); // the policy is gone while armed: every job is refused as not ready
+        const auto c4 = er::ReadCounters();
+        check(!er::MappingStalled(c0, c1) && c1.applied == c0.applied + 1, "health: a written frame is healthy");
+        check(!er::MappingStalled(c1, c2), "health: a weight-0 frame stays quiet");
+        check(!er::MappingStalled(c2, c3), "health: a first-person frame stays quiet");
+        check(er::MappingStalled(c3, c4) && c4.notReady > c3.notReady, "health: a frame whose job is no longer admitted is reported");
+        g_hot.armed.store(false);
+    }
+
+    // ---- early arm step not ready for a rig (a catalog helper missing from the rig): the FK owner takes that rig and writes the pose;
+    // the next ready rig returns to the early owner
+    {
+        const uint64_t rig = reinterpret_cast<uint64_t>(g_metaRig);
+        std::vector<uint64_t> wide = g_catalog;
+        wide.push_back(mm::integ::CNameHash("utpp_test_bone_absent_from_rig"));
+        Arm(er::Owner::Mapping, work, &wide);
+        check(g_lastChoice.fellBack && g_lastChoice.owner == er::Owner::FK && g_lastChoice.missingHelpers == 1 &&
+              g_lastChoice.missingAnchors == 0, "fallback: a missing helper hands the rig to the FK owner (1 helper missing)");
+        check(er::CurrentOwner() == er::Owner::FK && er::RequestedOwner() == er::Owner::Mapping,
+              "fallback: FK writes this rig, the early owner stays requested");
+        const FrameOut f1 = RunFrame({});
+        check(f1.earlyApplied == 0 && f1.mmApplied == 1 && Writers(f1) == cw::Bit(cw::kDriver) && MaxDiff(f1.bones, g_fx.bones) > 1e-4,
+              "fallback: the FK call writes the motion pose (no silent loss)");
+        er::ArmChoice refused;
+        check(!er::ArmOwnerForRig(true, rig, uint32_t(g_fx.names.size()), kTag, 0, g_fx.names, g_catalog, refused) &&
+              er::CurrentOwner() == er::Owner::FK, "fallback: the owner does not change while armed");
+        check(Arm(er::Owner::Mapping, work) && er::CurrentOwner() == er::Owner::Mapping,
+              "fallback: arming a ready rig returns to the early owner");
+        const FrameOut f2 = RunFrame({});
+        check(f2.earlyApplied == 1 && f2.mmApplied == 1, "fallback: the early job writes again after the return");
+        check(MaxDiffMain(f1.bones, f2.bones) < 1e-6, "fallback: the FK-written frame equals the early-written frame (shadow skeleton apart)");
+        g_hot.armed.store(false);
+        er::ArmChoice noHook;
+        check(er::ArmOwnerForRig(false, rig, uint32_t(g_fx.names.size()), kTag, 0, g_fx.names, g_catalog, noHook) && noHook.fellBack &&
+              noHook.missingHelpers == 0 && er::CurrentOwner() == er::Owner::FK, "fallback: no mapping hook hands the rig to the FK owner");
+        er::Disarm();
+    }
+
+    // ---- shadow skeleton under the FK owner: set from the written main bones after the write, untouched otherwise
+    {
+        const ShadowRig& s = g_shadow;
+        Arm(er::Owner::FK, work);
+        check(shadowcopy::Status() == shadowcopy::ArmStatus::Ready, std::string("shadow: copy armed (") + shadowcopy::StatusName() + ")");
+        const int32_t leftArm = FindIn(g_fx, "LeftArm");
+        const FrameOut w = RunFrame({});
+        double pairDiff = 0, toeDiff = 0;
+        for (size_t j = 0; j < s.main.size(); ++j) pairDiff = std::fmax(pairDiff, RecordDiff(w.bones, s.shadow[j], w.bones, s.main[j]));
+        for (int side = 0; side < 2; ++side) toeDiff = std::fmax(toeDiff, ToeDiff(w.bones, s.heel[side], s.toe[side], s.shadowToe[side]));
+        check(RecordDiff(w.bones, leftArm, g_fx.bones, leftArm) > 1e-4, "shadow: the motion pose moved LeftArm");
+        check(pairDiff == 0.0, "shadow: the 24 shadow bones equal their main bones after the FK write (max diff " + std::to_string(pairDiff) + ")");
+        check(toeDiff < 1e-5, "shadow: shadow_ToeBase = Heel * ToeBase (max diff " + std::to_string(toeDiff) + ")");
+        auto untouched = [&](const FrameOut& o) {
+            double d = 0;
+            for (size_t j = 0; j < s.shadow.size(); ++j) d = std::fmax(d, RecordDiff(o.bones, s.shadow[j], g_fx.bones, s.shadow[j]));
+            for (int side = 0; side < 2; ++side) d = std::fmax(d, RecordDiff(o.bones, s.shadowToe[side], g_fx.bones, s.shadowToe[side]));
+            return d == 0.0;
+        };
+        { FrameSpec f; f.weight = 0.f; check(untouched(RunFrame(f)), "shadow: weight 0 leaves the game's shadow pose"); }
+        { FrameSpec f; f.firstPerson = true; check(untouched(RunFrame(f)), "shadow: first person leaves the game's shadow pose"); }
+        Arm(er::Owner::Mapping, work);
+        check(shadowcopy::Status() == shadowcopy::ArmStatus::Ready && er::CurrentOwner() == er::Owner::Mapping,
+              "shadow: Mapping owner armed on the shadow rig");
+        check(untouched(RunFrame({})), "shadow: the Mapping owner never sets the shadow bones (the game's pass runs after its write)");
+        g_hot.armed.store(false);
+        // the game's reference pose: Heel and ToeBase of the shadow rig give its shadow_ToeBase
+        Arm(er::Owner::FK, work);
+        std::vector<float> ref = g_fx.bones;
+        const float heel[12] = {0.0610666685f, -2.84217088e-16f, 0.f, 0.f, 3.94609158e-18f, -9.86522895e-19f, 0.879211128f, 0.476432562f, 1, 1, 1, 1};
+        const float toe[12] = {0.171654835f, 1.24344979e-16f, 1.79412039e-15f, 0.f, 2.19228608e-18f, 3.50765773e-18f, 0.147201985f, 0.989106476f,
+                               0.99999994f, 0.99999994f, 1, 1};
+        const float want[8] = {-0.032661017f, 0.143807173f, 0.f, 0.f, 0.f, 0.f, 0.939765215f, 0.341820896f};
+        std::memcpy(&ref[size_t(s.heel[0]) * 12], heel, sizeof heel); std::memcpy(&ref[size_t(s.toe[0]) * 12], toe, sizeof toe);
+        const uint32_t n = shadowcopy::Apply(reinterpret_cast<uint8_t*>(ref.data()), uint32_t(g_fx.names.size()), reinterpret_cast<uint64_t>(g_metaRig));
+        double refDiff = 0;
+        for (int c = 0; c < 8; ++c) refDiff = std::fmax(refDiff, std::fabs(double(ref[size_t(s.shadowToe[0]) * 12 + c]) - want[c]));
+        check(n == 26 && refDiff < 1e-6, "shadow: the reference Heel and ToeBase give the game's reference shadow_LeftToeBase (max diff " +
+              std::to_string(refDiff) + ")");
+        check(shadowcopy::Apply(reinterpret_cast<uint8_t*>(ref.data()), uint32_t(g_fx.names.size()) - 1, reinterpret_cast<uint64_t>(g_metaRig)) == 0,
+              "shadow: a pose of another bone count is not touched");
+        g_hot.armed.store(false);
+        // a rig whose shadow toe hangs under another bone is refused as a whole
+        Fixture bent = g_fx; bent.parents[size_t(s.shadowToe[1])] = int16_t(s.heel[1]);
+        check(shadowcopy::Arm(reinterpret_cast<uint64_t>(g_metaRig), bent.names, bent.parents) == 0 &&
+              shadowcopy::Status() == shadowcopy::ArmStatus::ShapeMismatch, "shadow: a rig of another shape is refused");
+        // a rig without the shadow skeleton: nothing to copy
+        Fixture plain = g_fx;
+        for (int32_t i : s.shadow) plain.names[size_t(i)] = 0x1000u + uint64_t(i);
+        for (int32_t i : s.shadowToe) plain.names[size_t(i)] = 0x1000u + uint64_t(i);
+        check(shadowcopy::Arm(reinterpret_cast<uint64_t>(g_metaRig), plain.names, plain.parents) == 0 &&
+              shadowcopy::Status() == shadowcopy::ArmStatus::NoShadowBones, "shadow: a rig without shadow bones is left alone");
+        shadowcopy::Disarm();
+    }
 
     std::error_code ec; fs::remove_all(work, ec);
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

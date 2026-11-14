@@ -16,6 +16,24 @@ constexpr uint32_t kMaxRigBones = 1024;
 // individual early mapping invocation succeeds. There is no per-frame fallback.
 bool SelectOwner(Owner aOwner);
 Owner CurrentOwner();
+// The owner chosen at load. CurrentOwner() follows it, except while a rig is
+// armed for which the early arm step was not ready (see ArmOwnerForRig).
+Owner RequestedOwner();
+
+// Arm path, before g_hot.armed is published. With the requested owner Mapping
+// it runs PrepareArm; when that is not ready for this rig, the FK owner takes
+// this rig, so a pose still reaches the skeleton. The next arm of a ready rig
+// returns to Mapping. Returns false (no change) while armed.
+struct ArmChoice
+{
+    Owner owner = Owner::FK;
+    bool fellBack = false;              // Mapping requested, FK chosen for this rig
+    uint32_t missingAnchors = 0;        // main-source anchor names absent from the rig
+    uint32_t missingHelpers = 0;        // catalog helper names absent from the rig
+};
+bool ArmOwnerForRig(bool aMappingHooked, uint64_t aMergedRig, uint32_t aCount, uint64_t aTrackA, uint64_t aTrackB,
+                    std::span<const uint64_t> aDestinationNames, std::span<const uint64_t> aForbiddenHelperNames,
+                    ArmChoice& aOut);
 
 // Before publishing g_hot.armed=true. Hashes must be OWNED copies from the
 // current merged player MetaRig and validated procedural-helper catalog.
@@ -53,4 +71,10 @@ struct Counters
     uint64_t semanticRejected = 0, perspectiveRejected = 0, applied = 0, callbackNoWrite = 0;
 };
 Counters ReadCounters();
+
+// Health check between two samples of the counters: mapping jobs arrived but
+// none was admitted, and no pose or perspective rejection explains it (weight
+// 0, stale pose and first-person stretches stay quiet). True = the motion
+// pose did not reach the skeleton in that interval.
+bool MappingStalled(const Counters& aBefore, const Counters& aAfter);
 } // namespace utpp::earlyruntime

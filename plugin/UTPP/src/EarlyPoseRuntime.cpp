@@ -1,6 +1,7 @@
-// Experimental early owner, opt-in and fail-closed. This file does not install
-// a hook, change its owner automatically, mutate helper bones, or write poses
-// without the caller's explicit apply callback.
+// Early owner, opt-in. This file does not install a hook, mutate helper bones,
+// or write poses without the caller's explicit apply callback. The owner only
+// changes while disarmed: at load (SelectOwner) and in the arm path, where a rig
+// the early arm step is not ready for is handed to the FK owner (ArmOwnerForRig).
 #include "EarlyPoseRuntime.hpp"
 #include "State.hpp"
 
@@ -21,6 +22,7 @@ struct Policy
 };
 mm::integ::SeqlockBuffer<Policy> g_policy;
 std::atomic<Owner> g_owner{Owner::FK};
+std::atomic<Owner> g_requested{Owner::FK};
 std::atomic<bool> g_ready{false};
 std::atomic<uint64_t> g_generation{0};
 std::atomic<uint64_t> g_calls{0}, g_notReady{0}, g_identity{0}, g_pose{0};
@@ -48,10 +50,12 @@ const std::array<uint64_t, 5> kMainAnchors{
 bool SelectOwner(Owner owner)
 {
     if (g_hot.armed.load(std::memory_order_acquire) || (owner != Owner::FK && owner != Owner::Mapping)) return false;
+    g_requested.store(owner, std::memory_order_release);
     g_owner.store(owner, std::memory_order_release);
     return true;
 }
 Owner CurrentOwner() { return g_owner.load(std::memory_order_acquire); }
+Owner RequestedOwner() { return g_requested.load(std::memory_order_acquire); }
 
 bool PrepareArm(uint64_t mergedRig, uint32_t count, uint64_t trackA, uint64_t trackB,
                 std::span<const uint64_t> destinationNames, std::span<const uint64_t> forbiddenHelpers)
@@ -91,6 +95,38 @@ bool PrepareArm(uint64_t mergedRig, uint32_t count, uint64_t trackA, uint64_t tr
     g_policy.Publish(policy);
     g_ready.store(true, std::memory_order_release);
     return true;
+}
+
+bool ArmOwnerForRig(bool mappingHooked, uint64_t mergedRig, uint32_t count, uint64_t trackA, uint64_t trackB,
+                    std::span<const uint64_t> destinationNames, std::span<const uint64_t> forbiddenHelpers, ArmChoice& out)
+{
+    out = ArmChoice{};
+    if (g_hot.armed.load(std::memory_order_acquire)) return false;
+    if (g_requested.load(std::memory_order_acquire) != Owner::Mapping)
+    {
+        g_ready.store(false, std::memory_order_release);
+        g_owner.store(Owner::FK, std::memory_order_release);
+        return true;
+    }
+    const bool ready = mappingHooked &&
+        PrepareArm(mergedRig, count, trackA, trackB, destinationNames, forbiddenHelpers);
+    if (!ready)
+    {
+        for (uint64_t anchor : kMainAnchors)
+            if (!HasHash(destinationNames, anchor)) ++out.missingAnchors;
+        for (uint64_t helper : forbiddenHelpers)
+            if (!HasHash(destinationNames, helper)) ++out.missingHelpers;
+    }
+    out.owner = ready ? Owner::Mapping : Owner::FK;
+    out.fellBack = !ready;
+    g_owner.store(out.owner, std::memory_order_release);
+    return true;
+}
+
+bool MappingStalled(const Counters& before, const Counters& after)
+{
+    return after.calls > before.calls && after.applied == before.applied &&
+           after.poseRejected == before.poseRejected && after.perspectiveRejected == before.perspectiveRejected;
 }
 
 void Disarm()

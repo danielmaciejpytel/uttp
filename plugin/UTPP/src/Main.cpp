@@ -716,7 +716,7 @@ void Native_PoseCensusDump(RED4ext::IScriptable*, RED4ext::CStackFrame* frame, R
 }
 
 // Explicit local experiment, selected once at DLL load; never a live owner toggle.
-// An invalid opt-in keeps Mapping owner but denies writes rather than falling back.
+// An invalid opt-in keeps the Mapping request; the arm step then hands each rig to the FK owner (ArmLocked).
 void LoadEarlyPoseExperiment(const std::wstring& dir)
 {
     const auto path = std::filesystem::path(dir) / L"early-pose.txt";
@@ -747,12 +747,49 @@ void LoadEarlyPoseExperiment(const std::wstring& dir)
             valid ? 1 : 0, static_cast<uint32_t>(g_earlyHelperHashes.size()));
 }
 
+// One load-time line: every run-time file whose absence changes behaviour without an error, present (1) or absent (0), so a missing
+// file is visible in the log. Paths are relative to the plugin folder.
+void LogOptionalFiles(const std::wstring& dir)
+{
+    namespace fs = std::filesystem;
+    const fs::path root(dir), data = root / L"data";
+    auto has = [](const fs::path& aPath) { std::error_code ec; return fs::is_regular_file(aPath, ec) ? 1 : 0; };
+    std::string line;
+    auto add = [&line](const char* aName, int aValue) { line += ' '; line += aName; line += '='; line += std::to_string(aValue); };
+    add("early-pose.txt", has(root / L"early-pose.txt"));
+    add("skin_helpers/mode.txt", has(root / L"skin_helpers" / L"mode.txt"));
+    for (const wchar_t* body : {L"woman", L"man"})
+    {
+        const std::string b = body[0] == L'w' ? "woman" : "man";
+        add(("motion_" + b).c_str(), has(data / (std::wstring(L"utpp_motion_") + body + L".utppmm")));
+        add(("chooser_" + b).c_str(), has(data / (std::wstring(L"utpp_motion_") + body + L".chooser.json")));
+        add(("overlays_" + b).c_str(), has(data / (std::wstring(L"utpp_overlays_") + body + L".utppov")));
+        add(("style_weights_" + b).c_str(), has(data / (std::wstring(L"utpp_style_weights_") + body + L".txt")));
+        add(("traversal_" + b).c_str(), has(data / (std::wstring(L"utpp_traversal_") + body + L".utpptrav")));
+        add(("lean_" + b).c_str(), has(data / (std::wstring(L"utpp_lean_") + body + L".bin")));
+        add(("getup_" + b).c_str(), has(data / (std::wstring(L"utpp_getup_") + body + L".utpptrav")));
+        add(("dodge_" + b).c_str(), has(data / (std::wstring(L"utpp_dodge_") + body + L".utpptrav")));
+    }
+    add("traversal_table", has(data / L"utpp_traversal_table.json"));
+    add("melee_pose_female", has(data / L"utpp_melee_pose_female.bin"));
+    add("melee_pose_male", has(data / L"utpp_melee_pose_male.bin"));
+    int recoil = 0;
+    {
+        std::error_code ec;
+        for (fs::directory_iterator it(data / L"recoil", ec), end; !ec && it != end; it.increment(ec))
+            if (it->path().extension() == L".utpprecoil") ++recoil;
+    }
+    add("recoil_profiles", recoil);
+    LogInfo("UTPP optional files:%s", line.c_str());
+}
+
 void DisarmLocked()
 {
     g_hot.armed.store(false, std::memory_order_release);
     utpp::ragdollslot::OnDisarm(); // ragdoll episode aborted, keep store invalidated, slot cache dropped
     g_hot.perspectiveWrite.Reset();
     earlyruntime::Disarm();
+    shadowcopy::Disarm();
     BodyTraceFlushLocked();
     bodytraceruntime::ClearMap(); // continuous capture: no rig to record until the next arm
     posecaptureruntime::ClearMap();
@@ -821,19 +858,35 @@ int32_t ArmLocked(bool aLogAlways)
             LogInfo("UTPP ragdoll fk trace bones: Hips=%d Head=%d LeftFoot=%d Spine=%d LeftUpLeg=%d RightUpLeg=%d (rig bones %zu)", hips, head,
                     foot, spine, lup, rup, hashes.size());
         }
+        int skinHelpersArmed = -1; // -1 = skin helper recompute disabled
         if (bodyhelperruntime::Enabled())
         {
             const bool armed = bodyhelperruntime::PrepareArm(reinterpret_cast<uint64_t>(info.metaRig), parents, hashes, helperCatalog);
+            skinHelpersArmed = armed ? 1 : 0;
             LogInfo("UTPP skin helpers arm: %d cycleCensus=%d catalog=%u rigBones=%u (%s)", armed ? 1 : 0, cycleReady ? 1 : 0,
                 static_cast<uint32_t>(helperCatalog.size()), static_cast<uint32_t>(hashes.size()), bodyhelperruntime::Status().c_str());
         }
-        if (earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping)
+        // Owner of this rig, chosen before armed is published (the owner cannot change while armed). When the early arm step is not
+        // ready for this rig (a rig without every catalog helper, an invalid catalog, no mapping hook), the FK owner writes the pose
+        // for this rig instead of nothing; the next arm of a ready rig returns to the early owner.
+        if (earlyruntime::RequestedOwner() == earlyruntime::Owner::Mapping)
         {
-            const bool ready = g_mappingHooked && earlyruntime::PrepareArm(
-                reinterpret_cast<uint64_t>(info.metaRig), info.boneCount, info.trackA, info.trackB,
-                hashes, g_earlyHelperHashes);
-            LogInfo("UTPP early pose arm: ready=%d rig=%llu bones=%u", ready ? 1 : 0,
+            earlyruntime::ArmChoice choice;
+            earlyruntime::ArmOwnerForRig(g_mappingHooked, reinterpret_cast<uint64_t>(info.metaRig), info.boneCount, info.trackA,
+                                         info.trackB, hashes, g_earlyHelperHashes, choice);
+            LogInfo("UTPP early pose arm: ready=%d rig=%llu bones=%u", choice.fellBack ? 0 : 1,
                     reinterpret_cast<uint64_t>(info.metaRig), info.boneCount);
+            if (choice.fellBack)
+                LogWarn("UTPP early pose arm: not ready for this rig (mappingHook=%d missingAnchors=%u missingHelpers=%u of %u "
+                        "skinHelpers=%d) - the FK owner writes the pose for this rig; the early owner returns when a ready rig is armed",
+                        g_mappingHooked ? 1 : 0, choice.missingAnchors, choice.missingHelpers,
+                        static_cast<uint32_t>(g_earlyHelperHashes.size()), skinHelpersArmed);
+        }
+        // Shadow skeleton copy for the FK owner: pairs of this rig (0 = the rig has no shadow skeleton of the expected shape).
+        {
+            const uint32_t shadowPairs = shadowcopy::Arm(reinterpret_cast<uint64_t>(info.metaRig), hashes, parents);
+            if (shadowcopy::Status() != shadowcopy::ArmStatus::NoShadowBones)
+                LogInfo("UTPP shadow copy arm: pairs=%u status=%s", shadowPairs, shadowcopy::StatusName());
         }
         motionhost::OnArmed(info.metaRig, hashes, parents);
         aimofs::OnArmed(info.metaRig, hashes, parents); // 0.6.3 aim offset bones (fail closed)
@@ -870,6 +923,7 @@ void LogFkCountersIfDue()
 {
     static ULONGLONG s_lastLog = 0;
     static uint64_t s_lastMatched = 0, s_lastMmApplied = 0, s_lastTotal = 0;
+    static earlyruntime::Counters s_lastEarly{};
     static uint32_t s_tppLogs = 0;
     const ULONGLONG nowMs = GetTickCount64();
     if (s_lastLog != 0 && nowMs - s_lastLog < 10000)
@@ -883,14 +937,15 @@ void LogFkCountersIfDue()
     const uint64_t total = g_hot.totalCalls.value.load(std::memory_order_relaxed);
     const uint64_t matched = g_hot.matchedCalls.value.load(std::memory_order_relaxed);
     const uint64_t mmApplied = g_hot.mmAppliedCalls.value.load(std::memory_order_relaxed);
+    const auto early = earlyruntime::ReadCounters();
     if (rebaseline)
     {
         s_lastTotal = total;
         s_lastMatched = matched;
         s_lastMmApplied = mmApplied;
+        s_lastEarly = early;
         return;
     }
-    const auto early = earlyruntime::ReadCounters();
     if (++s_tppLogs <= 3)
         LogInfo("UTPP FK counters (tpp): totalCalls=%llu (+%llu) matchedCalls=%llu (+%llu) appliedCalls=%llu "
             "mmAppliedCalls=%llu (+%llu) badIndexCalls=%llu fault=%d faultCode=0x%08X armed=%d matchMode=%d "
@@ -933,9 +988,22 @@ void LogFkCountersIfDue()
         LogWarn("UTPP FK counters: no player FK call matched since the previous TPP sample (armed, %llu FK calls) - "
                 "the MM pose does not reach the skeleton on this build",
                 static_cast<unsigned long long>(total - s_lastTotal));
+    // The same check for the Mapping owner: mapping jobs arrived, no pose or perspective rejection explains the silence, yet no job was
+    // admitted (identity / semantic / not ready), so the motion pose does not reach the skeleton. Healthy: applied grows by about the
+    // frame rate per interval.
+    if (s_tppLogs >= 2 && earlyruntime::CurrentOwner() == earlyruntime::Owner::Mapping &&
+        g_hot.armed.load(std::memory_order_acquire) && earlyruntime::MappingStalled(s_lastEarly, early))
+        LogWarn("UTPP early pose counters: no mapping job admitted since the previous TPP sample (armed, %llu jobs: notReady +%llu "
+                "identity +%llu semantic +%llu noWrite +%llu) - the MM pose does not reach the skeleton on this build",
+                static_cast<unsigned long long>(early.calls - s_lastEarly.calls),
+                static_cast<unsigned long long>(early.notReady - s_lastEarly.notReady),
+                static_cast<unsigned long long>(early.identityRejected - s_lastEarly.identityRejected),
+                static_cast<unsigned long long>(early.semanticRejected - s_lastEarly.semanticRejected),
+                static_cast<unsigned long long>(early.callbackNoWrite - s_lastEarly.callbackNoWrite));
     s_lastTotal = total;
     s_lastMatched = matched;
     s_lastMmApplied = mmApplied;
+    s_lastEarly = early;
 }
 
 // Reload contact correction funnel: one line (<= 1 per 2 s) whenever an eligible reload frame was seen since the last line.
@@ -4363,6 +4431,7 @@ void OnLoad()
             g_bodyTraceFolder = FeedDumpFolder(dir);
             bodytraceruntime::Init(&BodyTraceContinuousLog, g_bodyTraceFolder);
             posecaptureruntime::Init(&BodyTraceContinuousLog, g_bodyTraceFolder);
+            LogOptionalFiles(dir);
             LoadEarlyPoseExperiment(dir);
             const bool helperLoaded = bodyhelperruntime::Load(dir);
             LogInfo("UTPP skin helpers load: %d %s", helperLoaded ? 1 : 0, bodyhelperruntime::Status().c_str());

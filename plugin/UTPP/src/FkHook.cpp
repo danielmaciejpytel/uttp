@@ -16,8 +16,11 @@
 #endif
 #include <Windows.h>
 
+#include <array>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
+#include <span>
 #include <string>
 
 #include "CommonUtil.hpp"
@@ -334,6 +337,11 @@ void ApplyMotionMatching(uint8_t* aDesc, void* aRig, uint32_t aCount, int64_t aN
     }
     auto* bones = *reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff);
     ApplyPoseSnapshot(nullptr, aDesc, bones, aCount, reinterpret_cast<uint64_t>(aRig), snap, aNow);
+    // The game filled the shadow skeleton from the main bones before this write; set it again from the written pose. The published
+    // writer mark is set once the pose passed every gate (third person, weight > 0, rig, age), also when the blend itself was fully
+    // masked and only the layers on top of it (melee, aim, head look, reload contacts) wrote.
+    if (snap.weight > 0.0f && (mm::corewrite::Current() & mm::corewrite::kPublishedMask))
+        shadowcopy::Apply(bones, aCount, reinterpret_cast<uint64_t>(aRig));
 }
 
 // No C++ objects with destructors here; may fault on a bad descriptor, caught by the caller.
@@ -501,4 +509,138 @@ void RdFkTraceSetBones(int32_t aHips, int32_t aHead, int32_t aFoot)
     rdpose::g_idx[2].store(aFoot, std::memory_order_relaxed);
     rdpose::g_idx[0].store(aHips, std::memory_order_relaxed); // gate last
 }
+
+namespace shadowcopy
+{
+namespace
+{
+constexpr uint32_t kPairs = 24, kToes = 2;
+constexpr const char* kMainNames[kPairs] = {
+    "Hips", "Spine", "Spine1", "Spine2", "Spine3", "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "LeftFoot", "RightFoot",
+    "LeftShoulder", "RightShoulder", "Neck", "Neck1", "Head", "LeftArm", "RightArm", "LeftForeArm", "RightForeArm", "LeftHand",
+    "RightHand", "WeaponLeft", "WeaponRight"};
+constexpr const char* kToeNames[kToes][3] = {{"LeftToeBase", "LeftHeel", "LeftFoot"}, {"RightToeBase", "RightHeel", "RightFoot"}};
+struct Table
+{
+    uint64_t rig = 0;             // 0 = off
+    uint32_t count = 0, pad = 0;
+    std::array<int32_t, kPairs> dst{}, src{};
+    std::array<int32_t, kToes> toeDst{}, toeHeel{}, toeSrc{};
+};
+// One consistent table per read (a FK call on another thread may run while the arm path replaces it).
+mm::integ::SeqlockBuffer<Table> g_table;
+std::atomic<ArmStatus> g_status{ArmStatus::Off};
+
+int32_t IndexOf(std::span<const uint64_t> aNames, uint64_t aHash)
+{
+    for (size_t i = 0; i < aNames.size(); ++i)
+        if (aNames[i] == aHash) return static_cast<int32_t>(i);
+    return -1;
+}
+uint64_t ShadowHash(const char* aMain) { return mm::integ::CNameHash(std::string("shadow_") + aMain); }
+uint32_t Fail(ArmStatus aStatus) { g_status.store(aStatus, std::memory_order_release); return 0; }
+
+void Rotate(const quat::Q& q, const float* v, float* out)
+{
+    // v' = v + 2w (u x v) + 2 u x (u x v)
+    const float ux = q.x, uy = q.y, uz = q.z;
+    const float cx = uy * v[2] - uz * v[1], cy = uz * v[0] - ux * v[2], cz = ux * v[1] - uy * v[0];
+    const float dx = uy * cz - uz * cy, dy = uz * cx - ux * cz, dz = ux * cy - uy * cx;
+    out[0] = v[0] + 2.f * (q.w * cx + dx);
+    out[1] = v[1] + 2.f * (q.w * cy + dy);
+    out[2] = v[2] + 2.f * (q.w * cz + dz);
+}
+} // namespace
+
+uint32_t Arm(uint64_t aRig, std::span<const uint64_t> aNames, std::span<const int16_t> aParents)
+{
+    Disarm();
+    if (!aRig || aNames.empty() || aNames.size() != aParents.size()) return Fail(ArmStatus::Off);
+    Table t;
+    t.rig = aRig;
+    t.count = static_cast<uint32_t>(aNames.size());
+    uint32_t shadowFound = 0, missing = 0;
+    for (uint32_t i = 0; i < kPairs; ++i)
+    {
+        t.src[i] = IndexOf(aNames, mm::integ::CNameHash(kMainNames[i]));
+        t.dst[i] = IndexOf(aNames, ShadowHash(kMainNames[i]));
+        shadowFound += t.dst[i] >= 0;
+        missing += t.src[i] < 0 || t.dst[i] < 0;
+    }
+    for (uint32_t k = 0; k < kToes; ++k)
+    {
+        t.toeDst[k] = IndexOf(aNames, ShadowHash(kToeNames[k][0]));
+        t.toeSrc[k] = IndexOf(aNames, mm::integ::CNameHash(kToeNames[k][0]));
+        t.toeHeel[k] = IndexOf(aNames, mm::integ::CNameHash(kToeNames[k][1]));
+        shadowFound += t.toeDst[k] >= 0;
+        missing += t.toeDst[k] < 0 || t.toeSrc[k] < 0 || t.toeHeel[k] < 0;
+    }
+    if (!shadowFound) return Fail(ArmStatus::NoShadowBones);
+    if (missing) return Fail(ArmStatus::MissingBone);
+    // Same shape: the parent of shadow_X is shadow_(parent of X) for a paired parent, else the same bone (Root for the hips).
+    auto shadowOf = [&t](int32_t aMain) -> int32_t {
+        for (uint32_t i = 0; i < kPairs; ++i)
+            if (t.src[i] == aMain) return t.dst[i];
+        return aMain;
+    };
+    for (uint32_t i = 0; i < kPairs; ++i)
+        if (aParents[static_cast<size_t>(t.dst[i])] != shadowOf(aParents[static_cast<size_t>(t.src[i])]))
+            return Fail(ArmStatus::ShapeMismatch);
+    for (uint32_t k = 0; k < kToes; ++k)
+    {
+        const int32_t foot = IndexOf(aNames, mm::integ::CNameHash(kToeNames[k][2]));
+        if (aParents[static_cast<size_t>(t.toeSrc[k])] != t.toeHeel[k] || aParents[static_cast<size_t>(t.toeHeel[k])] != foot ||
+            aParents[static_cast<size_t>(t.toeDst[k])] != shadowOf(foot))
+            return Fail(ArmStatus::ShapeMismatch);
+    }
+    g_table.Publish(t);
+    g_status.store(ArmStatus::Ready, std::memory_order_release);
+    return kPairs + kToes;
+}
+
+void Disarm()
+{
+    g_table.Publish(Table{});
+    g_status.store(ArmStatus::Off, std::memory_order_release);
+}
+
+ArmStatus Status() { return g_status.load(std::memory_order_acquire); }
+const char* StatusName()
+{
+    switch (Status())
+    {
+    case ArmStatus::NoShadowBones: return "no-shadow-bones";
+    case ArmStatus::Ready: return "ready";
+    case ArmStatus::MissingBone: return "missing-bone";
+    case ArmStatus::ShapeMismatch: return "shape-mismatch";
+    default: return "off";
+    }
+}
+
+uint32_t Apply(uint8_t* aBones, uint32_t aCount, uint64_t aRig)
+{
+    Table t;
+    if (!aBones || !aRig || !g_table.Read(t) || t.rig != aRig || aCount != t.count) return 0;
+    // indices come from a rig of t.count bones, so they are inside a pose of aCount == t.count records
+    for (uint32_t i = 0; i < kPairs; ++i)
+        std::memcpy(aBones + static_cast<size_t>(t.dst[i]) * kBoneStride,
+                    aBones + static_cast<size_t>(t.src[i]) * kBoneStride, kBoneStride);
+    for (uint32_t k = 0; k < kToes; ++k)
+    {
+        // local(shadow_ToeBase) = local(Heel) * local(ToeBase): translation, rotation quat, scale (float4 each)
+        const float* h = reinterpret_cast<const float*>(aBones + static_cast<size_t>(t.toeHeel[k]) * kBoneStride);
+        const float* s = reinterpret_cast<const float*>(aBones + static_cast<size_t>(t.toeSrc[k]) * kBoneStride);
+        float out[12];
+        const quat::Q hq{h[4], h[5], h[6], h[7]}, sq{s[4], s[5], s[6], s[7]};
+        const float scaled[3] = {h[8] * s[0], h[9] * s[1], h[10] * s[2]};
+        Rotate(hq, scaled, out);
+        out[0] += h[0]; out[1] += h[1]; out[2] += h[2]; out[3] = s[3];
+        const quat::Q q = quat::Mul(hq, sq);
+        out[4] = q.x; out[5] = q.y; out[6] = q.z; out[7] = q.w;
+        out[8] = h[8] * s[8]; out[9] = h[9] * s[9]; out[10] = h[10] * s[10]; out[11] = s[11];
+        std::memcpy(aBones + static_cast<size_t>(t.toeDst[k]) * kBoneStride, out, sizeof out);
+    }
+    return kPairs + kToes;
+}
+} // namespace shadowcopy
 } // namespace utpp
