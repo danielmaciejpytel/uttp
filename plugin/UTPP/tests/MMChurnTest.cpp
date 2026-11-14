@@ -37,10 +37,15 @@
 //   change and at most one per flip of the left / right taps (0.35 s apart); the windows also keep 3.0 changes per second. A start from rest
 //   toward a direction away from the facing counts as a step once its start clip plays, crouched too (churn_crouch_reface_man.feed, Male
 //   2026-11-13 09:24: the crouched reface start used to be followed by Loop_B, BR, RR, FR and F).
+//   churn_kbd_strafe_taps.feed / churn_kbd_strafe_taps_man.feed (Female 2026-11-14 06:48, Male 06:59; game 9 and 10 changes in 2.8 s): left / right taps
+//   0.35 s apart at a run keep one turn clip per tap (8 changes, check K at most one per tap); the finished turn used to hand to a loop one to seven
+//   feeds before the next tap (MatcherConfig::turnCommitTailS). churn_flick_run_kbd.feed (Female 06:48 flick, game 8 changes in 2.5 s): 5 changes,
+//   6 without MatcherConfig::downshiftDeferS (Run_to_Walk shown for one feed before the Stop of the release).
+//   UTPP_CHURN_TRACE=1 prints each window's clip changes, the replay foot lock peak between them and the reaction to each heading step.
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
 // (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets),
-// 33 no heading catch-up (check K).
+// 33 no heading catch-up (check K), 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered).
 // Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
@@ -447,7 +452,21 @@ int main(int argc, char** argv)
         // crouched start from rest with the facing 127 deg off the stick (Male): the reface start, then one forward loop while the body catches up
         {"churn_crouch_reface_man.feed", {{"crouch_walk_turns walk (Male, reface start)", 222.48f, 224.48f, 2}}, true},
         {"churn_crouch_reface_man.feed", {{"crouch_walk_turns walk (same feed, Female body)", 222.48f, 224.48f, 2}}},
+        // keyboard left / right taps at a run, both bodies (2026-11-14 06:48 Female, 06:59 Male): the game counted 9 and 10 changes in 2.8 s
+        {"churn_kbd_strafe_taps.feed", {{"kbd_strafe_weave strafe_taps (second run)", 103.36f, 106.16f, 8},
+                                        {"kbd_strafe_weave strafe_taps key edges (second run)", 103.2f, 106.1f, 99, false, false, false, 1}}},
+        {"churn_kbd_strafe_taps_man.feed", {{"kbd_strafe_weave strafe_taps (Male)", 95.91f, 98.71f, 8},
+                                            {"kbd_strafe_weave strafe_taps key edges (Male)", 95.75f, 98.65f, 99, false, false, false, 1}}, true},
+        // Female 2026-11-14 06:48 run flick (game 8 changes in 2.5 s)
+        {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 5}}},
     };
+    // opt-in: UTPP_CHURN_TRACE=1 prints every clip change of each window with its clip time and the foot lock correction peak after it
+    char* traceEnv = nullptr;
+    size_t traceEnvLen = 0;
+    _dupenv_s(&traceEnv, &traceEnvLen, "UTPP_CHURN_TRACE");
+    const bool trace = traceEnv && std::strcmp(traceEnv, "1") == 0;
+    std::free(traceEnv);
+    g_dumpCorr = trace;
     for (const Slice& s : slices)
     {
         FeedFile f;
@@ -459,6 +478,61 @@ int main(int argc, char** argv)
         g_dumpBody = s.man ? 1 : 0;
         const mm::motion::MotionDatabase& sdb = s.man ? *dbM : *db;
         const std::vector<FrameOut> run = RunDriver(s.man ? rigM : rig, f);
+        if (trace)
+            for (const Window& w : s.windows)
+            {
+                std::printf("trace %s [%.2f, %.2f)\n", w.name, static_cast<double>(w.t0), static_cast<double>(w.t1));
+                int32_t clip = -1;
+                float peak = 0.0f;
+                for (size_t i = 0; i < run.size() && i < f.fr.size(); ++i)
+                {
+                    const float t = f.fr[i].t;
+                    if (t < w.t0 - 0.5f || t >= w.t1)
+                        continue;
+                    if (2 * i + 1 < g_corr.size())
+                        peak = std::fmax(peak, std::fmax(g_corr[2 * i], g_corr[2 * i + 1]));
+                    if (!run[i].stepped || run[i].clip < 0 || run[i].clip == clip)
+                        continue;
+                    const auto& cl = sdb.Clip(static_cast<uint32_t>(run[i].clip));
+                    std::printf("  %.3f tgt %s%.0f  %s ct %.3f of %.3f (turn done %.3f)  (foot lock peak before %.1f cm)\n", static_cast<double>(t),
+                                f.fr[i].haveTarget ? "" : "-", static_cast<double>(f.fr[i].targetYawDeg),
+                                std::string(sdb.ClipName(static_cast<uint32_t>(run[i].clip))).c_str(), static_cast<double>(run[i].clipTime),
+                                static_cast<double>(cl.numFrames) / static_cast<double>(sdb.Header().fps),
+                                static_cast<double>(TurnEndS(sdb, static_cast<uint32_t>(run[i].clip))), static_cast<double>(peak));
+                    clip = run[i].clip;
+                    peak = 0.0f;
+                }
+                std::printf("  end foot lock peak %.1f cm\n", static_cast<double>(peak));
+                // reaction to each heading step: feeds to the first clip change, seconds until the visual root yaw has made 10 / 50 / 90 % of the
+                // turn toward the new wanted direction (before the next step; -1 = not reached)
+                for (size_t i = 1; i < run.size() && i < f.fr.size(); ++i)
+                {
+                    const Frame& p = f.fr[i - 1];
+                    const Frame& c = f.fr[i];
+                    if (c.t < w.t0 - 0.2f || c.t >= w.t1 || !p.haveTarget || !c.haveTarget ||
+                        std::fabs(std::remainder(c.targetYawDeg - p.targetYawDeg, 360.0f)) < 35.0f || !run[i - 1].haveVisual)
+                        continue;
+                    const float y0 = run[i - 1].visualYawDeg, total = std::remainder(c.targetYawDeg - y0, 360.0f);
+                    int pickFeeds = -1;
+                    float tf[3] = {-1.0f, -1.0f, -1.0f};
+                    for (size_t k = i; k < run.size() && k < f.fr.size(); ++k)
+                    {
+                        if (k > i && f.fr[k].haveTarget && std::fabs(std::remainder(f.fr[k].targetYawDeg - f.fr[k - 1].targetYawDeg, 360.0f)) >= 35.0f)
+                            break;
+                        if (pickFeeds < 0 && run[k].stepped && run[k].clip >= 0 && run[k].clip != run[i - 1].clip)
+                            pickFeeds = static_cast<int>(k - i);
+                        if (!run[k].haveVisual || std::fabs(total) < 1.0f)
+                            continue;
+                        const float frac = std::remainder(run[k].visualYawDeg - y0, 360.0f) / total;
+                        const float lv[3] = {0.1f, 0.5f, 0.9f};
+                        for (int q = 0; q < 3; ++q)
+                            if (tf[q] < 0.0f && frac >= lv[q])
+                                tf[q] = f.fr[k].t - p.t;
+                    }
+                    std::printf("  step %.3f turn %.0f deg: first change %d feeds, 10/50/90 %% at %.3f / %.3f / %.3f s\n", static_cast<double>(c.t),
+                                static_cast<double>(total), pickFeeds, static_cast<double>(tf[0]), static_cast<double>(tf[1]), static_cast<double>(tf[2]));
+                }
+            }
         size_t stepped = 0;
         for (const FrameOut& o : run)
             stepped += o.stepped;

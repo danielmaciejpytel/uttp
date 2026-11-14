@@ -579,6 +579,16 @@ struct MatcherConfig
     // state 0, so the Stop is picked on the release frame), a stance change, air, a landing / traversal, a forced interrupt, an aim / shot /
     // spin / reface start or a missing continuing row release it in the same update. false = off.
     bool turnCommit = true;
+    // turnCommitTailS: after the authored root turn is done the turn clip (already running in the new direction) stays held this long
+    // (seconds), under the same release conditions plus any new heading step since the turn was picked. Keyboard taps 0.35 s apart
+    // otherwise handed the finished turn to a loop one to seven feeds before the next tap picked the next turn (two changes for one
+    // tap). 0 = the commit ends at the turn end.
+    float turnCommitTailS = 0.2f;
+    // downshiftDeferS: for this long after any gait downshift while moving (seconds) the edge does not interrupt the playing clip (it is
+    // delivered once afterwards) and a Run_to_Walk transition is not picked over the continuing clip. A stick falling through the Walk
+    // band to a release showed the transition for one feed before the Stop; a release within this time picks its Stop directly. A
+    // downshift that stays reaches its new clip up to this much later. 0 = off.
+    float downshiftDeferS = 0.04f;
 
     // HEADING CATCH-UP. A direction key changes the wanted run direction in one feed: the capsule velocity follows within one or two
     // feeds while the actor facing turns at its own rate (about 0.3-0.5 s for 90 deg). In that time the velocity points sideways or
@@ -1271,11 +1281,15 @@ public:
         {
             if (!aState.isPivoting)
                 m_turnHoldPivotDropped = true;
+            // turnCommitTailS: past the turn end the hold lasts a little longer unless a heading step came after the pick
+            const bool turnDone = m_cur.valid && m_cur.clip == m_turnHoldClip && m_cur.clipTime >= m_clipTurnEndS[static_cast<uint32_t>(m_cur.clip)];
+            m_turnTailS = turnDone ? m_turnTailS + aDt : 0.0f;
+            const bool inTurn = !turnDone ||
+                (UTPP_AND_NOT(JUMPPICK, 34) m_guardsOn && m_turnTailS <= m_cfg.turnCommitTailS && aState.headingStepAgeS + 0.05f >= m_sinceJumpS);
             const bool keep = m_cfg.turnCommit && contValid && m_cur.valid && m_cur.clip == m_turnHoldClip && !aForce &&
                               aState.movementMode == 0 && aState.stance == m_turnHoldStance && !aState.justLandedLight &&
                               !aState.justLandedHeavy && !aState.justTraversed && !(aState.isPivoting && m_turnHoldPivotDropped) &&
-                              aState.movementState != 0 && (HoldFlags(aState) & ~4 & ~m_turnHoldFlags) == 0 &&
-                              m_cur.clipTime < m_clipTurnEndS[static_cast<uint32_t>(m_cur.clip)];
+                              aState.movementState != 0 && (HoldFlags(aState) & ~4 & ~m_turnHoldFlags) == 0 && inTurn;
             if (keep)
             {
                 turnHold = true;
@@ -1311,6 +1325,23 @@ public:
                 m_upshiftEdgeDone = true;
             }
         }
+        // MatcherConfig::downshiftDeferS: a young gait downshift while moving keeps the continuing pose (the edge is delivered once afterwards)
+        const bool downshiftYoung = UTPP_AND_NOT(JUMPPICK, 37) m_guardsOn && m_cfg.downshiftDeferS > 0.0f && contValid && m_cur.valid && !aForce &&
+            aState.gait < m_holdGait && aState.movementState == 1 && aState.movementState == m_holdMovementState && aState.movementMode == 0 &&
+            last.movementMode == 0 && aState.stance == 0 && last.stance == 0 && !slideExitHold && m_slideExitHoldLeft <= 0.0f;
+        if (downshiftYoung && m_holdChangeAge < m_cfg.downshiftDeferS)
+        {
+            if (res.interrupt == Interrupt::InterruptOnDatabaseChange)
+                res.interrupt = Interrupt::DoNotInterrupt;
+            m_downshiftDeferred = true;
+        }
+        else if (downshiftYoung && m_downshiftDeferred && res.interrupt == Interrupt::DoNotInterrupt)
+        {
+            res.interrupt = Interrupt::InterruptOnDatabaseChange;
+            m_downshiftDeferred = false;
+        }
+        else if (!downshiftYoung)
+            m_downshiftDeferred = false;
         // churn guard 2 (MatcherConfig::freshEventS): the young event clip keeps competing with a cost advantage while no stick edge arrived
         const bool freshEvent = UTPP_AND_NOT(JUMPPICK, 25) m_guardsOn && m_cfg.freshEventS > 0.0f && m_cfg.freshEventBias > 0.0f && contValid && m_cur.valid &&
             m_sinceJumpS < m_cfg.freshEventS && !(db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) && !m_clipStop[static_cast<uint32_t>(m_cur.clip)] &&
@@ -1744,6 +1775,16 @@ public:
                 bestRow = contRow;
                 bestEntry = contEntry;
             }
+            // MatcherConfig::downshiftDeferS: a young gait downshift does not hand the continuing clip to a Run_to_Walk transition
+            if (UTPP_AND_NOT(JUMPPICK, 37) jump && m_guardsOn && m_cfg.downshiftDeferS > 0.0f && contDb >= 0 && m_cur.valid && !aForce &&
+                m_clipRunToWalk[en.clip] && aState.gait < m_holdGait && aState.movementState == 1 && m_holdChangeAge < m_cfg.downshiftDeferS &&
+                aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0)
+            {
+                jump = false;
+                bestDb = contDb;
+                bestRow = contRow;
+                bestEntry = contEntry;
+            }
             // churn guard 1 (MatcherConfig::loopDwellS): a young loop gives way to another loop only by a clear margin
             if (UTPP_AND_NOT(JUMPPICK, 24) jump && m_guardsOn && res.interrupt == Interrupt::DoNotInterrupt && m_cfg.loopDwellS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.loopDwellS &&
                 aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0 && !aForce && (cl.flags & kClipLoop) &&
@@ -1822,6 +1863,7 @@ public:
                 m_turnHoldStance = aState.stance;
                 m_turnHoldFlags = HoldFlags(aState) & ~4;
                 m_turnHoldPivotDropped = false;
+                m_turnTailS = 0.0f;
                 m_stopHoldFlags = HoldFlags(aState);
                 m_exitHoldFlags = HoldFlags(aState);
                 res.blend.valid = m_cur.valid;
@@ -2801,6 +2843,8 @@ private:
     float m_stopHoldStart = 0.0f;           // stopCommitMaxS: clip time of the held Stop clip at its selection
     std::vector<float> m_clipTurnEndS;      // turnCommit: clip index -> clip time where the authored root turn is done (-1 = not a turn clip)
     int32_t m_turnHoldClip = -1;            // turnCommit: the held turn clip (-1 = none)
+    float m_turnTailS = 0.0f;               // turnCommitTailS: seconds the held turn clip has played past its turn end
+    bool m_downshiftDeferred = false;       // downshiftDeferS: a downshift edge was deferred and is still to be delivered
     int m_turnHoldStance = 0, m_turnHoldFlags = 0; // turnCommit: stance / HoldFlags (pivot bit cleared) when it was selected
     bool m_turnHoldPivotDropped = false;    // turnCommit: isPivoting dropped since the selection (a rise afterwards is a new reversal)
     int m_exitHoldStance = 0, m_exitHoldFlags = 0; // exitTransitionTailS: stance / HoldFlags when it was selected
