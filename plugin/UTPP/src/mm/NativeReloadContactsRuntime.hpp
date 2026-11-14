@@ -1479,9 +1479,51 @@ inline constexpr bool kRejectFade=false; // mutation 8: a rejected frame shows t
 inline constexpr bool kRejectFade=true;
 #endif
 inline constexpr float kRejectFadeSeconds=.12f;
+// Reference of the replay / ramp-in for the shoulder girdle. The records as handed in carry the GAME's clavicles and arm bone
+// translations on every masked channel (weapon-action mask, upper weight 1 inside a reload); the game's reload choreography can move
+// a clavicle translation by 20 cm (left clavicle of an SMG reload, both stages of the capture). Faded towards those records, a rejected
+// frame collapsed the shoulder within kRejectFadeSeconds and the ramp-in brought it back. The reference is therefore V's own pose for
+// the clavicle (rotation and translation) and for the translation lanes of the whole arm chain (the masked channel restored with the
+// correction weight, as restoreMasked does); the arm rotations keep the records. Only the reach rotation of the clavicle and the arm
+// solve are faded. Healthy episodes (always accepted, amp == 1) never read it. Mutation 25 fades towards the records again.
+#if defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==25
+inline constexpr bool kReplayOnOwnGirdle=false;
+#else
+inline constexpr bool kReplayOnOwnGirdle=true;
+#endif
+// V's own value of masked channel `b` restored over `base` with weight `w` (the restoreMasked rule); unmasked channels keep `base`.
+inline bool OwnChannel(const Prepared& p,const integ::PoseSnapshot& s,int b,const ov::Xf& base,float w,ov::Xf& out)
+{
+    out=base;
+    if(b<0 || b>=p.skeleton.n || !integ::SnapshotUpperBone(s,uint32_t(b)))return true;
+    if(uint32_t(b)<s.firstBone || p.gameIndex[b]<0)return false;
+    const float* v=s.pose+size_t(b)*7;
+    for(int k=0;k<7;++k)if(!std::isfinite(v[k]))return false;
+    ov::Xf endpoint=base;
+    endpoint.t={v[0],v[1],v[2]};endpoint.r={v[3],v[4],v[5],v[6]};
+    out=ov::BlendXf(base,endpoint,std::clamp(w,0.0f,1.0f));
+    if(s.reloadAuthoredClip && (b==p.arms.left.upper || b==p.arms.right.upper))out.t=endpoint.t;
+    return true;
+}
+inline bool IsClavicle(const Prepared& p,int b)
+{
+    return b>=0 && (b==p.skeleton.parent[p.arms.left.upper] || b==p.skeleton.parent[p.arms.right.upper]);
+}
+// Replay reference of chain bone `b`: `records` = the bone as handed in, `own` = V's own value of it (OwnChannel).
+inline ov::Xf GirdleReference(const Prepared& p,int b,const ov::Xf& records,const ov::Xf& own)
+{
+    ov::Xf ref=records;
+    if constexpr(kReplayOnOwnGirdle)
+    {
+        ref.t=own.t;
+        if(IsClavicle(p,b))ref.r=own.r;
+    }
+    else{(void)p;(void)b;(void)own;}
+    return ref;
+}
 struct RejectHold
 {
-    bool valid=false,haveDelta=false;
+    bool valid=false,haveDelta=false,girdleRelative=false; // girdleRelative: the delta was taken against GirdleReference
     uint64_t rig=0;
     int64_t lastTicks=0;
     float weight=0,amp=1;
@@ -1518,8 +1560,9 @@ struct RejectHold
         return true;
     }
     // Accepted frame: remember the full delta; returns the amplitude to apply to the candidate (1 = exact).
+    // `own` = the solver's input pose (masked channels restored with `w`): the delta of the girdle is taken against it (GirdleReference).
     float OnAccept(const Prepared& p,const ov::Pose& baseline,const ov::Pose& candidate,uint64_t rigId,
-                   int64_t ticks,int64_t ticksPerSecond,float w)
+                   int64_t ticks,int64_t ticksPerSecond,float w,const ov::Pose* own=nullptr)
     {
         if constexpr(kRejectFade)
         {
@@ -1530,10 +1573,12 @@ struct RejectHold
             {
                 const int b=bones[k];
                 bone[n]=b;
-                dq[n]=math::QuatNormalize(math::QuatMul(candidate.b[b].r,math::QuatInv(baseline.b[b].r)));
-                dt[n]=candidate.b[b].t-baseline.b[b].t;
+                const ov::Xf ref=own ? GirdleReference(p,b,baseline.b[b],own->b[b]) : baseline.b[b];
+                dq[n]=math::QuatNormalize(math::QuatMul(candidate.b[b].r,math::QuatInv(ref.r)));
+                dt[n]=candidate.b[b].t-ref.t;
                 ++n;
             }
+            girdleRelative=own!=nullptr;
             haveDelta=w>0;weight=w;
             return amp;
         }
@@ -1546,10 +1591,24 @@ struct RejectHold
         if constexpr(kRejectFade)
         {
             if(!Advance(s.rig,ticks,ticksPerSecond,-1.0f)){amp=0.0f;haveDelta=false;return false;}
-            if(!haveDelta || amp<=0 || !(weight>0) || !std::isfinite(currentWeight) || !Valid(p,s,count))return false;
+            if(!haveDelta || !(weight>0) || !std::isfinite(currentWeight) || !Valid(p,s,count))return false;
+            // amp 0: the records as handed in - except the girdle of a GirdleReference delta, which stays V's own (no pop to the game's
+            // girdle on the frame the replay has faded out)
+            if(amp<=0 && !(girdleRelative && kReplayOnOwnGirdle))return false;
             float f=amp*std::clamp(currentWeight/weight,0.0f,1.0f);
             ov::Pose base;
             if(!Read(p,records,base))return false;
+            // Replay reference: the records, or (delta taken against GirdleReference) V's own girdle restored with the lower of the
+            // current and the recorded weight - continuous with the last accepted frame and with the exit ramp of the weight.
+            ov::Xf ref[8];
+            const float ownWeight=std::min(currentWeight,weight);
+            for(int k=0;k<n;++k)
+            {
+                const int b=bone[k];
+                ref[k]=base.b[b];
+                ov::Xf mine;
+                if(girdleRelative && OwnChannel(p,s,b,base.b[b],ownWeight,mine))ref[k]=GirdleReference(p,b,base.b[b],mine);
+            }
             ov::Xf out[8];
             for(int pass=0;pass<2;++pass)
             {
@@ -1557,9 +1616,9 @@ struct RejectHold
                 {
                     const int b=bone[k];
                     out[k]=base.b[b];
-                    const auto full=math::QuatNormalize(math::QuatMul(dq[k],base.b[b].r));
-                    out[k].r=math::QuatNlerpShortest(base.b[b].r,full,f);
-                    out[k].t=base.b[b].t+dt[k]*f;
+                    const auto full=math::QuatNormalize(math::QuatMul(dq[k],ref[k].r));
+                    out[k].r=math::QuatNlerpShortest(ref[k].r,full,f);
+                    out[k].t=ref[k].t+dt[k]*f;
                     if(!math::IsFinite(out[k].r) || !math::IsFinite(out[k].t))return false;
                 }
                 if(pass==1)break;
@@ -1945,8 +2004,9 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
     result.stockShift=stockShift;result.leftArmShift=leftArmShift;
     if(rejectHold)
     {
-        const float amp=rejectHold->OnAccept(p,baseline,candidate,s.rig,nowTicks,ticksPerSecond,correctionWeight);
-        if(amp<1.0f) // coming back from a rejection: ramp the correction in from the baseline
+        // `authored` = the solver's input (masked channels restored with correctionWeight): V's own girdle of this frame.
+        const float amp=rejectHold->OnAccept(p,baseline,candidate,s.rig,nowTicks,ticksPerSecond,correctionWeight,&authored);
+        if(amp<1.0f) // coming back from a rejection: ramp the correction in from the baseline (girdle: V's own, GirdleReference)
         {
             const ov::Pose solved=candidate;
             float a=amp;
@@ -1955,8 +2015,9 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
                 for(int k=0;k<rejectHold->n;++k)
                 {
                     const int b=rejectHold->bone[k];
-                    candidate.b[b].r=math::QuatNlerpShortest(baseline.b[b].r,solved.b[b].r,a);
-                    candidate.b[b].t=baseline.b[b].t+(solved.b[b].t-baseline.b[b].t)*a;
+                    const ov::Xf ref=GirdleReference(p,b,baseline.b[b],authored.b[b]);
+                    candidate.b[b].r=math::QuatNlerpShortest(ref.r,solved.b[b].r,a);
+                    candidate.b[b].t=ref.t+(solved.b[b].t-ref.t)*a;
                 }
                 const float clearance=HeadClearance(p,candidate,rejectHold->headM);
                 if(pass==1 || clearance>=1.0f)break;

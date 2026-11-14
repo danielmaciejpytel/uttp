@@ -10,6 +10,7 @@
 // 17 = the episode starts from the MM snapshot instead of the published pose, 18 = residual clearance rise at the old 1.5 m/s,
 // 19 = contact catch-up at the old 9 m/s, 20 = the episode starts from its first frame, not from the observed published pose, 21 = rifle ramp with the 1000 deg/s joint slew, 12 = no weapon follower (the whole target jumps with the weight on the ramp-in), 14 = the old exit fade (lag at full scale until the weight is
 // below .15), 15 = no follower reset at weight 0, 16 = no contact catch-up of the left hand.
+// UTPP_RELOAD_CONTACT_MUTATION=25: the reject replay / ramp-in fades towards the records as handed in (the game's girdle), section 10.
 // Every mutation build must report an assertion FAIL (ctest PASS_REGULAR_EXPRESSION "FAIL ").
 #include "../src/mm/NativeReloadContactsRuntime.hpp"
 #include "../src/mm/OverlayFile.hpp"
@@ -703,6 +704,94 @@ int main(int argc,char** argv)
               "girdle: the kept correction holds V's own shoulder width, with and without the clavicle bits");
         Check(clavStep<0.001f && handStep<0.001f,"girdle: clearing the clavicle bits under a full correction moves no clavicle or hand (no pop at the latch)");
         Check(exitOk && minExit>=wOwn-0.002f,"girdle: through the .2 s exit the shoulder width stays V's own at every frame");
+    }
+
+    // 10) Rejected frames inside a reload (RejectHold, GirdleReference). The game's reload choreography moves its clavicles (both 8 cm
+    //     towards the midline, the left one 6 cm up / forward as well) and the left upper-arm bone translation; the records carry them on
+    //     the masked channels (upper weight 1). Accepted frames, then .13 s without an accepted solve (the replay of RejectHold, driven
+    //     through HoldOnly: the hand followers and the soft reach of this fixture accept even a native hand 88 cm away), then accepted
+    //     frames again (ramp-in), 60 fps with the production Continuity. Every frame (accepted, replayed, ramp-in) keeps
+    //     V's own clavicle translation and arm bone translations, the clavicle turns at most by the reach step's 20 deg away from V's own,
+    //     and the shoulder socket never steps by more than the faded reach rotation. Mutation 25 (replay towards the records) collapses it.
+    {
+        const int lc=sk.parent[rig.left.upper],rc=sk.parent[rig.right.upper];
+        auto game=std::make_unique<ov::Pose>(*base);
+        {
+            const auto lm=native_reload::Model(sk,*base,lc).t,rm=native_reload::Model(sk,*base,rc).t;
+            const math::Vec3 in=(rm-lm)*(1.0f/gik::Len(rm-lm));
+            for(int side=0;side<2;++side)
+            {
+                const int c=side ? rc : lc;
+                auto m=native_reload::Model(sk,*game,c);
+                m.t=m.t+in*(side ? -0.08f : 0.08f)+(side ? math::Vec3{} : math::Vec3{0.0f,0.04f,0.045f});
+                game->b[c]=native_reload::Relative(native_reload::Model(sk,*game,sk.parent[c]),m);
+            }
+            game->b[rig.left.upper].t=game->b[rig.left.upper].t*1.08f;
+        }
+        const int64_t tps=10000000,step=tps/60;
+        struct Sample{bool ok;float amp,clavT,armT,clavDeg,socketStep,width;};
+        const auto angle=[](math::Quat a,math::Quat b){
+            return 2.0f*std::acos(std::clamp(std::fabs(math::QuatDot(math::QuatNormalize(a),math::QuatNormalize(b))),0.0f,1.0f))*180.0f/math::kPi;};
+        const auto run=[&](int overlay,bool girdleOff,std::vector<Sample>& out){
+            rt::Continuity state;out.clear();
+            math::Vec3 prevSocket{};bool havePrev=false;
+            for(int k=0;k<40;++k)
+            {
+                // frames 12-19 without an accepted solve: the replay path (HoldOnly runs the reject branch of Finish, RejectHold::OnReject)
+                const bool held=k>=12 && k<20;
+                integ::PoseSnapshot s=snap;s.traceOverlay=overlay;s.sequence=uint64_t(1000+k);s.reloadContactsWeight=1.0f;
+                s.upperScale=0.0f;s.lowerScale=1.0f;
+                if(girdleOff)rt::ClearShoulderGirdleBits(s.upperBits,uint32_t(sk.n),2,[&](uint32_t b){return file.BoneName(b);});
+                std::vector<unsigned char> records;Records(*game,records);rt::Cycle cycle;
+                Sample m{};
+                const bool captured=!held && rt::Capture(prepared,s,records.data(),sk.n,true,cycle);
+                integ::BlendIntoRecords(records.data(),uint32_t(sk.n),s,1.0f);
+                native_reload_contacts::Result r;
+                ov::Pose o;
+                if(held)rt::HoldOnly(prepared,s,records.data(),sk.n,true,state,int64_t(k+1)*step,tps);
+                m.ok=captured && rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,1.0f,rt::kAuthoredContactMinReach,&state,
+                                            int64_t(k+1)*step,tps) && r.ok;
+                if(!rt::Read(prepared,records.data(),o)){out.push_back(Sample{false,-1.0f,9.0f,9.0f,180.0f,9.0f,0.0f});continue;}
+                m.amp=state.reject.amp;
+                m.clavT=std::max(gik::Len(o.b[lc].t-base->b[lc].t),gik::Len(o.b[rc].t-base->b[rc].t));
+                m.armT=std::max(gik::Len(o.b[rig.left.upper].t-base->b[rig.left.upper].t),gik::Len(o.b[rig.right.upper].t-base->b[rig.right.upper].t));
+                m.clavDeg=std::max(angle(o.b[lc].r,base->b[lc].r),angle(o.b[rc].r,base->b[rc].r));
+                const math::Vec3 socket=inSpine3(o,rig.left.upper);
+                m.socketStep=havePrev ? gik::Len(socket-prevSocket) : 0.0f;prevSocket=socket;havePrev=true;
+                m.width=gik::Len(native_reload::Model(sk,o,rig.left.upper).t-native_reload::Model(sk,o,rig.right.upper).t);
+                out.push_back(m);
+            }
+        };
+        const float wOwn=gik::Len(native_reload::Model(sk,*base,rig.left.upper).t-native_reload::Model(sk,*base,rig.right.upper).t);
+        const float wGame=gik::Len(native_reload::Model(sk,*game,rig.left.upper).t-native_reload::Model(sk,*game,rig.right.upper).t);
+        for(int pass=0;pass<2;++pass)
+        {
+            const bool pistol=pass==1;
+            std::vector<Sample> v;run(pistol ? int(ov::PoseOverlay::Pistol2H) : int(ov::PoseOverlay::Rifle),pistol,v);
+            bool acceptedBefore=true,acceptedAfter=true,rejected=true;
+            float minAmp=1.0f,clavT=0.0f,armT=0.0f,clavDeg=0.0f,socketStep=0.0f,minWidth=9.0f,minWidthAccepted=9.0f;
+            for(int k=0;k<40;++k)
+            {
+                const auto& m=v[size_t(k)];
+                if(k<12){acceptedBefore=acceptedBefore && m.ok;minWidthAccepted=std::min(minWidthAccepted,m.width);}
+                else if(k<20)rejected=rejected && !m.ok;
+                else if(k>=28)acceptedAfter=acceptedAfter && m.ok;
+                if(k>=12)minAmp=std::min(minAmp,m.amp);
+                clavT=std::max(clavT,m.clavT);armT=std::max(armT,m.armT);clavDeg=std::max(clavDeg,m.clavDeg);
+                socketStep=std::max(socketStep,m.socketStep);minWidth=std::min(minWidth,m.width);
+            }
+            std::printf("  reject replay (%s): accepted %d/%d, rejected %d, min amp %.2f | own width %.1fcm, game %.1fcm, min width %.1fcm | "
+                        "clavicle translation %.2fmm, arm bone translation %.2fmm, clavicle turn %.1fdeg, socket step %.2fcm/frame\n",
+                        pistol ? "Pistol2H, girdle bits cleared" : "Rifle",int(acceptedBefore),int(acceptedAfter),int(rejected),minAmp,
+                        wOwn*100.0f,wGame*100.0f,minWidth*100.0f,clavT*1000.0f,armT*1000.0f,clavDeg,socketStep*100.0f);
+            const char* tag=pistol ? "reject replay (pistol, girdle bits cleared)" : "reject replay (rifle)";
+            Check(acceptedBefore && acceptedAfter && rejected && minAmp<0.05f,
+                  (std::string("fixture: ")+tag+": accepted, rejected for .13 s (the replay fades out), accepted again").c_str());
+            Check(pistol || wGame<wOwn-0.10f,"fixture: the game's girdle is more than 10 cm narrower than V's own");
+            Check(clavT<0.001f && armT<0.001f,(std::string(tag)+": V's own clavicle and arm bone translations on every frame").c_str());
+            Check(clavDeg<=20.5f && socketStep<0.015f && minWidth>=std::min(wOwn,minWidthAccepted)-0.005f,
+                  (std::string(tag)+": the clavicle turns at most by the reach step, no shoulder pop at the rejection or the ramp-in").c_str());
+        }
     }
 
     std::printf("%d passed, %d failed\n",g_pass,g_fail);
