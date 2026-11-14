@@ -60,6 +60,15 @@ SIDE_TRACE_KINDS = (('MMTRACE feet ', 'FEET'), ('MMTRACE footstep ', 'STEP'), ('
 
 # MM v2 trace line token ('UTPP MOTIONPOSE ...' has no space after MOTION and stays kind 'UTPP')
 MOTION_TOKEN = 'UTPP MOTION '
+# dodge diagnostics: 'UTPP MOTIONDODGE start|push|end ...' (kind 'DODGE', the word after the token is fields['sub']); the push line
+# is written 0.30 s after the dodge started and says what the game was served and where the capsule really went
+DODGE_TOKEN = 'UTPP MOTIONDODGE '
+# a push line belongs to a button press when it lies from DODGE_PRESS_LEAD_S before the press to DODGE_PRESS_TAIL_S after it
+DODGE_PRESS_LEAD_S = 0.1
+DODGE_PRESS_TAIL_S = 1.0
+# a stick pushed less far than this holds no direction (the served heading of such a press is not checked)
+DODGE_MIN_STICK = 0.3
+DODGE_TRAVEL_RE = re.compile(r'^(-?[\d.]+)/([\d.]+)m$')
 # a step counts as driven by v2 when an MOTION line lies in the window or at most this long before it (heartbeat 0.5 s)
 MOTION_LOOKBACK_S = 1.0
 # the same clip under another database label is no clip change when its clip time advanced by the elapsed time within this
@@ -113,6 +122,11 @@ class LogLine:
         v = self.fields.get(key, '')
         return v.split(':', 1)[1] if ':' in v else v
 
+    def dodge_travel(self):
+        """MOTIONDODGE push 'travel=<deg>/<m>m' -> (heading deg, distance m), or None."""
+        m = DODGE_TRAVEL_RE.match(self.fields.get('travel', ''))
+        return (float(m.group(1)), float(m.group(2))) if m else None
+
     def motion_ov(self):
         """MOTION 'ov=<overlay>/<aim>/<crouch><moving>' -> (overlay, aim, crouch, moving) ints, or None."""
         m = re.match(r'^(-?\d+)/(-?\d+)/([01])([01])$', self.fields.get('ov', ''))
@@ -124,6 +138,8 @@ class LogLine:
             parts = [f'{k}={self.fields[k]}' for k in ('db', 'clip', 'ct', 'cost', 'blend', 'rot', 'ov', 'w')
                      if k in self.fields]
             return f'{t} MOTION  ' + ' '.join(parts).replace('M_Neutral_', '')
+        if self.kind == 'DODGE':
+            return f'{t} DODGE ' + self.raw.split(DODGE_TOKEN, 1)[1].strip()[:150]
         if self.kind == 'GATE':
             return f'{t} GATE  ' + self.raw.split('MMGATE', 1)[1].strip()[:110]
         if self.kind == 'AIR':
@@ -166,6 +182,10 @@ def parse_line(line: str) -> LogLine | None:
         return LogLine(ts, 'AIR', line, dict(FIELD_RE.findall(line.split('UTPP MMAIR ', 1)[1])))
     if MOTION_TOKEN in line:
         return LogLine(ts, 'MOTION', line, dict(FIELD_RE.findall(line.split(MOTION_TOKEN, 1)[1])))
+    if DODGE_TOKEN in line:
+        body = line.split(DODGE_TOKEN, 1)[1]
+        words = body.split(None, 1)
+        return LogLine(ts, 'DODGE', line, {**dict(FIELD_RE.findall(body)), 'sub': words[0] if words else ''})
     if 'UTPP CET' in line:
         return LogLine(ts, 'CET', line)
     return LogLine(ts, 'UTPP', line)
@@ -638,6 +658,86 @@ def _motion_metrics(m: dict, v2: list[LogLine], ref: LogLine | None, t0: datetim
     m['motion_crouch_fraction'] = _r(sum(d for o, d in oseg if o[2] == 1) / otot if otot > 0 else None)
 
 
+# ---- dodge push check ----
+
+def has_dodge_push(lines: list[LogLine]) -> bool:
+    """True when the log carries at least one 'MOTIONDODGE push' line: the build writes them (an older build does not)."""
+    return any(l.kind == 'DODGE' and l.fields.get('sub') == 'push' for l in lines)
+
+
+def dodge_expected_heading(ls) -> float | None:
+    """Camera-relative heading (deg, +90 = left, 0 = forward, 180 = back) of a left stick (x right, y forward) as the plugin
+    reports it in 'served='; None when the stick holds no direction (below DODGE_MIN_STICK)."""
+    x, y = ls
+    if math.hypot(x, y) < DODGE_MIN_STICK:
+        return None
+    return math.degrees(math.atan2(-x, y))
+
+
+def dodge_metrics(lines: list[LogLine], t0: datetime, t1: datetime, presses: list, log_has_push: bool | None = None) -> dict:
+    """Dodge push check of one step. `presses` = [{'t': seconds after the step start, 'ls': (x, y) held at the press}] (scenario
+    dodge_presses); each press takes the first unused push line from DODGE_PRESS_LEAD_S before it to DODGE_PRESS_TAIL_S after it
+    (the line comes 0.30 s after the dodge, so it may fall after the step end). Keys:
+      dodge_applicable   False when the log has no push line at all (an older build): every other value is None and nothing is scored
+      dodge_note         the plain reason of a not applicable check (never read it as a pass)
+      dodge_presses / dodge_pushes   presses of the step / push lines found for them
+      dodge_push_missing presses without a push line (counted only on a build that writes them)
+      dodge_served_missing  push lines that carry no served heading (the heading probe was not fresh)
+      dodge_served_dev_deg  largest |served - pressed direction| (camera relative, wrapped to 180)
+      dodge_err_deg      largest |err| = |travel - want| (the logged err, else travel - camera - pressed direction)
+      dodge_travel_m     shortest capsule travel distance
+      dodge_clip / dodge_no_clip   clip= of the push lines ('none' = no dodge clip played, information only) / how many are 'none'
+      dodge_starts       'MOTIONDODGE start' lines inside the window"""
+    if log_has_push is None:
+        log_has_push = has_dodge_push(lines)
+    out: dict = {'dodge_applicable': bool(log_has_push), 'dodge_note': None, 'dodge_presses': len(presses), 'dodge_pushes': None,
+                 'dodge_push_missing': None, 'dodge_served_missing': None, 'dodge_served_dev_deg': None, 'dodge_err_deg': None,
+                 'dodge_travel_m': None, 'dodge_clip': None, 'dodge_no_clip': None,
+                 'dodge_starts': sum(1 for l in step_lines(lines, t0, t1) if l.kind == 'DODGE' and l.fields.get('sub') == 'start')}
+    if not log_has_push:
+        out['dodge_note'] = ('n/a: no MOTIONDODGE push line anywhere in the log (an older build, diagnostic logs off, or no dodge '
+                             'fired): the dodge direction was not checked')
+        return out
+    pushes = [l for l in lines if l.kind == 'DODGE' and l.fields.get('sub') == 'push']
+    used: set = set()
+    found = []          # (press, push line)
+    for p in presses:
+        a = t0 + timedelta(seconds=p['t'] - DODGE_PRESS_LEAD_S)
+        b = t0 + timedelta(seconds=p['t'] + DODGE_PRESS_TAIL_S)
+        for i, l in enumerate(pushes):
+            if i not in used and a <= l.ts <= b:
+                used.add(i)
+                found.append((p, l))
+                break
+    devs, errs, travels, clips = [], [], [], []
+    served_missing = 0
+    for p, l in found:
+        want = dodge_expected_heading(p['ls'])
+        served, cam = l.num('served'), l.num('cam')
+        if served is None:
+            served_missing += 1
+        elif want is not None:
+            devs.append(abs(_wrap180(served - want)))
+        err = l.num('err')
+        tr = l.dodge_travel()
+        if err is None and tr is not None and cam is not None and want is not None:
+            err = _wrap180(tr[0] - cam - want)      # no served heading in the line: against the pressed direction
+        if err is not None:
+            errs.append(abs(err))
+        if tr is not None:
+            travels.append(tr[1])
+        clips.append(l.fields.get('clip', '?'))
+    out['dodge_pushes'] = len(found)
+    out['dodge_push_missing'] = len(presses) - len(found)
+    out['dodge_served_missing'] = served_missing
+    out['dodge_served_dev_deg'] = _r(max(devs), 1) if devs else None
+    out['dodge_err_deg'] = _r(max(errs), 1) if errs else None
+    out['dodge_travel_m'] = _r(min(travels), 2) if travels else None
+    out['dodge_clip'] = ','.join(clips) if clips else None
+    out['dodge_no_clip'] = sum(1 for c in clips if c == 'none') if clips else None
+    return out
+
+
 # ---- gait quality metrics (G6, 2026-10-31); report-only, no default thresholds ----
 GAIT_MV_MIN = 0.05            # |mv| above this counts as stick input (bucketed in GAIT_MV_STEP steps)
 GAIT_MV_STEP = 0.05
@@ -925,6 +1025,13 @@ DEFAULT_THRESHOLDS = {
     'motion_cost_mean': None,
     'motion_cost_max': None,
     'motion_crouch_fraction': None,
+    # dodge push check (steps of a scenario flagged dodge; see dodge_metrics); 'text' is the failure message
+    'dodge_served_dev_deg': {'max': 20.0, 'text': 'the game was asked for a dodge direction {val:.0f} deg off the pressed one '
+                                                  '(limit {lim:.0f})'},
+    'dodge_err_deg': {'max': 15.0, 'text': 'dodge went {val:.0f} deg off the pressed direction (limit {lim:.0f})'},
+    'dodge_travel_m': {'min': 0.5, 'text': 'dodge moved only {val:.2f} m (needs at least {lim:.2f})'},
+    'dodge_push_missing': {'max': 0, 'text': 'dodge pressed but the plugin logged no push line for it'},
+    'dodge_served_missing': {'max': 0, 'text': 'the dodge push line carries no served heading (the heading probe was not fresh)'},
 }
 # keep in sync with thresholds.json (test_gametest checks that the file and these defaults agree)
 SLOW_STICK = 0.6   # a step is 'slow' when its left-stick magnitude goes below this at any time
@@ -1004,8 +1111,10 @@ def evaluate(metrics: dict, thresholds: dict, step: str = '', slow: bool = False
             continue
         # optional 'msg' in a limit gives the failure a clear prefix (e.g. "crouch not engaged")
         pre = f'{lim["msg"]}: ' if lim.get('msg') else ''
+        # optional 'text' = the whole message ({val} = the value, {lim} = the limit that was crossed), for plain wording
+        text = lim.get('text')
         if 'max' in lim and val > lim['max']:
-            fails.append(f'{pre}{metric}={val} > {lim["max"]}')
+            fails.append(text.format(val=val, lim=lim['max']) if text else f'{pre}{metric}={val} > {lim["max"]}')
         if 'min' in lim and val < lim['min']:
-            fails.append(f'{pre}{metric}={val} < {lim["min"]}')
+            fails.append(text.format(val=val, lim=lim['min']) if text else f'{pre}{metric}={val} < {lim["min"]}')
     return fails

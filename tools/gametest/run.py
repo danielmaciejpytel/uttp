@@ -122,7 +122,9 @@ METRIC_COLUMNS = ['duration_s', 'mm_driver', 'samples', 'trace_coverage', 'motio
                   'motion_db_walk_loops_fraction', 'motion_db_walk_starts_fraction', 'motion_clip_transition_fraction',
                   'motion_walk_loop_clip_fraction', 'motion_walk_nonloop_fraction', 'motion_walk_loop_share', 'motion_steady_s',
                   'motion_steady_switches', 'motion_steady_ct_wraps', 'motion_steady_ct_jumps', 'motion_steady_reselect_per_s',
-                  'motion_steady_reselect_nowrap_per_s']
+                  'motion_steady_reselect_nowrap_per_s',
+                  'dodge_presses', 'dodge_pushes', 'dodge_push_missing', 'dodge_served_missing', 'dodge_served_dev_deg',
+                  'dodge_err_deg', 'dodge_travel_m', 'dodge_clip', 'dodge_no_clip', 'dodge_starts']
 INVALID_VERDICT = 'INVALID'   # step not scored: the MM v2 precondition failed (see mm_precondition)
 
 
@@ -174,10 +176,12 @@ def analyze(plan: dict, lines: list, base_thresholds: dict, scenarios: dict, clo
     """
     off = timedelta(seconds=clock_offset_s)
     rows = []
+    has_push = gt_log.has_dodge_push(lines)      # a build that writes 'MOTIONDODGE push' lines (an older one does not)
     for run in plan['runs']:
         sc = scenarios.get(run['scenario']) or scenarios.get(run.get('part'))   # 'part': a copy under its own name (a family label)
         thr = gt_log.merge_thresholds(base_thresholds, sc.thresholds if sc else {})
         stick = sc.step_stick_stats() if sc else {}
+        dodges = sc.dodge_presses() if sc else {}
         started = [s for s in run['steps'] if s.get('start')]
         last_started = started[-1] if started else None
         for st in run['steps']:
@@ -187,6 +191,8 @@ def analyze(plan: dict, lines: list, base_thresholds: dict, scenarios: dict, clo
             m = gt_log.compute_metrics(lines, t0, t1)
             smin, smax = stick.get(st['name'], (None, None))
             m['stick_min'], m['stick_max'] = smin, smax
+            if st['name'] in dodges:
+                m.update(gt_log.dodge_metrics(lines, t0, t1, dodges[st['name']], has_push))
             slow = smin is not None and smin < gt_log.SLOW_STICK
             fails = gt_log.evaluate(m, thr, st['name'], slow=slow) if st.get('metrics', True) else []
             verdict = 'SKIP' if not st.get('metrics', True) else ('FAIL' if fails else 'PASS')
@@ -201,8 +207,11 @@ def analyze(plan: dict, lines: list, base_thresholds: dict, scenarios: dict, clo
                 verdict = INVALID_VERDICT
             # True: no selection threshold (motion_transitions_per_s / costs) applied, so the verdict says nothing about jerks
             unscored = None if verdict == 'SKIP' else gt_log.selection_unscored(m, thr, st['name'], slow=slow)
+            info = []     # information only: never a failure
+            if m.get('dodge_no_clip'):
+                info.append(f'no dodge clip ({m["dodge_no_clip"]} of {m["dodge_pushes"]} dodges played none)')
             rows.append({'scenario': run['scenario'], 'run': run['run'], 'step': st['name'], 't0': t0, 't1': t1,
-                         'verdict': verdict, 'fails': fails, 'selection_unscored': unscored, 'metrics': m})
+                         'verdict': verdict, 'fails': fails, 'info': info, 'selection_unscored': unscored, 'metrics': m})
     return rows
 
 
@@ -230,6 +239,10 @@ def write_outputs(out_dir: str, plan: dict, rows: list, lines: list, log_path: s
                 if m.get('not_applicable'):
                     f.write(f'    n/a under MM v2 (v1 matcher fields, not scored): {",".join(m["not_applicable"])}'
                             + ('  [base tick frozen]' if m.get('base_trace_frozen') else '') + '\n')
+                if m.get('dodge_note'):
+                    f.write(f'    dodge: {m["dodge_note"]}\n')
+                for note in r.get('info') or []:
+                    f.write(f'    info: {note}\n')
                 if m.get('mm_driver_note'):
                     f.write(f'    driver: {m["mm_driver_note"]}\n')
                 if r.get('selection_unscored'):
@@ -266,8 +279,12 @@ def print_table(rows: list, summary: dict) -> None:
     cols = [('mm_driver', 'mm_driver'), ('motion_transitions_per_s', 'transitions_per_s'), ('motion_cost_max', 'cost_max'),
             ('offset_saturated_s', 'offset_saturated_s'), ('footlock_corr_max_cm', 'footlock_corr_max_cm'),
             ('rate_min', 'rate_min'), ('crouch_fraction', 'crouch_fraction'), ('bodyturn_cmds', 'bodyturn_cmds'),
-            ('cam_yaw_net_deg', 'cam_yaw_net_deg'), ('samples', 'samples'), ('motion_samples', 'motion_samples')]
-    short = ['drv', 'tr/s', 'cmax', 'sat_s', 'flcm', 'rmin', 'crch', 'btC', 'camYaw', 'n', 'nMotion']
+            ('cam_yaw_net_deg', 'cam_yaw_net_deg'), ('samples', 'samples'), ('motion_samples', 'motion_samples'),
+            ('dodge_served_dev_deg', 'dodge_served_dev_deg'), ('dodge_err_deg', 'dodge_err_deg'),
+            ('dodge_travel_m', 'dodge_travel_m'), ('dodge_clip', 'dodge_clip')]
+    # dSrv / dErr / dTrv / dClip: dodge steps only - served heading vs the pressed direction (deg), travel vs want (deg), travel (m),
+    # the dodge clip that played ('none' = no dodge clip, information); 'n/a' = the log has no dodge push line (older build)
+    short = ['drv', 'tr/s', 'cmax', 'sat_s', 'flcm', 'rmin', 'crch', 'btC', 'camYaw', 'n', 'nMotion', 'dSrv', 'dErr', 'dTrv', 'dClip']
     pre = summary.get('mm_precondition') or {}
     if pre.get('ok') is False:
         print(f'[gametest] PRECONDITION FAILED: {pre.get("reason")}' +
@@ -281,10 +298,13 @@ def print_table(rows: list, summary: dict) -> None:
         def cell(c2, c1):
             k = c2 if v2 else c1
             v = m.get(k)
+            if k.startswith('dodge_') and m.get('dodge_applicable') is False:
+                return 'n/a'
             return 'n/a' if k in na else ('-' if v is None else v)
         vals = ' '.join(f'{cell(a, b)!s:>6}' for a, b in cols)
         print(f'{r["scenario"][:26]:26} {r["run"]:>2} {r["step"][:14]:14} {r["verdict"]:7} {vals}  '
-              + ','.join(m['clip_classes_played']) + (f'  !! {"; ".join(r["fails"])}' if r['fails'] else ''))
+              + ','.join(m['clip_classes_played']) + (f'  !! {"; ".join(r["fails"])}' if r['fails'] else '')
+              + (f'  ~ {"; ".join(r["info"])}' if r.get('info') else ''))
     print(f'OVERALL {summary["overall"]} {summary["counts"]}' +
           (f'  aborted: {summary["aborted_runs"]}' if summary['aborted_runs'] else ''))
 

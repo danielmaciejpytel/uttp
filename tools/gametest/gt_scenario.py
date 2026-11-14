@@ -15,7 +15,8 @@ File format (JSON, see scenarios.json):
          "rs": [[t, x, y], ...], "rs_polar": ...,
          "lt": [[t, v], ...], "rt": [[t, v], ...],
          "buttons": [{"t": 0.5, "button": "B", "hold": 0.12}],
-         "metrics": false                                           # exclude the step from pass/fail
+         "metrics": false,                                          # exclude the step from pass/fail
+         "dodge": true                                              # the B press of the step is a dodge (push check, gt_log.dodge_metrics)
         }
       ]
     }
@@ -33,6 +34,7 @@ import json
 import math
 from dataclasses import dataclass, field
 
+DODGE_BUTTON = 'B'     # Dodge_Button of the pad (also the exit button of a vehicle: only steps flagged "dodge" are checked as dodges)
 BUTTONS = {
     'A': 0x1000, 'B': 0x2000, 'X': 0x4000, 'Y': 0x8000,
     'LB': 0x0100, 'RB': 0x0200, 'LS': 0x0040, 'RS': 0x0080, 'L3': 0x0040, 'R3': 0x0080,
@@ -122,6 +124,7 @@ class Step:
     tracks: dict = field(default_factory=dict)   # channel -> Track ('ls', 'ls_polar', 'rs', 'rs_polar', 'lt', 'rt')
     buttons: list = field(default_factory=list)
     metrics: bool = True
+    dodge: bool = False      # the DODGE_BUTTON press of the step is a dodge whose direction the analysis checks
 
 
 @dataclass
@@ -162,6 +165,20 @@ class Scenario:
             lo, hi = out.get(i, (m, m))
             out[i] = (min(lo, m), max(hi, m))
         return {self.steps[i].name: (round(lo, 3), round(hi, 3)) for i, (lo, hi) in out.items()}
+
+    def dodge_presses(self, dt: float | None = None) -> dict:
+        """{step name: [{'t': seconds after the step start, 'ls': (x, y) the left stick holds in the frame of the press}]} for the
+        steps flagged "dodge": one entry per press (rising edge) of DODGE_BUTTON, read from the frames the pad is sent."""
+        starts = {i: a for i, (_, a, _) in enumerate(self.step_bounds())}
+        mask = BUTTONS[DODGE_BUTTON]
+        out: dict = {}
+        down = False
+        for i, fr in self.sample(dt):
+            now = bool(fr.buttons & mask)
+            if now and not down and self.steps[i].dodge:
+                out.setdefault(self.steps[i].name, []).append({'t': round(fr.t - starts[i], 4), 'ls': fr.ls})
+            down = now
+        return out
 
     def sample(self, dt: float | None = None):
         """Yield (step_index, Frame) at fixed rate; time is absolute from scenario start."""
@@ -262,10 +279,13 @@ def parse_scenario(name: str, raw: dict, defaults: dict | None = None) -> Scenar
                 raise ScenarioError(f'{where}: button event {b!r} outside step')
             buttons.append(ev)
         unknown = set(rs) - {'name', 'duration', 'interp', 'ls', 'ls_polar', 'rs', 'rs_polar', 'lt', 'rt',
-                             'buttons', 'metrics', 'note'}
+                             'buttons', 'metrics', 'note', 'dodge'}
         if unknown:
             raise ScenarioError(f'{where}: unknown keys {sorted(unknown)}')
-        steps.append(Step(sname, dur, tracks, buttons, bool(rs.get('metrics', True))))
+        dodge = bool(rs.get('dodge', False))
+        if dodge and not any(b.button == DODGE_BUTTON for b in buttons):
+            raise ScenarioError(f'{where}: "dodge" needs a {DODGE_BUTTON} button event')
+        steps.append(Step(sname, dur, tracks, buttons, bool(rs.get('metrics', True)), dodge))
     names = [s.name for s in steps]
     if len(set(names)) != len(names):
         raise ScenarioError(f'{name}: duplicate step names')

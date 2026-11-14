@@ -1,6 +1,7 @@
 {
   "_note": "Global pass/fail limits per step metric ({min,max}); keys '<step>.<metric>' apply to one step name; suffix '@slow' applies to steps whose left stick goes below 0.6 (partial stick, ramps, stops); null disables a metric. Scenario 'thresholds' in scenarios.json override these. Starting values, not tuned - adjust after the first in-game runs.",
   "_note_rate": "rate_min 0.4 is report only (null) since 2026-10-23: it contradicts the intended slow-walk rate (0.25 at |v|=0.31 in the 2026-10-23 walk step).",
+  "_note_dodge": "Dodge push check (steps of a scenario flagged dodge, gt_log.dodge_metrics): the plugin logs 'UTPP MOTIONDODGE push' 0.30 s after every dodge. dodge_served_dev_deg = |heading the game was served - stick direction held at the press| (camera relative, tolerance 20 deg); dodge_err_deg = |travel - want| (15 deg); dodge_travel_m = capsule distance over the push window (0.5 m); dodge_push_missing = presses without a push line, scored only when the log has push lines at all (an older build: reported not applicable). 'text' is the failure message ({val}, {lim}). Keep gt_log.DEFAULT_THRESHOLDS in sync.",
   "_note_motion": "2026-10-23: MM v2 is the default driver (cet/utpp_motion/init.lua mm.motionDriver=true since 2026-10-20). Under v2 the v1-only metrics (trans_lines, transitions_per_s, cost_mean, cost_max, offset_saturated_s, offset_max_cm, rate_*) are None and listed per step as not_applicable (the MMTRACE tick fields clip/f/cost/rate/off and the TRANS lines are frozen placeholders); their limits only apply to legacy v1 logs (run.py --allow-base). motion_transitions_per_s max 3.0 is PROVISIONAL (the v1 value, loose) until a reviewed v2 baseline exists; v2 costs are report only (null; different scale, about -0.2..0.45 in the 2026-10-23 runs). Steps without an applied selection limit are flagged selection_unscored in summary.json. Keep gt_log.DEFAULT_THRESHOLDS in sync.",
   "samples": {"min": 1},
   "motion_samples": {"min": 1, "msg": "no MOTION lines in window"},
@@ -15,5 +16,10 @@
   "motion_transitions_per_s": {"max": 3.0},
   "motion_cost_mean": null,
   "motion_cost_max": null,
-  "motion_crouch_fraction": null
+  "motion_crouch_fraction": null,
+  "dodge_served_dev_deg": {"max": 20.0, "text": "the game was asked for a dodge direction {val:.0f} deg off the pressed one (limit {lim:.0f})"},
+  "dodge_err_deg": {"max": 15.0, "text": "dodge went {val:.0f} deg off the pressed direction (limit {lim:.0f})"},
+  "dodge_travel_m": {"min": 0.5, "text": "dodge moved only {val:.2f} m (needs at least {lim:.2f})"},
+  "dodge_push_missing": {"max": 0, "text": "dodge pressed but the plugin logged no push line for it"},
+  "dodge_served_missing": {"max": 0, "text": "the dodge push line carries no served heading (the heading probe was not fresh)"}
 }

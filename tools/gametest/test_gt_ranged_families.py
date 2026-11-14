@@ -443,6 +443,21 @@ class PureLogic(unittest.TestCase):
         self.assertTrue(all('rt' not in st.tracks or st.tracks['rt'].keys[-1][1] == 0 for st in sc.steps))
 
 
+BASH_GATE = ('MMGATE gate=0x0 (was 0x100) psm=0x800 detail=-1 loco=1 tpp=1 w=0.80 debounced=0 melee=0x800 meleeState=0 meleeHold=0 '
+              'upperBody=0 mountCut=0 mask=0x2 hold=0 release=0x0')
+NO_BASH_GATE = BASH_GATE.replace('melee=0x800', 'melee=0x0').replace('psm=0x800', 'psm=0x1')
+
+
+def with_bash_line(script, tag='handgun', line=BASH_GATE):
+    """The game as the macro sees it, plus the log line a gun bash writes when the pad phase of the bash plays."""
+    def wrapped(event, cmd):
+        if event == f'play:rf_{tag}_bash':
+            return [line] if line else []
+        return script(event, cmd)
+    wrapped.state = getattr(script, 'state', None)
+    return wrapped
+
+
 def run_macro(script, args=None, patch_reload=True, raises=None, fams=None):
     with tempfile.TemporaryDirectory() as d:
         n = FakeNight(d, script, args)
@@ -468,7 +483,7 @@ def run_macro(script, args=None, patch_reload=True, raises=None, fams=None):
 
 
 class Macro(unittest.TestCase):
-    PHASES = ['draw', 'aim_idle', 'hip_fire', 'aim_fire', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster']
+    PHASES = ['draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster']
 
     def test_handgun_passes_in_order_with_a_label_per_phase(self):
         n, res, plan = run_macro(good_script('handgun'), fams='handgun')
@@ -481,7 +496,7 @@ class Macro(unittest.TestCase):
         for w in res['phase_windows']:
             self.assertLessEqual(w['start'], w['end'])
         self.assertEqual(n.plays(), ['rf_setup_walk', 'rf_handgun_aim_idle', 'rf_handgun_hip_fire', 'rf_handgun_aim_fire',
-                                     'rf_handgun_reload', 'rf_handgun_walk', 'rf_handgun_walk_aimed', 'rf_handgun_sprint',
+                                     'rf_handgun_bash', 'rf_handgun_reload', 'rf_handgun_walk', 'rf_handgun_walk_aimed', 'rf_handgun_sprint',
                                      'rf_handgun_crouch_aim'])
         cmds = n.cmds()
         self.assertEqual(cmds[0], 'RF_HAND')                          # the weapon in the hand before the set
@@ -679,7 +694,7 @@ class Macro(unittest.TestCase):
         self.assertEqual((res['families']['handgun']['verdict'], res['families']['smg']['verdict']), ('PASS', 'PASS'))
         self.assertEqual(n.cmds().count('RF_REDRAW'), 1)                       # at the very end, not between the families
         self.assertEqual(n.cmds()[-1], 'RF_REDRAW')
-        self.assertEqual([w['label'].split('_')[1] for w in res['phase_windows']], ['handgun'] * 10 + ['smg'] * 10)
+        self.assertEqual([w['label'].split('_')[1] for w in res['phase_windows']], ['handgun'] * 11 + ['smg'] * 11)
         self.assertEqual(n.plays().count('rf_setup_walk'), 1)
 
     def test_set_verdict_fails_when_one_family_fails(self):
@@ -703,6 +718,121 @@ class Macro(unittest.TestCase):
             return base(event, cmd)
         n, res, plan = run_macro(script, fams='handgun')
         self.assertTrue(any('before the set could not be read' in w for w in res['warnings']))
+
+
+class GunBash(unittest.TestCase):
+    """Phase `bash`: one quick-melee tap between the aimed fire and the reload; no pass / fail limit; `not verified` without the log
+    marker. The marker line of these tests is synthetic (built from the MMGATE format of the plugin source: no log of a gun bash exists)."""
+
+    def test_the_pad_scenario_is_one_lb_tap_in_a_1_5_s_window_without_limits(self):
+        for tag in rf.FAMILIES:
+            sc = rf.scenario_for(tag, 'bash')
+            self.assertEqual(sc.name, f'rf_{tag}_bash')
+            self.assertEqual(len(sc.steps), 1)
+            st = sc.steps[0]
+            self.assertEqual(st.duration, 1.5)
+            self.assertFalse(st.metrics)
+            self.assertEqual([(b.button, b.hold) for b in st.buttons], [('LB', 0.08)])
+            self.assertLess(st.buttons[0].hold, 0.1)                 # a hold of 0.1 s would be the scanner
+            self.assertEqual(st.buttons[0].mask, BUTTONS['LB'])
+            self.assertTrue(all(k not in st.tracks or st.tracks[k].keys[-1][1] == 0 for k in ('lt', 'rt')))   # no aim, no shot
+
+    def test_marker_needs_the_melee_attack_bit_of_a_gate_line(self):
+        def at(line):
+            return rf.bash_result(stamp(1.0, line))
+        seen = at(BASH_GATE)
+        self.assertTrue(seen['verified'])
+        self.assertEqual(seen['gate_lines'], 1)
+        self.assertIn('MMGATE gate=0x0', seen['line'])
+        self.assertNotIn('\n', seen['line'])
+        for line in (NO_BASH_GATE, BASH_GATE.replace('melee=0x800', 'melee=0x1000'), 'MMTRACE tick clip=1 melee=0x800'):
+            self.assertFalse(at(line)['verified'], line)
+        self.assertEqual(rf.bash_result(''), {'verified': False, 'gate_lines': 0, 'line': None})
+        self.assertFalse(rf.bash_result(None)['verified'])
+
+    def test_bash_follows_the_aimed_fire_and_precedes_the_reload(self):
+        n, res, plan = run_macro(with_bash_line(good_script('handgun')), fams='handgun')
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        labels = [w['phase'] for w in res['phase_windows']]
+        self.assertEqual(labels[labels.index('aim_fire') + 1:labels.index('reload')], ['bash'])
+        plays = n.plays()
+        self.assertEqual(plays[plays.index('rf_handgun_aim_fire') + 1:plays.index('rf_handgun_reload')], ['rf_handgun_bash'])
+        # the magazine is read again after the bash (the reload starts from it): the last RF_HAND before the reload play
+        cmds = [c for c in n.calls if c[0] in ('cmd', 'play')]
+        i_bash = cmds.index(('play', 'rf_handgun_bash'))
+        self.assertEqual(cmds[i_bash + 1], ('cmd', 'RF_HAND'))
+
+    def test_a_seen_quick_melee_is_recorded_and_not_a_warning(self):
+        n, res, plan = run_macro(with_bash_line(good_script('handgun')), fams='handgun')
+        r = res['families']['handgun']
+        rec = next(p for p in r['phases'] if p.get('phase') == 'bash')
+        self.assertEqual((rec['quick_melee'], rec['button'], rec['window_s']), ('seen', 'LB', 1.5))
+        self.assertIn('melee=0x800', rec['marker'])
+        self.assertFalse([w for w in r['warnings'] if 'bash' in w])
+        self.assertTrue(any('bash: quick melee seen' in ln for ln in n.logs))
+
+    def test_without_the_marker_the_phase_is_not_verified_and_still_passes(self):
+        for line in (None, NO_BASH_GATE):
+            n, res, plan = run_macro(with_bash_line(good_script('handgun'), line=line), fams='handgun')
+            r = res['families']['handgun']
+            self.assertEqual(r['verdict'], 'PASS', r['fails'])
+            self.assertEqual(res['verdict'], 'PASS')
+            rec = next(p for p in r['phases'] if p.get('phase') == 'bash')
+            self.assertEqual(rec['quick_melee'], 'not verified')
+            self.assertIsNone(rec['marker'])
+            self.assertTrue(any(w.startswith('bash: not verified') for w in r['warnings']), r['warnings'])
+            self.assertFalse(any('bash' in f for f in r['fails']))
+            self.assertTrue(any('bash: no quick melee line in the log: not verified' in ln for ln in n.logs))
+
+    def test_the_phase_has_a_plan_run_with_no_limit_and_a_pose_window(self):
+        n, res, plan = run_macro(with_bash_line(good_script('handgun')), fams='handgun')
+        runs = {r['scenario']: r for r in plan['runs']}
+        self.assertIn('rf_handgun_bash', runs)
+        scen = load_scenarios(gw.SCENARIO_FILE)
+        sc = scen['rf_handgun_bash'] = rf.scenario_for('handgun', 'bash')
+        now = datetime.now()
+        # the step as the runner records it (the fake night above records every step with metrics on)
+        real = {'scenario': sc.name, 'run': 1, 'aborted': None,
+                'steps': [{'name': s.name, 'start': now, 'end': now, 'metrics': s.metrics} for s in sc.steps]}
+        rows = gt_run.analyze({'runs': [real]}, [], gt_log.DEFAULT_THRESHOLDS, scen)
+        self.assertEqual([r['verdict'] for r in rows], ['SKIP'])
+        wins = gp.build_windows([{'name': 'ranged_families', 'run': 1, 'start': now, 'end': now,
+                                  'phase_windows': res['phase_windows']}], [])
+        self.assertIn('rf_handgun_bash#1', [w[0] for w in wins])
+
+    def test_the_family_flag_switches_the_phase_off_and_the_old_sequence_is_unchanged(self):
+        old = [p for p in self.PHASES_ALL if p != 'bash']
+        with mock.patch.dict(rf.FAMILIES['handgun'], {'bash': False}):
+            n, res, plan = run_macro(good_script('handgun'), fams='handgun')
+            self.assertEqual(rf.phases_of('handgun'), tuple(old))
+            self.assertEqual([w['phase'] for w in res['phase_windows']], old)
+            self.assertEqual(n.plays(), ['rf_setup_walk', 'rf_handgun_aim_idle', 'rf_handgun_hip_fire', 'rf_handgun_aim_fire',
+                                         'rf_handgun_reload', 'rf_handgun_walk', 'rf_handgun_walk_aimed', 'rf_handgun_sprint',
+                                         'rf_handgun_crouch_aim'])
+            r = res['families']['handgun']
+            self.assertEqual(r['verdict'], 'PASS', r['fails'])
+            self.assertFalse([w for w in r['warnings'] if 'bash' in w])
+            self.assertFalse(any(p.get('phase') == 'bash' for p in r['phases']))
+            self.assertEqual(rf.phase_plan('handgun'), ['equip'] + old + ['remove'])
+            text = '\n'.join(rf.dry_run_lines('handgun', None, load_scenarios(gw.SCENARIO_FILE)))
+            self.assertNotIn('bash', text)
+            off_s = rf.pad_seconds('handgun', load_scenarios(gw.SCENARIO_FILE))
+        on_s = rf.pad_seconds('handgun', load_scenarios(gw.SCENARIO_FILE))
+        self.assertAlmostEqual(on_s - off_s, 1.5)
+        self.assertIn('bash', '\n'.join(rf.dry_run_lines('handgun', None, load_scenarios(gw.SCENARIO_FILE))))
+
+    PHASES_ALL = ['draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster']
+
+    def test_the_flag_defaults_to_on_for_every_family(self):
+        for tag, fam in rf.FAMILIES.items():
+            self.assertIs(fam['bash'], True, tag)
+            self.assertEqual(rf.phases_of(tag), tuple(rf.PHASES))
+
+    def test_one_family_off_leaves_the_others_on(self):
+        with mock.patch.dict(rf.FAMILIES['smg'], {'bash': False}):
+            self.assertIn('bash', rf.phases_of('handgun'))
+            self.assertNotIn('bash', rf.phases_of('smg'))
 
 
 class RunnerParts(unittest.TestCase):

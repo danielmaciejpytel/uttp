@@ -1223,10 +1223,14 @@ def stance_seen(lines: list, want: str) -> bool:
     return any(stance_of(l) == want for l in lines)
 
 
+# the dodge direction / travel limits have their own wording (thresholds.json 'text'); a missing push line is test mechanics
+DODGE_METRIC_FAIL_RE = re.compile(r'^(the game was asked for a dodge direction \d+ deg off|dodge went \d+ deg off|dodge moved only [\d.]+ m)')
+
+
 def is_metric_fail(text: str) -> bool:
-    """'footlock_corr_max_cm=17.6 > 15.0' = gameplay metric; anything else (custom threshold message, macro or
-    verification text) = test mechanics."""
-    return bool(METRIC_FAIL_RE.match(text.strip()))
+    """'footlock_corr_max_cm=17.6 > 15.0' or a dodge direction / travel failure = gameplay metric; anything else (custom
+    threshold message, macro or verification text) = test mechanics."""
+    return bool(METRIC_FAIL_RE.match(text.strip()) or DODGE_METRIC_FAIL_RE.match(text.strip()))
 
 
 def split_failures(harness_steps: list, scenario_records: list) -> tuple[list, list]:

@@ -111,6 +111,7 @@ REGISTRY = {
     'gametest/test_graphics_profile.py': {},
     'gametest/test_gt_capture.py': {},
     'gametest/test_gt_collect.py': {},
+    'gametest/test_gt_dodge.py': {},
     'gametest/test_gt_flow.py': {},
     'gametest/test_gt_freeze.py': {'note': 'writes real process dumps of a throw-away child process of the test (a few MB, a few seconds)'},
     'gametest/test_gt_melee_weapons.py': {},

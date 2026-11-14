@@ -7,10 +7,18 @@ Set name: `ranged_families` (not part of 'all'). Options of night.py: `--ranged-
 
 Sequence per family (script commands and the virtual pad only, so it also runs with --background):
   pick record -> give weapon + ammunition, draw -> confirm the weapon in the hand (log) -> aim idle -> hip fire -> aimed fire ->
-  reload (the magazine is no longer full) -> walk -> walk aimed -> sprint -> crouch + aim -> holster -> take out what was given.
+  gun bash -> reload (the magazine is no longer full) -> walk -> walk aimed -> sprint -> crouch + aim -> holster -> take out what
+  was given.
 Every phase has its own label `rf_<family>_<phase>` (plan run, pose meter window, contact sheet), so the pose reports and the
 sheets are per family and state. The phases measure what the runner already measures (clip changes, foot slip, frame pacing,
 pose capture with the helper reports); no limit is added here. Where no shape limit exists the values are only reported.
+
+Gun bash (phase `bash`, flag `bash` of a family, default on): one quick-melee tap with the weapon in the hand, a 1.5 s window, no
+pass / fail limit. The button is the quick-melee binding of the Alternative input scheme (LB, r6 input mapping
+QuickMelee_Button_Alternative; the harness runs under that scheme, crouch is R3); it is taken from the configuration and not yet
+confirmed in play. Whether the game played the move is read from the log: an `MMGATE` line (written with the MM trace on, when the
+melee gate changes) whose `melee=` value has the melee-attack bit 0x800, which the plugin sets while PSM.RightWeapon is QuickMelee.
+No such line = `not verified` (a warning, never a failure and never "no bash": the line is only written when the gate changes).
 
 Records: the first candidate the game knows and whose item type belongs to the family is used. A family without such a record is
 skipped with a `record not found` line (never a silent pass). Candidates are base game `_Default` presets of the 2.5 weapon
@@ -38,6 +46,7 @@ from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import gt_log  # noqa: E402
 import gt_melee_weapons as gw  # noqa: E402
 from gt_input import file_size, read_since  # noqa: E402
 
@@ -46,7 +55,11 @@ SET_MEMBERS = {SET_NAME: [SET_NAME]}
 # static pad parts of scenarios.json: the family copies of them (rf_<family>_<phase>) keep their thresholds
 PARTS = ['ranged_walk', 'ranged_walk_aimed', 'ranged_sprint']
 MOVING_PARTS = {'walk': 'ranged_walk', 'walk_aimed': 'ranged_walk_aimed', 'sprint': 'ranged_sprint'}
-PHASES = ('draw', 'aim_idle', 'hip_fire', 'aim_fire', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster')
+PHASES = ('draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'walk', 'walk_aimed', 'sprint', 'crouch_aim', 'holster')
+BASH_BUTTON = 'LB'                    # QuickMelee_Button_Alternative (the harness runs under the Alternative scheme: crouch = R3)
+BASH_TAP_S = 0.08                     # a longer LB hold is the scanner (VisionHold times out at 0.1 s), not the quick melee
+BASH_WINDOW_S = 1.5                   # length of the phase
+BASH_MELEE_BIT = 0x800                # MMGATE melee= bit of a melee attack; the plugin sets it while PSM.RightWeapon is QuickMelee
 AMMO_GIVEN = 300                      # ammunition of the weapon's type is raised to this count
 SECONDS_PER_FAMILY = 75.0             # time limit per family (the run itself takes about 35-40 s)
 RELOAD_MAX_S = 8.0                    # longest wait for the magazine to refill
@@ -87,6 +100,7 @@ FAMILIES = {
 }
 for _tag, _f in FAMILIES.items():
     _f['tag'] = _tag
+    _f.setdefault('bash', True)        # False switches the gun bash phase of the family off
 DEFAULT_RECORDS = {t: f['records'] for t, f in FAMILIES.items()}
 
 # 'live' = given and drawn in an earlier game session; everything else of the list is only known from the 2.5 weapon tables
@@ -356,6 +370,29 @@ def reload_result(mag_start: int | None, mag_end: int | None, cap: int | None, e
             'full': full, 'episodes': episodes}
 
 
+def phases_of(tag: str) -> tuple:
+    """The phases of a family in order (PHASES without `bash` when the family has the flag switched off)."""
+    on = FAMILIES[tag].get('bash', True)
+    return tuple(p for p in PHASES if p != 'bash' or on)
+
+
+def bash_result(text: str) -> dict:
+    """Did the game play the quick melee? `text` = the UTPP log written since the tap. verified: True when an MMGATE line carries the
+    melee-attack bit (BASH_MELEE_BIT) in `melee=` (the line exists only with the MM trace on and when the melee gate changes), else
+    False = not verified (the move may still have happened). `line` = the first such line, trimmed."""
+    lines = []
+    for l in gt_log.parse_text(text or ''):
+        if l.kind != 'GATE':
+            continue
+        try:
+            bits = int(l.fields.get('melee', '0x0'), 16)
+        except ValueError:
+            continue
+        if bits & BASH_MELEE_BIT:
+            lines.append(l)
+    return {'verified': bool(lines), 'gate_lines': len(lines), 'line': lines[0].raw.split('[UTPP]', 1)[-1].strip()[:160] if lines else None}
+
+
 def _taps(n: int, gap: float, first: float = 0.3, hold: float = 0.1) -> list:
     keys: list = [[0, 0]]
     for i in range(n):
@@ -393,6 +430,10 @@ def static_scenario_dict(phase: str) -> dict:
     if phase == 'reload':
         # X tap = Reload_Button (X is also the interaction button: the set walks away from the car first)
         return {'steps': [dict(_IDLE, name='reload', duration=0.6, buttons=[{'t': 0.2, 'button': 'X', 'hold': 0.12}])]}
+    if phase == 'bash':
+        # one LB tap (quick melee, Alternative scheme) with the weapon in the hand, hip stance, then the window runs out
+        return {'steps': [dict(_IDLE, name='bash', duration=BASH_WINDOW_S,
+                               buttons=[{'t': 0.3, 'button': BASH_BUTTON, 'hold': BASH_TAP_S}])]}
     if phase == 'reload_shot':
         # one trigger pull inside the reload phase: a magazine that one pull empties is refilled by the game right away, so the
         # reload of such a weapon can only be seen after a shot
@@ -414,7 +455,7 @@ def phase_label(tag: str, phase: str) -> str:
 
 def phase_plan(tag: str) -> list[str]:
     """Names of all phases in order for a family (equip .. remove)."""
-    return ['equip'] + list(PHASES) + ['remove']
+    return ['equip'] + list(phases_of(tag)) + ['remove']
 
 
 def scenario_for(tag: str, phase: str, shots: tuple[int, int] = (3, 3)):
@@ -432,7 +473,7 @@ def scenario_for(tag: str, phase: str, shots: tuple[int, int] = (3, 3)):
 def pad_seconds(tag: str, scenarios: dict | None = None, shots: tuple[int, int] = (3, 3)) -> float:
     """Pad input time of one family (the phases that play a scenario)."""
     total = 0.0
-    for ph in PHASES:
+    for ph in phases_of(tag):
         if ph in MOVING_PARTS:
             sc = (scenarios or {}).get(MOVING_PARTS[ph])
             total += sc.duration if sc is not None else 0.0
@@ -577,6 +618,28 @@ def _fire_phase(run: _Run, phase: str) -> dict:
         run.fails.append(f'{phase}: {res["problem"]} (magazine {mag_before} -> {run.mag}, total {total_before} -> {run.total})')
     elif res['note']:
         run.warns.append(f'{phase}: {res["note"]}')
+    return rec
+
+
+def _bash_phase(run: _Run) -> dict:
+    """One quick-melee tap with the weapon in the hand. No pass / fail limit: the shape values of the window are only reported. Whether
+    the game played the move is read from the log written since the tap; without the marker the phase is `not verified` (a warning)."""
+    off = file_size(run.night.utpp_log)
+    rec = _pad_phase(run, 'bash', {'button': BASH_BUTTON, 'window_s': BASH_WINDOW_S})
+    # the magazine is read again (a bash can cost ammunition and the reload starts from it); the echo of that command also gives the
+    # log a moment to write the gate line before it is read
+    h = run.hand('mag-bash')
+    rec.update(mag_after=run.mag if h else None, total_after=run.total if h else None)
+    res = bash_result(read_since(run.night.utpp_log, off))
+    rec['quick_melee'] = 'seen' if res['verified'] else 'not verified'
+    rec['marker'] = res['line']
+    if res['verified']:
+        run.say(f'bash: quick melee seen in the log ({res["gate_lines"]} MMGATE line(s) with the melee-attack bit)')
+    else:
+        run.say('bash: no quick melee line in the log: not verified')
+        run.warns.append(f'bash: not verified - no MMGATE line with the melee-attack bit {BASH_MELEE_BIT:#x} after the {BASH_BUTTON} tap '
+                         '(the game may not play a gun bash on the third-person body, the binding may differ, or the MM trace / '
+                         'melee gate is off)')
     return rec
 
 
@@ -804,6 +867,8 @@ def run_one(night, pad, guard, plan, tag: str, records, out: dict | None = None,
             _pad_phase(run, 'aim_idle')
             _fire_phase(run, 'hip_fire')
             _fire_phase(run, 'aim_fire')
+            if 'bash' in phases_of(tag):
+                _bash_phase(run)
             _reload_phase(run)
             for ph in ('walk', 'walk_aimed', 'sprint'):
                 if not _ensure_in_hand(run, ph):
@@ -938,7 +1003,7 @@ def dry_run_lines(tag: str, records=None, scenarios: dict | None = None) -> list
              f'   give    : {give_cmd(fam, recs[0])}  (record from the pick echo)',
              f'   hand    : {hand_cmd(recs[0])}']
     shots = plan_shots(None)
-    for ph in PHASES:
+    for ph in phases_of(tag):
         if ph in ('draw', 'holster'):
             continue
         if ph in MOVING_PARTS:
@@ -947,7 +1012,8 @@ def dry_run_lines(tag: str, records=None, scenarios: dict | None = None) -> list
                          + f' (family copy {phase_label(tag, ph)})')
         else:
             sc = scenario_for(tag, ph, shots)
-            lines.append(f'   {ph:10}: pad scenario {sc.name}, {sc.duration:.1f} s of pad input')
+            lines.append(f'   {ph:10}: pad scenario {sc.name}, {sc.duration:.1f} s of pad input'
+                         + (f'; {BASH_BUTTON} tap = quick melee, seen in the log as MMGATE melee={BASH_MELEE_BIT:#x}, no limit' if ph == 'bash' else ''))
     lines.append(f'   holster : {holster_cmd()}')
     lines.append(f'   remove  : {remove_cmd(recs[0], 0)}  ;  {ammo_off_cmd(fam, recs[0], 0)}')
     lines.append(f'   pad time ~{pad_seconds(tag, scenarios):.0f} s; phases: ' + ' -> '.join(phase_plan(tag)))

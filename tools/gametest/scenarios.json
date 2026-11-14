@@ -134,10 +134,10 @@
       "steps": [
         {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
         {"name": "sprint", "duration": 3.5, "ls": [[0, 0, 0], [0.3, 0, 1]], "buttons": [{"t": 0.4, "button": "LS", "hold": 0.12}]},
-        {"name": "dash_fwd", "duration": 2.0, "ls": [[0, 0, 1]], "buttons": [{"t": 0.3, "button": "B", "hold": 0.08}]},
-        {"name": "dash_left", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1], [0.15, -1, 0]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
-        {"name": "dash_right", "duration": 2.0, "interp": "linear", "ls": [[0, -1, 0], [0.15, 1, 0]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
-        {"name": "dash_back", "duration": 2.0, "interp": "linear", "ls": [[0, 1, 0], [0.15, 0, -1]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
+        {"name": "dash_fwd", "duration": 2.0, "dodge": true, "ls": [[0, 0, 1]], "buttons": [{"t": 0.3, "button": "B", "hold": 0.08}]},
+        {"name": "dash_left", "duration": 2.0, "dodge": true, "interp": "linear", "ls": [[0, 0, 1], [0.15, -1, 0]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
+        {"name": "dash_right", "duration": 2.0, "dodge": true, "interp": "linear", "ls": [[0, -1, 0], [0.15, 1, 0]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
+        {"name": "dash_back", "duration": 2.0, "dodge": true, "interp": "linear", "ls": [[0, 1, 0], [0.15, 0, -1]], "buttons": [{"t": 0.35, "button": "B", "hold": 0.08}]},
         {"name": "sprint_again", "duration": 3.0, "interp": "linear", "ls": [[0, 0, -1], [0.15, 0, 1]], "buttons": [{"t": 0.4, "button": "LS", "hold": 0.12}]},
         {"name": "stop", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, 0]]}
       ]
