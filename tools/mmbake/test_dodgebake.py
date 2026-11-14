@@ -74,9 +74,47 @@ def test_bake():
                "deterministic: the same bytes twice")
 
 
+def test_bake_npc():
+    try:
+        root = D.project_root(None)
+    except SystemExit:
+        print("skip npc bake: project root not found")
+        return
+    if not all(os.path.isfile(os.path.join(root, *D.NPC_DIR.split("/"), D.NPC_PREFIX[b] + s + ".anims.glb"))
+               for b in ("woman", "man") for _, s, _, _, _, _ in D.NPC_CLIPS):
+        print("skip npc bake: NPC combat sets not extracted")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        texts = []
+        for body in ("woman", "man"):
+            rep = D.bake_body(root, body, tmp, source="npc")
+            data = open(os.path.join(tmp, "utpp_dodge_%s.utpptrav" % body), "rb").read()
+            texts.append(data)
+            parsed = G.parse_trav(data.decode("ascii"))
+            expect([m["name"] for m in parsed["montages"]] == ["Dodge_F", "Dodge_B", "Dodge_L", "Dodge_R"], "%s npc: four montages in order" % body)
+            ok_root = True
+            for m in parsed["montages"]:
+                P = np.array(m["pose"], dtype=float).reshape(m["frames"], 73, 7)
+                ok_root &= bool(np.allclose(P[:, 0, :3], 0.0) and np.allclose(P[:, 0, 6], 1.0))
+            expect(ok_root, "%s npc: Root identity on every frame (in place)" % body)
+            c = rep["clips"]
+            expect(rep["source"] == "npc" and all(not x["errors"] and x["anatomy_gate"]["passed"] for x in c.values()),
+                   "%s npc: every gate passed (anatomy, bone lengths, joint steps, soles)" % body)
+            expect(all(x["frames"] == x["window"][1] - x["window"][0] + 1 for x in c.values()), "%s npc: each clip is its source window" % body)
+            # Dodge_L is the mirrored Dodge_R: lateral hips and root travel opposite, the rest equal
+            l, r = c["L"], c["R"]
+            expect(l["mirror"] and not r["mirror"] and abs(l["root_disp"][0] + r["root_disp"][0]) < 1e-3 and r["root_disp"][0] > 0.5
+                   and abs(l["hips_xy_first_last"][0][0] + r["hips_xy_first_last"][0][0]) < 1e-3, "%s npc: Dodge_L = mirrored Dodge_R" % body)
+            expect(c["B"]["root_disp"][1] < -1.0 and c["F"]["root_disp"][1] > 1.0, "%s npc: back / forward clips travel back / forward" % body)
+        rep2 = D.bake_body(root, "woman", tmp, source="npc")
+        expect(open(os.path.join(tmp, "utpp_dodge_woman.utpptrav"), "rb").read() == texts[0] and rep2["file"]["sha256"],
+               "npc deterministic: the same bytes twice")
+
+
 def main():
     test_helpers()
     test_bake()
+    test_bake_npc()
     print("FAILED" if FAILS else "PASSED", len(FAILS))
     return 1 if FAILS else 0
 

@@ -55,9 +55,10 @@ inline const char* SectorName(Sector s)
 #define UTPP_DODGE_RATE 1.5f
 #endif
 inline constexpr float kRate = UTPP_DODGE_RATE;
-// inertialized entry from the playing pose; UTPP_DODGE_BLEND_IN overrides it in measurement builds only
+// inertialized entry from the playing pose (long enough that the held arms of a weapon stance follow the crouch at the start of
+// the back clip without a jump); UTPP_DODGE_BLEND_IN overrides it in measurement builds only
 #ifndef UTPP_DODGE_BLEND_IN
-#define UTPP_DODGE_BLEND_IN 0.20f
+#define UTPP_DODGE_BLEND_IN 0.30f
 #endif
 inline constexpr float kBlendInS = UTPP_DODGE_BLEND_IN;
 inline constexpr float kBlendOutS = 0.30f;     // inertialized hand-back to the motion search

@@ -123,8 +123,8 @@ DATA = [
     (P_DATA + "utpp_traversal_man.utpptrav", 16074696, "c7620f82a795bca6125229eeefa91174921418bef3598609a6630163ebce79fb"),
     (P_DATA + "utpp_traversal_table.json", 15013, "bbd5e0d32928fe91bc770bfdb1f2cc6509529f3e5474cf1183c80b4ea416ec9b"),
     # ground dodge clips, four per body (tools/mmbake/dodgebake.py); the driver fails closed without them
-    (P_DATA + "utpp_dodge_woman.utpptrav", 256280, "362679d45f25b9ec84cc9c83965394c3a751f7b44767a500e6169d5f875ffc51"),
-    (P_DATA + "utpp_dodge_man.utpptrav", 256207, "dd47da768ec2c1a059eb3abbd4ef6bf5b632af229c98dfaa2456ae0d77cc5b60"),
+    (P_DATA + "utpp_dodge_woman.utpptrav", 376690, "415add6b929d5c7b33df424a05b30767ed29bda5eb1676bb280bc6327a3a8901"),
+    (P_DATA + "utpp_dodge_man.utpptrav", 376069, "4816f3b2546e81cb6f349f894abf080518cba7ba00ccbb736805fd612f0d0703"),
     (P_ARC + "utpp_camera.archive", 8192, "3f85260e895fe8aedf738aa3030c60372b82c973ef0802b04cd5ffbaba66dbe6"),
     (P_ARC + "utpp_female_tpp_nails_plane.archive", 131072, "7475da5a7101fe46876c2acf41301909ae45968c679db7b4a73b052e2c1ec4ff"),
     (P_ARC + "utpp_weapon_magazine_fix.archive", 1089536, "b52cc3233adc52843b28483107579d575959aee4f2ea5ede1c91f65633ea8663"),
