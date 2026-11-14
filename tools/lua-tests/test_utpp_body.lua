@@ -1440,7 +1440,7 @@ do
   M.body.frozen = nil
   check("module: Status carries the vehicle window state", string.find(M.Status(), "vehicle=", 1, true) ~= nil)
   M.body, M.guard, M.veh, M.api, M.core, M.settings.enabled = saved[1], saved[2], saved[3], saved[4], saved[5], saved[6]
-  check("module: body.shadowProxy default on (no utpp_core)", M.Config().shadowProxy == true)
+  check("module: body.shadowProxy default off (no utpp_core)", M.Config().shadowProxy == false)
 end
 
 -- ---------------------------------------------------------------- 0.1.8 vehicle batch (MOTO-1 C, CAR-7 (2), CAM-11)

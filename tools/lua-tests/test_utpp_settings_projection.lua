@@ -1544,11 +1544,11 @@ do
 
   -- ---------------------------------------------------------------- defaults revision
   do
-    local REV = "core.defaultsRevision=" .. tostring(1)
+    local REV = "core.defaultsRevision=" .. tostring(2)
     local oldFile = bootWithFile("melee.guard=false\nmm.headLead=false\n")
     local onDisk = readFile(tmpSettings) or ""
     check("T03 defaults revision: the moved value is written back at once (with the revision) and the other keys stay in the file",
-      count(onDisk, "core.defaultsRevision=1") == 1 and string.find(onDisk, "melee.guard=true", 1, true) ~= nil
+      count(onDisk, "core.defaultsRevision=2") == 1 and string.find(onDisk, "melee.guard=true", 1, true) ~= nil
       and string.find(onDisk, "mm.headLead=false", 1, true) ~= nil)
     check("T03 defaults revision: the registered default is on", oldFile.settings.defs["melee.guard"].default == true)
     check("T03 defaults revision: a file without a revision with the old default stored (false) moves to the new default (once)",
@@ -1556,7 +1556,7 @@ do
     local logged = ""
     for _, l in ipairs(coreLines) do if string.find(l, "settings defaults revision", 1, true) then logged = l end end
     check("T03 defaults revision: the log line names the revisions and the key",
-      string.find(logged, "0 -> 1", 1, true) ~= nil and string.find(logged, "melee.guard false -> true", 1, true) ~= nil, logged)
+      string.find(logged, "0 -> 2", 1, true) ~= nil and string.find(logged, "melee.guard false -> true", 1, true) ~= nil, logged)
     check("T03 defaults revision: another stored value of the same file is untouched", oldFile.Get("mm.headLead") == false)
     oldFile.Save(tmpSettings)
     local saved = readFile(tmpSettings)

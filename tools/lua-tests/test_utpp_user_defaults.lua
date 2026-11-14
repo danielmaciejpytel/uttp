@@ -23,7 +23,7 @@ local EXPECTED = {
   ["bodyturn.aimChestAlign"] = true, ["bodyturn.aimJog"] = true, ["bodyturn.aimJogSpeed"] = 3.3,
   ["bodyturn.shooterMode"] = false, -- Shooter mode (2026-10-22): opt-in, OFF by default
   -- Body visibility
-  ["body.impl"] = true, ["body.hideFpp"] = true, ["body.showTpp"] = true, ["body.shadowProxy"] = true, ["body.garments"] = true,
+  ["body.impl"] = true, ["body.hideFpp"] = true, ["body.showTpp"] = true, ["body.shadowProxy"] = false, ["body.garments"] = true,
   ["body.headGuard"] = true, ["body.garmentOffsets"] = false, ["body.retry"] = true,
   -- Animation
   ["mm.shootTransfer"] = true, ["mm.aimUpperFade"] = true, ["mm.idleHold"] = true, ["mm.kneeFix"] = true,
@@ -278,7 +278,7 @@ local USER_SETTINGS = {
   ["bodyturn.aimStrafeUnarmed"] = true, ["bodyturn.aimChestAlign"] = true, ["bodyturn.aimJog"] = true,
   ["bodyturn.aimJogSpeed"] = 3.3, ["bodyturn.guardFix"] = true, ["bodyturn.aimSmooth"] = true, ["bodyturn.shooterMode"] = false,
   ["body.impl"] = true,
-  ["body.hideFpp"] = true, ["body.showTpp"] = true, ["body.shadowProxy"] = true, ["body.garments"] = true,
+  ["body.hideFpp"] = true, ["body.showTpp"] = true, ["body.shadowProxy"] = false, ["body.garments"] = true,
   ["body.headGuard"] = true, ["body.garmentOffsets"] = false, ["body.retry"] = true,
 }
 -- registered by utpp_vehiclecam from its onInit with a live controller (not part of this harness; the three defaults are on)

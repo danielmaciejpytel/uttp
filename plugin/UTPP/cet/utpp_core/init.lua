@@ -319,9 +319,10 @@ M.MIGRATED_KEYS = MIGRATED_KEYS
 -- default (it cannot be told from a value nobody chose); any other stored value is a choice and stays. Save writes the
 -- current revision, so the replacement happens once.
 M.DEFAULTS_REVISION_KEY = "core.defaultsRevision"
-M.DEFAULTS_REVISION = 1
+M.DEFAULTS_REVISION = 2
 M.DEFAULT_CHANGES = {
   { rev = 1, key = "melee.guard", from = false, to = true },
+  { rev = 2, key = "body.shadowProxy", from = true, to = false },
 }
 S.fileRevision = nil
 

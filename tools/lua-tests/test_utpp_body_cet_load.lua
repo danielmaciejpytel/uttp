@@ -85,8 +85,8 @@ check("utpp_body 0.1.7: no vehicle window errors without a player", count(lines,
 check("utpp_body 0.1.8: utpp_vehiclecam not loaded -> hook still pending, no hook errors", mod.vcamHook.state == "pending"
   and mod.vcamHook.tries >= 2 and count(lines, "vehicle camera hook") == 0, mod.vcamHook.state .. " " .. mod.vcamHook.tries)
 if core then
-  check("utpp_body 0.1.7: setting body.shadowProxy registered (default on)", core.settings.defs["body.shadowProxy"] ~= nil
-    and mod.Config().shadowProxy == true)
+  check("utpp_body 0.1.7: setting body.shadowProxy registered (default off)", core.settings.defs["body.shadowProxy"] ~= nil
+    and mod.Config().shadowProxy == false)
 end
 -- 0.1.7 adapter: api.vehicle() reads PSM Vehicle (blackboard) + Game.GetMountedVehicle with a CET-like Game mock
 do

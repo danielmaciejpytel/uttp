@@ -8,7 +8,7 @@ return {
     ["body.hideFpp"] = "true",
     ["body.impl"] = "true",
     ["body.retry"] = "true",
-    ["body.shadowProxy"] = "true",
+    ["body.shadowProxy"] = "false",
     ["body.showTpp"] = "true",
     ["bodyturn.aimChestAlign"] = "true",
     ["bodyturn.aimJog"] = "true",
@@ -628,7 +628,7 @@ return {
       ["type"] = "bool"
     },
     ["body.shadowProxy"] = {
-      ["default"] = "true",
+      ["default"] = "false",
       ["hasApply"] = false,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2138,7 +2138,7 @@ return {
     ["body.hideFpp"] = "true",
     ["body.impl"] = "true",
     ["body.retry"] = "true",
-    ["body.shadowProxy"] = "true",
+    ["body.shadowProxy"] = "false",
     ["body.showTpp"] = "true",
     ["bodyturn.aimChestAlign"] = "true",
     ["bodyturn.aimJog"] = "true",
@@ -2860,7 +2860,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=1\r\
+core.defaultsRevision=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -2922,7 +2922,7 @@ bodyturn.shooterMode=false\r\
 body.impl=true\r\
 body.hideFpp=true\r\
 body.showTpp=true\r\
-body.shadowProxy=true\r\
+body.shadowProxy=false\r\
 body.garments=true\r\
 body.headGuard=true\r\
 body.garmentOffsets=false\r\
@@ -3268,7 +3268,7 @@ vehicle.jumpOutSidePush=true\r\
     ["body.hideFpp"] = "true",
     ["body.impl"] = "true",
     ["body.retry"] = "false",
-    ["body.shadowProxy"] = "true",
+    ["body.shadowProxy"] = "false",
     ["body.showTpp"] = "true",
     ["bodyturn.aimChestAlign"] = "true",
     ["bodyturn.aimJog"] = "true",
@@ -3438,7 +3438,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=1\r\
+core.defaultsRevision=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -3500,7 +3500,7 @@ bodyturn.shooterMode=true\r\
 body.impl=true\r\
 body.hideFpp=true\r\
 body.showTpp=true\r\
-body.shadowProxy=true\r\
+body.shadowProxy=false\r\
 body.garments=true\r\
 body.headGuard=true\r\
 body.garmentOffsets=false\r\

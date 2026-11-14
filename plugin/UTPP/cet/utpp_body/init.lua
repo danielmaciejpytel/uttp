@@ -28,10 +28,12 @@
 -- default environment of QueueRep / RedsSlot / CreateNative works in the CET sandbox where _G is nil, see M.DefaultEnv;
 -- Game / NewObject / GetPlayer / GetSingleton resolved live by name at call time (CET sets them after load);
 -- FPP entity meshes the TPP body
--- duplicates are hidden in TPP and restored in FPP - class shadowProxy (t0_000_p?a_base__full_shadow, head_shadowmesh:
--- the FPP shadow-only proxy -> V had two shadows) and renderPlaneFpp (entity meshes with renderingPlaneAnimationParam
+-- duplicates: class renderPlaneFpp (entity meshes with renderingPlaneAnimationParam
 -- "renderPlane": weapon grip cyberware device / decals, FPP fists, FPP lights -> drawn on the weapon plane through the
--- TPP body); setting body.shadowProxy; one log line per corrected / restored component. The head guard
+-- TPP body) is hidden in TPP and restored in FPP; class shadowProxy (t0_000_p?a_base__full_shadow, head_shadowmesh: the
+-- FPP shadow-only proxy) is left as the game sets it unless body.shadowProxy is on - with ray-traced shadows the proxy
+-- casts the shadow of the torso and the legs, and its skeleton follows the written pose; one log line per corrected /
+-- restored component. The head guard
 -- windows (mount / exit / unmount) are opened by utpp_body itself from the PSM vehicle state + GetMountedVehicle
 -- (M.NewVehicleWindows), and the unmount re-checks the TPP representation at once (retry budget reset)).
 -- After the save load the body was
@@ -1428,7 +1430,7 @@ end
 
 -- ================================================================ settings (utpp_core) and module API
 M.settings = { enabled = true, hideFpp = true, showTpp = true, garments = true, garmentOffsets = false, headGuard = true,
-               shadowProxy = true, retry = true, repKeep = true } -- repKeep: module switch (M.SetRepKeep), no menu entry
+               shadowProxy = false, retry = true, repKeep = true } -- repKeep: module switch (M.SetRepKeep), no menu entry
 M.core = nil
 
 function M.RegisterSettings(core)
@@ -1441,8 +1443,8 @@ function M.RegisterSettings(core)
     desc = "Third person: hide parts that exist only in first person (arms, torso, neck, nails of the FPP body)." })
   core.Register({ key = "body.showTpp", section = "body", type = "bool", default = true, label = "Show third-person body parts",
     desc = "Third person: enable full-body parts the game left disabled (table generated from game data)." })
-  core.Register({ key = "body.shadowProxy", section = "body", type = "bool", default = true, label = "Hide first-person shadow proxy",
-    desc = "Third person: disable the recognized first-person shadow-only proxy. Other meshes and their shadow settings remain unchanged." })
+  core.Register({ key = "body.shadowProxy", section = "body", type = "bool", default = false, label = "Hide first-person shadow proxy",
+    desc = "Third person: disable the recognized first-person shadow-only proxy. Off by default: with ray-traced shadows the proxy casts the shadow of the torso and the legs. Other meshes and their shadow settings remain unchanged." })
   core.Register({ key = "body.garments", section = "body", type = "bool", default = true, label = "Third-person clothing variants",
     desc = "Third person: switch trousers and shoes from their first-person variant (&FPP) to the third-person one." })
   core.Register({ key = "body.headGuard", section = "body", type = "bool", default = true, label = "Keep V's head around vehicles",
