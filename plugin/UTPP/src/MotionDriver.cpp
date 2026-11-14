@@ -5885,7 +5885,9 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
                 // Pistol reload kept through a walk / run start or begun moving (GroundMoveKeep): the clavicles stay on V's own pose
                 // under the game's arms, so the game's moving clavicle lanes never narrow the shoulders (the correction was full when it
                 // latched through the weight; an edge latch clears them while the reload upper weight is still ~0).
-                if (reloadGirdleOwn)
+                // Two weapons drawn: the reload has no hand correction (no magazine contact of one weapon), so the clavicles
+                // stay on V's own pose for the whole hand-back as well.
+                if (reloadGirdleOwn || DualWieldNow())
                     reload_contacts_runtime::ClearShoulderGirdleBits(aSnap.upperBits, n, kFirstBone,
                                                                      [&](uint32_t i) { return b.db.BoneName(i); });
             }
