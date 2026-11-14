@@ -313,25 +313,40 @@ inline constexpr bool kReloadCorrectionMoving=UTPP_RELOAD_CORRECTION_MOVING!=0;
 // The keep latches on the first frame on which the former rule would withdraw a FULL correction (weight >= kGroundKeepLatchWeight) while
 // V stands upright on the ground (PSM stance Stand, MovementMode OnGround, no slide frame); from then on the correction stays allowed
 // (it follows the native envelope, through the exit) and the driver keeps the clavicles on V's own pose (ClearShoulderGirdleBits).
-// Crouch, air or a slide ends it for the rest of the episode (the former .2 s withdrawal, never re-acquired). A reload that never had a
-// full correction (began moving, or V moves during the entry ramp) keeps the former rule; a frame on which the former rule allows the
-// correction is unchanged, so standing reloads are bit-identical. Mutation 1 (UTPP_RELOAD_GROUND_KEEP_MUTATION) turns the keep off.
+// Crouch, air or a slide ends it for the rest of the episode (the former .2 s withdrawal, never re-acquired). A frame on which the former
+// rule allows the correction is unchanged, so standing reloads are bit-identical. Mutation 1 (UTPP_RELOAD_GROUND_KEEP_MUTATION) turns
+// the keep off.
+// A pistol reload that BEGINS while V moves upright on the ground (walk, jog, run start; the game's clip and the authored clip alike)
+// latches the keep on its first reload frame (CorrectionEpisode::edgeFrame): recorded 2026-11-14, handgun reload begun walking,
+// uncorrected, the game's clavicles shown for the whole reload (left clavicle 14 cm off V's, shoulder joints 26 cm apart instead of
+// 33.5, 4.3 cm in the last .3 s). The correction then ramps in with the native envelope like a standing reload (CorrectionFade .12 s
+// entry ceiling) and the clavicle bits are cleared from the first frame, while the reload upper weight is still ~0, so the girdle never
+// leaves V's pose. A reload whose first frame is crouched, in the air or on a slide keeps the former rule; V starting to move during the
+// entry ramp of a reload that began standing (weight below kGroundKeepLatchWeight) also keeps the former rule. Mutation 2 turns the
+// edge latch off (reloads begun moving stay uncorrected).
 #if defined(UTPP_RELOAD_GROUND_KEEP_MUTATION) && UTPP_RELOAD_GROUND_KEEP_MUTATION==1
 inline constexpr bool kReloadGroundKeep=false; // mutation 1: the pistol rule withdraws the correction on the run start (former policy)
 #else
 inline constexpr bool kReloadGroundKeep=true;
 #endif
+#if defined(UTPP_RELOAD_GROUND_KEEP_MUTATION) && UTPP_RELOAD_GROUND_KEEP_MUTATION==2
+inline constexpr bool kReloadGroundKeepEdge=false; // mutation 2: a pistol reload that begins moving is never corrected (former policy)
+#else
+inline constexpr bool kReloadGroundKeepEdge=true;
+#endif
 inline constexpr float kGroundKeepLatchWeight=0.999f;
 struct GroundMoveKeep
 {
-    bool latched=false; // the correction is kept through ground movement for the rest of this episode
-    bool closed=false;  // crouch / air / slide after the latch: no keep (and no new latch) until the episode resets
-    void Reset(){latched=false;closed=false;}
+    bool latched=false;  // the correction is kept through ground movement for the rest of this episode
+    bool closed=false;   // crouch / air / slide after the latch: no keep (and no new latch) until the episode resets
+    bool fromEdge=false; // latched on the first reload frame (the reload began moving)
+    void Reset(){latched=false;closed=false;fromEdge=false;}
     // pistol: pistol overlay inside the reload domain (rifles have their own pose rule); allowedBefore: the former admission of this frame
     // ((kReloadCorrectionMoving || ReloadCorrectionPose) && (!authored || stationary episode)); groundStand: stance Stand, MovementMode
-    // OnGround, no slide frame; fadeWeight: CorrectionFade weight before this frame's Step. Returns the keep of this frame (OR it into
-    // the admission). Non-finite fadeWeight never latches.
-    bool Step(bool pistol,bool allowedBefore,bool groundStand,float fadeWeight)
+    // OnGround, no slide frame; fadeWeight: CorrectionFade weight before this frame's Step; episodeEdge: the first reload frame of the
+    // episode (CorrectionEpisode::edgeFrame). Returns the keep of this frame (OR it into the admission). Non-finite fadeWeight never
+    // latches through the weight; the edge latch does not read the weight.
+    bool Step(bool pistol,bool allowedBefore,bool groundStand,float fadeWeight,bool episodeEdge=false)
     {
         if constexpr(!kReloadGroundKeep){Reset();return false;}
         if(!pistol){Reset();return false;}
@@ -340,10 +355,38 @@ struct GroundMoveKeep
         {
             closed=latched;
             latched=false;
+            fromEdge=false;
             return false;
         }
-        if(!latched && !allowedBefore && std::isfinite(fadeWeight) && fadeWeight>=kGroundKeepLatchWeight)latched=true;
+        if(!latched && !allowedBefore)
+        {
+            if(kReloadGroundKeepEdge && episodeEdge){latched=true;fromEdge=true;}
+            else if(std::isfinite(fadeWeight) && fadeWeight>=kGroundKeepLatchWeight)latched=true;
+        }
         return latched;
+    }
+};
+// Clavicles of a reload that began moving after its episode ended early (a shot or any other loss of the reload domain resets the
+// episode, the keep and the correction in one frame while the reload upper weight still falls over .2 s): the clavicle bits would come
+// back at once and step the girdle by (upper weight) x (game - own clavicles), 14 cm in the recorded walking reload. The hold keeps them
+// on V's pose until the reload handback ends. Only for an edge latch (GroundMoveKeep::fromEdge): a keep that latched in a reload begun
+// standing returns its bits as before. A new episode or a crouch / air / slide close ends the hold. Mutation 3 turns it off.
+#if defined(UTPP_RELOAD_GROUND_KEEP_MUTATION) && UTPP_RELOAD_GROUND_KEEP_MUTATION==3
+inline constexpr bool kReloadGirdleHold=false; // mutation 3: the clavicle bits come back with the episode reset
+#else
+inline constexpr bool kReloadGirdleHold=true;
+#endif
+struct GirdleHold
+{
+    bool on=false;
+    void Reset(){on=false;}
+    // keepLatched / keepFromEdge: GroundMoveKeep of this frame; episodeLive: the reload episode is open (CorrectionEpisode::Live);
+    // handback: the reload handback or correction tail of this frame. Returns true when the clavicle bits are cleared this frame.
+    bool Step(bool keepLatched,bool keepFromEdge,bool episodeLive,bool handback)
+    {
+        if(keepLatched){on=kReloadGirdleHold && keepFromEdge;return true;}
+        if(!handback || episodeLive)on=false;
+        return on;
     }
 };
 // Removes the clavicle channels (the "LeftShoulder" / "RightShoulder" prefixes of IsWeaponActionBone) from a weapon-action mask: they
@@ -374,12 +417,14 @@ struct CorrectionEpisode
     bool observedActive=false;
     bool allowed=false;
     bool authoredSeen=false;
+    bool edgeFrame=false; // the last Observe classified the episode (its first reload frame)
     GroundMoveKeep groundKeep; // stepped by the caller after Observe; reset with the episode (Observe's result does not read it)
 
-    void Reset(){entryPending=false;observedActive=false;allowed=false;authoredSeen=false;groundKeep.Reset();}
+    void Reset(){entryPending=false;observedActive=false;allowed=false;authoredSeen=false;edgeFrame=false;groundKeep.Reset();}
     // Call only on the actual non-reload -> reload action edge. Does not touch
     // any CorrectionFade weight owned by the caller.
-    void Begin(){entryPending=true;observedActive=false;allowed=false;authoredSeen=false;groundKeep.Reset();}
+    void Begin(){entryPending=true;observedActive=false;allowed=false;authoredSeen=false;edgeFrame=false;groundKeep.Reset();}
+    bool Live()const{return entryPending || observedActive;}
 
     // reloadActive is PSM action==2; false is the action-0 envelope tail.
     // domainPermitted includes TPP/weapon/release/body safety. Any loss of
@@ -387,6 +432,7 @@ struct CorrectionEpisode
     bool Observe(bool reloadActive,bool stationaryPose,float physicalSpeed,
                  bool domainPermitted,float nativeEnvelope,bool authoredClip=false)
     {
+        edgeFrame=false;
         if(!domainPermitted || !std::isfinite(physicalSpeed) || physicalSpeed<0.0f ||
            !std::isfinite(nativeEnvelope) || nativeEnvelope<0.0f || nativeEnvelope>1.0f)
         {Reset();return false;}
@@ -397,6 +443,7 @@ struct CorrectionEpisode
             {
                 entryPending=false;
                 observedActive=true;
+                edgeFrame=true;
                 allowed=kReloadCorrectionMoving || (stationaryPose && physicalSpeed<=kStationarySpeedMps);
             }
             else if(!observedActive)

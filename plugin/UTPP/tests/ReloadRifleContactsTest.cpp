@@ -11,6 +11,8 @@
 // 19 = contact catch-up at the old 9 m/s, 20 = the episode starts from its first frame, not from the observed published pose, 21 = rifle ramp with the 1000 deg/s joint slew, 12 = no weapon follower (the whole target jumps with the weight on the ramp-in), 14 = the old exit fade (lag at full scale until the weight is
 // below .15), 15 = no follower reset at weight 0, 16 = no contact catch-up of the left hand.
 // UTPP_RELOAD_CONTACT_MUTATION=25: the reject replay / ramp-in fades towards the records as handed in (the game's girdle), section 10.
+// UTPP_RELOAD_GROUND_KEEP_MUTATION=1: no ground keep, 2: no edge latch (a pistol reload begun moving stays uncorrected), 3: no girdle
+// hold after an early episode end (sections 9 and 11).
 // Every mutation build must report an assertion FAIL (ctest PASS_REGULAR_EXPRESSION "FAIL ").
 #include "../src/mm/NativeReloadContactsRuntime.hpp"
 #include "../src/mm/OverlayFile.hpp"
@@ -571,9 +573,9 @@ int main(int argc,char** argv)
     }
 
     // 9) Pistol reload that began standing, then V starts to walk / run (GroundMoveKeep, ReloadContactFade.hpp). Policy at 60 fps with
-    //    the production CorrectionFade / UpperEnvelope: the keep never changes a frame the former rule allows (standing reloads and reloads
-    //    that began moving are bit-identical), keeps a full correction through the walk start and the exit, ends on crouch / air / slide
-    //    without re-acquiring, and never latches during the entry ramp.
+    //    the production CorrectionFade / UpperEnvelope: the keep never changes a frame the former rule allows (standing reloads are
+    //    bit-identical), keeps a full correction through the walk start and the exit, ends on crouch / air / slide without re-acquiring,
+    //    and never latches during the entry ramp. Reloads that begin moving latch on their edge (section 11).
     {
         struct G{bool stationary,groundStand;};
         const auto play=[&](auto&& at,int len,bool keepOn,std::vector<float>& w,bool& latched){
@@ -584,7 +586,7 @@ int main(int argc,char** argv)
                 const G g=at(k);
                 const float e=env.Step(dt,k<len,false,true);
                 const bool before=rt::ReloadCorrectionPose(false,g.stationary,0,false); // non-authored pistol: the pose rule alone
-                const bool keep=keepOn && ep.groundKeep.Step(true,before,g.groundStand,fade.weight);
+                const bool keep=keepOn && ep.groundKeep.Step(true,before,g.groundStand,fade.weight,k==0); // k 0: the episode edge
                 latched=latched || ep.groundKeep.latched;
                 w.push_back(fade.Step(dt,e,before || keep,true,true));
             }
@@ -598,9 +600,10 @@ int main(int argc,char** argv)
         const auto standing=[](int){return G{true,true};};
         play(standing,100,false,before,latchedBefore);play(standing,100,true,kept,latched);
         Check(same(before,kept) && !latched,"ground keep: a standing pistol reload is bit-identical (never latched)");
+        // A reload that begins walking latches on its edge (section 11 covers it in full); here only that it is corrected at all.
         const auto walking=[](int){return G{false,true};};
-        play(walking,100,false,before,latchedBefore);play(walking,100,true,kept,latched);
-        Check(same(before,kept) && !latched,"ground keep: a pistol reload that began walking is bit-identical (no correction, never latched)");
+        play(walking,100,true,kept,latched);
+        Check(latched && kept[50]>=0.999f,"ground keep: a pistol reload that began walking latches on its edge (corrected, section 11)");
         const auto entryMove=[](int k){return G{k<5,true};};
         play(entryMove,100,false,before,latchedBefore);play(entryMove,100,true,kept,latched);
         Check(same(before,kept) && !latched,"ground keep: V moving during the entry ramp (correction not full) keeps the former withdrawal");
@@ -792,6 +795,190 @@ int main(int argc,char** argv)
             Check(clavDeg<=20.5f && socketStep<0.015f && minWidth>=std::min(wOwn,minWidthAccepted)-0.005f,
                   (std::string(tag)+": the clavicle turns at most by the reach step, no shoulder pop at the rejection or the ramp-in").c_str());
         }
+    }
+
+    // 11) Pistol reload that BEGINS while V walks / runs upright on the ground (GroundMoveKeep edge latch, GirdleHold). Policy through the
+    //     production CorrectionEpisode::Observe / CorrectionFade / UpperEnvelope at 60 fps in the driver's order, then whole frames on the
+    //     Female rig with the recorded walking handgun girdle (left clavicle 14 cm, right 4.5 cm towards the midline; the left one 26 cm
+    //     in the last .3 s of the reload, the clavicles crossed). Mutation 2 (no edge latch) and 3 (no hold after an early episode end)
+    //     must fail here.
+    {
+        struct G{bool stationary,groundStand;float speed;bool domain;};
+        struct F{float e,w;bool girdleOff,latched,fromEdge;};
+        const float dt=1.0f/60.0f,fall=dt/0.2f+1.0e-5f;
+        const auto play=[&](auto&& at,int len,bool authored,bool keepOn,std::vector<F>& out){
+            rt::CorrectionFade fade;rt::UpperEnvelope env;rt::CorrectionEpisode ep;rt::GirdleHold hold;ep.Begin();out.clear();
+            for(int k=0;k<len+24;++k)
+            {
+                const G g=at(k);
+                const float e=env.Step(dt,k<len && g.domain,false,true);
+                const bool stEp=ep.Observe(k<len,g.stationary,g.speed,g.domain,e,authored);
+                const bool before=(rt::kReloadCorrectionMoving || rt::ReloadCorrectionPose(false,g.stationary,0,false)) && (!authored || stEp);
+                const bool keep=keepOn && ep.groundKeep.Step(g.domain,before,g.groundStand,fade.weight,ep.edgeFrame);
+                const float w=fade.Step(dt,e,before || keep,g.domain,true);
+                const bool off=keepOn ? hold.Step(ep.groundKeep.latched,ep.groundKeep.fromEdge,ep.Live(),e>0.0f || fade.Active())
+                                      : ep.groundKeep.latched;
+                out.push_back(F{e,w,off,ep.groundKeep.latched,ep.groundKeep.fromEdge});
+            }
+        };
+        const auto maxDiff=[](const std::vector<F>& a,const std::vector<F>& b){
+            float d=a.size()==b.size() ? 0.0f : 9.0f;
+            for(size_t i=0;i<a.size() && i<b.size();++i)d=std::max(d,std::fabs(a[i].w-b[i].w));
+            return d;};
+        const auto anyLatch=[](const std::vector<F>& a){for(const auto& f:a)if(f.latched)return true;return false;};
+        constexpr int len=85; // 1.41 s, the recorded handgun reload
+        std::vector<F> stand,walk,former,aStand,aWalk,shot,standShot;
+        play([](int){return G{true,true,0.0f,true};},len,false,true,stand);
+        play([](int){return G{false,true,1.37f,true};},len,false,true,walk);
+        play([](int){return G{false,true,1.37f,true};},len,false,false,former);
+        float peakWalk=0.0f,peakFormer=0.0f;for(const auto& f:walk)peakWalk=std::max(peakWalk,f.w);for(const auto& f:former)peakFormer=std::max(peakFormer,f.w);
+        std::printf("  begun walking (game clip): former peak %.3f | edge keep peak %.3f, max diff to the standing reload %.2e\n",
+                    peakFormer,peakWalk,maxDiff(walk,stand));
+        Check(peakFormer<=1.0e-6f,"fixture: the former rule never corrects a pistol reload that began walking");
+        Check(walk[0].latched && walk[0].fromEdge && peakWalk>=0.999f && maxDiff(walk,stand)<=1.0e-5f,
+              "edge keep: a game-clip pistol reload begun walking gets the standing reload's correction weights (ramp-in, full, exit)");
+        play([](int){return G{true,true,0.0f,true};},len,true,true,aStand);
+        play([](int){return G{false,true,1.37f,true};},len,true,true,aWalk);
+        Check(aWalk[0].latched && maxDiff(aWalk,aStand)<=1.0e-5f,
+              "edge keep: an authored pistol reload begun walking gets the standing authored reload's correction weights");
+        {
+            std::vector<F> brake,brakeFormer;
+            play([](int){return G{true,true,0.5f,true};},len,false,true,brake);play([](int){return G{true,true,0.5f,true};},len,false,false,brakeFormer);
+            Check(!anyLatch(brake) && maxDiff(brake,brakeFormer)==0.0f,"edge keep: a game-clip reload begun braking on a stationary pose keeps the former rule");
+        }
+        // Begun crouched / in the air / on a slide (not upright on the ground on the edge frame): the former rule, never latched.
+        for(int variant=0;variant<2;++variant)
+        {
+            std::vector<F> a,b;
+            const auto at=[variant](int k){return G{false,variant==0 ? false : k>0,1.37f,true};}; // 0: whole reload, 1: only the edge frame
+            play(at,len,false,true,a);play(at,len,false,false,b);
+            Check(!anyLatch(a) && maxDiff(a,b)==0.0f,variant==0 ? "edge keep: a reload begun crouched / in the air / sliding keeps the former rule"
+                                                               : "edge keep: an edge frame that is not upright on the ground never latches later");
+        }
+        {
+            std::vector<F> c;
+            play([](int k){return G{false,k<40 || k>=55,1.37f,true};},len,false,true,c); // walk, crouch 40-54, upright again
+            float dropMax=0.0f,riseAfter=0.0f;
+            for(int k=41;k<len+24;++k){dropMax=std::max(dropMax,c[size_t(k-1)].w-c[size_t(k)].w);riseAfter=std::max(riseAfter,c[size_t(k)].w-c[size_t(k-1)].w);}
+            Check(c[39].w>=0.999f && dropMax<=fall && c[53].w<=1.0e-6f && riseAfter<=0.0f && !c[60].girdleOff,
+                  "edge keep: a crouch in a reload begun walking withdraws the correction over .2 s, no re-acquire, the clavicle bits return");
+        }
+        {
+            rt::GroundMoveKeep k;
+            Check(!k.Step(false,false,true,0.0f,true) && !k.latched,"edge keep: never without the pistol solve (rifle, FK owner)");
+        }
+        // Clavicle bits: cleared from the edge frame to the end of the handback; after a shot (episode reset in one frame) the hold keeps
+        // them for a reload begun moving, a keep that latched in a reload begun standing returns them as before.
+        {
+            bool edgeOff=true;for(const auto& f:walk)if(f.e>0.0f || f.w>0.0f)edgeOff=edgeOff && f.girdleOff;
+            play([](int k){return G{false,true,1.37f,k<len+3};},len,false,true,shot);
+            play([](int k){return G{k<50,true,k<50 ? 0.0f : 1.37f,k<len+3};},len,false,true,standShot);
+            bool shotOff=true;int heldFrames=0;
+            for(int k=len+3;k<len+24;++k){if(shot[size_t(k)].e>0.0f){shotOff=shotOff && shot[size_t(k)].girdleOff;++heldFrames;}else shotOff=shotOff && !shot[size_t(k)].girdleOff;}
+            bool standSame=true;for(const auto& f:standShot)standSame=standSame && f.girdleOff==f.latched;
+            std::printf("  clavicle bits: cleared on every reload frame %d | after the shot held %d frames (upper weight at the shot %.3f)\n",
+                        int(edgeOff),heldFrames,shot[size_t(len+3)].e);
+            Check(edgeOff,"girdle: a reload begun walking clears the clavicle bits from its first frame to the end of the handback");
+            Check(heldFrames>0 && shotOff,"girdle hold: after a shot the clavicles stay on V's pose until the reload upper weight is 0");
+            Check(anyLatch(standShot) && standSame,"girdle hold: a keep latched in a reload begun standing returns the bits with the episode (unchanged)");
+        }
+
+        // Whole frames: composition (BlendIntoRecords) + Capture + Finish with the production Continuity.
+        const int lc=sk.parent[rig.left.upper],rc=sk.parent[rig.right.upper];
+        const auto lm0=native_reload::Model(sk,*base,lc).t,rm0=native_reload::Model(sk,*base,rc).t;
+        const math::Vec3 inDir=(rm0-lm0)*(1.0f/gik::Len(rm0-lm0));
+        const auto girdle=[&](float left,float right,float forearmTwistDeg){
+            auto q=std::make_unique<ov::Pose>(*base);
+            for(int side=0;side<2;++side)
+            {
+                const int c=side ? rc : lc;
+                auto m=native_reload::Model(sk,*q,c);m.t=m.t+inDir*(side ? -right : left);
+                q->b[c]=native_reload::Relative(native_reload::Model(sk,*q,sk.parent[c]),m);
+            }
+            if(forearmTwistDeg!=0.0f)
+                q->b[rig.left.lower].r=math::QuatNormalize(math::QuatMul(q->b[rig.left.lower].r,
+                    gik::AxisAngle(math::Vec3{0.0f,1.0f,0.0f},forearmTwistDeg*math::kPi/180.0f)));
+            return q;};
+        const int64_t tps=10000000,tick=tps/60;
+        const auto width=[&](const ov::Pose& q){
+            return gik::Len(native_reload::Model(sk,q,rig.left.upper).t-native_reload::Model(sk,q,rig.right.upper).t);};
+        const auto gap=[&](const ov::Pose& q){return math::Dot(native_reload::Model(sk,q,rc).t-native_reload::Model(sk,q,lc).t,inDir);};
+        const auto inWeapon=[&](const ov::Pose& q,int bone){
+            const auto fr=native_reload::Model(sk,q,rig.weaponRight);
+            return math::QuatRotate(math::QuatInv(fr.r),native_reload::Model(sk,q,bone).t-fr.t);};
+        const auto elbowRy=[&](const ov::Pose& q){
+            const auto r=math::QuatNormalize(math::QuatMul(math::QuatInv(base->b[rig.left.lower].r),q.b[rig.left.lower].r));
+            return std::fabs(std::asin(std::clamp(2.0f*(r.w*r.y-r.z*r.x),-1.0f,1.0f)))*180.0f/math::kPi;};
+        struct W{int frames=0,accepted=0;float minWidth=9,minGap=9,clavStep=0,socketStep=0,startStep=0,endStep=0,handErr=0,maxRy=0;bool ok=true;};
+        const auto wholeRun=[&](const std::vector<F>& seq,bool authored,float twistDeg,bool bitsOn){
+            auto walkGame=girdle(0.14f,0.045f,twistDeg),lateGame=girdle(0.26f,0.045f,twistDeg);
+            rt::Continuity state;W r;
+            ov::Pose prev=*base;bool havePrev=true; // the frame before the reload: V's own pose (upper scale 1)
+            for(size_t k=0;k<seq.size();++k)
+            {
+                const F& f=seq[k];
+                const ov::Pose& game=int(k)>=len-18 ? *lateGame : *walkGame;
+                const float cw=authored ? rt::AuthoredFadeWeight(f.w) : f.w;
+                integ::PoseSnapshot s=snap;s.traceOverlay=int32_t(ov::PoseOverlay::Pistol1H);s.sequence=uint64_t(3000+k);
+                s.reloadContactsWeight=cw;s.reloadContactsEligible=cw>0.0f;s.reloadAuthoredClip=authored && cw>0.0f;
+                s.upperScale=1.0f-(authored ? rt::AuthoredFadeWeight(f.e) : f.e);s.lowerScale=1.0f;
+                if(f.girdleOff && !bitsOn)rt::ClearShoulderGirdleBits(s.upperBits,uint32_t(sk.n),2,[&](uint32_t b){return file.BoneName(b);});
+                std::vector<unsigned char> records;Records(game,records);rt::Cycle cycle;
+                const bool captured=cw>0.0f && rt::Capture(prepared,s,records.data(),sk.n,true,cycle);
+                integ::BlendIntoRecords(records.data(),uint32_t(sk.n),s,1.0f);
+                bool accepted=false;
+                if(cw>0.0f)
+                {
+                    native_reload_contacts::Result res;
+                    accepted=captured && rt::Finish(prepared,s,records.data(),sk.n,true,cycle,res,cw,rt::kAuthoredContactMinReach,&state,
+                                                   int64_t(k+1)*tick,tps) && res.ok;
+                }
+                ov::Pose o;
+                if(!rt::Read(prepared,records.data(),o)){r.ok=false;continue;}
+                ++r.frames;r.accepted+=accepted ? 1 : 0;
+                r.minWidth=std::min(r.minWidth,width(o));r.minGap=std::min(r.minGap,gap(o));
+                if(havePrev)
+                {
+                    const float cs=std::max(gik::Len(native_reload::Model(sk,o,lc).t-native_reload::Model(sk,prev,lc).t),
+                                            gik::Len(native_reload::Model(sk,o,rc).t-native_reload::Model(sk,prev,rc).t));
+                    const float ss=std::max(gik::Len(inSpine3(o,rig.left.upper)-inSpine3(prev,rig.left.upper)),
+                                            gik::Len(inSpine3(o,rig.right.upper)-inSpine3(prev,rig.right.upper)));
+                    r.clavStep=std::max(r.clavStep,cs);r.socketStep=std::max(r.socketStep,ss);
+                    if(k==0)r.startStep=ss;
+                    if(f.e>0.0f || f.w>0.0f)r.endStep=ss; // last frame with a reload weight
+                }
+                if(int(k)>=40 && int(k)<len-18 && f.w>=0.999f)
+                {
+                    r.handErr=std::max(r.handErr,gik::Len(inWeapon(o,rig.left.hand)-inWeapon(*walkGame,rig.left.hand)));
+                    r.maxRy=std::max(r.maxRy,elbowRy(o));
+                }
+                prev=o;havePrev=true;
+            }
+            return r;};
+        const float wOwn=width(*base);
+        const auto report=[&](const char* name,const W& r){
+            std::printf("  whole frame %s: frames %d accepted %d | width own %.1fcm min %.1fcm, clavicle gap min %.1fcm | clavicle step %.2fmm, "
+                        "socket step max %.2fcm (start %.2f, end %.2f) | LH-in-weapon err %.2fcm | elbow ry max %.1fdeg\n",
+                        name,r.frames,r.accepted,wOwn*100.0f,r.minWidth*100.0f,r.minGap*100.0f,r.clavStep*1000.0f,r.socketStep*100.0f,
+                        r.startStep*100.0f,r.endStep*100.0f,r.handErr*100.0f,r.maxRy);};
+        const W wf=wholeRun(former,false,0.0f,true);report("former (begun walking, uncorrected)",wf);
+        Check(wf.ok && wf.minWidth<wOwn-0.15f && wf.minGap<0.0f,"fixture: the former reload begun walking shows the game's narrow, crossed girdle");
+        const W wk=wholeRun(walk,false,0.0f,false);report("edge keep (game clip)",wk);
+        Check(wk.ok && wk.accepted>=60,"edge keep: the contact solve accepts the reload begun walking");
+        Check(wk.minWidth>=0.31f && wk.minWidth>=wOwn-0.01f && wk.minGap>0.0f,
+              "edge keep: V's own shoulder width on every frame (Female >= 31 cm), the clavicles never cross");
+        Check(wk.clavStep<0.001f && wk.startStep<0.015f && wk.endStep<0.015f && wk.socketStep<0.015f,
+              "edge keep: no clavicle step, no shoulder pop at the start, inside or at the end of the reload");
+        Check(wk.handErr<0.015f,"edge keep: the left hand keeps the game's hand-to-weapon relation (hands at the weapon)");
+        const W ws=wholeRun(shot,false,0.0f,false);report("edge keep, shot in the exit",ws);
+        Check(ws.ok && ws.minWidth>=wOwn-0.01f && ws.clavStep<0.001f && ws.socketStep<0.015f,
+              "girdle hold: a shot in the exit of a reload begun walking does not pop the girdle");
+        const W wa=wholeRun(aWalk,true,50.0f,false);
+        report("edge keep (authored clip, forearm 50 deg off its hinge)",wa);
+        Check(wa.ok && wa.minWidth>=wOwn-0.01f && wa.minGap>0.0f && wa.clavStep<0.001f && wa.socketStep<0.015f,
+              "edge keep (authored): V's own shoulder width, no clavicle step or shoulder pop");
+        Check(elbowRy(*girdle(0.14f,0.045f,50.0f))>45.0f,"fixture: the authored left forearm is 50 deg off its hinge (former output)");
+        Check(wa.maxRy<5.0f,"edge keep (authored): the solve keeps the left forearm on its hinge plane (elbow deviation < 5 deg)");
     }
 
     std::printf("%d passed, %d failed\n",g_pass,g_fail);

@@ -215,6 +215,7 @@ bool g_reloadContactsEligible = false;
 bool g_authoredReload = false;
 reload_contacts_runtime::CorrectionFade g_reloadContactFade;
 reload_contacts_runtime::CorrectionEpisode g_reloadContactEpisode;
+reload_contacts_runtime::GirdleHold g_reloadGirdleHold; // clavicles of a reload begun moving after an early episode end (ApplyLocked)
 // UTPP-MOTION SEAM motionfix item 2: aim target (model space) + mm.aimGameUpper; g_aimingNow = wantsToAim of the last
 // v2 frame (ApplyLocked: hand the upper body back while aiming when aimGameUpper is on)
 bool g_aimTgtOn = false, g_aimTgtValid = false;
@@ -1797,7 +1798,7 @@ void SetEnabled(bool aOn)
     if (!aOn) g_authoredReload = false;
     if (!aOn) integ::g_gamePoseCaptureWanted.store(false, std::memory_order_relaxed);
     if (!aOn) { g_airLegsFade.Reset(); g_jumpOutArmsFade.Reset(); g_jumpOutWindowNow = false; }
-    if (!aOn) { ResetAuthoredRecoil(); g_weaponAction = 0; g_hipFirePoseHold.Reset(); g_jumpOutExitHold.Reset(); g_stationaryShotTurn.Reset(); g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadContactsEligible = false; g_shootLastReadyValid = g_shootBaseValid = false; g_shootHold.Reset(); g_shootEpisode.Reset(); }
+    if (!aOn) { ResetAuthoredRecoil(); g_weaponAction = 0; g_hipFirePoseHold.Reset(); g_jumpOutExitHold.Reset(); g_stationaryShotTurn.Reset(); g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadGirdleHold.Reset(); g_reloadContactsEligible = false; g_shootLastReadyValid = g_shootBaseValid = false; g_shootHold.Reset(); g_shootEpisode.Reset(); }
     if (g_enabled != aOn)
     {
         g_aimUpperTail = false;
@@ -1847,7 +1848,7 @@ bool SetRigBody(int32_t aBody)
         ResetAuthoredRecoil();
         g_weaponAction = 0;
         g_hipFirePoseHold.Reset(); g_jumpOutExitHold.Reset(); g_stationaryShotTurn.Reset();
-        g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadContactsEligible = false;
+        g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadGirdleHold.Reset(); g_reloadContactsEligible = false;
         g_aimUpperTail = false;
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
@@ -2553,7 +2554,7 @@ void OnArmed(uint64_t aRig, const std::vector<uint64_t>& aGameHashes, const std:
     g_fnHoldValid = false;
     g_weaponAction = 0;
     g_hipFirePoseHold.Reset(); g_jumpOutExitHold.Reset(); g_stationaryShotTurn.Reset();
-    g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadContactsEligible = false;
+    g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadGirdleHold.Reset(); g_reloadContactsEligible = false;
     g_airLegsFade.Reset();
     g_jumpOutArmsFade.Reset();
     g_jumpOutWindowNow = false;
@@ -2719,9 +2720,11 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
     // A pistol reload whose correction is fully in keeps it when V starts to walk / run upright on the ground (ReloadContactFade.hpp
     // GroundMoveKeep); ApplyLocked then keeps the clavicles on V's own pose. False on every frame the former rule already allows, and
     // under a pose owner that does not correct pistol reloads (the contact solve would not hold the hands on the weapon there).
+    // A pistol reload that begins while V moves upright on the ground latches it on its first reload frame (the episode edge).
     const bool groundKeep = g_reloadContactEpisode.groundKeep.Step(
         reloadDomain && !rifleOverlay && reload_contacts_runtime::OwnerCorrectsPistols(), allowedBefore,
-        cs.stanceRaw == 0 && cs.movementMode == 0 && !(b.map.slideActive || adapter::PsmSlide(f.psmDetailed)), g_reloadContactFade.weight);
+        cs.stanceRaw == 0 && cs.movementMode == 0 && !(b.map.slideActive || adapter::PsmSlide(f.psmDetailed)), g_reloadContactFade.weight,
+        g_reloadContactEpisode.edgeFrame);
     const bool allowStationaryCorrection = allowedBefore || groundKeep;
     g_reloadContactFade.Step(dt, g_reloadUpperWeight, allowStationaryCorrection, reloadDomain, true);
     // Perspective permission is independently checked before Capture and immediately before Finish.
@@ -5840,6 +5843,9 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
         g_aimUpperTail = false;
     const bool reloadHandback = weaponOverlay && g_reloadUpperWeight > 0.0f;
     const bool reloadCorrectionTail = aSnap.reloadContactsEligible && g_reloadContactFade.Active();
+    // Clavicles on V's own pose (GroundMoveKeep, plus GirdleHold after an early episode end of a reload that began moving).
+    const bool reloadGirdleOwn = g_reloadGirdleHold.Step(g_reloadContactEpisode.groundKeep.latched,
+        g_reloadContactEpisode.groundKeep.fromEdge, g_reloadContactEpisode.Live(), reloadHandback || reloadCorrectionTail);
     // melee masked (g_meleeMasked): the game's melee clip or the melee guard owns the upper body; the host's upperScale (its mask
     // fade in / out) stays, the upper bits are the host's when both databases map to the same game bones, else built on MOTION's
     // bones. The tail keeps that while the host's mask is still fading out after the melee mask ended.
@@ -5876,9 +5882,10 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
             if (action.ok)
             {
                 std::memcpy(aSnap.upperBits, action.bits, sizeof aSnap.upperBits);
-                // Pistol reload kept through a walk / run start (GroundMoveKeep): the clavicles stay on V's own pose under the game's
-                // arms, so the game's moving clavicle lanes never narrow the shoulders (the correction was full when it latched).
-                if (g_reloadContactEpisode.groundKeep.latched)
+                // Pistol reload kept through a walk / run start or begun moving (GroundMoveKeep): the clavicles stay on V's own pose
+                // under the game's arms, so the game's moving clavicle lanes never narrow the shoulders (the correction was full when it
+                // latched through the weight; an edge latch clears them while the reload upper weight is still ~0).
+                if (reloadGirdleOwn)
                     reload_contacts_runtime::ClearShoulderGirdleBits(aSnap.upperBits, n, kFirstBone,
                                                                      [&](uint32_t i) { return b.db.BoneName(i); });
             }
@@ -6973,7 +6980,7 @@ void Shutdown()
         g_enabled = false;
         g_weaponAction = 0;
         g_hipFirePoseHold.Reset(); g_jumpOutExitHold.Reset(); g_stationaryShotTurn.Reset();
-        g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadContactsEligible = false;
+        g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadGirdleHold.Reset(); g_reloadContactsEligible = false;
         g_aimUpperTail = false;
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
