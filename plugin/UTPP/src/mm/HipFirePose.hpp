@@ -195,15 +195,44 @@ inline bool HipFireNeedsNativeAction(bool hipFire, int action, bool transferred,
 // transfer). Without it there is nothing to "preserve until proven": the authored Aim pose (MM + AO + grip) already holds the
 // arms and swapping them for the FPP shot only deforms the shoulders for one frame (rifles, SMGs, shotguns, other pistols).
 // The weaponUpper option (user choice) keeps the native shot regardless of the route.
+// Longest wait (s) for the first shot event of a Shoot state, measured from the first frame of that state. A weapon with a wind-up
+// enters Shoot before its first round leaves (measured 0.066 - 0.088 s on a power LMG at 60 fps); the bound covers that with margin and
+// keeps the native fallback reachable when no event comes at all.
+constexpr double kHipFireShotEventWaitS = 0.2;
+// Bounded wait for the first shot event of a Shoot state on a weapon with a transfer route. While it runs, the authored hip-fire pose
+// keeps the arms (as for a shot event in flight) instead of the native first-burst fallback. It ends for the rest of the Shoot state
+// when an event arrives (the in-flight rule takes over), when the route is lost, or when the bound expires (the fallback applies).
+struct ShotEventWait
+{
+    double start = -1.0; // clock of the first Shoot frame, < 0 = not waiting
+    bool expired = false;
+    void Reset() { start = -1.0; expired = false; }
+    // aShoot: action 8 this frame; aEdge: first action-8 frame of this Shoot state; aRoute: the held transfer route;
+    // aEventSeen: a shot event is pending or already owns the shot (in flight); aNow: seconds. Returns true while waiting.
+    bool Step(bool aShoot, bool aEdge, bool aRoute, bool aEventSeen, double aNow)
+    {
+        if (!aShoot) { Reset(); return false; }
+        if (aEdge) { start = aEventSeen ? -1.0 : aNow; expired = false; }
+        if (aEventSeen || !aRoute) { start = -1.0; return false; }
+        if (start < 0.0) return false;
+        const double age = aNow - start;
+        if (!(age >= 0.0 && age <= kHipFireShotEventWaitS)) { start = -1.0; expired = true; return false; }
+        return true;
+    }
+};
 inline bool HipFireNativeActionOwner(bool weaponUpper, bool recoilTransfer, bool transferRoute, bool hipFire, int action,
-                                    bool transferred, float aimWeight, bool transferInFlight = false)
+                                    bool transferred, float aimWeight, bool transferInFlight = false, bool shotEventWait = false)
 {
 #if defined(UTPP_HIPFIRE_ROUTE_MUTATION) && UTPP_HIPFIRE_ROUTE_MUTATION == 1
     transferRoute = true; // mutation 1: pre-P9, every weapon waits for a transfer that never comes
 #endif
+#if defined(UTPP_HIPFIRE_ROUTE_MUTATION) && UTPP_HIPFIRE_ROUTE_MUTATION == 2
+    shotEventWait = false; // mutation 2: the Shoot state shows the native arms until its first shot event (pre-fix)
+#endif
     // The bounded capture/admission gate owns the authored pose while waiting for FK.
     // Yielding to FPP for those few frames produces a native->authored arm pop.
-    if (recoilTransfer && transferRoute && hipFire && action == 8 && transferInFlight) return false;
+    // The same holds before the first shot event of a Shoot state, for a bounded time (ShotEventWait).
+    if (recoilTransfer && transferRoute && hipFire && action == 8 && (transferInFlight || shotEventWait)) return false;
     return (weaponUpper || (recoilTransfer && transferRoute)) && HipFireNeedsNativeAction(hipFire, action, transferred, aimWeight);
 }
 } // namespace utpp::mm::ov

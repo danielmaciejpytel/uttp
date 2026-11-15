@@ -65,6 +65,7 @@
 #include "../src/mm/MotionAdapter.hpp"
 #include "../src/mm/GamePoseCapture.hpp"
 #include "../src/mm/MotionTraversal.hpp" // trav check 8
+#include "../src/mm/HipFirePose.hpp" // shot event wait bound (hipfire-*-late / -noshot)
 #include "MotionFixRealFrames.hpp" // motionfix 9a
 #include "TestFailFast.hpp" // mutation early exit (UTPP_TEST_STOP_ON), called from Check()
 
@@ -2136,6 +2137,115 @@ int MaskHandoverChildMain(const std::string& aData, const std::string& aDb, cons
         if (airCase) { airborne = true; for (int i = 0; i < aHz / 2; ++i) feed(false); }
         if (slideCase) { sliding = true; slideSpeed = 10.8f; for (int i = 0; i < aHz / 6; ++i) feed(false); }
         const auto frames = [&](double aSeconds) { return std::max(1, static_cast<int>(std::lround(aSeconds * aHz))); };
+        // Shoot state before its first shot event (in game: a power LMG enters Shoot ~70 ms before its first round; the native fallback
+        // showed the game's arms and clavicles for those 5 frames, shoulder width 22 cm instead of 38.6). Weapon with a recoil profile:
+        //   hipfire-<rifle|pistol2h>-profile-late[-man]: three shots, each with its shot event 0.07 s after the Shoot edge. Every frame of
+        //     every shot and hold: published, upperScale > 0.99, step <= 0.011, the hip-fire pose on the action-8 frames; the wait is
+        //     reported on the frames before the event (shotWait=1), the recoil owns the frames after it, the wait never expires.
+        //   hipfire-<rifle|pistol2h>-profile-noshot[-man]: a Shoot state without any event. Up to the wait bound the authored arms stay
+        //     (upperScale > 0.99, shotWait=1); after it the native fallback applies (upperScale 0, the weapon action mask: arms and hands
+        //     on the game, Spine3 and both clavicles on V's own pose) and one expired wait is counted.
+        if (aWeaponCase.find("-late") != std::string::npos || aWeaponCase.find("-noshot") != std::string::npos)
+        {
+            const bool late = aWeaponCase.find("-late") != std::string::npos;
+            if (!profileCase) return 38; // the wait exists only on a weapon with a route
+            const auto masked = [&](std::string_view aName) {
+                for (uint32_t i = 0; i < sourceDb->NumBones(); ++i)
+                    if (sourceDb->BoneName(i) == aName) return mm::integ::SnapshotUpperBone(g_read, i);
+                return false;
+            };
+            const auto statusU = [](const std::string& aStatus, const char* aKey) {
+                const std::string v = StatusField(aStatus, aKey);
+                return v.empty() ? uint64_t(0) : static_cast<uint64_t>(std::stoull(v));
+            };
+            const uint64_t expiredBefore = statusU(motiondriver::Status(), "shotWaitExpired=");
+            const double bound = mm::ov::kHipFireShotEventWaitS;
+            std::ostringstream trace;
+            int badFrames = 0, waitFrames = 0, ownedAfter = 0, afterFrames = 0, nativeFrames = 0, earlyBad = 0, lateBad = 0, maskBad = 0;
+            int raiseFrames = 0;
+            float prevUpper = -1.0f, minUpper = 1.0f, maxStep = 0.0f;
+            std::string firstFailure;
+            const int shots = late ? 3 : 1;
+            const int eventAt = frames(0.07);
+            const int shotLen = late ? frames(0.25) : frames(bound + 0.3);
+            for (int s = 0; s < shots; ++s)
+            {
+                motiondriver::SetWeaponAction(8);
+                for (int i = 0; i < shotLen; ++i)
+                {
+                    if (late && i == eventAt) motiondriver::FeedRecoilShot(shotEpoch, false);
+                    feed(false);
+                    const std::string status = motiondriver::Status();
+                    const bool published = ReadPublished() && motionhost::ProbeMotionSeam().legMotionSet;
+                    const float upper = published ? g_read.upperScale : -1.0f;
+                    const float step = prevUpper >= 0.0f && upper >= 0.0f ? std::fabs(upper - prevUpper) : 0.0f;
+                    prevUpper = upper;
+                    const bool waiting = StatusField(status, "shotWait=") == "1";
+                    const bool owns = StatusField(status, "nueRecoilOwns=") == "1";
+                    const bool hipPose = StatusField(status, "hipFirePose=") == "1";
+                    waitFrames += waiting ? 1 : 0;
+                    nativeFrames += (published && upper < 0.5f) ? 1 : 0;
+                    bool ok = published && hipPose;
+                    if (late)
+                    {
+                        // before the event: the wait (or a recoil episode still owning from the previous shot) keeps the arms;
+                        // the first shot comes out of a steady Ready, so it must have waited on every frame before its event
+                        ok = ok && upper > 0.99f && step <= 0.011f && (i < eventAt ? (waiting || owns) : !waiting) &&
+                             (s > 0 || i >= eventAt || waiting);
+                        if (i > eventAt) { ++afterFrames; ownedAfter += owns ? 1 : 0; }
+                        minUpper = std::fmin(minUpper, upper); maxStep = std::fmax(maxStep, step);
+                        // the blend into the hip-fire pose continues through the wait: 80% within 0.1 s + 1.5 frames (as the shot cases)
+                        const std::string poseW = StatusField(status, "aimPoseW=");
+                        if (s == 0 && raiseFrames == 0 && !poseW.empty() && std::stof(poseW) >= 0.8f) raiseFrames = i + 1;
+                    }
+                    else
+                    {
+                        // simulated clock: frame i is i * dt after the edge (the edge frame is 0)
+                        const double t = i * static_cast<double>(dt);
+                        if (t <= bound - dt)
+                        {
+                            const bool e = upper > 0.99f && waiting && step <= 0.011f;
+                            earlyBad += e ? 0 : 1; ok = ok && e;
+                        }
+                        else if (t >= bound + 2.0 * dt)
+                        {
+                            const bool l = upper < 0.01f && !waiting;
+                            const bool m = masked("RightHand") && masked("LeftHand") && masked("LeftArm") && masked("RightArm") &&
+                                           !masked("LeftShoulder") && !masked("RightShoulder") && !masked("Spine3") && !masked("Hips");
+                            lateBad += l ? 0 : 1; maskBad += m ? 0 : 1; ok = ok && l && m;
+                        }
+                    }
+                    badFrames += ok ? 0 : 1;
+                    if (!ok && firstFailure.empty())
+                        firstFailure = "shot=" + std::to_string(s) + " frame=" + std::to_string(i) + " upper=" + std::to_string(upper) +
+                            " waiting=" + std::to_string(waiting) + " owns=" + std::to_string(owns) + " hipPose=" + std::to_string(hipPose) +
+                            " lsh=" + std::to_string(masked("LeftShoulder")) + " rhand=" + std::to_string(masked("RightHand"));
+                    if (trace.tellp() < 900) trace << s << ":" << i << ":" << upper << "/" << (waiting ? 1 : 0) << (owns ? 1 : 0) << " ";
+                }
+                motiondriver::SetWeaponAction(0);
+                for (int i = 0; i < frames(0.9); ++i)
+                {
+                    feed(false);
+                    const float upper = ReadPublished() ? g_read.upperScale : -1.0f;
+                    const float step = prevUpper >= 0.0f && upper >= 0.0f ? std::fabs(upper - prevUpper) : 0.0f;
+                    prevUpper = upper;
+                    // after an expired wait the old fallback hands the arms back at once (unchanged behaviour); a late event keeps them
+                    if (late && !(upper > 0.99f && step <= 0.011f)) { ++badFrames; if (firstFailure.empty()) firstFailure = "hold frame=" + std::to_string(i); }
+                }
+            }
+            const uint64_t expired = statusU(motiondriver::Status(), "shotWaitExpired=") - expiredBefore;
+            const bool pass = badFrames == 0 &&
+                (late ? (nativeFrames == 0 && expired == 0 && waitFrames >= eventAt && afterFrames > 0 && ownedAfter == afterFrames &&
+                         raiseFrames > 0 && static_cast<float>(raiseFrames) * dt <= 0.1f + 1.5f * dt)
+                      : (expired == 1 && waitFrames > 0 && earlyBad == 0 && lateBad == 0 && maskBad == 0));
+            std::ofstream(aOut) << "case=" << aWeaponCase << " hz=" << aHz << " pass=" << pass << " badFrames=" << badFrames << " waitFrames=" << waitFrames
+                << " eventAt=" << eventAt << " raiseFrames=" << raiseFrames << " ownedAfter=" << ownedAfter << "/" << afterFrames << " nativeFrames=" << nativeFrames << " expired=" << expired
+                << " earlyBad=" << earlyBad << " lateBad=" << lateBad << " maskBad=" << maskBad << " minUpper=" << minUpper << " maxStep=" << maxStep
+                << " firstFailure=[" << firstFailure << "]\ntrace=" << trace.str() << "\n";
+            motiondriver::TestSetRecoilClock(-1.0);
+            motiondriver::SetEnabled(false); motionhost::SetMotionHooks(nullptr); motiondriver::Shutdown(); motionhost::Shutdown();
+            return pass ? 0 : 39;
+        }
         // P9 review C: the route is decided once per shot (kept from the act=8 edge, it can only fall). Pistol2H that is not the Nue preset:
         //   hipfire-route-pulse: stands still on the edge (native FK route), a 0.05 s micro-step in the middle of the shot flips the live
         //     gate 1 -> 0 -> 1: the arms may switch FPP -> authored once, never back (4 switches without the latch);

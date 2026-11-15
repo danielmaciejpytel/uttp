@@ -8,7 +8,9 @@
 # mutation 3 (the legacy native FK stance, Pistol2H standing without a profile, is a route again = the Overture revolver hand-over of
 # recording 2026-10-25) MUST fail hipfire-pistol2h-other-still and the hipfire-route-* cases. (Old mutation 2, route follows every
 # frame, is gone: with the route = the authored domain the live gate no longer flips inside a shot in any harness scenario.)
-foreach(_m "" 1 3)
+# Mutation 4 (no wait for the first shot event of a Shoot state: the native arms until the event) MUST fail the hipfire-*-late cases;
+# mutation 5 (the native fallback keeps the game's clavicles) MUST fail the hipfire-*-noshot cases.
+foreach(_m "" 1 3 4 5)
     if(_m STREQUAL "")
         set(_tgt utpp_motion_driver_hipfire_weapons_test)
     else()
@@ -44,6 +46,15 @@ target_compile_features(utpp_mm_hipfire_warmup_mut1 PRIVATE cxx_std_20)
 target_compile_definitions(utpp_mm_hipfire_warmup_mut1 PRIVATE UTPP_HIPFIRE_ROUTE_MUTATION=1)
 add_test(NAME utpp_mm_hipfire_warmup_mut1 COMMAND utpp_mm_hipfire_warmup_mut1)
 set_tests_properties(utpp_mm_hipfire_warmup_mut1 PROPERTIES WILL_FAIL TRUE)
+
+# Shot event wait: mutation 2 (UTPP_HIPFIRE_ROUTE_MUTATION=2: the owner ignores the wait = the native arms from the Shoot state until
+# its first shot event) MUST fail the warm-up test (exit code 12).
+add_executable(utpp_mm_hipfire_warmup_mut2 tests/HipFireWarmupTest.cpp)
+target_compile_options(utpp_mm_hipfire_warmup_mut2 PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_mm_hipfire_warmup_mut2 PRIVATE cxx_std_20)
+target_compile_definitions(utpp_mm_hipfire_warmup_mut2 PRIVATE UTPP_HIPFIRE_ROUTE_MUTATION=2)
+add_test(NAME utpp_mm_hipfire_warmup_mut2 COMMAND utpp_mm_hipfire_warmup_mut2)
+set_tests_properties(utpp_mm_hipfire_warmup_mut2 PROPERTIES WILL_FAIL TRUE)
 
 # P9 C: the hip raise out of Ready (OverlayTimes::hipFireReadyToAiming, OverlayInputs::hipFireRaise). Mutation 1
 # (UTPP_OVL_HIPFIRE_MUTATION: the hip shot keeps the 0.2 s readyToAiming) MUST fail the machine checks of the overlay test and the

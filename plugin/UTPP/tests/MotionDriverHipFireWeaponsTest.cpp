@@ -11,6 +11,8 @@
 // Male V cases (suffix -man, W5 2026-11-06) run the same assertions on the man bundle; the man bundle needs no other expectation.
 // Usage: utpp_motion_driver_hipfire_weapons_test <data dir> [ignored]
 // UTPP_MOTION_DRIVER_HIPFIRE_ROUTE_MUTATION=1 (the route gate is always open, the pre-P9 behaviour) must print a FAIL line.
+// =4 (no shot event wait: the native arms from the Shoot state until its first event) must fail the -late cases; =5 (the native
+// fallback takes the game's clavicles) must fail the -noshot cases.
 #define main UnusedIntegrationMain
 #include "MotionDriverIntegrationTest.cpp"
 #undef main
@@ -68,6 +70,16 @@ int main(int argc, char** argv)
             runs.push_back({variant, hz});
     for (const char* variant : {"hipfire-route-pulse-man", "hipfire-route-stop-man"})
         runs.push_back({variant, 60});
+    // A Shoot state before its first shot event (a wind-up weapon, in game ~70 ms): the authored hip-fire arms wait for the event (late),
+    // and a Shoot state without any event falls back to the native arms after the bound, on V's own clavicles (noshot).
+    for (int hz : {30, 60, 144})
+        for (const char* variant : {"hipfire-rifle-profile-late", "hipfire-rifle-profile-late-man"})
+            runs.push_back({variant, hz});
+    for (const char* variant : {"hipfire-pistol2h-profile-late", "hipfire-pistol2h-profile-late-man", "hipfire-rifle-profile-noshot",
+                                "hipfire-rifle-profile-noshot-man", "hipfire-pistol2h-profile-noshot", "hipfire-pistol2h-profile-noshot-man"})
+        runs.push_back({variant, 60});
+    for (int hz : {30, 144})
+        runs.push_back({"hipfire-rifle-profile-noshot", hz});
     // All variants are submitted to the child pool at once (they run in parallel, bounded by the pool), then evaluated in the order above.
     const bool baseExists = Exists(v1);
     std::vector<ChildRef> kids;
@@ -93,11 +105,15 @@ int main(int argc, char** argv)
         if (head.size() > 700)
             head.resize(700);
         const bool routeCase = std::string(run.variant).find("hipfire-route-") == 0;
+        const bool waitCase = std::string(run.variant).find("-late") != std::string::npos ||
+                              std::string(run.variant).find("-noshot") != std::string::npos;
         const bool control = std::string(run.variant).find("nue2h") != std::string::npos;
         const bool profile = std::string(run.variant).find("-profile") != std::string::npos ||
                              std::string(run.variant).find("nue-recoil-") == 0;
         Check(code == 0, std::string(run.variant) + " at " + std::to_string(run.hz) +
-              (routeCase ? "Hz: the route is decided once per shot, no extra arm switches from a micro-step / a stop (exit code " :
+              (waitCase ? "Hz: the Shoot state waits for its first shot event on the authored hip-fire arms; without an event the native "
+                          "fallback applies after the bound with V's own clavicles (exit code " :
+               routeCase ? "Hz: the route is decided once per shot, no extra arm switches from a micro-step / a stop (exit code " :
                profile ? "Hz: a weapon with a recoil profile owns the arms with its authored recoil (upperScale 1, recoil owner, applied transfers) (exit code " :
                control ? "Hz: control, the route stays open and the Nue recoil / native FK behaviour is unchanged (exit code " :
                          "Hz: a weapon without a recoil route keeps upperScale 1 and the hipfire pose through the shot and the hold (exit code ") +

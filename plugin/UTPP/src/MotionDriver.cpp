@@ -424,6 +424,11 @@ bool g_shootRouteNow = false;
 // kept for the rest of the shot: set on the act=8 edge, afterwards it can only fall (a route that was lost stays lost until act=8 ends), so
 // the arms never owe more than one extra FPP <-> authored switch per shot, and a route that was absent on the edge never appears mid-shot.
 bool g_shootRouteLive = false, g_shootRouteHeld = false, g_shootRouteInShot = false;
+// A Shoot state can begin before its first shot event (a weapon with a wind-up fires its first round ~70-90 ms after the trigger).
+// While this bounded wait runs, the authored hip-fire pose keeps the arms instead of the native first-burst fallback (HipFirePose.hpp).
+ov::ShotEventWait g_shotEventWait;
+bool g_shotEventWaitNow = false; // this Step's wait (reset per Step like g_shootRouteNow)
+uint64_t g_shotEventWaitFrames = 0, g_shotEventWaitExpired = 0; // Steps spent waiting / waits that ran out (status)
 authored_recoil::Player g_authoredRecoil;
 uint32_t g_recoilWeaponEpoch = 0;
 uint64_t g_recoilSerial = 0;
@@ -533,7 +538,7 @@ void RecordGripInfoLocked(const motionpose::FrameInfo& aInfo)
         // native FK stance has nothing to wait for, and the FPP arms would pop in for the whole shot (upperScale 1 -> 0 -> 1).
         g_weaponUpperFrame = ov::HipFireNativeActionOwner(g_weaponUpperOn, g_shootTransferEnabled, g_shootRouteNow,
             true, g_weaponAction, aInfo.shootApplied, aInfo.aoWeight,
-            g_shootEpisode.pending || g_shootEpisode.admitted || g_recoilOwns);
+            g_shootEpisode.pending || g_shootEpisode.admitted || g_recoilOwns, g_shotEventWaitNow);
     g_shootReachableScale = aInfo.shootScale;
     if (aInfo.shootApplied) ++g_shootAppliedEvaluations;
     g_gripProbe.applied = aInfo.grip.left.ok;
@@ -1835,6 +1840,7 @@ void SetEnabled(bool aOn)
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
         g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
+        g_shotEventWait.Reset(); g_shotEventWaitNow = false;
         // re-enable after a failed load (files copied meanwhile) loads again; a good bundle is kept
         if (aOn && g_bundle && !g_bundle->res.matcherInit)
             g_reload = true;
@@ -1883,6 +1889,7 @@ bool SetRigBody(int32_t aBody)
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
         g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
+        g_shotEventWait.Reset(); g_shotEventWaitNow = false;
         g_airLegsFade.Reset();
         g_jumpOutArmsFade.Reset();
         g_jumpOutWindowNow = false;
@@ -2593,6 +2600,7 @@ void OnArmed(uint64_t aRig, const std::vector<uint64_t>& aGameHashes, const std:
     g_weaponUpperFrame = g_weaponUpperTail = false;
     g_shootRouteNow = false;
     g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
+    g_shotEventWait.Reset(); g_shotEventWaitNow = false;
     g_wasRunning = false;
     g_hoLeft = 0.0f;
     g_hiLeft = 0.0f;
@@ -2980,6 +2988,7 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
 #else
     g_shootRouteLive = authoredDomain;
 #endif
+    const bool shootEdge = g_weaponAction == 8 && !g_shootRouteInShot; // first Step of this Shoot state
     if (g_weaponAction == 8)
     {
         g_shootRouteHeld = g_shootRouteInShot ? (g_shootRouteHeld && g_shootRouteLive) : g_shootRouteLive;
@@ -3071,6 +3080,19 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
         g_shootHold.Reset();
         g_shootEpisode.Reset();
         if (g_weaponAction != 8) g_shootLastReadyValid = false;
+    }
+    // A shot event that is pending or already owns the shot is in flight (RecordGripInfoLocked); otherwise, on a weapon with a route,
+    // the Shoot state waits a bounded time for its first event before the native fallback may take the arms. (After the native
+    // episode block above: its Begin on the action edge is only a candidate until this Step admitted or dropped it.)
+    {
+        const bool eventSeen = authoredRoute || g_shootEpisode.pending || g_shootEpisode.admitted;
+        const bool wasExpired = g_shotEventWait.expired;
+        g_shotEventWaitNow = g_shotEventWait.Step(g_weaponAction == 8, shootEdge, g_shootRouteNow, eventSeen, recoilNow);
+#if defined(UTPP_MOTION_DRIVER_HIPFIRE_ROUTE_MUTATION) && UTPP_MOTION_DRIVER_HIPFIRE_ROUTE_MUTATION == 4
+        g_shotEventWaitNow = false; // mutation 4: the native arms show from the Shoot state until its first shot event (pre-fix)
+#endif
+        if (g_shotEventWaitNow) ++g_shotEventWaitFrames;
+        if (g_shotEventWait.expired && !wasExpired) ++g_shotEventWaitExpired;
     }
     g_recoilEffT = g_recoilEffR = 0.0f;
     if (authoredRoute)
@@ -3441,9 +3463,10 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
     char boTxt[48] = ""; // only with a body yaw offset set or still fading: the default trace line is unchanged
     if (g_bodyOffsetDeg != 0.0f || g_bo.Weight() != 0.0f)
         std::snprintf(boTxt, sizeof(boTxt), " bo=%.1f/%.2f/%s", static_cast<double>(g_bodyOffsetDeg), static_cast<double>(g_bo.Weight()), g_boWhy);
-    char hipTxt[40] = ""; // P9: only on hipfire frames (the other trace lines are unchanged): the native first-burst fallback and its route
-    if (g_hipFirePoseNow)
-        std::snprintf(hipTxt, sizeof(hipTxt), " hipNative=%d route=%d", g_weaponUpperFrame ? 1 : 0, g_shootRouteNow ? 1 : 0);
+    char hipTxt[48] = ""; // P9: only on hipfire frames (the other trace lines are unchanged): the native first-burst fallback and its route
+    if (g_hipFirePoseNow) // shotWait only while the Shoot state waits for its first shot event (the former line otherwise)
+        std::snprintf(hipTxt, sizeof(hipTxt), " hipNative=%d route=%d%s", g_weaponUpperFrame ? 1 : 0, g_shootRouteNow ? 1 : 0,
+                      g_shotEventWaitNow ? " shotWait=1" : "");
     char magTxt[64] = ""; // only while a magazine top-up gesture ran since the last line: the other trace lines are unchanged
     if (g_magTapPeak > 0.0f || !g_magTap.Idle())
         std::snprintf(magTxt, sizeof(magTxt), " magTap=%.2f/%.2f/%llu", static_cast<double>(g_magTap.weight),
@@ -4409,6 +4432,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     std::fill(std::begin(g_gripProbe.relativeTarget), std::end(g_gripProbe.relativeTarget), 0.0f);
     g_weaponUpperFrame = false; // every Step has its own admission; invalid/yielded frames cannot reuse the last one
     g_shootRouteNow = false;
+    g_shotEventWaitNow = false;
     g_shootApplied = false;
     EmitLoadDoneLocked(); // UTPP-MOTION SEAM motionfix (item 4): only after a load (none while mm.motionDriver was never on)
     g_tailed = false;
@@ -5968,6 +5992,13 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
         {
             std::memcpy(aSnap.upperBits, action.bits, sizeof aSnap.upperBits);
             aSnap.upperScale = 0.0f;
+            // A weapon with a transfer route: the game's arms go on V's own shoulder girdle (the native shot's clavicle lanes
+            // collapse the shoulders), as the reload hand-back does. Without a route (the weapon-upper option) nothing changes.
+#if !(defined(UTPP_MOTION_DRIVER_HIPFIRE_ROUTE_MUTATION) && UTPP_MOTION_DRIVER_HIPFIRE_ROUTE_MUTATION == 5) // mutation 5: game clavicles
+            if (g_shootRouteNow)
+                reload_contacts_runtime::ClearShoulderGirdleBits(aSnap.upperBits, n, kFirstBone,
+                                                                 [&](uint32_t i) { return b.db.BoneName(i); });
+#endif
         }
         else
         {
@@ -6845,6 +6876,9 @@ std::string StatusLocked()
            " shootApplied=" + std::to_string(g_shootApplied) +
            " shootRoute=" + std::to_string(g_shootRouteNow) +
            " shootRouteLive=" + std::to_string(g_shootRouteLive) +
+           " shotWait=" + std::to_string(g_shotEventWaitNow) +
+           " shotWaitFrames=" + std::to_string(g_shotEventWaitFrames) +
+           " shotWaitExpired=" + std::to_string(g_shotEventWaitExpired) +
            " aimPoseW=" + std::to_string(AimPoseWeightLocked()) +
            " recoilSupported=" + std::to_string(g_recoilSupported) +
            " recoilProfile=" + std::to_string(g_recoilProfile) +
@@ -7046,6 +7080,7 @@ void Shutdown()
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
         g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
+        g_shotEventWait.Reset(); g_shotEventWaitNow = false;
     }
     WaitLoaderSerial();
     std::unique_ptr<Bundle> old;
