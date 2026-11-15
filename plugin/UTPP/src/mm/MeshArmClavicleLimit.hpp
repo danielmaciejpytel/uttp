@@ -282,7 +282,9 @@ struct ClavicleTransientBound
 // standing (not moving) weapon poses, since a moving aim pose keeps its arms at the overlay's mesh rotations; 0 = untouched.
 // Mutation UTPP_CLAVLIMIT_MUTATION 6 = never acts, 7 = the arm is not solved back (the hand moves with the shoulder joint).
 inline constexpr float kGirdleDeficitLimitM = 0.015f;  // largest deficit against the own width left untouched / kept
-inline constexpr float kGirdleMaxHandShiftM = 0.020f;  // largest shared shift of the hands and the weapon
+// largest shared shift of the hands and the weapon: the crouched two-handed pistol aim needs 3.8 cm to come within the limit above
+// (2 cm leaves a deficit of 2.4 cm, 3 cm one of 1.9 cm)
+inline constexpr float kGirdleMaxHandShiftM = 0.040f;
 
 struct GirdleResult
 {

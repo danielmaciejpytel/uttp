@@ -2248,7 +2248,11 @@ static void TestBarrelPitch(const char* aTag, motionpose::PoseEvaluator& ev, con
         //   woman 54f6e6788e137abd -> 8fad9302239b47fd: the woman overlay is now the protected E7E5 overlay (was the unpatched B307...);
         //   man   114828c5903b7a45 -> 7c613f7456bfb4be: the man database is now the shipped one (932c2452..., with the slide schema; was the
         //   plain bake 38b71221...). Neither value was re-derived on a loop-free build: they pin the shipped data, not the old behaviour.
-        const uint64_t want = aMan ? 0x7c613f7456bfb4beull : 0x8fad9302239b47fdull;
+        // both bodies re-recorded 2026-11-15 (girdle width bound of the standing two-handed poses, MeshArmClavicleLimit.hpp BoundGirdleWidth:
+        // the crouch idle aim of the grid now carries the bound): woman 8fad9302239b47fd -> da3905ff8c1161c9, man 7c613f7456bfb4be ->
+        // de75f3d473bf5c9f. The previous values are reproduced bit for bit by a build with -DUTPP_CLAVLIMIT_MUTATION=6 (the bound compiled
+        // out, 555 / 555 passed).
+        const uint64_t want = aMan ? 0xde75f3d473bf5c9full : 0xda3905ff8c1161c9ull;
         Check(digestOff == want, F("%s 10: loop-off output == the build before the loop, bit for bit (digest %016llx, recorded "
                                    "%016llx)", aTag, static_cast<unsigned long long>(digestOff),
                                    static_cast<unsigned long long>(want)));
