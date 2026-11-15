@@ -85,11 +85,11 @@ public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
 // Parried 5 (knife 3668160, the other four 3669440).
 // Arm blades (mantis_blade): only the states whose clips are all third-person on both bodies: Parried 5 (parried_left / _right) +
 // Hold 6 + ChargedHold 7 (hold_start_01, hold_start_offscreen_01 / _02, hold_loop_01 / _02) + Block 8 (block_start, block, block_end)
-// + ComboAttack 11 (combo_attack_01 .. 09) + StrongAttack 13 (heavy_attack_01 / _02) + SafeAttack 14 (safe_attack) + BlockAttack 15
-// (block_attack, block_attack_hit) + SprintAttack 16 + CrouchAttack 17 + JumpAttack 18 + DeflectAttack 20 (combo_attack_01 .. 09_deflect
-// and the safe, sprint, crouch, jump and block attack deflects) = 0x17E9E0 = 1567200. Deflect 10 (block_deflect_left / _right) has
-// third-person clips for Male V only; the line is per variable, not per body, so the bit stays out: Male V plays its own block deflect
-// clips with the legs on motion matching, Female V the game's. The set has no final attack and no equip attack (12 and 21 stay out).
+// + Deflect 10 (block_deflect_left / _right) + ComboAttack 11 (combo_attack_01 .. 09) + StrongAttack 13 (heavy_attack_01 / _02)
+// + SafeAttack 14 (safe_attack) + BlockAttack 15 (block_attack, block_attack_hit) + SprintAttack 16 + CrouchAttack 17 + JumpAttack 18
+// + DeflectAttack 20 (combo_attack_01 .. 09_deflect and the safe, sprint, crouch, jump and block attack deflects) = 0x17EDE0 = 1568224.
+// Draw (melee_equip) and holster (melee_unequip) are third-person on both bodies as well (Equipping 1 has no effect on the mask).
+// The set has no final attack and no equip attack (12 and 21 stay out).
 // Format: one line per variable between the UTPP_STATES_TABLE markers (read by the melee stage installer).
 public func UTPPMeleeStatesDefault() -> Int32 {
   return 3667968;
@@ -103,7 +103,7 @@ public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
   if Equals(n, n"w_melee_one_hand_blunt") { return 3669472; }
   if Equals(n, n"w_melee_baton") { return 3669472; }
   if Equals(n, n"w_two_hand_blunt") { return 3669472; }
-  if Equals(n, n"mantis_blade") { return 1567200; }
+  if Equals(n, n"mantis_blade") { return 1568224; }
   // UTPP_STATES_TABLE end
   return UTPPMeleeStatesDefault();
 }

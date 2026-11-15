@@ -258,7 +258,7 @@ DAYOF_GROUPS = {
               "fist combat in third person (idle, punches, movement, equip/unequip, guard) with the UTPP body; knife, katana, "
               "one-handed blunt, baton and two-handed blunt: combo, heavy, block (not knife), parried from left / right; "
               "arm blades: guard, combo, safe attack, hold and heavy, block, block attack, parried, sprint / crouch / jump "
-              "attacks, deflected attacks, safe pose, draw (Female V) and holster (Male V); block deflect only on Male V; "
+              "attacks, deflected attacks, safe pose, draw, holster and block deflect; "
               "Male V only in the single short pre-release test"),
     "car": ("Third-person car entry/exit",
             "entering and leaving cars as driver and passenger (door, approach, exit clips, camera transitions), "
@@ -280,14 +280,21 @@ DAYOF_DATA = [
     # Re-pinned 2026-11-15 (was 02bdb447..., 27721728 bytes): arm blade sets extended (Female V 44 clips, Male V 46: block, block
     # attack, parried, sprint / crouch / jump attacks, deflected attacks, safe pose; Female V draw, Male V holster and block
     # deflects); the other 16 sets are byte-identical to 02bdb447... (compared unbundled).
-    ("melee", P_ARC + "utpp_melee.archive", 29638656, "84cb2a09b50ccf14ac2b81d86c6379aa17bbf3ab4aade93307e9a5b0872067b6"),
+    # Re-pinned 2026-11-15 (was 84cb2a09..., 29638656 bytes): arm blade sets complete on both bodies (Female V block deflects and
+    # holster, Male V draw); knife, katana, one-handed blunt and baton: the forearm of a number of clips bends on its hinge (the
+    # forearm roll moved onto the hand, hand and weapon unchanged); the eight fists / default / StrongArms / two-handed blunt sets
+    # are byte-identical to 84cb2a09... (compared unbundled).
+    ("melee", P_ARC + "utpp_melee.archive", 29835264, "05066cc159f6a69d3189dea0924e5eb6b01e0e31f552d4aac7b208415f3e869f"),
     # Melee full pose tables (hips, spine and legs of every packed melee clip, one file per body; generated from the clip inputs of
     # the archive above by tools\melee\melee_pose_table.py): fists, knife, katana, one-handed blunt, baton, arm blades and
     # two-handed blunt, 384 clips each (was 882ba64a... / abb21add..., 368 clips: the six other sections are unchanged).
     # Re-pinned 2026-11-15 (was 024fbef0... / 7954c415..., 2260680 bytes): arm blade section extended (Female V 404 clips, Male V
     # 406); the six other sections and the rows of the 16 earlier arm blade clips are unchanged.
-    ("melee", P_DATA + "utpp_melee_pose_female.bin", 2406312, "5bd705dbe7ce55ae924e4a07f73ee7c5c8c84ad93240824bced5d52c16c1ffe9"),
-    ("melee", P_DATA + "utpp_melee_pose_male.bin", 2426756, "4c0b876ece59ef8d295e2af7c755d1c219c16ed120213cae96dafed6e77726de"),
+    # Re-pinned 2026-11-15 (was 5bd705db... 2406312 bytes / 4c0b876e... 2426756 bytes): arm blade section 407 clips per body (block
+    # deflects and holster added for Female V, draw for Male V); knife, katana, one-handed blunt and baton sections: the key rows of
+    # the forearm and hand of the rebuilt clips; fists and two-handed blunt sections and every lower-body row unchanged.
+    ("melee", P_DATA + "utpp_melee_pose_female.bin", 2431244, "8fba8c5f52758b546ccabf654b5b5153821b9ba5a5c4d247ff2f50913a2be428"),
+    ("melee", P_DATA + "utpp_melee_pose_male.bin", 2431244, "8775f62ef43b9c173489788b58519f13174e0d43c07ab8e2d784fb43496b6cad"),
     # stage Build\stages\vehexit6-20261109 (game copy of 2026-11-09 15:30 is identical)
     ("car", P_ARC + "utpp_vehicle_car.archive", 7102464, "3843163c100787fc0669c6f5091e58597e83a312cc1f21da1542fc09771119d5"),
 ]
@@ -331,9 +338,12 @@ DAYOF_DATA = [
 #   utpp_melee.reds           1a279c0d... -> f500feb7...  FUNCTIONAL: the strong arms guard waits for the first melee action after
 #                                                           the draw; the mantis_blade state line 26816 -> 1567200 (parried, block,
 #                                                           block / sprint / crouch / jump / deflect attacks added)
+# Re-pinned 2026-11-15 (arm blade block deflect):
+#   utpp_melee.reds           f500feb7... -> c555abd5...  FUNCTIONAL: the mantis_blade state line 1567200 -> 1568224 (Deflect 10
+#                                                           added: block deflect clips on both bodies)
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "f500feb7812f3c50543c51ee2c4a159833537db7787cf77bf8dd17579c7dc2bc"),
+     "c555abd52fd55cbd94c336300271454d3eb2fd4aa4fb57391a7d3c93fbea09dd"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
      "e9d806ec607eb6145860992b235632a08020722a490f3adea3c4a0b0367dd57d"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",
@@ -385,6 +395,12 @@ PARRIED_CLIPS = {
     # the same 16 sets + extended arm blade sets (their own plain parried_left / parried_right; the game set has no per-strike
     # parried clips)
     "84cb2a09b50ccf14ac2b81d86c6379aa17bbf3ab4aade93307e9a5b0872067b6": {
+        "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
+        "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike", "w_two_hand_blunt": "per-strike",
+        "mantis_blade": "generic"},
+    # the same sets with complete arm blade sets and forearm-corrected knife, katana, one-handed blunt and baton clips (clip names
+    # unchanged)
+    "05066cc159f6a69d3189dea0924e5eb6b01e0e31f552d4aac7b208415f3e869f": {
         "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
         "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike", "w_two_hand_blunt": "per-strike",
         "mantis_blade": "generic"},
