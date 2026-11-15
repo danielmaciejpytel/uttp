@@ -463,6 +463,66 @@ void RealData(const char* aDbPath, const char* aOvPath, const char* aStylePath)
         else
             Check(false, "I: evaluator init");
     }
+    // J) the runtime engages the girdle width bound (BoundGirdleWidth) in the crouched two-handed pistol aim, with the feminine shoulder
+    // pass after it: crouch idle loop, Pistol2H, Ready 2 s, Aim 2.5 s, Ready 1.5 s. The feminine pass applies on every frame and its
+    // socket width moves by no more than 1 cm from one frame to the next (no rejection after the bound re-solved the arms).
+    {
+        const int idle = FindClip(*db, "M_Neutral_Crouch_Idle_Loop");
+        Check(idle >= 0, "J: crouch idle loop found");
+        auto ev = std::make_unique<motionpose::PoseEvaluator>();
+        if (idle >= 0 && ev->Init(db.get(), ovf.get(), &style, 2, err))
+        {
+            motionpose::OverlayFrameInputs in;
+            in.machine.overlay = PoseOverlay::Pistol2H;
+            in.machine.style = Style::Feminine;
+            in.machine.crouch = true;
+            in.machine.wantsReady = true;
+            in.bodyWoman = true;
+            std::vector<BoneTransform> out(n);
+            const float fps = db->Header().fps > 0.0f ? db->Header().fps : 30.0f;
+            const float len = static_cast<float>(db->Clip(static_cast<uint32_t>(idle)).numFrames - 1) / fps;
+            motion::MatchResult m;
+            m.clip = idle;
+            int settled = 0, settledApplied = 0, femRejected = 0, femFrames = 0, aimFrames = 0;
+            float femStep = 0.0f, prevFem = -1.0f, widthBefore = 1e9f, widthAfter = 1e9f, shiftMax = 0.0f;
+            for (int f = 0; f < 360; ++f)
+            {
+                in.machine.wantsToAim = f >= 120 && f < 270;
+                m.clipTime = std::fmod(static_cast<float>(f) / 60.0f, std::max(len, 0.1f));
+                motionpose::FrameInfo info;
+                ev->Evaluate(1.0f / 60.0f, m, in, out.data(), n, &info);
+                aimFrames += ev->Machine().aim == ov::AimState::Aiming;
+                if (f >= 180 && f < 270) // aim settled
+                {
+                    ++settled;
+                    settledApplied += info.girdle.applied;
+                    widthBefore = std::min(widthBefore, info.girdle.widthBefore * 100.0f);
+                    widthAfter = std::min(widthAfter, info.girdle.widthAfter * 100.0f);
+                }
+                shiftMax = std::max(shiftMax, info.girdle.handShift * 100.0f);
+                if (f >= 60 && info.fem.ran)
+                {
+                    ++femFrames;
+                    femRejected += !info.fem.applied;
+                    if (prevFem >= 0.0f)
+                        femStep = std::max(femStep, std::fabs(info.fem.widthAfter - prevFem) * 100.0f);
+                    prevFem = info.fem.widthAfter;
+                }
+            }
+            std::printf("J: crouch Pistol2H aim: girdle applied on %d of %d settled frames, width before %.1f after %.1f cm, hand shift max %.2f cm; "
+                        "feminine pass rejected on %d of %d frames, largest socket width step %.2f cm (%d aiming frames)\n",
+                        settledApplied, settled, static_cast<double>(widthBefore), static_cast<double>(widthAfter), static_cast<double>(shiftMax),
+                        femRejected, femFrames, static_cast<double>(femStep), aimFrames);
+            Check(aimFrames > 0 && settledApplied == settled && widthAfter > widthBefore + 0.5f,
+                  F("J: the girdle bound acts on every settled crouch aim frame (%d of %d) and widens the shoulders (%.1f -> %.1f cm)",
+                    settledApplied, settled, static_cast<double>(widthBefore), static_cast<double>(widthAfter)));
+            Check(femFrames > 0 && femRejected == 0 && femStep <= 1.0f,
+                  F("J: the feminine pass applies on every frame after the bound (%d of %d rejected), socket width step %.2f cm <= 1.0",
+                    femRejected, femFrames, static_cast<double>(femStep)));
+        }
+        else
+            Check(false, "J: evaluator init");
+    }
 }
 
 #ifdef UTPP_CLAVLIMIT_SURVEY

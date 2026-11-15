@@ -222,6 +222,7 @@ struct FrameInfo
     } fem;
     ov::ClavicleLimitResult clavicleLimit; // mesh-space arm clavicle deviation of this frame before the limit
     ov::ClavicleTransientResult clavicleTransient; // transient bound of the clavicles (gate 1 = free, pose untouched)
+    ov::GirdleResult girdle;                       // girdle width bound of the mesh-space arm poses (applied = the pose was changed)
     float forearmTwistMovedDeg[2] = {};   // forearm roll moved into the hand on the output (left, right; ForearmTwist.hpp)
     // rifle-hand-fix 2026-11-09: support (left) hand of a 2H pose - hand twist about the forearm -> hand axis before / after the
     // elbow swivel of LimitHandTwistBySwivel and the applied swivel (deg).
@@ -695,6 +696,28 @@ private:
                         stopFade = stopFade || (m_machine.poses.key[i] != m_machine.poses.target && (m_machine.poses.key[i] & 1) != 0 &&
                                                 m_machine.poses.key[i] / 12 == m_machine.poses.target / 12 && m_machine.poses.w[i] > 0.0f);
                 info.clavicleTransient = m_clavTransient.Apply(sk, *m_scratch, m_shootClavL, m_shootClavR, stopFade, aDt, *m_lay);
+                // the shoulders of a mesh-space arm pose stay within 1.5 cm of the body's own girdle width (crouched two-handed aim:
+                // 3.5 - 4 cm narrower): clavicles turn the upper arm joints outward, the hands and the weapon shift together by at most
+                // ov::kGirdleMaxHandShiftM (ov::BoundGirdleWidth); a pose within 1.5 cm is untouched
+                if (m_rig.Valid(sk))
+                {
+                    // share = weight of the standing (not moving) two-handed poses (Pistol2H / Rifle): the bound fades with them, so a
+                    // fade to a one-handed pose, a holster or a start never switches it; one-handed and moving poses stay untouched
+                    float wAll = 0.0f, wStanding2H = 0.0f;
+                    for (int i = 0; i < m_machine.poses.count; ++i)
+                    {
+                        if (!(m_machine.poses.w[i] > 0.0f))
+                            continue;
+                        wAll += m_machine.poses.w[i];
+                        const int o = m_machine.poses.key[i] / 12;
+                        if ((m_machine.poses.key[i] & 1) == 0 &&
+                            (o == static_cast<int>(ov::PoseOverlay::Pistol2H) || o == static_cast<int>(ov::PoseOverlay::Rifle)))
+                            wStanding2H += m_machine.poses.w[i];
+                    }
+                    info.girdle = ov::BoundGirdleWidth(sk, *m_L, m_rig, m_spine3, m_shootClavL, m_shootClavR, ov::kGirdleDeficitLimitM,
+                                                       ov::kGirdleMaxHandShiftM, true, wAll > 0.0f ? wStanding2H / wAll : 0.0f,
+                                                       gik::Params{}, *m_lay);
+                }
             }
             else
                 m_clavTransient.Reset();

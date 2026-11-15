@@ -26,8 +26,10 @@
 // 3 = no shortest-arc (hemisphere) fix.
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 
+#include "GripIK.hpp"
 #include "Overlay.hpp"
 
 namespace utpp::mm::ov
@@ -257,4 +259,246 @@ struct ClavicleTransientBound
         return r;
     }
 };
+
+// ---- girdle width bound: the shoulders of a mesh-space arm pose kept near the body's own width -------------------------------------
+// Why: under a chest that differs from the weapon pose's base pose (crouch: the motion clip's chest is about 23 deg off the crouch base
+// pose) the mesh-space arm branch turns the clavicles with that difference (see the top of this file). With the two-handed pistol aim
+// in the crouch it swings the right shoulder joint forward and in (Spine3 frame (16.6, -19.6, 15.3) instead of about (17.3, -13.9, 18.3)
+// in the pose's own geometry): the shoulders are 3.5 cm narrower than the body's own girdle, steadily, on both bodies. Moving the
+// clavicles back to their local-space reference does not work: the left joint would move in, and the right one 5.6 cm away from the
+// hand, past the reach of the arm.
+// What: own width = lateral distance of the two upper arm joints with each clavicle at its rotation in aOwn (the locomotion pose: the
+// body's own girdle) under the composed chest; deficit = own width - composed width. While the deficit is not above limitM the pose is
+// untouched, bit for bit. Above it, the missing width (deficit - limitM) is shared by the sides in proportion to their own lateral
+// deficits; each side's clavicle turns its upper arm joint outward (shortest arc of the clavicle vector toward the lateral axis, never
+// past the side's own lateral distance); a share one side cannot take goes to the other side. The two-handed aim arm is already near
+// its full reach, so an outward joint would leave it: both hands then shift together by the same vector (the weapon hand first, then
+// the other hand), just enough to keep each within the soft reach of its arm (aParams.softStart x arm length). The weapon follows the
+// right hand, so it translates by that shift and keeps its rotation, and the left hand keeps its place on it (aTwoHanded; otherwise
+// each hand shifts only as far as its own arm needs). The shift is bounded by
+// aMaxShiftM: where the full share needs more, the largest share that fits is taken (continuous in the pose). The arms are solved
+// (gik::SolveArm) to the shifted hand positions with the composed hand rotations; only the clavicles, upper arms and forearms turn.
+// The joints only move outward: the width never falls. aShare (0..1) scales the missing width: the runtime passes the share of the
+// standing (not moving) weapon poses, since a moving aim pose keeps its arms at the overlay's mesh rotations; 0 = untouched.
+// Mutation UTPP_CLAVLIMIT_MUTATION 6 = never acts, 7 = the arm is not solved back (the hand moves with the shoulder joint).
+inline constexpr float kGirdleDeficitLimitM = 0.015f;  // largest deficit against the own width left untouched / kept
+inline constexpr float kGirdleMaxHandShiftM = 0.020f;  // largest shared shift of the hands and the weapon
+
+struct GirdleResult
+{
+    float ownWidth = 0.0f, widthBefore = 0.0f, widthAfter = 0.0f; // m, lateral in the Spine3 frame
+    float handErr[2] = {0.0f, 0.0f};                              // |hand - shifted hand target| after the solve (m)
+    float handShift = 0.0f;                                       // shared shift of both hands and the weapon (m)
+    bool capped[2] = {false, false};                              // the shift bound left part of the missing width
+    bool applied = false;
+};
+
+namespace girdle_detail
+{
+struct Side
+{
+    Vec3 origin, vec;      // clavicle joint and clavicle -> upper arm joint, Spine3 frame (m)
+    Vec3 hand;             // composed hand position, Spine3 frame
+    float reach = 0.0f;    // softStart x arm length
+    float own = 0.0f;      // own lateral distance |z|
+    float sign = 1.0f;     // +1 right (positive lateral), -1 left
+    Vec3 axis;             // rotation axis of the outward turn (unit), zero when no turn is possible
+    float maxAngle = 0.0f; // angle of vec to the lateral direction
+};
+inline Vec3 Rot(Vec3 v, Vec3 a, float ang) // Rodrigues, a unit and perpendicular to nothing in particular
+{
+    const float c = std::cos(ang), s = std::sin(ang);
+    return v * c + math::Cross(a, v) * s + a * (math::Dot(a, v) * (1.0f - c));
+}
+inline Vec3 JointAt(const Side& aS, float aAng) { return aS.origin + Rot(aS.vec, aS.axis, aAng); }
+// largest angle in [0, aMaxAng] with lateral gain <= aGain and the joint within reach (lateral and reach are monotone along the arc
+// toward the lateral axis for these poses; bisection keeps the result on the safe side of both)
+inline float AngleFor(const Side& aS, float aGain, float& aGot, bool& aCapped)
+{
+    const float z0 = aS.sign * aS.vec.z;
+    auto ok = [&](float a) {
+        const Vec3 j = JointAt(aS, a);
+        const float zg = aS.sign * (j.z - aS.origin.z) - z0;
+        const Vec3 d = aS.hand - j;
+        return zg <= aGain && std::sqrt(math::Dot(d, d)) <= aS.reach;
+    };
+    float lo = 0.0f, hi = aS.maxAngle;
+    if (ok(hi))
+        lo = hi;
+    else
+        for (int i = 0; i < 24; ++i)
+        {
+            const float m = 0.5f * (lo + hi);
+            (ok(m) ? lo : hi) = m;
+        }
+    const Vec3 j = JointAt(aS, lo);
+    aGot = aS.sign * (j.z - aS.origin.z) - z0;
+    const Vec3 d = aS.hand - JointAt(aS, std::min(aS.maxAngle, lo + 1e-3f));
+    aCapped = aGot < aGain - 1e-4f && std::sqrt(math::Dot(d, d)) > aS.reach;
+    return lo;
+}
+} // namespace girdle_detail
+
+// Call after the clavicle limits above, before any pass that reads the hands (feminine shoulders, grip, aim offset). aOwn = the
+// locomotion pose of the composition (its clavicle local rotations are the body's own girdle); aClavL / aClavR = LeftShoulder /
+// RightShoulder, children of aSpine3, with the upper arms of aRig as their children.
+inline GirdleResult BoundGirdleWidth(const Skeleton& aSk, const Pose& aOwn, const gik::Rig& aRig, int aSpine3, int aClavL, int aClavR,
+                                     float aLimitM, float aMaxShiftM, bool aTwoHanded, float aShare, const gik::Params& aParams,
+                                     Pose& aPose)
+{
+    GirdleResult r;
+    const int clav[2] = {aClavL, aClavR};
+    const gik::ArmChain* chain[2] = {&aRig.left, &aRig.right};
+    if (aSpine3 < 0 || aSpine3 >= aSk.n || !(aLimitM >= 0.0f) || !aRig.Valid(aSk))
+        return r;
+    for (int s = 0; s < 2; ++s)
+        if (clav[s] < 0 || clav[s] >= aSk.n || aSk.parent[clav[s]] != aSpine3 || aSk.parent[chain[s]->upper] != clav[s] ||
+            !math::IsFinite(aOwn.b[clav[s]].r) || !math::IsFinite(aPose.b[clav[s]].r))
+            return r;
+    Quat sRot, hRot[2];
+    Vec3 sPos, hPos[2];
+    gik::ModelOf(aSk, aPose, aSpine3, sRot, sPos);
+    const Quat sInv = math::QuatInv(sRot);
+    girdle_detail::Side side[2];
+    gik::Params solve[2] = {aParams, aParams}; // per side: an arm the composition already stretched past softStart keeps its reach
+    float zNow[2], zOwn[2];
+    for (int s = 0; s < 2; ++s)
+    {
+        girdle_detail::Side& d = side[s];
+        const Xf& c = aPose.b[clav[s]];
+        const Vec3 armT = aPose.b[chain[s]->upper].t;
+        d.origin = c.t;
+        d.vec = math::QuatRotate(math::QuatNormalize(c.r), armT);
+        const Vec3 ownVec = math::QuatRotate(math::QuatNormalize(aOwn.b[clav[s]].r), armT);
+        d.sign = s ? 1.0f : -1.0f;
+        zNow[s] = d.sign * (d.origin.z + d.vec.z);
+        zOwn[s] = d.sign * (d.origin.z + ownVec.z);
+        gik::ModelOf(aSk, aPose, chain[s]->hand, hRot[s], hPos[s]);
+        d.hand = math::QuatRotate(sInv, hPos[s] - sPos);
+        const float full = gik::Len(aPose.b[chain[s]->lower].t) + gik::Len(aPose.b[chain[s]->hand].t);
+        const Vec3 toHand = d.hand - (d.origin + d.vec);
+        const float now = full > 1e-6f ? std::sqrt(math::Dot(toHand, toHand)) / full : 0.0f;
+        if (now > aParams.softStart)
+        {
+            solve[s].softStart = std::min(now, 0.9999f);
+            solve[s].maxReach = std::max(aParams.maxReach, std::min(1.0f, solve[s].softStart + 1e-4f));
+        }
+        d.reach = solve[s].softStart * full;
+        d.own = zOwn[s];
+    }
+    r.widthBefore = zNow[0] + zNow[1];
+    r.ownWidth = zOwn[0] + zOwn[1];
+    r.widthAfter = r.widthBefore;
+    const float deficit = r.ownWidth - r.widthBefore;
+    const float share = std::isfinite(aShare) ? std::clamp(aShare, 0.0f, 1.0f) : 0.0f;
+    if (!std::isfinite(deficit) || !(deficit > aLimitM) || !(share > 0.0f))
+        return r;
+#if defined(UTPP_CLAVLIMIT_MUTATION) && UTPP_CLAVLIMIT_MUTATION == 6
+    (void)aMaxShiftM, (void)aTwoHanded;
+    return r; // mutation 6: never acts
+#else
+    const Vec3 lat{0.0f, 0.0f, 1.0f};
+    float need[2], gain[2] = {0.0f, 0.0f}, ang[2] = {0.0f, 0.0f};
+    for (int s = 0; s < 2; ++s)
+    {
+        girdle_detail::Side& d = side[s];
+        need[s] = std::max(0.0f, zOwn[s] - zNow[s]);
+        Vec3 u;
+        const Vec3 to = lat * d.sign;
+        if (gik::Norm(d.vec, u) && gik::Norm(math::Cross(d.vec, to), d.axis, 1e-6f))
+            d.maxAngle = std::acos(std::clamp(math::Dot(u, to), -1.0f, 1.0f));
+        else
+        {
+            d.axis = Vec3{};
+            d.maxAngle = 0.0f;
+        }
+    }
+    const float needSum = need[0] + need[1];
+    if (!(needSum > 1e-6f))
+        return r;
+    girdle_detail::Side free[2] = {side[0], side[1]};
+    free[0].reach = free[1].reach = 1e9f; // the turn itself ignores the reach: the hands shift instead (below)
+    // plan for the share aFrac of the missing width: turn angles, lateral gains and the shared hand shift (Spine3 frame) that keeps
+    // both hands within the soft reach of their arms
+    auto plan = [&](float aFrac, float* aAng, float* aGain, Vec3* aShift) {
+        const float missing = (deficit - aLimitM) * share * aFrac;
+        aGain[0] = aGain[1] = aAng[0] = aAng[1] = 0.0f;
+        // first pass: shares in proportion to the side deficits (never past the own lateral distance); second: the rest to the other side
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            if (!(missing - aGain[0] - aGain[1] > 1e-5f))
+                break;
+            for (int s = 0; s < 2; ++s)
+            {
+                if (free[s].maxAngle <= 0.0f)
+                    continue;
+                const float part = pass == 0 ? missing * need[s] / needSum : missing - aGain[0] - aGain[1];
+                const float want = std::min(need[s], aGain[s] + part);
+                if (!(want > aGain[s]))
+                    continue;
+                bool capped = false;
+                float got = 0.0f;
+                aAng[s] = girdle_detail::AngleFor(free[s], want, got, capped);
+                aGain[s] = got;
+            }
+        }
+        // two-handed: one shift for both hands, the weapon hand first, then the other hand with the shift so far; one-handed: each
+        // hand its own
+        Vec3 shared{};
+        for (int s : {1, 0})
+        {
+            const Vec3 j = girdle_detail::JointAt(side[s], aAng[s]);
+            const Vec3 h = side[s].hand + (aTwoHanded ? shared : Vec3{});
+            const Vec3 d = h - j;
+            const float len = std::sqrt(math::Dot(d, d));
+            const Vec3 own = len > side[s].reach && len > 1e-6f ? d * -(1.0f - side[s].reach / len) : Vec3{};
+            shared = shared + own;
+            aShift[s] = own;
+        }
+        if (aTwoHanded)
+            aShift[0] = aShift[1] = shared;
+        return std::sqrt(std::max(math::Dot(aShift[0], aShift[0]), math::Dot(aShift[1], aShift[1])));
+    };
+    // the largest share whose hand shift stays within aMaxShiftM (the full share when it fits)
+    Vec3 shift[2];
+    float frac = 1.0f;
+    if (plan(1.0f, ang, gain, shift) > aMaxShiftM)
+    {
+        float lo = 0.0f, hi = 1.0f;
+        for (int i = 0; i < 24; ++i)
+        {
+            const float m = 0.5f * (lo + hi);
+            (plan(m, ang, gain, shift) <= aMaxShiftM ? lo : hi) = m;
+        }
+        frac = lo;
+        plan(frac, ang, gain, shift);
+        r.capped[0] = r.capped[1] = true;
+    }
+    if (!(ang[0] > 0.0f) && !(ang[1] > 0.0f))
+        return r;
+    for (int s = 0; s < 2; ++s)
+    {
+        const Vec3 shiftMesh = math::QuatRotate(sRot, shift[s]);
+        const float shiftLen = std::sqrt(math::Dot(shift[s], shift[s]));
+        r.handShift = std::max(r.handShift, shiftLen);
+        if (!(ang[s] > 0.0f) && !(shiftLen > 0.0f))
+            continue;
+        const int c = clav[s];
+        if (ang[s] > 0.0f)
+        {
+            const Quat turn = math::QuatNormalize(gik::AxisAngle(side[s].axis, ang[s])); // Spine3 frame = parent frame of the clavicle
+            const Quat q = math::QuatNormalize(aPose.b[c].r);
+            SetClavicleKeepChildren(aSk, c, q, math::QuatNormalize(math::QuatMul(turn, q)), aPose);
+        }
+#if !(defined(UTPP_CLAVLIMIT_MUTATION) && UTPP_CLAVLIMIT_MUTATION == 7)
+        gik::Result ik;
+        gik::SolveArm(aSk, aPose, *chain[s], hPos[s] + shiftMesh, &hRot[s], 1.0f, solve[s], ik);
+        r.handErr[s] = ik.handErr;
+#endif
+        r.applied = true;
+    }
+    r.widthAfter = r.widthBefore + gain[0] + gain[1];
+    return r;
+#endif
+}
 } // namespace utpp::mm::ov
