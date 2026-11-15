@@ -2174,5 +2174,107 @@ do
   check("melee variable: mutation [pack ignored] is caught", lastOf(gm.melee) ~= 0)
 end
 
+-- ---------------------------------------------------------------- Game Animations pack on foot: the representation feature
+-- The game's player graph animates V on foot only while the anim feature TPPRepresentation.IsActive is off; with the pack in
+-- force UTPP keeps it off on foot (every frame) and leaves it alone in a vehicle and while the game owns the representation.
+do
+  local function count(t, v, from) local n = 0 for i = (from or 0) + 1, #t do if t[i] == v then n = n + 1 end end return n end
+  local function setup(Mod, veh)
+    local g = mock("female", femaleSet())
+    if Mod then g.body = Mod.NewBody(g.body.api, function() return g.cfg end) end
+    g.veh = veh or { state = 0, mounted = false }
+    g.body.api.vehicle = function() return { state = g.veh.state, mounted = g.veh.mounted } end
+    return g
+  end
+  -- the mod's animations: an activation and the verify cycle apply the feature on, never off
+  local g = setup()
+  g.body:SetWanted(true, "test")
+  g.run(1.2)
+  check("feature, mod pack: on at the activation and at every verify, never off", count(g.feat, true) >= 2 and count(g.feat, false) == 0
+    and g.body.gameFoot == false, #g.feat)
+  -- the pack changes while V stands on foot: off from the next frame, every frame, and no more "on"
+  local n0 = #g.feat
+  g.cfg.packGame = true
+  g.run(0.5)
+  check("feature, game pack on foot: off every frame", count(g.feat, false, n0) == 30 and g.body.gameFoot == true, count(g.feat, false, n0))
+  check("feature, game pack on foot: never switched on again (no verify write)", count(g.feat, true, n0) == 0)
+  check("feature, game pack on foot: logged once", g.count("game animations on foot: representation feature kept off") == 1)
+  -- V mounts a vehicle: the feature is the game's (the vehicle animations of the third-person body need it)
+  n0 = #g.feat
+  g.veh.mounted, g.veh.state = true, 1
+  g.run(1.2)
+  check("feature, game pack in a vehicle: not switched off", count(g.feat, false, n0) == 0 and g.body.gameFoot == false)
+  check("feature, game pack in a vehicle: the usual verify applies it on", count(g.feat, true, n0) >= 1)
+  -- PSM vehicle state without a mounted vehicle (enter / exit transition) counts as the vehicle too
+  n0 = #g.feat
+  g.veh.mounted, g.veh.state = false, 4
+  g.run(0.3)
+  check("feature, game pack in a vehicle transition: not switched off", count(g.feat, false, n0) == 0)
+  -- back on foot
+  n0 = #g.feat
+  g.veh.mounted, g.veh.state = false, 0
+  g.run(0.2)
+  check("feature, game pack after the vehicle: off again every frame", count(g.feat, false, n0) == 12 and count(g.feat, true, n0) == 0)
+  -- the game owns the representation (take-over, scene): nothing is written by this rule
+  n0 = #g.feat
+  g.reason = "takeover"
+  g.run(0.3)
+  check("feature, game pack while the game owns the representation: not switched off", count(g.feat, false, n0) == 0
+    and g.body.gameFoot == false)
+  g.reason = nil
+  -- back to the mod's animations: the usual rule again (on at the next verify)
+  g.run(0.1)
+  n0 = #g.feat
+  g.cfg.packGame = false
+  g.run(1.2)
+  check("feature, back to the mod pack: on again at the verify, never off", count(g.feat, true, n0) >= 1 and count(g.feat, false, n0) == 0
+    and g.count("representation feature under the usual rule again") >= 1)
+  -- a start with the pack in force: the activation itself applies the feature off
+  local s = setup()
+  s.cfg.packGame = true
+  s.body:SetWanted(true, "test")
+  s.run(0.5)
+  check("feature, start with the game pack: the activation applies it off, nothing applies it on", s.act == 1 and count(s.feat, true) == 0
+    and count(s.feat, false) >= 30, #s.feat)
+  -- third person not wanted (first person): the rule does not run
+  local f = setup()
+  f.cfg.packGame = true
+  f.run(0.5)
+  check("feature, game pack in first person: nothing written", #f.feat == 0 and f.body.gameFoot ~= true)
+  -- without a vehicle reading the feature is not touched (the rule cannot tell a ride from a walk)
+  local nv = mock("female", femaleSet())
+  nv.cfg.packGame = true
+  nv.body:SetWanted(true, "test")
+  nv.run(0.5)
+  check("feature, game pack without a vehicle reading: the usual rule (on, never off)", count(nv.feat, false) == 0 and count(nv.feat, true) >= 1)
+  -- mutations of the shipped source are caught
+  local src = assert(io.open(UTPP_BODY_PATH, "rb")):read("*a")
+  local function mutant(from, to)
+    local a, b = src:find(from, 1, true)
+    assert(a and not src:find(from, b + 1, true), "mutation anchor must exist exactly once: " .. from)
+    local savedRegister = registerForEvent
+    registerForEvent = nil
+    local Mut = assert(loadstring(src:sub(1, a - 1) .. to .. src:sub(b + 1), "=utpp_body_mutant"))()
+    registerForEvent = savedRegister
+    return Mut
+  end
+  local m1 = setup(mutant("    if gameFoot and api.feature then\n", "    if false then\n"))
+  m1.cfg.packGame = true
+  m1.body:SetWanted(true, "test")
+  m1.run(0.5)
+  check("feature: mutation [not kept off every frame] is caught", count(m1.feat, false) < 30)
+  local m2 = setup(mutant("  return ok and type(o) == \"table\" and o.mounted ~= true and (tonumber(o.state) or 0) == 0", "  return true"),
+    { state = 1, mounted = true })
+  m2.cfg.packGame = true
+  m2.body:SetWanted(true, "test")
+  m2.run(0.5)
+  check("feature: mutation [vehicle ignored] is caught", count(m2.feat, false) > 0)
+  local m3 = setup(mutant("if self.owner == \"utpp\" and api.feature and not gameFoot then", "if self.owner == \"utpp\" and api.feature then"))
+  m3.cfg.packGame = true
+  m3.body:SetWanted(true, "test")
+  m3.run(1.2)
+  check("feature: mutation [verify still applies it on] is caught", count(m3.feat, true) > 0)
+end
+
 print(string.format("utpp_body offline test: %d passed, %d failed", results.pass, results.fail))
 assert(results.fail == 0, "utpp_body offline test failed")

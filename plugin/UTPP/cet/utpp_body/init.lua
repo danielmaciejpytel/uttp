@@ -636,7 +636,7 @@ function Body:Activate(now, retry, cfg)
   end
   local ok, err = pcall(self.api.activateRep)
   if not ok then self:LogOnce("act", "activate representation FAILED: " .. tostring(err)) end
-  if self.api.feature then pcall(self.api.feature, true) end
+  if self.api.feature then pcall(self.api.feature, not self.gameFoot) end -- Game Animations on foot: see Body:GameFoot
   self.owner, self.pendingSince = "utpp", now
   self.stats.activations = self.stats.activations + 1
   if retry then self.stats.retries = self.stats.retries + 1 end
@@ -658,6 +658,19 @@ function Body:RestoreAll(now, why)
   if self:HasChanges() then self:Log(string.format("t=%.2f restore FPP parts (%s)", now, why)) end
   self:RestoreL3()
   self:RestoreL2()
+end
+
+-- Game Animations pack on foot: the game's player graph animates V only while the anim feature TPPRepresentation.IsActive is
+-- off. With the feature on (what an activation of the third-person body sets) the graph takes a branch that holds no on-foot
+-- animation: V stands in the reference pose and slides. The mod's own movement covers that pose; with the Game Animations
+-- pack nothing does. So with that pack, on foot and while nothing of the game owns the representation, UTPP keeps the feature
+-- off (every frame: an activation event sets it again); the third-person body itself (meshes, head, wrapper variables, camera)
+-- stays on. In a vehicle the feature is left alone: the vehicle animations of the third-person body need it on.
+-- True = keep the feature off now. No vehicle reading (api.vehicle missing or failing) = false: the feature is not touched.
+function Body:GameFoot(cfg, wanted, gameReason)
+  if not (cfg.packGame and wanted) or gameReason ~= nil or not self.api.vehicle then return false end
+  local ok, o = pcall(self.api.vehicle)
+  return ok and type(o) == "table" and o.mounted ~= true and (tonumber(o.state) or 0) == 0
 end
 
 function Body:Step(now)
@@ -715,6 +728,13 @@ function Body:Step(now)
   -- before any activation below (the graph edge ANY -> tpp_securitycam_hacking needs the variable in place first);
   -- a vanilla take-over of control (security camera) keeps its own behaviour
   self:SyncFoot(now, wanted and not (gameReason and string.find(gameReason, "takeover", 1, true)))
+  -- before the activation branch (Activate applies the feature with this value)
+  local gameFoot = self:GameFoot(cfg, wanted, gameReason)
+  if gameFoot ~= (self.gameFoot == true) then
+    self:Log(string.format("t=%.2f game animations on foot: representation feature %s", now,
+      gameFoot and "kept off (the game's own animations play)" or "under the usual rule again"))
+  end
+  self.gameFoot = gameFoot
 
   if wanted then
     if rep == "tpp" then
@@ -779,12 +799,15 @@ function Body:Step(now)
         -- inside a vehicle head guard window (mount / exit / unmount) the parts are re-checked every 0.1 s
         self.nextVerify = now + (fast and math.min(self.opt.verifyInterval, self.opt.fastVerifyInterval)
           or self.opt.verifyInterval)
-        if self.owner == "utpp" and api.feature then pcall(api.feature, true) end
+        if self.owner == "utpp" and api.feature and not gameFoot then pcall(api.feature, true) end
         self:ApplyL2(cfg)
         self:ApplyL3(cfg)
       end
     else
       self.repOkSince = nil
+    end
+    if gameFoot and api.feature then
+      if pcall(api.feature, false) then self.stats.gameFootFeatures = (self.stats.gameFootFeatures or 0) + 1 end
     end
   else
     self.repOkSince = nil
