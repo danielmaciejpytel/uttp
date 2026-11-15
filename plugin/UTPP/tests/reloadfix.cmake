@@ -192,6 +192,13 @@ if(DEFINED _utpp_pmotion_wov)
   target_compile_definitions(utpp_reload_rifle_contacts_cmut28 PRIVATE UTPP_RELOAD_CONTACT_MUTATION=28)
   add_test(NAME utpp_reload_rifle_contacts_cmut28 COMMAND utpp_reload_rifle_contacts_cmut28 "${_utpp_pmotion_wov}")
   set_tests_properties(utpp_reload_rifle_contacts_cmut28 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
+  # Contact mutation 29: no final elbow swivel of the weapon (right) arm, section 16.
+  add_executable(utpp_reload_rifle_contacts_cmut29 tests/ReloadRifleContactsTest.cpp)
+  target_compile_options(utpp_reload_rifle_contacts_cmut29 PRIVATE ${UTPP_WARNINGS} /EHsc)
+  target_compile_features(utpp_reload_rifle_contacts_cmut29 PRIVATE cxx_std_20)
+  target_compile_definitions(utpp_reload_rifle_contacts_cmut29 PRIVATE UTPP_RELOAD_CONTACT_MUTATION=29)
+  add_test(NAME utpp_reload_rifle_contacts_cmut29 COMMAND utpp_reload_rifle_contacts_cmut29 "${_utpp_pmotion_wov}")
+  set_tests_properties(utpp_reload_rifle_contacts_cmut29 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
   # Ground keep mutations (sections 9 and 11): 1 = no keep (former run-start withdrawal), 2 = no edge latch (a pistol reload begun moving
   # stays uncorrected), 3 = no girdle hold after an early episode end.
   foreach(_m 1 2 3)

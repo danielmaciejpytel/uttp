@@ -1981,6 +1981,37 @@ inline FinalLimitResult LimitArmFinal(ov::Pose& aPose,const gik::ArmChain& aArm,
     r.applied=r.upperTwistCutDeg!=0.0f || r.pronationCutDeg!=0.0f || r.bendCutDeg!=0.0f;
     return r;
 }
+// Final elbow swivel of the weapon (right) arm of a rifle reload correction. The right hand carries the weapon: its MODEL transform
+// is the game's and must stay exact (turning the hand would turn the weapon and move the support-hand contact). The swivel limiter
+// after the solve turns the elbow by at most kReloadMaxSwivelDeg from the solve's elbow and stops at the 85 deg pronation limit of
+// the support grip; on folded reloads (elbow flexed ~145 deg, hand near the shoulder) the wrist bend then stays at 80 - 95 deg for
+// up to a second. This stage runs on the records as finally written (after the replay, the joint limiter and the left-arm stage)
+// and turns the elbow further about the shoulder -> wrist axis (LimitArmBySwivel, its own continuous state: at most
+// kReloadSwivelRateDegPerSec * dt per frame, no sign change in one frame) until the wrist bend is under kReloadWristBendLimitDeg.
+// Only the bend is a target here: the pronation may rise to max(kRightArmFinalPronationLimitDeg, its value before), the upper-arm
+// twist to max(kReloadUpperArmTwistCapDeg, its value before). The hand, the weapon bones and the fingers keep their model transforms;
+// the forearm local is unchanged. Frames whose wrist bend is under the limit while the stage's swivel is 0: untouched bit for bit.
+// The joint limiter does not re-capture after this stage, so its next frame is limited against the pose before the stage (the stage's
+// own rate keeps the swivel continuous). Mutation 29 drops the stage.
+#if defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==29
+inline constexpr bool kRightArmFinalSwivel=false;
+#else
+inline constexpr bool kRightArmFinalSwivel=true;
+#endif
+inline constexpr float kRightArmFinalPronationLimitDeg=100.0f;
+// The swivel limiter leaves a bend it could reach at the limit plus the rounding of the written rotation (< .001 deg); such frames
+// count as inside the limit here (untouched bit for bit).
+inline constexpr float kRightArmFinalBendToleranceDeg=0.01f;
+inline ArmLimitResult LimitRightArmFinal(ov::Pose& aPose,const ov::Skeleton& aSk,const gik::ArmChain& aArm,float aWeight,float* aPrevDeg,
+                                         float aMaxStepDeg,float aPronationLimitDeg=kRightArmFinalPronationLimitDeg)
+{
+    const ArmAnatomy m=MeasureArm(aPose,aArm);
+    if(!m.ok){if(aPrevDeg)*aPrevDeg=0.0f;return ArmLimitResult{};}
+    // the pronation is a cap, not a target: a pronation above the limit is kept where it is (never lowered or raised by this stage)
+    const float pronLimit=std::fmax(aPronationLimitDeg,std::fabs(m.pronationDeg));
+    return LimitArmBySwivel(aPose,aSk,aArm.upper,aArm.lower,aArm.hand,pronLimit,kReloadWristBendLimitDeg+kRightArmFinalBendToleranceDeg,
+                            kReloadMaxSwivelDeg,aWeight,aPrevDeg,aMaxStepDeg);
+}
 // Everything the FK hook keeps between frames of one reload (single FK thread).
 struct Continuity
 {
@@ -1993,11 +2024,12 @@ struct Continuity
     PublishedStart published;
     SwivelState swivel;
     FinalLimitSide finalSide;
+    SwivelState rightFinal; // swivel of the final right-arm stage (deg[1])
     // Diagnostic record of the current call (reload_trace), set by the caller while it holds the state and cleared before it lets go;
     // nullptr = nothing is recorded. Read-only for the correction: never part of Reset.
     reload_trace::Record* trace=nullptr;
     void Reset(){placement.Reset();divergence.Reset();reject.Reset();joints.Reset();stock.Reset();leftArm.Reset();weaponFollow.Reset();published.Reset();swivel.Reset();
-                 finalSide.Reset();}
+                 finalSide.Reset();rightFinal.Reset();}
     // Last stage of a frame: the final records (after replay / ramp / limiter) become the reference of the next frame's
     // head clearance.
     void NoteOutput(const Prepared& p,const uint8_t* records,uint32_t count)
@@ -2354,6 +2386,26 @@ inline bool ApplyLeftArmFinalLimits(const Prepared& p,const integ::PoseSnapshot&
     if(joints.valid)joints.Capture(p,records,count,s.rig,ticks);
     return true;
 }
+// Last write of a corrected rifle frame, after ApplyLeftArmFinalLimits: LimitRightArmFinal on the right arm of the written records.
+// Writes the right upper-arm and hand local rotations only; no joint limiter capture (see LimitRightArmFinal).
+inline bool ApplyRightArmFinalSwivel(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* records,uint32_t count,float weight,
+                                     SwivelState& state,int64_t ticks,int64_t ticksPerSecond)
+{
+    if(!kRightArmFinalSwivel || s.traceOverlay!=static_cast<int32_t>(ov::PoseOverlay::Rifle) ||
+       !JointLimiter::RecordsInBounds(p,records,count))return false;
+    ov::Pose pose;
+    if(!Read(p,records,pose))return false;
+    const float step=state.Begin(s.rig,ticks,ticksPerSecond);
+    const ArmLimitResult r=LimitRightArmFinal(pose,p.skeleton,p.arms.right,weight,step>=0.0f ? &state.deg[1] : nullptr,step);
+    if(!r.applied)return false;
+    for(const int b:{p.arms.right.upper,p.arms.right.hand})
+    {
+        if(uint32_t(b)<s.firstBone || p.gameIndex[b]<0)continue;
+        const float q[4]={pose.b[b].r.x,pose.b[b].r.y,pose.b[b].r.z,pose.b[b].r.w};
+        std::memcpy(records+size_t(p.gameIndex[b])*48+16,q,sizeof(q));
+    }
+    return true;
+}
 // ---- diagnostic record (reload_trace) around Finish / HoldOnly. Read-only.
 // The game's own left arm of this frame (the records as handed in).
 inline void TraceOwnLeftArm(const Prepared& p,const integ::PoseSnapshot& s,const uint8_t* records,uint32_t count,const ArmAnatomy& own,
@@ -2433,6 +2485,8 @@ inline bool Finish(const Prepared& p,const integ::PoseSnapshot& s,
         if(written && ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,correctionWeight,continuity->joints,continuity->finalSide,nowTicks,
                                               ticksPerSecond) && tr)
             tr->flags|=reload_trace::kFlagFinalLimit;
+        if(written && ApplyRightArmFinalSwivel(p,s,records,count,correctionWeight,continuity->rightFinal,nowTicks,ticksPerSecond) && tr)
+            tr->flags|=reload_trace::kFlagRightFinalSwivel;
         continuity->NoteOutput(p,records,count);
     }
     if(tr)TraceAfterFrame(p,records,count,*continuity,ok,written,result,*tr);
@@ -2471,6 +2525,8 @@ inline bool HoldOnly(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* rec
     if(written && ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,s.reloadContactsWeight,state.joints,state.finalSide,nowTicks,ticksPerSecond) &&
        tr)
         tr->flags|=reload_trace::kFlagFinalLimit;
+    if(written && ApplyRightArmFinalSwivel(p,s,records,count,s.reloadContactsWeight,state.rightFinal,nowTicks,ticksPerSecond) && tr)
+        tr->flags|=reload_trace::kFlagRightFinalSwivel;
     state.NoteOutput(p,records,count);
     if(tr)
     {

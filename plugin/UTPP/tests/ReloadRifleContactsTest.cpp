@@ -14,6 +14,7 @@
 // UTPP_RELOAD_CONTACT_MUTATION=26: the girdle is restored with the weight shrunk by the placement guard (the game's girdle), section 12.
 // UTPP_RELOAD_CONTACT_MUTATION=27: no final anatomy stage of the left arm (LimitArmFinal), sections 12 (13e) and 13.
 // UTPP_RELOAD_CONTACT_MUTATION=28: the girdle is restored with the correction weight under a hand-back that ramps with it, section 15.
+// UTPP_RELOAD_CONTACT_MUTATION=29: no final elbow swivel of the weapon (right) arm, section 16.
 // UTPP_RELOAD_GROUND_KEEP_MUTATION=1: no ground keep, 2: no edge latch (a pistol reload begun moving stays uncorrected), 3: no girdle
 // hold after an early episode end (sections 9 and 11).
 // Every mutation build must report an assertion FAIL (ctest PASS_REGULAR_EXPRESSION "FAIL ").
@@ -1349,6 +1350,126 @@ int main(int argc,char** argv)
             Check(handStep<=0.055f && weaponStep<=0.05f,(std::string(tag)+": no step of the left hand / weapon above the entry bounds").c_str());
             Check(minRampGirdle>=0.999f && minReplayOwn>=0.999f,
                   (std::string(tag)+": the record shows V's own girdle in full on ramp frames and replays").c_str());
+        }
+    }
+
+    // 16. Final elbow swivel of the weapon (right) arm (ApplyRightArmFinalSwivel / LimitRightArmFinal) on written rifle records. A folded
+    //     right arm (elbow flexed ~146 deg, hand ~15 cm from the shoulder, wrist bend 94.5 deg, pronation 41 deg) whose hand rotation
+    //     sweeps at 60 fps from half of that rotation to all of it and back (bend ~47 -> 94.5 -> ~47 deg), then holds. Per frame: frames
+    //     under the bend limit with the stage's swivel at 0 keep the records bit for bit; over the limit the written bend is at most the
+    //     limit; the hand and weapon MODEL transforms and the forearm local are unchanged; the swivel moves at most
+    //     kReloadSwivelRateDegPerSec * dt per frame; the pronation never rises past max(kRightArmFinalPronationLimitDeg, before) nor the
+    //     upper-arm twist past max(kReloadUpperArmTwistCapDeg, before). Weight 0 and a pistol overlay: untouched. Mutation 29 drops the stage.
+    {
+        const auto& R=rig.right;
+        auto fold=std::make_unique<ov::Pose>(*base);
+        fold->b[R.upper].t=math::Vec3{-0.149257f,0.000865f,0.001491f};
+        fold->b[R.upper].r=math::QuatNormalize(math::Quat{-0.201312f,0.771737f,-0.376593f,0.471247f});
+        fold->b[R.lower].t=math::Vec3{-0.290435f,0.0f,0.0f};
+        fold->b[R.lower].r=math::QuatNormalize(math::Quat{0.0f,-0.014680f,-0.957310f,0.288691f});
+        fold->b[R.hand].t=math::Vec3{-0.275284f,0.0f,0.0f};
+        const math::Quat handFold=math::QuatNormalize(math::Quat{-0.236920f,0.176973f,-0.712422f,-0.636400f});
+        const auto handAt=[&](float t){return math::QuatNlerpShortest(math::Quat{0.0f,0.0f,0.0f,1.0f},handFold,t);};
+        integ::PoseSnapshot s=snap;s.traceOverlay=int32_t(ov::PoseOverlay::Rifle);s.reloadContactsWeight=1.0f;
+        const auto restInv=math::QuatInv(math::QuatNormalize(rt::kUpperArmRestLocal));
+        const auto upTwist=[&](const ov::Pose& x){
+            return std::fabs(ov::TwistAngleDeg(math::QuatNormalize(math::QuatMul(restInv,math::QuatNormalize(x.b[R.upper].r))),math::Vec3{1.0f,0.0f,0.0f}));};
+        rt::SwivelState state;
+        const int64_t tps=60000;
+        const int frames=70;
+        int inside0=0,inside0Same=0,relax=0,over=0,applied=0,handMoved=0,foreChanged=0,raised=0;
+        float maxBendIn=0.0f,maxBendOut=0.0f,maxSwivelStep=0.0f,maxSwivel=0.0f,elbowStepIn=0.0f,elbowStepOut=0.0f,maxPronOut=0.0f;
+        math::Vec3 prevElbowIn{},prevElbowOut{};float prevSwivel=0.0f;
+        for(int k=0;k<frames;++k)
+        {
+            const float t=k<30 ? 0.5f+0.5f*float(k)/29.0f : k<60 ? 1.0f-0.5f*float(k-30)/29.0f : 0.5f;
+            fold->b[R.hand].r=handAt(t);
+            std::vector<unsigned char> in;Records(*fold,in);
+            std::vector<unsigned char> out=in;
+            const float stateBefore=state.deg[1];
+            const bool did=rt::ApplyRightArmFinalSwivel(prepared,s,out.data(),sk.n,1.0f,state,int64_t(k+1)*(tps/60),tps);
+            ov::Pose po;rt::Read(prepared,out.data(),po);
+            const rt::ArmAnatomy mi=rt::MeasureArm(*fold,R),mo=rt::MeasureArm(po,R);
+            const bool same=in==out;
+            applied+=did;
+            maxBendIn=std::max(maxBendIn,mi.bendDeg);maxBendOut=std::max(maxBendOut,mo.bendDeg);
+            maxPronOut=std::max(maxPronOut,std::fabs(mo.pronationDeg));
+            if(mi.bendDeg<=rt::kReloadWristBendLimitDeg)
+            {
+                if(stateBefore==0.0f){++inside0;inside0Same+=same;}
+                else if(!same)++relax;
+            }
+            else ++over;
+            const auto hi=native_reload::Model(sk,*fold,R.hand),ho=native_reload::Model(sk,po,R.hand);
+            const auto wi=native_reload::Model(sk,*fold,rig.weaponRight),wo=native_reload::Model(sk,po,rig.weaponRight);
+            if(gik::Len(hi.t-ho.t)>1e-5f || std::fabs(std::fabs(math::QuatDot(hi.r,ho.r))-1.0f)>1e-5f ||
+               gik::Len(wi.t-wo.t)>1e-5f || std::fabs(std::fabs(math::QuatDot(wi.r,wo.r))-1.0f)>1e-5f)++handMoved;
+            foreChanged+=std::memcmp(&po.b[R.lower],&fold->b[R.lower],sizeof(ov::Xf))!=0;
+            raised+=std::fabs(mo.pronationDeg)>std::fmax(rt::kRightArmFinalPronationLimitDeg,std::fabs(mi.pronationDeg))+0.01f ||
+                    upTwist(po)>std::fmax(rt::kReloadUpperArmTwistCapDeg,upTwist(*fold))+0.01f;
+            const math::Vec3 ei=native_reload::Model(sk,*fold,R.lower).t,eo=native_reload::Model(sk,po,R.lower).t;
+            if(k>0){elbowStepIn=std::max(elbowStepIn,gik::Len(ei-prevElbowIn));elbowStepOut=std::max(elbowStepOut,gik::Len(eo-prevElbowOut));
+                    maxSwivelStep=std::max(maxSwivelStep,std::fabs(state.deg[1]-prevSwivel));}
+            prevElbowIn=ei;prevElbowOut=eo;prevSwivel=state.deg[1];maxSwivel=std::max(maxSwivel,std::fabs(state.deg[1]));
+        }
+        std::printf("  final right arm swivel: %d frames, over the bend limit %d, applied %d | inside with swivel 0: %d (%d bit for bit), "
+                    "relaxing %d | wrist bend max %.1f -> %.1f deg, pronation max %.1f deg | swivel max %.1f deg, step max %.2f deg/frame | "
+                    "elbow step max %.2f -> %.2f cm/frame | hand / weapon moved on %d frames, forearm changed on %d, raised %d\n",
+                    frames,over,applied,inside0,inside0Same,relax,maxBendIn,maxBendOut,maxPronOut,maxSwivel,maxSwivelStep,elbowStepIn*100.0f,
+                    elbowStepOut*100.0f,handMoved,foreChanged,raised);
+        Check(maxBendIn>90.0f && over>=10 && inside0>=10,"fixture: the folded right arm sweeps past the wrist bend limit and back inside it");
+        Check(inside0Same==inside0,"final right arm swivel: frames under the bend limit with the swivel at 0 keep the records bit for bit");
+        Check(maxBendOut<=rt::kReloadWristBendLimitDeg+0.05f,"final right arm swivel: the written wrist bend stays at most at the limit");
+        Check(handMoved==0 && foreChanged==0,"final right arm swivel: hand and weapon model transforms and the forearm local unchanged");
+        Check(maxSwivelStep<=rt::kReloadSwivelRateDegPerSec/60.0f+1e-3f && raised==0,
+              "final right arm swivel: the swivel moves at most the rate per frame; pronation / upper-arm twist never raised past their caps");
+        // weight 0 and a pistol overlay on the most bent frame: untouched
+        {
+            fold->b[R.hand].r=handFold;
+            std::vector<unsigned char> in;Records(*fold,in);
+            std::vector<unsigned char> w0=in,pistol=in;
+            rt::SwivelState s0,s1;
+            const bool d0=rt::ApplyRightArmFinalSwivel(prepared,s,w0.data(),sk.n,0.0f,s0,1000,tps);
+            integ::PoseSnapshot sp=s;sp.traceOverlay=int32_t(ov::PoseOverlay::Pistol2H);
+            const bool d1=rt::ApplyRightArmFinalSwivel(prepared,sp,pistol.data(),sk.n,1.0f,s1,1000,tps);
+            Check(!d0 && !d1 && w0==in && pistol==in,"final right arm swivel: weight 0 and a pistol overlay leave the records untouched");
+        }
+        // relax: the folded arm held for 15 frames, then the hand back inside the limit in ONE frame and held for 25 frames. The swivel
+        // returns to 0 at the rate (no elbow jump): on those frames the records change although the input is inside the limit; once the
+        // swivel is 0 the records are bit for bit again.
+        {
+            rt::SwivelState st;
+            int relaxFrames=0,relaxOverStep=0,afterZero=0,afterZeroSame=0;
+            float relaxBendMax=0.0f,relaxStepMax=0.0f,swivelAtDrop=0.0f,prevSw=0.0f;
+            for(int k=0;k<40;++k)
+            {
+                fold->b[R.hand].r=handAt(k<15 ? 1.0f : 0.5f);
+                std::vector<unsigned char> in;Records(*fold,in);
+                std::vector<unsigned char> out=in;
+                const float before=st.deg[1];
+                rt::ApplyRightArmFinalSwivel(prepared,s,out.data(),sk.n,1.0f,st,int64_t(k+1)*(tps/60),tps);
+                ov::Pose po;rt::Read(prepared,out.data(),po);
+                if(k==15)swivelAtDrop=before;
+                if(k>=15)
+                {
+                    if(before!=0.0f)
+                    {
+                        ++relaxFrames;
+                        relaxBendMax=std::max(relaxBendMax,rt::MeasureArm(po,R).bendDeg);
+                        relaxStepMax=std::max(relaxStepMax,std::fabs(st.deg[1]-prevSw));
+                        relaxOverStep+=std::fabs(st.deg[1]-prevSw)>rt::kReloadSwivelRateDegPerSec/60.0f+1e-3f;
+                    }
+                    else{++afterZero;afterZeroSame+=in==out;}
+                }
+                prevSw=st.deg[1];
+            }
+            std::printf("  final right arm swivel, relax: swivel %.1f deg when the hand drops inside the limit, %d relaxing frames (step max %.2f "
+                        "deg/frame, bend max %.1f deg), then %d frames at swivel 0 (%d bit for bit)\n",swivelAtDrop,relaxFrames,relaxStepMax,
+                        relaxBendMax,afterZero,afterZeroSame);
+            Check(swivelAtDrop>12.0f && relaxFrames>=2 && afterZero>=10,"fixture: the swivel is still turned when the hand drops inside the limit");
+            Check(relaxOverStep==0 && relaxBendMax<=rt::kReloadWristBendLimitDeg+0.05f,
+                  "final right arm swivel: the swivel relaxes to 0 at the rate, the wrist stays inside the limit while it does");
+            Check(afterZeroSame==afterZero,"final right arm swivel: after the relax the records are bit for bit again");
         }
     }
     std::printf("%d passed, %d failed\n",g_pass,g_fail);

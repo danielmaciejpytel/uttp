@@ -17,6 +17,7 @@ An episode is a run of records with less than 0.25 s between them. Flags per fra
   MASK   the hand-back mask bits (clavicles, arms, hands, chest, head, weapon) changed since the previous frame
   ELB    the left elbow (solve output or written) turned by more than 30 deg about the shoulder in one frame
   REJ    the correction did not accept the frame (guard cut, solve reject, failed stage); REPLAY marks a written replay
+  RFIN   the final elbow swivel of the right (weapon) arm changed the written records (wrist bend over its limit)
 Columns: t = local time; path F finish / H hold / - none / L lock lost; exit = where the correction left; w = contact weight;
 hb = hand-back weight (1 - upper scale); cw = correction weight after the guards; pg = placement gate; gw = girdle weight;
 amp / hw / hgw = reject hold amplitude, recorded weight, recorded girdle weight; mask letters: C clavicles, A upper arms, F forearms,
@@ -79,7 +80,7 @@ EXITS = {0: '', 1: 'notcap', 2: 'badw', 3: 'w0', 4: 'read', 5: 'diverg', 6: 'pla
 REJECTS = {0: '', 1: 'input', 2: 'reach', 3: 'pole', 4: 'solve', 5: 'contact', 6: 'binding'}
 FLAG_BITS = {'eligible': 0, 'authored': 1, 'admitted': 2, 'config': 3, 'captured': 4, 'permitted': 5, 'reachedSolver': 6, 'written': 7,
              'replay': 8, 'replayGirdle': 9, 'holdDelta': 10, 'finalLimit': 11, 'swivel': 12, 'ownerMapping': 13, 'aiming': 14,
-             'jointsValid': 15}
+             'jointsValid': 15, 'rightFinal': 16}
 MASK_BITS = ['clavL', 'clavR', 'upperL', 'upperR', 'foreL', 'foreR', 'handL', 'handR', 'spine3', 'head', 'weaponR']
 CLAV_FLAG_M = 0.01
 WSTEP = 0.2
@@ -271,6 +272,8 @@ def analyse(ep: list[Record]) -> list[dict]:
             flags.append('REJ')
         if r.flag('replay'):
             flags.append('REPLAY')
+        if r.flag('rightFinal'):
+            flags.append('RFIN')
         d['flags'] = flags
         rows.append(d)
         prev = (r, d)

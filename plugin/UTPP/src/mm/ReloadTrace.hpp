@@ -52,6 +52,7 @@ enum Flag : uint32_t
     kFlagOwnerMapping = 1u << 13,   // pose hook owner: early mapping job (else the FK hook)
     kFlagAiming = 1u << 14,         // snapshot: traceAiming
     kFlagJointsValid = 1u << 15,    // joint limiter had a previous output to limit against
+    kFlagRightFinalSwivel = 1u << 16, // the final right-arm swivel changed the records
 };
 // Record::mask: snapshot upper-mask bits of the bones that matter for the reload hand-back.
 enum MaskBit : uint32_t

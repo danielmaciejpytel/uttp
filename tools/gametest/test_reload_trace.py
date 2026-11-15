@@ -84,6 +84,8 @@ class ReaderTest(unittest.TestCase):
                             | (1 << rt.FLAG_BITS['replay']))
             if k >= 15:  # correction weight steps 1 -> 0.5
                 over.update(corrFinal=0.5)
+            if k in (12, 13):  # the final right-arm swivel changed the records
+                over.update(flags=(1 << rt.FLAG_BITS['ownerMapping']) | (1 << rt.FLAG_BITS['written']) | (1 << rt.FLAG_BITS['rightFinal']))
             frames.append(frame(k, **over))
         return frames
 
@@ -102,6 +104,8 @@ class ReaderTest(unittest.TestCase):
         self.assertEqual({k for k, f in flagged.items() if 'ELB' in f}, {8, 9})  # out and back
         self.assertEqual({k for k, f in flagged.items() if 'REJ' in f}, {10})
         self.assertIn('REPLAY', flagged[10])
+        self.assertEqual({k for k, f in flagged.items() if 'RFIN' in f}, {12, 13})
+        self.assertEqual(rt.FLAG_BITS['rightFinal'], 16)  # ReloadTrace.hpp kFlagRightFinalSwivel
         self.assertEqual({k for k, f in flagged.items() if 'WSTEP' in f}, {15})
         self.assertAlmostEqual(rows[5]['dL'], 0.05, places=4)
         self.assertEqual(rt.mask_text(recs[5]['mask']), 'CAFHSNW')
