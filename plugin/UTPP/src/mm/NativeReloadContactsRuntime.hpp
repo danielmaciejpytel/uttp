@@ -1491,6 +1491,19 @@ inline constexpr bool kReplayOnOwnGirdle=false;
 #else
 inline constexpr bool kReplayOnOwnGirdle=true;
 #endif
+// The placement guard (PlacementWeight / PlacementGate) shrinks the correction while the transported native left hand sits under the
+// MM hips; a run start inside a rifle reload lowers the MM hips by ~15 cm and brings the native box-magazine hand 16 - 23 cm under them
+// for ~0.6 s. The guard protects the hand targets; the girdle is not a target. Restored with the shrunk weight, the masked clavicle
+// channels showed the game's reload girdle (left clavicle translation up to 19 cm off V's own, shoulder width down to 30 cm) and came
+// back over the guard's 0.2 s recovery. The girdle (clavicle rotation and translation, translation lanes of the arm chain) is therefore
+// restored with the weight before the guard; the arm limits use it too, because the solve then starts from V's shoulders and has to
+// reach hands placed by the shrunk weight. Frames with the guard at 1 are unchanged. Mutation 26 restores the girdle with the shrunk
+// weight again.
+#if defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==26
+inline constexpr bool kGirdlePlacementUngated=false;
+#else
+inline constexpr bool kGirdlePlacementUngated=true;
+#endif
 // V's own value of masked channel `b` restored over `base` with weight `w` (the restoreMasked rule); unmasked channels keep `base`.
 inline bool OwnChannel(const Prepared& p,const integ::PoseSnapshot& s,int b,const ov::Xf& base,float w,ov::Xf& out)
 {
@@ -1527,6 +1540,7 @@ struct RejectHold
     uint64_t rig=0;
     int64_t lastTicks=0;
     float weight=0,amp=1;
+    float girdleWeight=0; // weight of V's own girdle in the last accepted frame (GirdlePlacementUngated: before the placement guard)
     float headM=-1.0f; // weapon-head distance of the previous frame's final output (reference of HeadClearance); < 0 unknown
     int n=0;
     int bone[8]{};
@@ -1560,10 +1574,12 @@ struct RejectHold
         return true;
     }
     // Accepted frame: remember the full delta; returns the amplitude to apply to the candidate (1 = exact).
-    // `own` = the solver's input pose (masked channels restored with `w`): the delta of the girdle is taken against it (GirdleReference).
+    // `own` = the solver's input pose (masked channels restored with `w`, the girdle with `girdleW`; < 0 = `w`): the delta of the girdle
+    // is taken against it (GirdleReference).
     float OnAccept(const Prepared& p,const ov::Pose& baseline,const ov::Pose& candidate,uint64_t rigId,
-                   int64_t ticks,int64_t ticksPerSecond,float w,const ov::Pose* own=nullptr)
+                   int64_t ticks,int64_t ticksPerSecond,float w,const ov::Pose* own=nullptr,float girdleW=-1.0f)
     {
+        girdleWeight=girdleW>=0.0f ? girdleW : w;
         if constexpr(kRejectFade)
         {
             if(!Advance(rigId,ticks,ticksPerSecond,+1.0f))amp=1.0f;
@@ -1601,7 +1617,7 @@ struct RejectHold
             // Replay reference: the records, or (delta taken against GirdleReference) V's own girdle restored with the lower of the
             // current and the recorded weight - continuous with the last accepted frame and with the exit ramp of the weight.
             ov::Xf ref[8];
-            const float ownWeight=std::min(currentWeight,weight);
+            const float ownWeight=std::min(currentWeight,girdleWeight);
             for(int k=0;k<n;++k)
             {
                 const int b=bone[k];
@@ -1896,6 +1912,11 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
     // Fail open: a skeleton without that chain keeps the absolute native model positions.
     // Ordinary action masking retained native shoulders/arms. Restore ONLY those mask channels from the final authored snapshot
     // (weighted like the correction); lower body and unmasked torso keep the just-blended pose.
+    // Girdle weight (kGirdlePlacementUngated): the correction weight before the placement guard below.
+    const float girdleWeight=correctionWeight;
+    const auto armChainBone=[&](int i){
+        return i==p.arms.left.upper || i==p.arms.left.lower || i==p.arms.left.hand ||
+               i==p.arms.right.upper || i==p.arms.right.lower || i==p.arms.right.hand;};
     const auto restoreMasked=[&](ov::Pose& a)->bool{
         for(int i=0;i<a.n;++i)if(integ::SnapshotUpperBone(s,uint32_t(i)))
         {
@@ -1904,7 +1925,16 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
             for(int k=0;k<7;++k)if(!std::isfinite(v[k]))return false;
             ov::Xf endpoint=a.b[i];
             endpoint.t={v[0],v[1],v[2]};endpoint.r={v[3],v[4],v[5],v[6]};
-            a.b[i]=ov::BlendXf(a.b[i],endpoint,correctionWeight);
+            const ov::Xf in=a.b[i];
+            a.b[i]=ov::BlendXf(in,endpoint,correctionWeight);
+            if constexpr(kGirdlePlacementUngated)
+            {
+                if(girdleWeight!=correctionWeight)
+                {
+                    if(IsClavicle(p,i))a.b[i]=ov::BlendXf(in,endpoint,girdleWeight);
+                    else if(armChainBone(i))a.b[i].t=math::Lerp(in.t,endpoint.t,girdleWeight);
+                }
+            }
             // Custom clips already own their choreography. Keep the current TPP
             // feminine socket positions through the mask fade, not a second blend
             // towards raw clip offsets which widens the body halfway through.
@@ -1996,7 +2026,7 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
         {
             float* const prev=swivelStep>=0.0f ? &continuity->swivel.deg[side] : nullptr;
             LimitArmBySwivel(candidate,p.skeleton,arm->upper,arm->lower,arm->hand,kReloadPronationLimitDeg,kReloadWristBendLimitDeg,
-                             kReloadMaxSwivelDeg,correctionWeight,prev,swivelStep);
+                             kReloadMaxSwivelDeg,kGirdlePlacementUngated ? girdleWeight : correctionWeight,prev,swivelStep);
             ++side;
         }
     }
@@ -2004,8 +2034,10 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
     result.stockShift=stockShift;result.leftArmShift=leftArmShift;
     if(rejectHold)
     {
-        // `authored` = the solver's input (masked channels restored with correctionWeight): V's own girdle of this frame.
-        const float amp=rejectHold->OnAccept(p,baseline,candidate,s.rig,nowTicks,ticksPerSecond,correctionWeight,&authored);
+        // `authored` = the solver's input (masked channels restored with correctionWeight, the girdle with girdleWeight): V's own girdle
+        // of this frame.
+        const float amp=rejectHold->OnAccept(p,baseline,candidate,s.rig,nowTicks,ticksPerSecond,correctionWeight,&authored,
+                                             kGirdlePlacementUngated ? girdleWeight : correctionWeight);
         if(amp<1.0f) // coming back from a rejection: ramp the correction in from the baseline (girdle: V's own, GirdleReference)
         {
             const ov::Pose solved=candidate;

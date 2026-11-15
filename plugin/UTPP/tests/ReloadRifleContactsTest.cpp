@@ -11,6 +11,7 @@
 // 19 = contact catch-up at the old 9 m/s, 20 = the episode starts from its first frame, not from the observed published pose, 21 = rifle ramp with the 1000 deg/s joint slew, 12 = no weapon follower (the whole target jumps with the weight on the ramp-in), 14 = the old exit fade (lag at full scale until the weight is
 // below .15), 15 = no follower reset at weight 0, 16 = no contact catch-up of the left hand.
 // UTPP_RELOAD_CONTACT_MUTATION=25: the reject replay / ramp-in fades towards the records as handed in (the game's girdle), section 10.
+// UTPP_RELOAD_CONTACT_MUTATION=26: the girdle is restored with the weight shrunk by the placement guard (the game's girdle), section 12.
 // UTPP_RELOAD_GROUND_KEEP_MUTATION=1: no ground keep, 2: no edge latch (a pistol reload begun moving stays uncorrected), 3: no girdle
 // hold after an early episode end (sections 9 and 11).
 // Every mutation build must report an assertion FAIL (ctest PASS_REGULAR_EXPRESSION "FAIL ").
@@ -979,6 +980,129 @@ int main(int argc,char** argv)
               "edge keep (authored): V's own shoulder width, no clavicle step or shoulder pop");
         Check(elbowRy(*girdle(0.14f,0.045f,50.0f))>45.0f,"fixture: the authored left forearm is 50 deg off its hinge (former output)");
         Check(wa.maxRy<5.0f,"edge keep (authored): the solve keeps the left forearm on its hinge plane (elbow deviation < 5 deg)");
+    }
+
+    // 12) Placement guard inside a rifle reload (PlacementGate, kGirdlePlacementUngated). A run start lowers and leans the MM torso while
+    //     the game's box-magazine hand stays low: carried in the chest frame, the native left hand ends up 14 - 23 cm under the MM hips and
+    //     the guard shrinks the correction (partly, then to 0) for ~.3 s, then recovers over .2 s. The records carry the game's girdle on
+    //     the masked channels (section 10's girdle). Every frame keeps V's own clavicle translation and arm bone translations, the clavicle
+    //     turns at most by the reach step, the shoulder never pops, and the wrists stay under the bend limit of the arm limits.
+    //     Mutation 26 (girdle restored with the shrunk weight) shows the game's girdle on the guarded frames.
+    {
+        const int lc=sk.parent[rig.left.upper],rc=sk.parent[rig.right.upper];
+        auto game=std::make_unique<ov::Pose>(*base);
+        {
+            const auto lm=native_reload::Model(sk,*base,lc).t,rm=native_reload::Model(sk,*base,rc).t;
+            const math::Vec3 in=(rm-lm)*(1.0f/gik::Len(rm-lm));
+            for(int side=0;side<2;++side)
+            {
+                const int c=side ? rc : lc;
+                auto m=native_reload::Model(sk,*game,c);
+                m.t=m.t+in*(side ? -0.08f : 0.08f)+(side ? math::Vec3{} : math::Vec3{0.0f,0.04f,0.045f});
+                game->b[c]=native_reload::Relative(native_reload::Model(sk,*game,sk.parent[c]),m);
+            }
+            game->b[rig.left.upper].t=game->b[rig.left.upper].t*1.08f;
+            // the game's left hand low at the box magazine: 25 cm in front of the hips, 5 cm above them
+            const auto hm=native_reload::Model(sk,*base,hips).t;
+            gik::Params wide;gik::Result solved;
+            if(!gik::SolveArm(sk,*game,rig.left,hm+math::Vec3{0.05f,0.25f,0.05f},nullptr,1.0f,wide,solved))return 2;
+        }
+        // V's MM pose leaning forward by `deg` at the hips (the pose the snapshot hands in; the game's body stays upright)
+        const auto leaned=[&](float deg){
+            auto out=std::make_unique<ov::Pose>(*base);
+            for(const float sign:{1.0f,-1.0f})
+            {
+                auto desired=native_reload::Model(sk,*base,hips);
+                desired.r=math::QuatNormalize(math::QuatMul(gik::AxisAngle(math::Vec3{1.0f,0.0f,0.0f},sign*deg*math::kPi/180.0f),desired.r));
+                const auto parentModel=sk.parent[hips]>=0 ? native_reload::Model(sk,*base,sk.parent[hips]) : ov::Xf{};
+                out->b[hips].r=native_reload::Relative(parentModel,desired).r;
+                if(deg<=0.0f || native_reload::Model(sk,*out,spine3).t.y>native_reload::Model(sk,*base,spine3).t.y)break; // forward = +y
+            }
+            return out;
+        };
+        const int64_t tps=10000000,step=tps/60;
+        const int frames=60;
+        const auto angle=[](math::Quat a,math::Quat b){
+            return 2.0f*std::acos(std::clamp(std::fabs(math::QuatDot(math::QuatNormalize(a),math::QuatNormalize(b))),0.0f,1.0f))*180.0f/math::kPi;};
+        struct Sample{bool ok;float gate,clavT,armT,clavDeg,socketStep,width,bendL,bendR;};
+        const auto run=[&](float leanDeg,std::vector<Sample>& out){
+            rt::Continuity state;out.clear();
+            math::Vec3 prevSocket{};bool havePrev=false;
+            for(int k=0;k<frames;++k)
+            {
+                // lean: 0 for 10 frames, ramp over 4, held 16, back over 4, 0 for the rest
+                const float e=k<10 ? 0.0f : k<14 ? float(k-9)/4.0f : k<30 ? 1.0f : k<34 ? float(33-k)/4.0f : 0.0f;
+                const auto mm=leaned(leanDeg*e);
+                integ::PoseSnapshot s=snap;s.traceOverlay=int(ov::PoseOverlay::Rifle);s.sequence=uint64_t(3000+k);s.reloadContactsWeight=1.0f;
+                s.upperScale=0.0f;s.lowerScale=1.0f;
+                for(int b=0;b<sk.n;++b)
+                {
+                    const auto& x=mm->b[b];float row[7]={x.t.x,x.t.y,x.t.z,x.r.x,x.r.y,x.r.z,x.r.w};std::memcpy(s.pose+size_t(b)*7,row,sizeof(row));
+                }
+                std::vector<unsigned char> records;Records(*game,records);rt::Cycle cycle;
+                Sample m{};
+                const bool captured=rt::Capture(prepared,s,records.data(),sk.n,true,cycle);
+                integ::BlendIntoRecords(records.data(),uint32_t(sk.n),s,1.0f);
+                native_reload_contacts::Result r;
+                ov::Pose o;
+                m.ok=captured && rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,1.0f,rt::kAuthoredContactMinReach,&state,
+                                            int64_t(k+1)*step,tps) && r.ok;
+                m.gate=state.placement.value;
+                if(!rt::Read(prepared,records.data(),o)){out.push_back(Sample{false,-1.0f,9.0f,9.0f,180.0f,9.0f,0.0f,180.0f,180.0f});continue;}
+                m.clavT=std::max(gik::Len(o.b[lc].t-base->b[lc].t),gik::Len(o.b[rc].t-base->b[rc].t));
+                m.armT=0.0f;
+                for(const int b:{rig.left.upper,rig.left.lower,rig.left.hand,rig.right.upper,rig.right.lower,rig.right.hand})
+                    m.armT=std::max(m.armT,gik::Len(o.b[b].t-base->b[b].t));
+                m.clavDeg=std::max(angle(o.b[lc].r,base->b[lc].r),angle(o.b[rc].r,base->b[rc].r));
+                const math::Vec3 socket=inSpine3(o,rig.left.upper);
+                m.socketStep=havePrev ? gik::Len(socket-prevSocket) : 0.0f;prevSocket=socket;havePrev=true;
+                m.width=gik::Len(native_reload::Model(sk,o,rig.left.upper).t-native_reload::Model(sk,o,rig.right.upper).t);
+                m.bendL=rt::WristBendDeg(o.b[rig.left.hand].r);m.bendR=rt::WristBendDeg(o.b[rig.right.hand].r);
+                out.push_back(m);
+            }
+        };
+        const float wOwn=gik::Len(native_reload::Model(sk,*base,rig.left.upper).t-native_reload::Model(sk,*base,rig.right.upper).t);
+        // the smallest lean (5 deg steps) at which the guard cuts the correction to 0 on the held frames
+        float lean=-1.0f;std::vector<Sample> v;
+        for(float d=10.0f;d<=80.0f;d+=5.0f)
+        {
+            run(d,v);
+            float minGate=1.0f;for(int k=14;k<30;++k)minGate=std::min(minGate,v[size_t(k)].gate);
+            if(minGate<=0.0f){lean=d;break;}
+        }
+        Check(lean>0.0f,"fixture: a forward lean of the MM torso brings the carried game hand under the MM hips (placement guard at 0)");
+        if(lean>0.0f)
+        {
+            int partial=0,cut=0,accepted=0;
+            float clavT=0,armT=0,clavDeg=0,socketStep=0,minWidth=9,bendL=0,bendR=0,bendL0=0,bendR0=0,maxRise=0;
+            for(int k=0;k<frames;++k)
+            {
+                const auto& m=v[size_t(k)];
+                if(m.gate>0.0f && m.gate<1.0f)++partial;
+                if(m.gate<=0.0f)++cut;
+                accepted+=m.ok ? 1 : 0;
+                if(k>0)maxRise=std::max(maxRise,m.gate-v[size_t(k-1)].gate);
+                clavT=std::max(clavT,m.clavT);armT=std::max(armT,m.armT);clavDeg=std::max(clavDeg,m.clavDeg);
+                socketStep=std::max(socketStep,m.socketStep);minWidth=std::min(minWidth,m.width);
+                if(k<10){bendL0=std::max(bendL0,m.bendL);bendR0=std::max(bendR0,m.bendR);}
+                else{bendL=std::max(bendL,m.bendL);bendR=std::max(bendR,m.bendR);}
+            }
+            std::printf("  placement guard (rifle, lean %.0f deg): gate partial %d, zero %d frames, accepted %d/%d, max gate rise %.3f/frame | "
+                        "own width %.1fcm, min width %.1fcm | clavicle translation %.2fmm, arm bone translation %.2fmm, clavicle turn %.1fdeg, "
+                        "socket step %.2fcm/frame | wrist bend L %.1f R %.1f deg (before the lean %.1f / %.1f)\n",
+                        lean,partial,cut,accepted,frames,maxRise,wOwn*100.0f,minWidth*100.0f,clavT*1000.0f,armT*1000.0f,clavDeg,socketStep*100.0f,
+                        bendL,bendR,bendL0,bendR0);
+            Check(partial>=1 && cut>=4 && maxRise<=(1.0f/60.0f)/0.2f+1.0e-4f,
+                  "fixture: the placement guard shrinks the correction partly, then to 0, and recovers at its .2 s rate");
+            Check(clavT<0.001f && armT<0.001f,"placement guard (rifle): V's own clavicle and arm bone translations on every frame");
+            Check(clavDeg<=20.5f && minWidth>=wOwn-0.005f && socketStep<0.015f,
+                  "placement guard (rifle): V's shoulder width, the clavicle turns at most by the reach step, no shoulder pop");
+            // On the frames the guard cuts to 0 the arms are the game's arm rotations (RejectHold replay faded out): the game's own wrist.
+            const float gameL=rt::WristBendDeg(game->b[rig.left.hand].r),gameR=rt::WristBendDeg(game->b[rig.right.hand].r);
+            std::printf("  placement guard: the game's own wrist bend L %.1f R %.1f deg\n",gameL,gameR);
+            Check(bendL<=std::max({rt::kReloadWristBendLimitDeg,bendL0,gameL})+0.5f && bendR<=std::max({rt::kReloadWristBendLimitDeg,bendR0,gameR})+0.5f,
+                  "placement guard (rifle): no wrist bends past the limit, the unguarded frames or the game's own wrist");
+        }
     }
 
     std::printf("%d passed, %d failed\n",g_pass,g_fail);
