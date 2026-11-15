@@ -366,16 +366,37 @@ float g_dualTwinDeg = 0.0f; // twin stance: angle between the two barrels shown 
 uint64_t g_dualLeftShotAccepted = 0, g_dualLeftShotDropped = 0;
 float g_dualLeftKickCm = 0.0f;
 bool g_dualPreMirror = false;
+// Latched counterparts (a kick lasts a few frames, the status is read far less often):
+//  " dualLeftProfile=": profile id of the last accepted left shot;
+//  " dualLeftKickFrames=": frames on which a left kick was applied to the left arm (cumulative);
+//  " dualLeftKickPeak=<cm>/<deg>": largest left hand move / left weapon turn of the latest left kick (kept until the next one starts);
+//  " dualLeftSkip=<lost>/<stale>/<nomap>/<unsolved>": left shot pulses dropped by the frame step (mirror not shown or profile not
+//    loaded / no frame within 0.5 s) and kick frames not applied (no game pose map / arm IK without a solution);
+//  " dualPreMirrorFrames=": frames on which the mirror was built from the right arm before the right weapon's kick (cumulative);
+//  " dualNativeFrames=": frames on which the native hip-fire fallback owned the arms while two weapons were drawn (cumulative);
+//  " dualWaitExpired=": shot event waits that ran out while two weapons were drawn (cumulative).
+uint64_t g_dualLeftKickFrames = 0, g_dualPreMirrorFrames = 0, g_dualNativeFrames = 0, g_dualWaitExpired = 0;
+uint64_t g_dualLeftSkipLost = 0, g_dualLeftSkipStale = 0, g_dualLeftSkipNoMap = 0, g_dualLeftSkipUnsolved = 0;
+float g_dualLeftKickPeakCm = 0.0f, g_dualLeftKickPeakDeg = 0.0f;
+int32_t g_dualLeftProfileShown = 0;
 std::string DualStatusSuffix()
 {
-    char buf[192];
+    char buf[512];
     const int used = integ::PsmDualStatusSuffix(buf, sizeof buf, g_feedPsmRaw.load(std::memory_order_relaxed));
     if (used > 0 && used < static_cast<int>(sizeof buf))
         std::snprintf(buf + used, sizeof buf - static_cast<size_t>(used),
-                      " dualMirror=%.2f dualTwin=%.1f dualLeftShot=%llu/%llu dualLeftKick=%.2f dualPreMirror=%d",
+                      " dualMirror=%.2f dualTwin=%.1f dualLeftShot=%llu/%llu dualLeftKick=%.2f dualPreMirror=%d"
+                      " dualLeftKickFrames=%llu dualNativeFrames=%llu dualWaitExpired=%llu dualLeftProfile=%d"
+                      " dualLeftKickPeak=%.2f/%.1f dualLeftSkip=%llu/%llu/%llu/%llu dualPreMirrorFrames=%llu",
                       static_cast<double>(g_dualMirrorW), static_cast<double>(g_dualTwinDeg),
                       static_cast<unsigned long long>(g_dualLeftShotAccepted), static_cast<unsigned long long>(g_dualLeftShotDropped),
-                      static_cast<double>(g_dualLeftKickCm), g_dualPreMirror ? 1 : 0);
+                      static_cast<double>(g_dualLeftKickCm), g_dualPreMirror ? 1 : 0,
+                      static_cast<unsigned long long>(g_dualLeftKickFrames), static_cast<unsigned long long>(g_dualNativeFrames),
+                      static_cast<unsigned long long>(g_dualWaitExpired), static_cast<int>(g_dualLeftProfileShown),
+                      static_cast<double>(g_dualLeftKickPeakCm),
+                      static_cast<double>(g_dualLeftKickPeakDeg), static_cast<unsigned long long>(g_dualLeftSkipLost),
+                      static_cast<unsigned long long>(g_dualLeftSkipStale), static_cast<unsigned long long>(g_dualLeftSkipNoMap),
+                      static_cast<unsigned long long>(g_dualLeftSkipUnsolved), static_cast<unsigned long long>(g_dualPreMirrorFrames));
     return buf;
 }
 std::atomic<bool> g_aimJogOff{true}; // G9: the last UTPPMMAimJogTarget answer was 0 (vanilla aim walk speed; default before any query)
@@ -437,6 +458,7 @@ bool g_shootRouteLive = false, g_shootRouteHeld = false, g_shootRouteInShot = fa
 // While this bounded wait runs, the authored hip-fire pose keeps the arms instead of the native first-burst fallback (HipFirePose.hpp).
 ov::ShotEventWait g_shotEventWait;
 bool g_shotEventWaitNow = false; // this Step's wait (reset per Step like g_shootRouteNow)
+bool g_dualLeftEventInShot = false; // dual wield: a left weapon's shot is in flight in this Shoot state (see the shot event wait)
 uint64_t g_shotEventWaitFrames = 0, g_shotEventWaitExpired = 0; // Steps spent waiting / waits that ran out (status)
 authored_recoil::Player g_authoredRecoil;
 uint32_t g_recoilWeaponEpoch = 0;
@@ -547,7 +569,9 @@ void RecordGripInfoLocked(const motionpose::FrameInfo& aInfo)
         // native FK stance has nothing to wait for, and the FPP arms would pop in for the whole shot (upperScale 1 -> 0 -> 1).
         g_weaponUpperFrame = ov::HipFireNativeActionOwner(g_weaponUpperOn, g_shootTransferEnabled, g_shootRouteNow,
             true, g_weaponAction, aInfo.shootApplied, aInfo.aoWeight,
-            g_shootEpisode.pending || g_shootEpisode.admitted || g_recoilOwns, g_shotEventWaitNow);
+            g_shootEpisode.pending || g_shootEpisode.admitted || g_recoilOwns || g_dualLeftEventInShot, g_shotEventWaitNow);
+    if (g_hipFirePoseNow && !g_aimingNow && g_weaponUpperFrame && integ::PsmDualOf(g_feedPsmRaw.load(std::memory_order_relaxed)))
+        ++g_dualNativeFrames; // status " dualNativeFrames="
     g_shootReachableScale = aInfo.shootScale;
     if (aInfo.shootApplied) ++g_shootAppliedEvaluations;
     g_gripProbe.applied = aInfo.grip.left.ok;
@@ -1867,7 +1891,7 @@ void SetEnabled(bool aOn)
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
         g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
-        g_shotEventWait.Reset(); g_shotEventWaitNow = false;
+        g_shotEventWait.Reset(); g_shotEventWaitNow = false; g_dualLeftEventInShot = false;
         // re-enable after a failed load (files copied meanwhile) loads again; a good bundle is kept
         if (aOn && g_bundle && !g_bundle->res.matcherInit)
             g_reload = true;
@@ -1916,7 +1940,7 @@ bool SetRigBody(int32_t aBody)
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
         g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
-        g_shotEventWait.Reset(); g_shotEventWaitNow = false;
+        g_shotEventWait.Reset(); g_shotEventWaitNow = false; g_dualLeftEventInShot = false;
         g_airLegsFade.Reset();
         g_jumpOutArmsFade.Reset();
         g_jumpOutWindowNow = false;
@@ -2486,6 +2510,7 @@ void FeedRecoilShotLeft(uint32_t aEpoch, int32_t aProfile, bool aAiming)
     l.aim = aAiming;
     l.pending = true;
     ++g_dualLeftShotAccepted;
+    g_dualLeftProfileShown = aProfile;
 }
 
 bool FeedMagTap()
@@ -2649,7 +2674,7 @@ void OnArmed(uint64_t aRig, const std::vector<uint64_t>& aGameHashes, const std:
     g_weaponUpperFrame = g_weaponUpperTail = false;
     g_shootRouteNow = false;
     g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
-    g_shotEventWait.Reset(); g_shotEventWaitNow = false;
+    g_shotEventWait.Reset(); g_shotEventWaitNow = false; g_dualLeftEventInShot = false;
     g_wasRunning = false;
     g_hoLeft = 0.0f;
     g_hiLeft = 0.0f;
@@ -3134,7 +3159,23 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
     // the Shoot state waits a bounded time for its first event before the native fallback may take the arms. (After the native
     // episode block above: its Begin on the action edge is only a candidate until this Step admitted or dropped it.)
     {
-        const bool eventSeen = authoredRoute || g_shootEpisode.pending || g_shootEpisode.admitted;
+        // Dual wield: a shot of the left weapon is the shot event of this Shoot state (the game raises the same weapon action for it,
+        // with no pulse of the right weapon). Without it the right weapon's wait expired 0.2 s into a left-only shot and the native
+        // fallback took both arms (upperScale 0) from the left kick. Latched from the frame its pulse is pending, its kick plays or it
+        // was accepted at most the wait bound ago (a short kick can be over before the action edge is published) until the Shoot state
+        // ends; never set with one weapon (the left pulse is dropped there and its player never runs).
+        if (g_weaponAction != 8)
+            g_dualLeftEventInShot = false;
+#if !(defined(UTPP_DUALWIELD_KICK_MUTATION) && UTPP_DUALWIELD_KICK_MUTATION == 2) // mutation 2: a left shot is no shot event
+        else if (DualWieldNow())
+        {
+            const DualLeftRecoil& l = g_dualLeftRecoil;
+            const double age = recoilNow - l.shotTime;
+            if (l.pending || l.player.Active() || (l.serial != 0 && age >= 0.0 && age <= ov::kHipFireShotEventWaitS))
+                g_dualLeftEventInShot = true;
+        }
+#endif
+        const bool eventSeen = authoredRoute || g_shootEpisode.pending || g_shootEpisode.admitted || g_dualLeftEventInShot;
         const bool wasExpired = g_shotEventWait.expired;
         g_shotEventWaitNow = g_shotEventWait.Step(g_weaponAction == 8, shootEdge, g_shootRouteNow, eventSeen, recoilNow);
 #if defined(UTPP_MOTION_DRIVER_HIPFIRE_ROUTE_MUTATION) && UTPP_MOTION_DRIVER_HIPFIRE_ROUTE_MUTATION == 4
@@ -3142,6 +3183,7 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
 #endif
         if (g_shotEventWaitNow) ++g_shotEventWaitFrames;
         if (g_shotEventWait.expired && !wasExpired) ++g_shotEventWaitExpired;
+        if (g_shotEventWait.expired && !wasExpired && DualWieldNow()) ++g_dualWaitExpired;
     }
     g_recoilEffT = g_recoilEffR = 0.0f;
     if (authoredRoute)
@@ -3977,17 +4019,26 @@ void DualLeftKickLocked(Bundle& b)
     const bool ready = recoil_profile::Valid(l.profile) && b.recoilOk[static_cast<size_t>(l.profile)];
     if (!ready || !(shown > 0.0f) || !b.dualMirror.Valid() || !g_enabled || g_release)
     {
+        if (l.pending)
+            ++g_dualLeftSkipLost;
         l.player.Reset();
         l.pending = false;
         return;
     }
     const double now = RecoilClock();
     if (l.pending && now - l.shotTime > 0.5)
+    {
         l.pending = false; // a stale pulse (no frame for 0.5 s) does not start late
+        ++g_dualLeftSkipStale;
+    }
     integ::PoseSnapshot map;
     const bool mapped = integ::g_gamePoseReadMap.Read(map) && map.rig == g_rig && map.sequence != 0;
     if (!mapped)
+    {
+        if (l.pending || l.player.Active())
+            ++g_dualLeftSkipNoMap;
         return;
+    }
     const authored_recoil::Binding binding{l.epoch, g_rig, map.sequence};
     auto& clips = b.recoil[static_cast<size_t>(l.profile)];
     if (l.pending)
@@ -3995,7 +4046,8 @@ void DualLeftKickLocked(Bundle& b)
         if (!l.player.Active())
             l.admitTime = now;
         l.clip = l.aim ? 1 : 0;
-        l.player.Trigger(clips[static_cast<size_t>(l.clip)], binding, l.serial, now, recoil_profile::LimitsOf(l.profile));
+        if (l.player.Trigger(clips[static_cast<size_t>(l.clip)], binding, l.serial, now, recoil_profile::LimitsOf(l.profile)))
+            g_dualLeftKickPeakCm = g_dualLeftKickPeakDeg = 0.0f; // a new kick: the latched peak starts again
         l.pending = false;
     }
     ov::Xf delta;
@@ -4042,7 +4094,11 @@ void DualLeftKickLocked(Bundle& b)
         solved = solve(reachable);
     }
     if (!solved)
+    {
+        ++g_dualLeftSkipUnsolved;
         return;
+    }
+#if !(defined(UTPP_DUALWIELD_KICK_MUTATION) && UTPP_DUALWIELD_KICK_MUTATION == 1) // mutation 1: the left kick is never applied
     for (int k = 1; k <= 3; ++k)
     {
         const int32_t db = b.dualMirror.left[k];
@@ -4050,7 +4106,12 @@ void DualLeftKickLocked(Bundle& b)
         const ov::Xf& s = s_solved.b[b.eval.OvBone(static_cast<uint32_t>(db))];
         x.q = math::QuatNlerpShortest(x.q, s.r, weight);
     }
+#endif
     g_dualLeftKickCm = 100.0f * weight * gik::Len(target.t - hand.t);
+    const float turnDeg = weight * reachable * authored_recoil::Rotation(mirrored) * 57.29578f;
+    ++g_dualLeftKickFrames;
+    g_dualLeftKickPeakCm = std::fmax(g_dualLeftKickPeakCm, g_dualLeftKickCm);
+    g_dualLeftKickPeakDeg = std::fmax(g_dualLeftKickPeakDeg, turnDeg);
 }
 
 void DualWieldMirrorStepLocked(Bundle& b, const motionpose::FrameInfo& aInfo, float aDt)
@@ -4089,6 +4150,7 @@ void DualWieldMirrorStepLocked(Bundle& b, const motionpose::FrameInfo& aInfo, fl
             }
             mirrorSource = s_source.data();
             g_dualPreMirror = true;
+            ++g_dualPreMirrorFrames;
         }
     }
 #endif
@@ -7276,7 +7338,7 @@ void Shutdown()
         g_weaponUpperFrame = g_weaponUpperTail = false;
         g_shootRouteNow = false;
         g_shootRouteHeld = g_shootRouteInShot = g_shootRouteLive = false;
-        g_shotEventWait.Reset(); g_shotEventWaitNow = false;
+        g_shotEventWait.Reset(); g_shotEventWaitNow = false; g_dualLeftEventInShot = false;
     }
     WaitLoaderSerial();
     std::unique_ptr<Bundle> old;

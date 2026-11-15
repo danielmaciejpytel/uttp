@@ -590,6 +590,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tests/magtap.cmake OPTIONAL) # magazine top-
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/stancefix.cmake OPTIONAL) # fix batch 2: stance latency (P1) tests
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/hipfireweapons.cmake OPTIONAL) # fix batch 3: hipfire with weapons that have no recoil route (P9)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/hipfireraise.cmake OPTIONAL) # fix batch 3: key changes inside / after the hip raise (P9 review 3)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tests/dualwielddriver.cmake OPTIONAL) # dual wield recoil per arm through the real driver
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/shooter_mode.cmake OPTIONAL) # feat/shooterMode-dll: Shooter mode + H2 safeguard (strafe rotation mode, root hold / lock)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/vehexit.cmake OPTIONAL) # vehicle batch: exit gate / traversal release tests
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/vehtrans.cmake OPTIONAL) # vehicle batch: mount/exit pose transition tests
