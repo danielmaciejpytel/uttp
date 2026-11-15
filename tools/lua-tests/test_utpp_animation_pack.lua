@@ -59,9 +59,15 @@ end
 -- the motion matching switches of the core (the real registrations) with recording natives, plus the keys that other CET modules
 -- register (stubs with a recording apply)
 local function boot(core)
-  local rec = { mm = {}, fullBody = {}, aimTilt = {}, applied = {} }
-  core.SetupMMSettings(function(on) rec.mm[#rec.mm + 1] = on end, function() end,
-    { setMeleeFullBody = function(on) rec.fullBody[#rec.fullBody + 1] = on end,
+  -- hold: the pose hold switch of the plugin; events: both switches in call order ("hold=..." / "mm=..."); holdFails > 0 makes
+  -- that many hold calls raise
+  local rec = { mm = {}, hold = {}, events = {}, holdFails = 0, fullBody = {}, aimTilt = {}, applied = {} }
+  core.SetupMMSettings(function(on) rec.mm[#rec.mm + 1] = on; rec.events[#rec.events + 1] = "mm=" .. tostring(on) end, function() end,
+    { setHoldPose = function(on)
+        if rec.holdFails > 0 then rec.holdFails = rec.holdFails - 1; error("no such native") end
+        rec.hold[#rec.hold + 1] = on; rec.events[#rec.events + 1] = "hold=" .. tostring(on)
+      end,
+      setMeleeFullBody = function(on) rec.fullBody[#rec.fullBody + 1] = on end,
       setMeleeAimParams = function(up) rec.aimTilt[#rec.aimTilt + 1] = up; return true end })
   for _, spec in ipairs({ { "mm.motionDriver", true }, { "bodyturn.shooterMode", true }, { "mm.aimAtCrosshair", true }, { "camera.idleOrbit", true },
                           { "camera.followHoldOnFlip", true } }) do
@@ -106,6 +112,8 @@ local function shipped()
     and core.ModSettingsDecode(def, "1") == "game" and core.ModSettingsDecode(def, "2") == nil)
   check("default: the mod's animations, nothing forced", core.PackIsGame() == false and core.Effective("mm.enabled") == true
     and core.Effective("melee.fullBody") == true)
+  check("default: the pose hold of the plugin is left at its start value (no call)", #rec.hold == 0 and core.SyncHoldPose("test") == false
+    and #rec.hold == 0, #rec.hold)
   local notes = 0
   for _, key in ipairs({ "melee.fullBody", "melee.aimTilt", "mm.shinobiBonusReload" }) do
     local d = core.settings.defs[key]
@@ -128,9 +136,17 @@ local function shipped()
     and lastOf(rec.fullBody) == false and lastOf(rec.applied["mm.aimAtCrosshair"]) == false
     and lastOf(rec.applied["camera.idleOrbit"]) == false and lastOf(rec.applied["camera.followHoldOnFlip"]) == false)
   check("game pack: unrelated options keep their values", core.Effective("headLook.impl") == true and core.Effective("lootView.impl") == true)
-  local nMM, nFB = #rec.mm, #rec.fullBody
+  -- the body must go to the game's animation: the plugin's "keep the last pose" rule is switched off, and before the movement
+  -- itself is switched off (otherwise the closing gate is held and V stays in the last pose of the mod)
+  local order = table.concat(rec.events, ",")
+  local iHold, iMM = string.find(order, "hold=false", 1, true), string.find(order, "mm=false", 1, true)
+  check("game pack: the pose hold is switched off, before the movement is switched off", lastOf(rec.hold) == false and #rec.hold == 1
+    and iHold ~= nil and iMM ~= nil and iHold < iMM, order)
+  check("game pack: the hold switch is logged", logHas("pose hold off"))
+  local nMM, nFB, nHold = #rec.mm, #rec.fullBody, #rec.hold
   core.ReapplyPack()
-  check("game pack: applying again changes nothing (idempotent natives)", #rec.mm == nMM and #rec.fullBody == nFB)
+  check("game pack: applying again changes nothing (idempotent natives)", #rec.mm == nMM and #rec.fullBody == nFB and #rec.hold == nHold
+    and core.SyncHoldPose("test") == false and #rec.hold == nHold)
   check("game pack: the pack change is logged", logHas("animation pack -> Game Animations"))
   core.Set("mm.aimAtCrosshair", false)
   core.Set("melee.fullBody", false)
@@ -141,6 +157,25 @@ local function shipped()
     and core.Effective("mm.aimAtCrosshair") == false)
   check("back to the mod's animations: the apply callbacks ran again", lastOf(rec.mm) == true and lastOf(rec.applied["mm.motionDriver"]) == true
     and lastOf(rec.applied["bodyturn.shooterMode"]) == true and lastOf(rec.fullBody) == false)
+  check("back to the mod's animations: the pose hold is on again", lastOf(rec.hold) == true and #rec.hold == 2, #rec.hold)
+  -- "Use motion matching" off (developer option) is the same case as the pack: no movement of the mod, so no held pose
+  core.Set("mm.enabled", false)
+  check("movement switched off by its own option: the pose hold goes off too", lastOf(rec.hold) == false and lastOf(rec.mm) == false)
+  core.Set("mm.enabled", true)
+  check("movement switched on again: the pose hold comes back", lastOf(rec.hold) == true and lastOf(rec.mm) == true)
+  -- a hold call that fails is not taken as sent: the session tick (SyncHoldPose) sends it again, the failure is logged once
+  rec.holdFails = 2
+  local nBefore = #rec.hold
+  core.Set("animation.pack", "game")
+  check("failing hold call: the pack still changes, the movement still goes off, nothing is marked as sent", core.PackIsGame() == true
+    and lastOf(rec.mm) == false and #rec.hold == nBefore and logHas("pose hold switch FAILED"))
+  check("failing hold call: the next tick tries again (still failing)", core.SyncHoldPose("session") == false and #rec.hold == nBefore)
+  check("failing hold call: the retry that goes through switches the hold off", core.SyncHoldPose("session") == true
+    and lastOf(rec.hold) == false and #rec.hold == nBefore + 1)
+  local fails = 0
+  for _, l in ipairs(logs) do if string.find(l, "pose hold switch FAILED", 1, true) then fails = fails + 1 end end
+  check("failing hold call: logged once", fails == 1, fails)
+  core.Set("animation.pack", "utpp")
 
   -- ---------------------------------------------------------------- modules without a key
   core = loadCore()
@@ -246,6 +281,8 @@ do
   local mmOn = false
   for _, v in ipairs(rec.mm) do if v == true then mmOn = true end end
   check("restart: motion matching is never switched on, not even for a moment", mmOn == false and lastOf(rec.mm) == false)
+  check("restart: the pose hold is switched off from the start, before the movement switch", lastOf(rec.hold) == false and #rec.hold == 1
+    and rec.events[1] == "hold=false", table.concat(rec.events, ","))
   check("restart: the other dependent options register with their forced values", lastOf(rec.applied["mm.motionDriver"]) == false
     and lastOf(rec.applied["bodyturn.shooterMode"]) == false and lastOf(rec.fullBody) == false and lastOf(rec.applied["camera.idleOrbit"]) == false)
   check("restart: the players's own values are kept", core.Get("mm.enabled") == true and core.Get("mm.motionDriver") == true)
@@ -254,6 +291,13 @@ do
   rec = boot(core)
   check("restart: the mod's animations: nothing forced, motion matching on", core.PackIsGame() == false and lastOf(rec.mm) == true
     and lastOf(rec.applied["mm.motionDriver"]) == true)
+  check("restart: the mod's animations: the pose hold is not touched", #rec.hold == 0)
+  -- before the movement switch is registered nothing may be sent (an unregistered option reads as off)
+  writeFile(settingsFile, "animation.pack=utpp\n")
+  core = loadCore(nil, true)
+  local early = {}
+  core.mm.setHoldPose = function(on) early[#early + 1] = on end
+  check("before the options register: the session tick sends no hold switch", core.SyncHoldPose("session") == false and #early == 0)
   writeFile(settingsFile, "animation.pack=nonsense\n")
   core = loadCore(nil, true)
   check("restart: an unknown stored value falls back to the mod's animations", core.PackIsGame() == false and core.Get("animation.pack") == "utpp")
@@ -388,6 +432,17 @@ local function scenario(core, name)
     return sent[1] == false
   elseif name == "dependent note" then
     return string.find(core.settings.defs["melee.fullBody"].desc, "No effect with the Game Animations pack.", 1, true) ~= nil
+  elseif name == "pose released for game" then
+    core.Set("animation.pack", "game")
+    local order = table.concat(rec.events, ",")
+    local iHold, iMM = string.find(order, "hold=false", 1, true), string.find(order, "mm=false", 1, true)
+    return lastOf(rec.hold) == false and iHold ~= nil and iMM ~= nil and iHold < iMM
+  elseif name == "pose hold back" then
+    core.Set("animation.pack", "game")
+    core.Set("animation.pack", "utpp")
+    return lastOf(rec.hold) == true
+  elseif name == "pose hold untouched for the default" then
+    return #rec.hold == 0
   end
   error("unknown scenario " .. name)
 end
@@ -402,6 +457,9 @@ local MUTANTS = {
   { "vehicle clips not sent for the default", { "  if P.sent == nil and P.applied == \"utpp\" then\n    P.sent = \"utpp\"\n    return false\n  end\n", "" } },
   { "vehicle clips sent for game", { "  local ok, res = pcall(fn, P.applied ~= \"game\")", "  local ok, res = pcall(fn, true)" } },
   { "dependent note", { "    def.desc = def.desc .. M.PACK_NOTE\n", "" } },
+  { "pose released for game", { "  M.ApplyHoldPose(on, why) -- before the movement switch itself: the closing gate must not be held\n", "" } },
+  { "pose hold back", { "  if known == want then return false end", "  if known == want or want then return false end" } },
+  { "pose hold untouched for the default", { "  if known == nil then known = true end", "  if known == nil then known = false end" } },
 }
 for _, mu in ipairs(MUTANTS) do
   check("scenario [" .. mu[1] .. "] holds on the shipped source", scenario(loadCore(), mu[1]) == true)

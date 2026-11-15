@@ -2347,10 +2347,38 @@ local function mmCall(fn, on, what, why)
   M.Log(string.format("%s %s (%s)%s", what, on and "on" or "off", tostring(why), ok and "" or (" FAILED: " .. tostring(err))))
   return ok
 end
+-- Pose hold of the plugin (setHoldPose(on) = Game.UTPPSetMMHoldPose; the plugin starts with it on): while the mod's movement
+-- runs, a closed movement gate keeps the last pose of the mod, so a short closure never shows another pose. With the movement
+-- switched off for good (the Game Animations pack, or "Use motion matching" off) the same rule would keep V in the pose the mod
+-- showed last, whatever she does; the hold is switched off then, so the body goes to the game's own animation. Sent only when
+-- the wanted value differs from the one in place (M.mm.holdPose: nil = the plugin's start value, on); a failed call is not
+-- marked as sent, so the next call tries again (M.ApplyMM and the session tick call this).
+function M.ApplyHoldPose(on, why)
+  local want = on and true or false
+  local known = M.mm.holdPose
+  if known == nil then known = true end
+  if known == want then return false end
+  local fn = M.mm.setHoldPose
+  if type(fn) ~= "function" then return false end
+  local ok, err = pcall(fn, want)
+  if not ok then
+    M.LogOnce("mm.holdPose", "pose hold switch FAILED: " .. tostring(err) .. " - further failures not logged")
+    return false
+  end
+  M.mm.holdPose = want
+  M.Log(string.format("pose hold %s (%s)", want and "on" or "off", tostring(why or "apply")))
+  return true
+end
+-- the hold follows the movement switch in force; nothing is sent before that switch is registered
+function M.SyncHoldPose(why)
+  if not S.defs["mm.enabled"] then return false end
+  return M.ApplyHoldPose(M.Effective("mm.enabled") and true or false, why)
+end
 function M.ApplyMM(why)
   local def = S.defs["mm.enabled"]
   if not def then return false end
   local on = M.Effective("mm.enabled") and true or false
+  M.ApplyHoldPose(on, why) -- before the movement switch itself: the closing gate must not be held
   if M.mm.enabled == on then return false end
   if mmCall(M.mm.setEnabled, on, "motion matching", tostring(why or "apply")) then M.mm.enabled = on end
   return true
@@ -2687,6 +2715,7 @@ end
 function M.SetupMMSettings(setEnabled, setTrace, api)
   api = type(api) == "table" and api or {}
   M.mm.setEnabled, M.mm.setTrace = setEnabled, setTrace
+  M.mm.setHoldPose = api.setHoldPose
   M.mm.setFootReplant = api.setFootReplant
   M.mm.setFeedDump = api.setFeedDump
   M.mm.setIdleHold = api.setIdleHold
@@ -3245,7 +3274,8 @@ if type(registerForEvent) == "function" then
       tostring(M.Effective("headLook.impl")), tostring(M.Effective("lootView.impl"))))
     -- motion matching switches (applied now: play needs MM without console commands)
     pcall(M.SetupMMSettings, function(on) return Game.UTPPSetMMEnabled(on) end, function(on) return Game.UTPPSetMMTrace(on) end,
-      { setFootReplant = function(mask) return Game.UTPPSetMMFootReplant(mask) end,
+      { setHoldPose = function(on) return Game.UTPPSetMMHoldPose(on) end,
+        setFootReplant = function(mask) return Game.UTPPSetMMFootReplant(mask) end,
         setFeedDump = function(on) return Game.UTPPSetMMFeedDump(on) end,
         setIdleHold = function(on) return Game.UTPPSetMMIdleHold(on) end,
         setAimUpperFade = function(on) return Game.UTPPSetMMAimUpperFade(on) end,
@@ -3317,6 +3347,7 @@ if type(registerForEvent) == "function" then
     local menu = inMenu()
     pcall(M.DiagTick, dt, not menu)
     pcall(M.PackSend, clock, newSession)
+    pcall(M.SyncHoldPose, "session") -- a call that failed earlier is repeated here
     if M.pack.pending then
       local okO, obs = pcall(packObservation, player, menu)
       pcall(M.PackTick, dt, okO and obs or { unreadable = true })
