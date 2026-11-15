@@ -52,7 +52,7 @@ target_compile_features(utpp_mm_magazine_target_test PRIVATE cxx_std_20)
 add_test(NAME utpp_mm_magazine_target_test COMMAND utpp_mm_magazine_target_test)
 
 # Focused feminine/contact regressions use the same actual assets as MotionPose.
-foreach(_case IN ITEMS FeminineShouldersAdaptive FemininePoseSwitch FeminineUnarmedContinuity)
+foreach(_case IN ITEMS FeminineShouldersAdaptive FemininePoseSwitch FeminineUnarmedContinuity FeminineFigure)
   add_executable(utpp_${_case}_test tests/${_case}Test.cpp)
   target_compile_options(utpp_${_case}_test PRIVATE ${UTPP_WARNINGS} /EHsc)
   add_test(NAME utpp_${_case}_test COMMAND utpp_${_case}_test

@@ -112,6 +112,7 @@ return {
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.feedDump"] = "false",
+    ["mm.feminineFigure"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
     ["mm.headLead"] = "true",
@@ -263,6 +264,7 @@ return {
     "v2 setOrientWarp(true)",
     "apply mm.orientWarp(true,\"ok\")",
     "apply mm.shoulderWidth(0,\"ok\")",
+    "apply mm.feminineFigure(true,\"ok\")",
     "native UTPPSetMotionPelvisYawTrim(2)",
     "apply mm.pelvisYawTrim(2,\"ok\")",
     "native UTPPSetMotionBodyYawOffset(4)",
@@ -461,6 +463,7 @@ return {
     "apply mm.slide(true,\"ok\")",
     "apply mm.orientWarp(true,\"ok\")",
     "apply mm.shoulderWidth(0,\"ok\")",
+    "apply mm.feminineFigure(true,\"ok\")",
     "apply mm.pelvisYawTrim(2,\"ok\")",
     "apply mm.bodyYawOffset(4,\"ok\")",
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
@@ -1565,6 +1568,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.feminineFigure"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["mm.footReplant"] = {
       ["choices"] = "off,crouch",
       ["default"] = "\"crouch\"",
@@ -2244,6 +2255,7 @@ return {
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.feedDump"] = "false",
+    ["mm.feminineFigure"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
     ["mm.headLead"] = "true",
@@ -2416,6 +2428,7 @@ return {
     "mm.slide",
     "mm.orientWarp",
     "mm.shoulderWidth",
+    "mm.feminineFigure",
     "mm.pelvisYawTrim",
     "mm.bodyYawOffset",
     "mm.walkSpeed",
@@ -2593,6 +2606,7 @@ return {
     "mm.slide",
     "mm.orientWarp",
     "mm.shoulderWidth",
+    "mm.feminineFigure",
     "mm.pelvisYawTrim",
     "mm.bodyYawOffset",
     "mm.walkSpeed",
@@ -2760,6 +2774,7 @@ return {
     "apply mm.slide(true,\"ok\")",
     "apply mm.orientWarp(true,\"ok\")",
     "apply mm.shoulderWidth(0,\"ok\")",
+    "apply mm.feminineFigure(true,\"ok\")",
     "apply mm.pelvisYawTrim(2,\"ok\")",
     "apply mm.bodyYawOffset(4,\"ok\")",
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
@@ -2937,6 +2952,7 @@ mm.aimGameUpper=false\r\
 mm.slide=true\r\
 mm.orientWarp=true\r\
 mm.shoulderWidth=0\r\
+mm.feminineFigure=true\r\
 mm.pelvisYawTrim=2\r\
 mm.bodyYawOffset=4\r\
 mm.walkSpeed=1.6\r\
@@ -3071,6 +3087,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.database",
       "mm.orientWarp",
       "mm.shoulderWidth",
+      "mm.feminineFigure",
       "mm.pelvisYawTrim",
       "mm.bodyYawOffset",
       "mm.walkSpeed",
@@ -3375,6 +3392,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.feedDump"] = "false",
+    ["mm.feminineFigure"] = "true",
     ["mm.footReplant"] = "\"off\"",
     ["mm.grip"] = "true",
     ["mm.headLead"] = "true",
@@ -3516,6 +3534,7 @@ mm.aimGameUpper=false\r\
 mm.slide=true\r\
 mm.orientWarp=true\r\
 mm.shoulderWidth=0\r\
+mm.feminineFigure=true\r\
 mm.pelvisYawTrim=2\r\
 mm.bodyYawOffset=4\r\
 mm.walkSpeed=1.6\r\
@@ -3667,6 +3686,7 @@ other.module=42\r\
     "/utpp/animation|selector|mm.database",
     "/utpp/animation|switch|mm.orientWarp",
     "/utpp/animation|float|mm.shoulderWidth",
+    "/utpp/animation|switch|mm.feminineFigure",
     "/utpp/animation|float|mm.walkSpeed",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",
     "/utpp/bodyturn|switch|bodyturn.turnRate",

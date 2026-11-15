@@ -8,7 +8,7 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 <p align="center">
   <img src="https://img.shields.io/badge/Cyberpunk_2077-2.5-FCEE0A?style=for-the-badge&labelColor=1a1a1a" alt="Cyberpunk 2077 2.5">
   <img src="https://img.shields.io/badge/Phantom_Liberty-required-FF2A6D?style=for-the-badge&labelColor=1a1a1a" alt="Phantom Liberty required">
-  <img src="https://img.shields.io/badge/version-0.1.1-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Version 0.1.1">
+  <img src="https://img.shields.io/badge/version-0.1.2-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Version 0.1.2">
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/RED4ext-1.31.1-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="RED4ext 1.31.1">
@@ -34,7 +34,7 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 ## Quick start
 
 > [!NOTE]
-> Version 0.1.1 adds melee weapons, a first version of dual wield, smoother keyboard movement and many body and shadow fixes. It is still an early version; see the [changelog](CHANGELOG.md). Feedback is very welcome.
+> Version 0.1.2 gives female V a more feminine figure while she stands and moves without a weapon. Version 0.1.1 added melee weapons, a first version of dual wield, smoother keyboard movement and many body and shadow fixes. It is still an early version; see the [changelog](CHANGELOG.md). Feedback is very welcome.
 
 1. Install the [requirements](#requirements): RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL and Input Loader.
 2. Install UTPP with Vortex (**Mod manager download**) or extract the archive into the game folder.
@@ -79,6 +79,7 @@ Left: the game's own animations. Right: Ultimate Third Person Project. Real-time
 - A shoulder swap key (keyboard and controller, assignable in Mod Settings)
 - Head look: V turns her head and eyes towards where the camera looks while standing or walking
 - Body skin recalculated for the mod's poses on both V bodies instead of deforming
+- A more feminine figure for female V without a weapon: sloping, set-back shoulders, arms closer to the body (can be switched off)
 - V's shadow follows the third-person body, also with ray-traced shadows
 - Targeted corrections for arm and forearm deformation
 - Reduced snapping and popping during animation transitions
@@ -169,7 +170,7 @@ Do not use outdated, duplicate or mixed versions of the required frameworks. If 
 > [!CAUTION]
 > When updating UTPP, remove obsolete files only when instructed by the release notes. Do not mix files from different UTPP versions.
 
-**Updating from 0.1.0 to 0.1.1:** install 0.1.1 over 0.1.0 and let it replace every file. No file of 0.1.0 has to be removed. At the first start of 0.1.1 the settings of the mod are reset to their defaults once, because the defaults and the way several options work changed; a message on the screen tells you when it happened. The two "Swap shoulder" controls are not changed. This happens once: afterwards your settings are kept as before.
+**Updating to 0.1.2:** install 0.1.2 over the version you have and let it replace every file. No file of an older version has to be removed. Coming from 0.1.1, your settings are kept. Coming from 0.1.0, the settings of the mod are reset to their defaults once at the first start, because the defaults and the way several options work changed in 0.1.1; a message on the screen tells you when it happened. The two "Swap shoulder" controls are not changed. This happens once: afterwards your settings are kept as before.
 
 Always keep a backup of your mod setup before installing or updating UTPP.
 
@@ -249,7 +250,7 @@ For the best troubleshooting results, test UTPP with the required dependencies a
 <details>
 <summary><b>Details</b></summary>
 
-Version 0.1.1 is the second public release of UTPP and still an early version of the project.
+Version 0.1.2 is the third public release of UTPP and still an early version of the project.
 
 Some poses, weapons, body states, story animations and transitions require further refinement. Results may also vary depending on the installed character, weapon and animation setup.
 
@@ -270,12 +271,12 @@ The project is being developed in stages, with continued focus on movement quali
 
 </details>
 
-## Known issues in 0.1.1
+## Known issues in 0.1.2
 
 <details>
 <summary><b>Details</b></summary>
 
-These problems are known in version 0.1.1 and are planned to be fixed in the next updates. You do not need to report them. What was fixed since 0.1.0 is listed in the [changelog](CHANGELOG.md).
+These problems are known in version 0.1.2 and are planned to be fixed in the next updates. You do not need to report them. What was fixed since 0.1.0 is listed in the [changelog](CHANGELOG.md).
 
 - redscript 1.0.0 is not supported yet: use redscript 0.5.32
 - Rare game crash a few seconds after loading a save in which V sits on a vehicle; loading again works
@@ -283,6 +284,7 @@ These problems are known in version 0.1.1 and are planned to be fixed in the nex
 - Mantis Blades and Gorilla Arms: drawing them plays the game's own animation
 - Hammers, the monowire, finishers and takedowns keep the game's animations
 - Dual wield is a first version: the reload uses a basic animation and the stance still needs polish
+- Feminine figure: it shows while female V stands and moves without a weapon. With a weapon drawn, while climbing or vaulting and in the animations the game plays itself the previous figure is used; the change between the two takes a quarter of a second
 - Sniper rifles: aiming through the scope uses the first-person view; after you stop aiming the view stays in first person for about a second, and the camera passes through V's body on the way back
 - Two-handed weapons: V leans far forward while moving, and some rifle stocks do not reach the shoulder
 - Shotguns, sniper and precision rifles and heavy machine guns have no UTPP recoil animation yet

@@ -257,6 +257,7 @@ const void* g_owSkBundle = nullptr;
 float g_pelvisTrimDeg = 0.0f;
 // Feminine shoulder narrowing in metres per side (CET mm.shoulderWidth -> cm per side -> SetFeminineShoulderCm); default = MotionPose.hpp constant.
 float g_femShoulderM = motionpose::kFeminineShoulderAmount;
+bool g_femFigureOn = true;
 owarp::TrimParams g_ptParams;
 owarp::PelvisTrim g_pt;
 owarp::Skeleton g_ptSk;
@@ -1692,6 +1693,7 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
             // a new evaluator starts at the constant: carry the setting over here, under g_m, so a change made while the bundle was loading is not lost
             if (g_bundle->evalOk)
                 g_bundle->eval.SetFeminineShoulders(g_femShoulderM);
+                g_bundle->eval.SetFeminineFigure(g_femFigureOn);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
@@ -2060,6 +2062,15 @@ bool SetFeminineShoulderCm(float aCm)
     g_femShoulderM = utpp::mm::femshoulder::AmountFromCm(aCm); // exact: 2.5 cm == kFeminineShoulderAmount bit for bit
     if (g_bundle && g_bundle->evalOk)
         g_bundle->eval.SetFeminineShoulders(g_femShoulderM);
+    return true;
+}
+
+bool SetFeminineFigure(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_femFigureOn = aOn;
+    if (g_bundle && g_bundle->evalOk)
+        g_bundle->eval.SetFeminineFigure(aOn);
     return true;
 }
 

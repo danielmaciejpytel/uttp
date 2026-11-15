@@ -102,7 +102,7 @@ M.PACK_FORCED = {
 M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffset", "mm.walkSpeed", "mm.minWalkSpeed", "mm.shoulderWidth",
-  "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
+  "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
@@ -559,7 +559,7 @@ local LAYOUT = {
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
-                         "mm.bodyYawOffset", "mm.headLead", "mm.walkSpeed", "mm.minWalkSpeed", "mm.shoulderWidth" } },
+                         "mm.bodyYawOffset", "mm.headLead", "mm.walkSpeed", "mm.minWalkSpeed", "mm.shoulderWidth", "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
   { "developer", "frame", { "body.impl", "headGuard.impl" } },

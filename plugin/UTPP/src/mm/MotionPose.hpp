@@ -30,6 +30,7 @@
 #include "MotionBlendStack.hpp"
 #include "MotionAdapter.hpp"
 #include "FeminineShoulders.hpp"
+#include "FeminineFigure.hpp"
 #include "ForearmTwist.hpp"
 #include "MotionOrientationFeet.hpp"
 #include "GripIK.hpp"
@@ -159,6 +160,7 @@ inline constexpr float kFreeArmAddScale = 0.25f;
 inline constexpr float kFeminineShoulderAmount = UTPP_FEM_AMOUNT; // m per side (2026-11-02: was 0.020)
 inline constexpr float kFeminineMaxAmount = femshoulder::kMaxAmountCm / 100.0f; // clamp for any setting: 0.05 m (was 0.040)
 inline constexpr float kFeminineRiseSeconds = 0.25f;
+inline constexpr float kFigureSeconds = 0.25f; // full fade time of the feminine figure pass (FeminineFigure.hpp)
 #ifndef UTPP_FEM_SOFTSTART
 #define UTPP_FEM_SOFTSTART 0.995f // the recoil / grip IK needs reach slack: 0.998 failed 7 recoil-reach cases (2026-11-02)
 #endif
@@ -220,6 +222,12 @@ struct FrameInfo
         float elbowMove[2] = {}, elbowFlexDeg[2] = {}; // elbow evidence of the pass (femshoulder::Result)
         float drift[2] = {}; // socket drift toward the hand per side (m, femshoulder REACH DRIFT; 0 up to the default amount)
     } fem;
+    // Feminine figure pass of this frame (FeminineFigure.hpp): runs right after the shoulder width pass.
+    struct FemFigure
+    {
+        bool ran = false, applied = false;
+        float weight = 0.0f, freeShare = 0.0f, sideWeight[2] = {}, handShift[2] = {}, handError[2] = {};
+    } figure;
     ov::ClavicleLimitResult clavicleLimit; // mesh-space arm clavicle deviation of this frame before the limit
     ov::ClavicleTransientResult clavicleTransient; // transient bound of the clavicles (gate 1 = free, pose untouched)
     ov::GirdleResult girdle;                       // girdle width bound of the mesh-space arm poses (applied = the pose was changed)
@@ -378,13 +386,14 @@ public:
         m_aoSlots = std::make_unique<ov::Additive[]>(6);
         m_clavL.Clear(sk.n);
         m_clavR.Clear(sk.n);
-        m_spine3 = m_spine2 = -1;
+        m_spine3 = m_spine2 = m_neck = -1;
         for (int k = 0; k < sk.n; ++k)
         {
             const std::string_view nm = aOv->BoneName(k);
             if (nm == "LeftShoulder" || nm == "WeaponLeft")
                 m_clavL.w[k] = 1.0f;
             if (nm == "Spine3") m_spine3 = k;
+            if (nm == "Neck") m_neck = k;
             if (nm == "Spine2") m_spine2 = k;
             if (nm == "RightShoulder" || nm == "WeaponRight")
                 m_clavR.w[k] = 1.0f;
@@ -434,6 +443,7 @@ public:
         m_havePrev = m_externalBase = m_usesLiveBase = false;
         m_femHave = false;
         m_femHold.Reset();
+        m_figureHave = false;
         m_ready = true;
         return true;
     }
@@ -448,6 +458,9 @@ public:
         m_femRiseSeconds = std::isfinite(aRiseSeconds) && aRiseSeconds > 0.0f ? aRiseSeconds : kFeminineRiseSeconds;
     }
     float FeminineShoulderAmount() const { return m_femAmount; }
+    // Feminine figure (FeminineFigure.hpp): sloping set-back shoulders, free arms closer to the body, a lower head. On by default.
+    void SetFeminineFigure(bool aOn) { m_figureOn = aOn; }
+    bool FeminineFigure() const { return m_figureOn; }
     void SetGraphInputs(const motionstack::GraphInputs &input)
     {
         m_stack.SetGraphInputs(input);
@@ -473,6 +486,7 @@ public:
         m_havePrev = false;
         m_femHave = false;
         m_femHold.Reset();
+        m_figureHave = false;
         m_supportGate.Reset();
         m_reachShift = 0.0f;
         m_reachShiftHave = false;
@@ -810,6 +824,32 @@ private:
                     info.fem.feasible[side] = posture.feasible[side];
                 }
                 info.fem.widthAfter = femshoulder::SocketWidth(sk, *m_lay, m_rig, m_spine3, m_shootClavL, m_shootClavR);
+#if !(defined(UTPP_FEMFIGURE_MUTATION) && UTPP_FEMFIGURE_MUTATION == 1) // mutation 1: no figure pass (the build before)
+                // Figure pass on the same pose. It belongs to the unarmed movement poses: its weight is the feminine style weight
+                // times the share of the unarmed poses in the composition, and 0 on a traversal clip (hands on a ledge). Weapon poses
+                // keep the shoulders their grip, stock and recoil passes were built on. The weight moves at most 1 / kFigureSeconds
+                // per second, so a traversal start or end never switches the figure in one frame.
+                if (m_neck >= 0)
+                {
+                    const float freeShare = composedSum > 0.0f ? 1.0f - ov::Clamp01(composedOther / composedSum) : 0.0f;
+                    const float target = (m_figureOn && !aIn.montageBase) ? requested * freeShare : 0.0f;
+                    const float step = std::isfinite(aDt) && aDt > 0.0f ? std::fmin(aDt, 0.1f) / kFigureSeconds : 0.0f;
+                    m_figureW = m_figureHave ? std::fmin(m_figureW + step, std::fmax(m_figureW - step, target)) : target;
+                    m_figureHave = true;
+                    femfigure::Result figure;
+                    info.figure.ran = true;
+                    info.figure.applied = femfigure::Apply(sk, *m_lay, *m_tmp, m_rig, m_spine3, m_shootClavL, m_shootClavR, m_neck,
+                                                           m_figureW, 1.0f, contactParams, figure) && figure.applied;
+                    info.figure.weight = m_figureW;
+                    info.figure.freeShare = freeShare;
+                    for (int side = 0; side < 2; ++side)
+                    {
+                        info.figure.sideWeight[side] = figure.sideWeight[side];
+                        info.figure.handShift[side] = figure.handShift[side];
+                        info.figure.handError[side] = figure.handError[side];
+                    }
+                }
+#endif
             }
             if (aIn.capturePoseDiagnostics)
                 CaptureStageDelta(feminineBefore, *m_lay, info.feminineDelta);
@@ -1932,6 +1972,9 @@ private:
     std::unique_ptr<ov::Additive[]> m_dPs;
     std::unique_ptr<ov::LayerScratch> m_scratch;
     int m_spine3 = -1;
+    int m_neck = -1;
+    bool m_figureOn = true, m_figureHave = false;
+    float m_figureW = 0.0f;
     ov::OverlayMachine m_machine;
     ov::StyleWeightTable m_styleTable;
     idlebreak::Controller m_idle;

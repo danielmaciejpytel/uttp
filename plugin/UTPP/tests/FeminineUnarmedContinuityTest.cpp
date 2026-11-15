@@ -27,6 +27,7 @@ int main(int argc, char** argv)
     auto makeEvaluator = [&] {
         auto ev = std::make_unique<motionpose::PoseEvaluator>();
         if (!ev->Init(db.get(), ovf.get(), &style, 2, error, motionpose::BaseBlendPolicy::LiveCrossfade)) ev.reset();
+        if (ev) ev->SetFeminineFigure(false); // this test is about the shoulder width pass alone (its contacts and untouched bones)
         return ev;
     };
     auto input = [] {

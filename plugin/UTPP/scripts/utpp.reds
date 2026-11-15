@@ -1306,6 +1306,9 @@ public native func UTPPSetMMHeadLeadParams(leadDeg: Float, maxDeg: Float) -> Boo
 // Feminine shoulder narrowing (motion poses, female body; CET setting mm.shoulderWidth -> 2.5 - width / 2, default 2.5): how far (cm, 0..5) each upper-arm
 // socket moves toward the spine at full weight; hands and weapon contacts are kept exactly. 0 = off. False = NaN / out of range.
 public native func UTPPSetMotionShoulderNarrow(cm: Float) -> Bool
+// Feminine figure (motion poses, female body; CET setting mm.feminineFigure, default on): sloping set-back shoulders, free arms closer
+// to the body and a lower head. Hands of weapon poses stay where the animation put them.
+public native func UTPPSetMotionFeminineFigure(on: Bool) -> Bool
 // Run pelvis yaw trim (motion poses; CET setting mm.pelvisYawTrim, default 0): turns the pelvis by deg (+ = left, -10..10) while V
 // walks / runs / sprints forward on the ground; chest, head and feet keep their direction. False = NaN / out of range (nothing changed).
 public native func UTPPSetMotionPelvisYawTrim(deg: Float) -> Bool

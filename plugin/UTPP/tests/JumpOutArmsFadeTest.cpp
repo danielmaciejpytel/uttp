@@ -122,6 +122,7 @@ void RealData(const char* aDbPath, const char* aOvPath, const char* aStylePath)
                 std::string e;
                 if (!ev->Init(db.get(), ovf.get(), &style, 2, e))
                     return false;
+                ev->SetFeminineFigure(false); // the unarmed reference and the weapon composition are compared arm for arm: no figure pass
                 motionpose::OverlayFrameInputs in;
                 in.machine.overlay = aOverlay;
                 in.machine.style = Style::Feminine;

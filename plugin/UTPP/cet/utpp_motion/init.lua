@@ -73,11 +73,11 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 -- wanted state (settings) and what the glue reported last
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = false, orientWarp = false,
   lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
-  bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, selectionGuards = true }
+  feminineFigure = true, bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, selectionGuards = true }
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
   leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
-  bodyYawOffsetApplied = 0, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, aimPointApplied = nil,
+  feminineFigureApplied = true, bodyYawOffsetApplied = 0, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, aimPointApplied = nil,
   pistolAutoApplied = nil, selectionGuardsApplied = true, errors = 0 }
 
 -- no file system paths in the log: a Lua error text names the script file with its full path (user name included); a path in
@@ -201,6 +201,7 @@ function M.Sync(api)
     M.ApplySelectionGuards(api)
     M.ApplyPelvisYawTrim(api)
     M.ApplyShoulderNarrow(api)
+    M.ApplyFeminineFigure(api)
     M.ApplyBodyYawOffset(api)
     M.ApplyWalkSpeed(api)
     M.ApplyMinAnalogWalk(api)
@@ -244,6 +245,7 @@ function M.Sync(api)
   M.ApplySelectionGuards(api)
   M.ApplyPelvisYawTrim(api)
   M.ApplyShoulderNarrow(api)
+  M.ApplyFeminineFigure(api)
   M.ApplyBodyYawOffset(api)
   M.ApplyWalkSpeed(api)
   M.ApplyMinAnalogWalk(api)
@@ -542,6 +544,32 @@ function M.SetShoulderNarrow(v, api)
   M.ApplyShoulderNarrow(api)
   return M.want.shoulderNarrow
 end
+-- Feminine figure (mm.feminineFigure, default on = the DLL default: nothing is called while the wanted value is what the DLL has).
+function M.ApplyFeminineFigure(api)
+  if not M.want.enabled then return false end
+  local v = M.want.feminineFigure
+  if M.rt.feminineFigureApplied == v then return true end
+  api = api or M.api
+  local ok, accepted
+  if api and api.setFeminineFigure then
+    ok, accepted = pcall(api.setFeminineFigure, v)
+  else
+    ok, accepted = pcall(function() return Game.UTPPSetMotionFeminineFigure(v) end)
+  end
+  if not ok or accepted == false then
+    M.rt.errors = M.rt.errors + 1
+    if M.rt.errors <= 3 then log("mm.feminineFigure: native call failed") end
+    return false
+  end
+  M.rt.feminineFigureApplied = v
+  log("mm.feminineFigure: feminine figure -> " .. tostring(v) .. " (native call accepted)")
+  return true
+end
+function M.SetFeminineFigure(v, api)
+  M.want.feminineFigure = v ~= false
+  M.ApplyFeminineFigure(api)
+  return M.want.feminineFigure
+end
 -- the Mod Settings option (mm.shoulderWidth); returns the narrowing in cm per side that is now wanted
 function M.SetShoulderWidth(v, api)
   return M.SetShoulderNarrow(M.ShoulderNarrowFromWidth(v), api)
@@ -825,6 +853,11 @@ function M.RegisterSettings(core)
       .. "narrower (down to -5), above 0 = wider (+5 = the body's own width). Her hands and weapon stay where the animation puts "
       .. "them; narrower shoulders bend the elbows a little more. No effect on male V.",
     apply = function(v) M.SetShoulderWidth(v) end })
+  core.Register({ key = "mm.feminineFigure", section = "animation", type = "bool", default = true,
+    label = "Feminine figure (female V)",
+    desc = "Female V stands and moves with sloping, set-back shoulders, her arms closer to the body and her head a little lower. "
+      .. "With a weapon her hands stay where the animation puts them. Off = the figure of the earlier versions. No effect on male V.",
+    apply = function(v) M.SetFeminineFigure(v) end })
   core.Register({ key = "mm.pelvisYawTrim", section = "animation", type = "float", default = 2, min = -10, max = 10, step = 0.5,
     label = "Run pelvis yaw trim (deg)",
     desc = "Turns V's hips around the vertical axis while she walks, runs or sprints forward (+ = to the left, - = to the right); her "

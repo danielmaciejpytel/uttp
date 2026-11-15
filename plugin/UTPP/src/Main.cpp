@@ -2232,6 +2232,17 @@ void Native_SetMMHeadLeadParams(RED4ext::IScriptable*, RED4ext::CStackFrame* aFr
 // ---- feminine shoulder narrowing (motiondriver::SetFeminineShoulderCm): cm per side, default 2.5. CET mm.shoulderWidth (2026-11-09,
 // Mod Settings "Shoulder width (female V)", -5..5 cm) sends 2.5 - width / 2 = 0..5; the accepted range is the driver's
 // (motionpose::kFeminineMaxAmount * 100, femshoulder::kMaxAmountCm = 5 is the setting's end)
+void Native_SetMotionFeminineFigure(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = true;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = motiondriver::SetFeminineFigure(on);
+    LogInfo("UTPPSetMotionFeminineFigure(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
+
 void Native_SetMotionShoulderNarrow(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     float cm = 0.0f;
@@ -3837,6 +3848,15 @@ void PostRegisterTypes()
         hp->AddParam("Float", "maxDeg");
         hp->SetReturnType("Bool");
         rtti->RegisterFunction(hp);
+    }
+
+    // feminine figure switch
+    {
+        auto* ff = RED4ext::CGlobalFunction::Create("UTPPSetMotionFeminineFigure", "UTPPSetMotionFeminineFigure", &Native_SetMotionFeminineFigure);
+        ff->flags = flags;
+        ff->AddParam("Bool", "on");
+        ff->SetReturnType("Bool");
+        rtti->RegisterFunction(ff);
     }
 
     // feminine shoulder narrowing

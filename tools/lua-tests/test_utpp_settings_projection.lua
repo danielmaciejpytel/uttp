@@ -664,11 +664,12 @@ if not WRITE then
     -- 2026-10-30 user: Run pelvis yaw trim, then Body yaw offset right after it (both registered by utpp_motion); 2026-10-31: Walk speed,
     -- then Minimum walk speed; 2026-11-09 (user K5): Shoulder width (female V) last
     -- 2026-11-13: Run pelvis yaw trim, Body yaw offset and Minimum walk speed are hidden in 0.1.0 (level "hidden", layout place kept)
-    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset, Head follows turns), Walk speed, (hidden: Minimum walk speed), Shoulder width, then the advanced camera options",
+    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset, Head follows turns), Walk speed, (hidden: Minimum walk speed), Shoulder width, Feminine figure, then the advanced camera options",
       placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffset") == "hidden/frame/60"
       and placeOf("mm.headLead") == "hidden/frame/70"
       and placeOf("mm.walkSpeed") == "player/frame/80" and placeOf("mm.minWalkSpeed") == "hidden/frame/90"
-      and placeOf("mm.shoulderWidth") == "player/frame/100" and placeOf("camera.idleOrbit") == "advanced/frame/110",
+      and placeOf("mm.shoulderWidth") == "player/frame/100" and placeOf("mm.feminineFigure") == "player/frame/110"
+      and placeOf("camera.idleOrbit") == "advanced/frame/120",
       placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.bodyYawOffset") .. " " .. placeOf("mm.walkSpeed") .. " "
         .. placeOf("mm.minWalkSpeed") .. " " .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
     -- 2026-10-30 aim pitch plan: "Weapon aims at crosshair point" (mm.aimAtCrosshair, utpp_motion) after the crosshair colour, player level

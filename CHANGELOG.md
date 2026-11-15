@@ -2,6 +2,22 @@
 
 Changes of Ultimate Third Person Project, newest version first.
 
+## 0.1.2 - 2026-11-15
+
+For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscript 0.5.32, Cyber Engine Tweaks 1.38.1, Codeware 1.21.4, ArchiveXL 1.28.8, Input Loader 0.2.6 and Mod Settings 0.2.30.
+
+**Updating:** install 0.1.2 over the version you have and let it replace every file. No file of an older version has to be removed. Settings are kept when you come from 0.1.1; coming from 0.1.0 they are reset to their defaults once (see 0.1.1).
+
+### Added
+
+- **Feminine figure for female V:** while V stands and moves without a weapon her shoulders slope down and sit further back, her arms hang closer to the body and her head sits about 2 cm lower, so the neck looks shorter and the shoulder line softer. Hips, chest and legs are not changed.
+- New option **"Feminine figure (female V)"** in the Camera section of the mod menu (next to "Shoulder width"), on by default. Switch it off to get the figure of 0.1.1 back.
+
+### Notes
+
+- The figure is applied to the poses the mod sets for unarmed standing and movement. With a weapon drawn, while climbing or vaulting and in the animations the game plays itself (scenes, vehicles, finishers) the figure of 0.1.1 is used. The change between the two takes a quarter of a second.
+- Male V is not changed.
+
 ## 0.1.1 - 2026-11-15
 
 For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscript 0.5.32, Cyber Engine Tweaks 1.38.1, Codeware 1.21.4, ArchiveXL 1.28.8, Input Loader 0.2.6 and Mod Settings 0.2.30.
@@ -50,7 +66,7 @@ For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscri
 
 ### Known issues
 
-See [Known issues in 0.1.1](README.md#known-issues-in-011) in the readme.
+See [Known issues](README.md#known-issues-in-012) in the readme.
 
 ## 0.1.0 - 2026-11-13
 

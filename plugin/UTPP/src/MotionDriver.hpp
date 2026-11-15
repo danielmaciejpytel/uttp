@@ -266,6 +266,9 @@ bool SetOrientWarp(bool aOn);
 // upper-arm socket of a female body moves toward the spine at full weight; hands and weapon stay exactly where the animation put them.
 // 0 = off. False on NaN / out of range (nothing changed). Applied to the installed bundle at once and to every bundle loaded later.
 bool SetFeminineShoulderCm(float aCm);
+// Feminine figure (CET mm.feminineFigure, default on; mm/FeminineFigure.hpp): sloping set-back shoulders, free arms closer to the
+// body and a lower head on a female body. Applied to the installed bundle at once and to every bundle loaded later.
+bool SetFeminineFigure(bool aOn);
 bool SetPelvisYawTrim(float aDeg);
 float PelvisYawTrim();
 float PelvisYawTrimWeight();

@@ -272,6 +272,26 @@ do
   check("pelvisYawTrim is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.trim == 1 and t.trim[1] == 4.5)
 end
 
+-- mm.feminineFigure: on by default like the DLL -> no native call until it is switched off; a rejected call is retried
+do
+  local v, calls, reject = fresh(), {}, false
+  local api = { setFeminineFigure = function(on) calls[#calls + 1] = on; return not reject end }
+  v.want.enabled = true
+  check("feminineFigure default on: no native call", v.ApplyFeminineFigure(api) == true and #calls == 0 and v.want.feminineFigure == true)
+  check("feminineFigure off is sent once", v.SetFeminineFigure(false, api) == false and #calls == 1 and calls[1] == false
+    and v.rt.feminineFigureApplied == false and v.ApplyFeminineFigure(api) == true and #calls == 1)
+  reject = true
+  v.SetFeminineFigure(true, api)
+  check("a rejected feminineFigure call is not acknowledged and is retried", v.rt.feminineFigureApplied == false and #calls == 2
+    and v.ApplyFeminineFigure(api) == false and #calls == 3)
+  reject = false
+  check("feminineFigure on again is acknowledged", v.ApplyFeminineFigure(api) == true and calls[#calls] == true and v.rt.feminineFigureApplied == true)
+  v.want.enabled = false
+  v.SetFeminineFigure(false, api)
+  local n = #calls
+  check("feminineFigure while motion is off makes no native call", #calls == n and v.want.feminineFigure == false)
+end
+
 -- mm.shoulderNarrow (2026-11-02, console per side since 2026-11-09): DLL default 2.5 cm -> no native call until the value
 -- differs; clamped to 0..5 (2026-11-09: was 0..4), NaN -> 2.5
 do
