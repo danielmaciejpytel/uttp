@@ -359,12 +359,14 @@ std::atomic<bool> g_selectionGuards{true};
 std::atomic<uint32_t> g_feedPsmRaw{0};
 // Dual wield left arm: the mirror weight shown on the last frame (DualWieldMirrorStepLocked); status " dualMirror=".
 float g_dualMirrorW = 0.0f;
+float g_dualTwinDeg = 0.0f; // twin stance: turn of the right upper arm on the last frame (status " dualTwin=")
 std::string DualStatusSuffix()
 {
     char buf[96];
     const int used = integ::PsmDualStatusSuffix(buf, sizeof buf, g_feedPsmRaw.load(std::memory_order_relaxed));
     if (used > 0 && used < static_cast<int>(sizeof buf))
-        std::snprintf(buf + used, sizeof buf - static_cast<size_t>(used), " dualMirror=%.2f", static_cast<double>(g_dualMirrorW));
+        std::snprintf(buf + used, sizeof buf - static_cast<size_t>(used), " dualMirror=%.2f dualTwin=%.1f", static_cast<double>(g_dualMirrorW),
+                      static_cast<double>(g_dualTwinDeg));
     return buf;
 }
 std::atomic<bool> g_aimJogOff{true}; // G9: the last UTPPMMAimJogTarget answer was 0 (vanilla aim walk speed; default before any query)
@@ -1733,7 +1735,7 @@ float WallP95Locked() { return P95Of(g_wallTimes); } // status / log only, never
 bool DualWieldNow() { return integ::PsmDualOf(g_feedPsmRaw.load(std::memory_order_relaxed)); }
 // Dual wield left arm: ramp of the mirror (DualWieldMirror.hpp) and when it last stepped (the shown weight: g_dualMirrorW).
 dualmirror::Ramp g_dualMirrorRamp;
-dualmirror::Held g_dualMirrorHeld; // the mirrored ready pose kept through the aim / fire stance
+dualmirror::Follow g_dualMirrorFollow; // the shown left chain (speed-limited follower of the mirror target)
 int64_t g_dualMirrorNs = 0;
 
 ov::PoseOverlay OverlayLocked()
@@ -3650,8 +3652,9 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
     motionpose::FrameInfo info;
     g_ovArmsNow = false; // traversal montage frames never claim both hands on the weapon
     g_dualMirrorRamp.Reset(); // dual wield left arm: not on montage frames; fades in again afterwards
-    g_dualMirrorHeld.Reset();
+    g_dualMirrorFollow.Reset();
     g_dualMirrorW = 0.0f;
+    g_dualTwinDeg = 0.0f;
     const bool ok = fromPoses ? b.eval.EvaluateWithPose(dt, mr, b.travRaw.data(), in, b.pose.data(),
                                                         static_cast<uint32_t>(b.pose.size()), &info)
                               : b.eval.Evaluate(dt, mr, in, b.pose.data(), static_cast<uint32_t>(b.pose.size()), &info);
@@ -3878,25 +3881,28 @@ void MagTapAgePendingLocked()
     }
 }
 
-// Dual wield left arm: with two weapons drawn and the one-handed weapon pose as the overlay, the left arm (clavicle .. hand and
+// Dual wield arms: with two weapons drawn and the one-handed weapon pose as the overlay, the left arm (clavicle .. hand and
 // WeaponLeft) takes the mirror image of the right arm across the chest mid plane (DualWieldMirror.hpp). Shown weight = the 0.65 s
 // ramp x the right arm layer of the weapon pose (a right arm that follows the locomotion is not copied) x (1 - reload envelope)
 // (the reload keeps its own behaviour); no ramp during a weapon action (reload). Weight 0 leaves the pose untouched, so a single
 // weapon is bit-identical. After 0.25 s without a step (skipped frames, pause) the ramp keeps its value while still wanted and is 0
 // at once when not (dualmirror::Ramp aGap).
+// Twin stance: in the aim and the hip-fire pose (the machine's aiming weight) the right upper arm is first turned about the
+// shoulder until its barrel points along the chest mid plane (dualmirror::ApplyTwinRight, weight = aiming weight x shown weight),
+// so the mirror points both weapons the same way. The left chain follows its mirror target at <= 2.4 cm per frame at 60 Hz.
 void DualWieldMirrorStepLocked(Bundle& b, const motionpose::FrameInfo& aInfo, float aDt)
 {
     const int64_t now = SteadyNs();
     const bool gap = g_dualMirrorNs == 0 || now - g_dualMirrorNs > 250000000ll;
     g_dualMirrorNs = now;
     const bool wanted = b.dualMirror.Valid() && ov::DualWieldMirrorWanted(OverlayLocked(), DualWieldNow()) && g_weaponAction != 2;
-    // The aim and the hip-fire pose are a side stance: the left arm keeps the mirrored ready pose there (dualmirror::Held)
-    // instead of the mirror of the stance, which would point the left weapon away from the target.
-    const bool stance = g_aimingNow || g_hipFirePoseNow || g_hipFirePoseHold.Active();
-    const float ramp = dualmirror::StepRamp(g_dualMirrorRamp, g_dualMirrorHeld, wanted, stance, aDt, gap);
+    const float ramp = g_dualMirrorRamp.Step(wanted, aDt, gap);
     const float armR = (aInfo.curves.present & (1u << ov::kArmR)) != 0 ? aInfo.curves[ov::kArmR] : 0.0f;
     g_dualMirrorW = dualmirror::ShownWeight(ramp, armR, g_reloadUpperWeight);
-    dualmirror::ApplyOrHold(b.dualMirror, g_dualMirrorHeld, b.pose.data(), g_dualMirrorW, stance, aDt);
+    const float aim = std::isfinite(aInfo.aoWeight) ? std::fmin(1.0f, std::fmax(0.0f, aInfo.aoWeight)) : 0.0f;
+    g_dualTwinDeg = static_cast<float>(dualmirror::ApplyTwinRight(b.dualMirror, b.pose.data(), g_dualMirrorW * aim));
+    // the twin keeps the left clavicle of the pose (the mirror of an aimed right clavicle narrows the shoulders)
+    dualmirror::ApplyFollow(b.dualMirror, g_dualMirrorFollow, b.pose.data(), g_dualMirrorW, aDt, g_dualMirrorW * aim);
 }
 
 // MM owns the arms in TPP: ApplyLocked publishes the MM upper body at upperScale 1 (weapon overlay drawn, no release, no reload action /

@@ -141,6 +141,8 @@ struct Mirror
     V3d lateral;          // plane normal (chest frame), for diagnostics
     M3 n[kPairs];         // per pair: Rr_rest^T S Rl_rest
     double restAsymmetry = 0.0; // largest |N - round(N)| over the pairs (diagnostics, tests)
+    V3d up;               // chest up axis inside the mid plane (chest frame): the turn axis of the twin stance
+    V3d fwd;              // chest forward inside the mid plane (chest frame), up x fwd ~ lateral
     bool Valid() const { return ok; }
 };
 
@@ -200,15 +202,33 @@ inline Mirror Build(uint32_t aCount, NameFn aName, ParentFn aParent, const BoneT
                 worst = std::fmax(worst, std::fabs(m.n[k].m[i][j] - std::round(m.n[k].m[i][j])));
     }
     m.restAsymmetry = worst;
+    // chest up = the chest bone's local x axis without its lateral part; forward = the mid plane direction that points away from
+    // the back (local -y). A chest frame without such axes leaves the mirror off.
+    const double ux = 1.0 - m.lateral.x * m.lateral.x, uy = -m.lateral.x * m.lateral.y, uz = -m.lateral.x * m.lateral.z;
+    const double ul = std::sqrt(ux * ux + uy * uy + uz * uz);
+    if (!(ul > 0.9))
+        return m;
+    m.up = {ux / ul, uy / ul, uz / ul};
+    V3d f = {m.up.y * m.lateral.z - m.up.z * m.lateral.y, m.up.z * m.lateral.x - m.up.x * m.lateral.z,
+             m.up.x * m.lateral.y - m.up.y * m.lateral.x};
+    if (f.y > 0.0)
+        f = {-f.x, -f.y, -f.z};
+    m.fwd = f;
     m.ok = worst <= kMaxRestAsymmetry;
     return m;
 }
 
 // Mirrored left locals (targets) of the pose, without blending. aOut[k] = local transform for m.left[k].
-inline bool MirroredLeftLocals(const Mirror& aM, const BoneTransform* aPose, BoneTransform (&aOut)[kPairs])
+// aOwnClavicle (0..1): share of the pose's own left clavicle (local) instead of the mirrored one. Below the clavicle the bones keep
+// the mirrored rotations in the chest frame with their own bone offsets, so nothing stretches. The aim
+// offset of the one-handed weapon pulls the right clavicle forward when aiming down; its mirror would pull the left one forward
+// too and narrow the shoulders, so the twin stance keeps the left clavicle of the pose (Mirror::Apply callers pass 0: the plain
+// mirror, bit for bit as before).
+inline bool MirroredLeftLocals(const Mirror& aM, const BoneTransform* aPose, BoneTransform (&aOut)[kPairs], float aOwnClavicle = 0.0f)
 {
     if (!aM.ok || aPose == nullptr)
         return false;
+    const float own = std::isfinite(aOwnClavicle) ? (aOwnClavicle < 0.0f ? 0.0f : (aOwnClavicle > 1.0f ? 1.0f : aOwnClavicle)) : 0.0f;
     Xd right = {}, leftParent = {};
     for (int k = 0; k < kPairs; ++k)
     {
@@ -216,12 +236,29 @@ inline bool MirroredLeftLocals(const Mirror& aM, const BoneTransform* aPose, Bon
         Xd target;
         target.r = Mul(Mul(aM.s, right.r), aM.n[k]);
         target.t = Add(aM.mid, Apply3(aM.s, Sub(right.t, aM.mid)));
-        const Xd local = Compose(Inverse(leftParent), target);
+        Xd local = Compose(Inverse(leftParent), target);
         aOut[k].q = ToQuat(local.r);
         aOut[k].p = ToF(local.t);
+        if (own > 0.0f)
+        {
+            const BoneTransform& ownL = aPose[aM.left[k]];
+            if (k == 0)
+            {
+                aOut[k].q = math::QuatNlerpShortest(aOut[k].q, ownL.q, own);
+                aOut[k].p = math::Lerp(aOut[k].p, ownL.p, own);
+            }
+            else
+                aOut[k].p = ownL.p; // bone offset in the parent frame (the rig's own; the mirrored one differs by < 1 mm)
+            local = FromBone(aOut[k]);
+            if (k > 0) // the mirrored rotation in the chest frame under the actual parent
+            {
+                local.r = Mul(Transpose(leftParent.r), target.r);
+                aOut[k].q = ToQuat(local.r);
+            }
+        }
         if (!math::IsFinite(aOut[k].q) || !math::IsFinite(aOut[k].p))
             return false;
-        leftParent = target;
+        leftParent = own > 0.0f ? Compose(leftParent, FromBone(aOut[k])) : target;
     }
     return true;
 }
@@ -250,70 +287,233 @@ inline bool Apply(const Mirror& aM, BoneTransform* aPose, float aW)
     return true;
 }
 
-// Blend time of the mirror weight (see Ramp) and of the return from the stance hold. 0.65 s: the left hand travels up to ~0.6 m
-// between the free arm of the weapon pose and the mirror (ready pose), so the smoothstep peak stays near 1.5 m/s (<= 2.5 cm per
-// frame at 60 Hz).
+// Blend time of the mirror weight (see Ramp). 0.65 s: the left hand travels up to ~0.6 m between the free arm of the weapon pose
+// and the mirror (ready pose), so the smoothstep peak stays near 1.5 m/s (<= 2.5 cm per frame at 60 Hz).
 inline constexpr float kBlendSeconds = 0.65f;
 
-// Stance hold. The aim / fire pose of the one-handed weapon is a side stance: its mirror image points the left weapon far away
-// from the target. While the right arm is in that stance the left chain therefore keeps the mirrored locals of the last frame
-// outside it (the ready pose) instead of the mirror of the current right arm. Entering the stance is continuous (the held locals
-// are the previous frame's target, so the switch is immediate); leaving it returns to the live mirror over kBlendSeconds, while
-// the right arm blends back to the ready pose; a stance that comes back during that return takes the hold again over
-// kHoldInSeconds.
-inline constexpr float kHoldInSeconds = 0.1f;
-struct Held
+// Twin stance. The aim / fire pose of the one-handed weapon is a side stance: the right weapon points along the arm, far to the
+// side of the chest, and its mirror image would point the left weapon to the other side. With two weapons drawn the right upper
+// arm is turned about the shoulder joint, around the chest up axis, until the right barrel lies in the chest mid plane direction
+// (no sideways component); its elevation is kept, so the aim offset pitch, the elevation of the recoil and everything below the
+// shoulder stay as they are. The mirror of that arm then points the left weapon the same way: the two barrels are parallel.
+// That turn alone ends with the right hand ~5 cm from the mid plane (the weapons ~8 cm apart). The arm is then turned out about
+// the same axis until the hand is kTwinHandHalfWidth from the mid plane, and the hand is turned back by the same angle at the
+// wrist, so the barrel keeps its direction (spread <= kTwinMaxSpreadDeg).
+// A barrel near the up axis (aiming steeply up) has no reliable heading: the turn fades out with the barrel's forward component
+// (kTwinHeadingFade), so the arm never swings round when the heading flips.
+// The turn is scaled by the caller's weight (aiming weight x mirror weight), so the ready pose is untouched.
+inline constexpr int kBarrelAxis = 1;               // the barrel is the weapon bone's local +y
+inline constexpr double kTwinMaxTurnDeg = 80.0;     // larger turns are clamped (the stance needs ~45 deg)
+inline constexpr double kTwinHandHalfWidth = 0.15;  // m: hands ~30 cm apart, a little narrower than the shoulders
+inline constexpr double kTwinMaxSpreadDeg = 25.0;
+inline constexpr double kTwinHeadingFade = 0.3;     // forward component of the barrel at which the turn has its full weight
+
+// Turn of the right upper arm (radians, about Mirror::up) that brings the right barrel into the mid plane direction; 0 when the
+// barrel is (nearly) along the up axis. aPose: game-local transforms.
+inline double TwinTurn(const Mirror& aM, const BoneTransform* aPose)
+{
+    if (!aM.ok || aPose == nullptr)
+        return 0.0;
+    Xd x = {};
+    for (int k = 0; k < kPairs; ++k)
+        x = Compose(x, FromBone(aPose[aM.right[k]]));
+    const V3d b = {x.r.m[0][kBarrelAxis], x.r.m[1][kBarrelAxis], x.r.m[2][kBarrelAxis]};
+    const double bu = b.x * aM.up.x + b.y * aM.up.y + b.z * aM.up.z;
+    const V3d h = {b.x - bu * aM.up.x, b.y - bu * aM.up.y, b.z - bu * aM.up.z};
+    const double hl = std::sqrt(h.x * h.x + h.y * h.y + h.z * h.z);
+    if (!(hl > 0.05))
+        return 0.0;
+    // signed angle from h to fwd about up
+    const V3d c = {h.y * aM.fwd.z - h.z * aM.fwd.y, h.z * aM.fwd.x - h.x * aM.fwd.z, h.x * aM.fwd.y - h.y * aM.fwd.x};
+    const double sn = (c.x * aM.up.x + c.y * aM.up.y + c.z * aM.up.z) / hl;
+    const double cs = (h.x * aM.fwd.x + h.y * aM.fwd.y + h.z * aM.fwd.z) / hl;
+    const double lim = kTwinMaxTurnDeg * 3.14159265358979323846 / 180.0;
+    const double ang = std::atan2(sn, cs);
+    const double fade = std::fmin(1.0, std::fmax(0.0, (b.x * aM.fwd.x + b.y * aM.fwd.y + b.z * aM.fwd.z) / kTwinHeadingFade));
+    return (ang > lim ? lim : (ang < -lim ? -lim : ang)) * fade * fade * (3.0 - 2.0 * fade);
+}
+
+// Rotation matrix about a unit axis.
+inline M3 AxisRotation(V3d aAxis, double aRad)
+{
+    const double c = std::cos(aRad), s = std::sin(aRad), t = 1.0 - c;
+    const double x = aAxis.x, y = aAxis.y, z = aAxis.z;
+    M3 r;
+    r.m[0][0] = t * x * x + c, r.m[0][1] = t * x * y - s * z, r.m[0][2] = t * x * z + s * y;
+    r.m[1][0] = t * x * y + s * z, r.m[1][1] = t * y * y + c, r.m[1][2] = t * y * z - s * x;
+    r.m[2][0] = t * x * z - s * y, r.m[2][1] = t * y * z + s * x, r.m[2][2] = t * z * z + c;
+    return r;
+}
+
+// Turns the right upper arm by aWeight x TwinTurn about the chest up axis through the shoulder joint, then spreads it out to the
+// hand half width with the wrist turned back (see kTwinHandHalfWidth). Only the RightArm and RightHand locals change; the
+// clavicle is not touched. aWeight <= 0: the pose is not touched. Returns the barrel turn in degrees (aSpreadDeg: the spread).
+inline double ApplyTwinRight(const Mirror& aM, BoneTransform* aPose, float aWeight, double* aSpreadDeg = nullptr)
+{
+    if (aSpreadDeg)
+        *aSpreadDeg = 0.0;
+    if (!(aWeight > 0.0f) || !aM.ok || aPose == nullptr)
+        return 0.0;
+    const double w = aWeight < 1.0f ? aWeight : 1.0;
+    const double ang = w * TwinTurn(aM, aPose);
+    const Xd clav = FromBone(aPose[aM.right[0]]);
+    Xd arm = Compose(clav, FromBone(aPose[aM.right[1]]));
+    const Xd foreL = FromBone(aPose[aM.right[2]]);
+    const Xd handL = FromBone(aPose[aM.right[3]]);
+    arm.r = Mul(AxisRotation(aM.up, ang), arm.r); // pivot = the joint itself: its position does not move
+    // the hand (chest frame) after the turn: its rotation is kept through the spread
+    const Xd hand = Compose(Compose(arm, foreL), handL);
+    const V3d v = Sub(hand.t, arm.t);
+    const double vu = v.x * aM.up.x + v.y * aM.up.y + v.z * aM.up.z;
+    const V3d vh = {v.x - vu * aM.up.x, v.y - vu * aM.up.y, v.z - vu * aM.up.z};
+    const V3d uxv = {aM.up.y * vh.z - aM.up.z * vh.y, aM.up.z * vh.x - aM.up.x * vh.z, aM.up.x * vh.y - aM.up.y * vh.x};
+    const auto lat = [&](V3d p) { return p.x * aM.lateral.x + p.y * aM.lateral.y + p.z * aM.lateral.z; };
+    // lateral of the hand after a turn s: lat(joint - mid) + A cos s + B sin s; the right side is negative
+    const double A = lat(vh), B = lat(uxv), C = -kTwinHandHalfWidth - lat(Sub(arm.t, aM.mid));
+    const double R = std::sqrt(A * A + B * B);
+    double spread = 0.0;
+    if (R > 1e-4)
+    {
+        const double phi = std::atan2(B, A), c = std::fmax(-1.0, std::fmin(1.0, C / R));
+        const double s1 = phi + std::acos(c), s2 = phi - std::acos(c);
+        auto wrap = [](double x) { return std::atan2(std::sin(x), std::cos(x)); };
+        spread = std::fabs(wrap(s1)) < std::fabs(wrap(s2)) ? wrap(s1) : wrap(s2);
+        const double lim = kTwinMaxSpreadDeg * 3.14159265358979323846 / 180.0;
+        spread = w * (spread > lim ? lim : (spread < -lim ? -lim : spread));
+    }
+    if (ang == 0.0 && spread == 0.0)
+        return 0.0;
+    arm.r = Mul(AxisRotation(aM.up, spread), arm.r);
+    const Xd armLocal = Compose(Inverse(clav), arm);
+    const Xd fore = Compose(arm, foreL);
+    Xd handLocal = Compose(Inverse(fore), Xd{hand.r, Compose(fore, handL).t});
+    const math::Quat qa = ToQuat(armLocal.r), qh = ToQuat(handLocal.r);
+    if (!math::IsFinite(qa) || !math::IsFinite(qh))
+        return 0.0;
+    aPose[aM.right[1]].q = qa;
+    aPose[aM.right[3]].q = qh;
+    if (aSpreadDeg)
+        *aSpreadDeg = spread * 180.0 / 3.14159265358979323846;
+    return ang * 180.0 / 3.14159265358979323846;
+}
+
+// Left arm follower. The left hand (chest frame) moves at most kFollowSpeed x dt per frame (2.4 cm at 60 Hz), whatever drives it:
+//  - the mirror target is followed with that speed limit, so a fast raise of the right arm (hip fire raises in 0.1 s) or a quick
+//    stance on / off does not throw the left hand; a target that moves slower is followed exactly;
+//  - the shown weight (ramp x right arm layer x reload envelope) is followed with the rest of the same budget: it changes by at
+//    most (budget left) / (distance between the left hand of the pose and of the mirror) per frame, so a reload envelope that
+//    takes the arm back to the pose of the frame (and gives it again) moves the hand within the limit too.
+// The pose's own left arm under weight 0 is never limited. Shown weight 0: the pose is not touched and the follower is reset.
+inline constexpr float kFollowSpeed = 1.44f; // m/s = 2.4 cm per frame at 60 Hz
+struct Follow
 {
     bool valid = false;
-    float u = 0.0f; // 0 = the live mirror, 1 = the held locals
+    float w = 0.0f; // shown weight (limited)
     BoneTransform local[kPairs];
-    void Reset() { valid = false; u = 0.0f; }
+    void Reset() { valid = false; w = 0.0f; }
 };
-
-// Like Apply, with the stance hold (aStance: the right arm is in the aim / fire stance this frame). aW <= 0: the pose is not
-// touched and the hold is cleared. In the stance with nothing held yet (two weapons drawn while aiming) the pose is left as it is.
-inline bool ApplyOrHold(const Mirror& aM, Held& aHeld, BoneTransform* aPose, float aW, bool aStance, float aDt)
+inline V3d LeftHandInChest(const BoneTransform (&aL)[kPairs])
 {
-    if (!(aW > 0.0f) || !aM.ok || aPose == nullptr)
+    Xd x = {};
+    for (int k = 0; k < 4; ++k)
+        x = Compose(x, FromBone(aL[k]));
+    return x.t;
+}
+inline double Norm(V3d v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
+
+// Like Apply, with the follower. aW: the wanted shown weight; aOwnClavicle: see MirroredLeftLocals (the twin stance passes its
+// weight). Returns true when the pose was edited.
+inline bool ApplyFollow(const Mirror& aM, Follow& aF, BoneTransform* aPose, float aW, float aDt, float aOwnClavicle = 0.0f)
+{
+    const float want = std::isfinite(aW) ? (aW < 0.0f ? 0.0f : (aW > 1.0f ? 1.0f : aW)) : 0.0f;
+    if (!aM.ok || aPose == nullptr || (!(want > 0.0f) && !(aF.w > 0.0f)))
     {
-        aHeld.Reset();
+        aF.Reset();
         return false;
     }
-    const float dt = std::isfinite(aDt) && aDt > 0.0f ? aDt : 0.0f;
-    if (aStance && aHeld.valid)
-        aHeld.u = aHeld.u > 0.0f ? std::fmin(1.0f, aHeld.u + dt / kHoldInSeconds) : 1.0f;
-    else
-        aHeld.u = std::fmax(0.0f, aHeld.u - dt / kBlendSeconds);
     BoneTransform target[kPairs];
-    if (!MirroredLeftLocals(aM, aPose, target))
+    if (!MirroredLeftLocals(aM, aPose, target, aOwnClavicle))
+    {
+        aF.Reset();
         return false;
-    if (!aStance && !(aHeld.u > 0.0f))
-    {
-        for (int k = 0; k < kPairs; ++k)
-            aHeld.local[k] = target[k];
-        aHeld.valid = true;
     }
-    else if (aHeld.valid)
+    const float dt = std::isfinite(aDt) && aDt > 0.0f ? std::fmin(aDt, 0.1f) : 0.0f;
+    const double cap = static_cast<double>(kFollowSpeed) * dt;
+    double step = 0.0; // hand step of the follower this frame
+    if (!aF.valid)
     {
-        const float s = aHeld.u * aHeld.u * (3.0f - 2.0f * aHeld.u);
         for (int k = 0; k < kPairs; ++k)
+            aF.local[k] = target[k];
+        aF.valid = true;
+        aF.w = 0.0f; // the weight starts from the pose (no jump on the first frame)
+    }
+    else
+    {
+        const double dist = Norm(Sub(LeftHandInChest(target), LeftHandInChest(aF.local)));
+        float f = dist > cap ? static_cast<float>(dist > 0.0 ? cap / dist : 0.0) : 1.0f;
+        for (int pass = 0; pass < 6; ++pass)
         {
-            target[k].q = math::QuatNlerpShortest(target[k].q, aHeld.local[k].q, s);
-            target[k].p = math::Lerp(target[k].p, aHeld.local[k].p, s);
+            // a rotation blend does not move the hand on a straight line: halve the fraction until the hand step is in the cap
+            BoneTransform next[kPairs];
+            for (int k = 0; k < kPairs; ++k)
+            {
+                next[k].q = f >= 1.0f ? target[k].q : math::QuatNlerpShortest(aF.local[k].q, target[k].q, f);
+                next[k].p = f >= 1.0f ? target[k].p : math::Lerp(aF.local[k].p, target[k].p, f);
+            }
+            const double e = Norm(Sub(LeftHandInChest(next), LeftHandInChest(aF.local)));
+            if (f >= 1.0f || e <= cap * 1.0001)
+            {
+                for (int k = 0; k < kPairs; ++k)
+                    aF.local[k] = next[k];
+                step = e;
+                break;
+            }
+            f *= 0.5f;
         }
     }
-    else
+    // the shown weight with the rest of the budget
+    BoneTransform own[kPairs];
+    for (int k = 0; k < kPairs; ++k)
+        own[k] = aPose[aM.left[k]];
+    const auto shownHand = [&](float aWeight) {
+        BoneTransform l[kPairs];
+        for (int k = 0; k < kPairs; ++k)
+        {
+            l[k].q = math::QuatNlerpShortest(own[k].q, aF.local[k].q, aWeight);
+            l[k].p = math::Lerp(own[k].p, aF.local[k].p, aWeight);
+        }
+        return LeftHandInChest(l);
+    };
+    const double gapHand = Norm(Sub(LeftHandInChest(aF.local), LeftHandInChest(own)));
+    const double budget = std::fmax(0.0, cap - static_cast<double>(aF.w) * step);
+    float dw = gapHand > 1e-6 ? static_cast<float>(budget / gapHand) : 1.0f;
+    float nw = want > aF.w ? std::fmin(want, aF.w + dw) : std::fmax(want, aF.w - dw);
+    if (nw != aF.w && gapHand > 1e-6)
+    {
+        // the rotation blend is not linear in the weight: halve the change until the hand step is in the budget
+        const V3d from = shownHand(aF.w);
+        for (int pass = 0; pass < 6 && Norm(Sub(shownHand(nw), from)) > budget * 1.0001; ++pass)
+        {
+            dw *= 0.5f;
+            nw = want > aF.w ? std::fmin(want, aF.w + dw) : std::fmax(want, aF.w - dw);
+        }
+    }
+    aF.w = nw;
+    const float w = aF.w;
+    if (!(w > 0.0f))
+    {
+        aF.Reset();
         return false;
-    const float w = aW < 1.0f ? aW : 1.0f;
+    }
     for (int k = 0; k < kPairs; ++k)
     {
         BoneTransform& b = aPose[aM.left[k]];
         if (w >= 1.0f)
-            b = target[k];
+            b = aF.local[k];
         else
         {
-            b.q = math::QuatNlerpShortest(b.q, target[k].q, w);
-            b.p = math::Lerp(b.p, target[k].p, w);
+            b.q = math::QuatNlerpShortest(b.q, aF.local[k].q, w);
+            b.p = math::Lerp(b.p, aF.local[k].p, w);
         }
     }
     return true;
@@ -337,19 +537,6 @@ struct Ramp
     float Shaped() const { return u * u * (3.0f - 2.0f * u); }
     void Reset() { u = 0.0f; }
 };
-
-// Ramp step with the stance rule: in the stance with nothing held (two weapons drawn while aiming, a reload that ended in the
-// stance) the left arm is left alone and the ramp restarts from 0, so the mirror fades in after the stance instead of appearing
-// at full weight.
-inline float StepRamp(Ramp& aRamp, const Held& aHeld, bool aWanted, bool aStance, float aDt, bool aGap = false)
-{
-    if (aStance && !aHeld.valid)
-    {
-        aRamp.Reset();
-        return 0.0f;
-    }
-    return aRamp.Step(aWanted, aDt, aGap);
-}
 
 // Shown weight: ramp x the right arm layer weight of the weapon pose (a right arm that follows locomotion is not copied) x the
 // reload envelope complement (the reload keeps its own behaviour).

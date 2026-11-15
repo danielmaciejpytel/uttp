@@ -11,11 +11,14 @@
 //  5) the blend (also a gap in the stepping: kept while wanted, 0 when not): 60 Hz ramp on, hold, off: the left hand moves continuously (largest step <= 3 x the mean step, and <= 2.5 cm),
 //     reaches the full mirror at the end of the rise and the input pose (bit-identical) at the end of the fall;
 //  6) fail closed: a rest pose with a turned left upper arm, or a missing bone, gives no mirror and Apply does nothing;
-//  7) the stance hold: the right arm goes into the aim stance and back: the left hand stays on the mirrored ready pose (<= 1 mm) and
-//     returns without a step above 2.5 cm per frame; weight 0 clears the hold; a stance with nothing held leaves the pose alone and
-//     the mirror fades in afterwards.
+//  7) the twin stance (aim / hip fire): over the one-handed aim poses, the aim offset sweep and a turned chest the right barrel
+//     lies along the chest mid plane with its elevation kept, the left barrel is parallel, hands 20..50 cm and weapons >= 15 cm
+//     apart, only RightArm changes on the right side; the transitions (hip-fire raise, aim raise, taps, a reload envelope) move
+//     the left hand <= 2.5 cm per frame at 60 Hz. With a dump file (5th argument) the constructed poses are written for the
+//     anatomy gate of the tools.
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -194,109 +197,281 @@ static void TestBlend(const char* aTag, const RigData& aR, const dm::Mirror& aM,
     (void)mean;
 }
 
-// Stance hold: the right arm goes from the ready pose into the aim stance and back; the left arm keeps the mirrored ready pose.
-static void TestHold(const char* aTag, const RigData& aR, const dm::Mirror& aM, const std::vector<BoneTransform>& aReady,
-                     const std::vector<BoneTransform>& aStance)
+// Twin stance (aim / hip fire with two weapons): the right upper arm is turned about the shoulder until the right barrel lies in
+// the chest mid plane direction, the left arm mirrors it. Over the one-handed aim poses (standing and crouched), the aim offset sweep
+// frames (pitch from up to down) and a turned chest:
+//  - with a barrel heading forward (forward component >= dm::kTwinHeadingFade) the right barrel has no sideways component in the
+//    chest frame (<= 0.5 deg out of the mid plane direction) and the barrels are parallel (<= 1 deg); steeply up (heading faded)
+//    the barrels stay within 3 deg of each other; the barrel elevation is kept (barrel . up unchanged within 1e-4);
+//  - the hands are 25..40 cm apart and the weapons at least 15 cm apart (they do not touch);
+//  - only RightArm and RightHand change on the right side (clavicle position and rotation unchanged: the shoulders are not narrowed);
+//  - weight 0 leaves the pose bit-identical.
+// The constructed poses are written to the dump file (database bone order, game-local) for the anatomy gate of the tools.
+static double Deg(double aRad) { return aRad * 180.0 / 3.14159265358979323846; }
+static math::Vec3 BarrelOf(const Model& aM, int aBone)
 {
-    const float dt = 1.0f / 60.0f;
-    const size_t bytes = sizeof(BoneTransform) * aReady.size();
-    auto rightAt = [&](float aU) {
-        std::vector<BoneTransform> p = aReady;
-        for (int k = 0; k < dm::kPairs; ++k)
-        {
-            const int i = aM.right[k];
-            p[i].q = math::QuatNlerpShortest(aReady[i].q, aStance[i].q, aU);
-            p[i].p = math::Lerp(aReady[i].p, aStance[i].p, aU);
-        }
-        return p;
-    };
-    auto leftHand = [&](const std::vector<BoneTransform>& aP) { return Fk(aR.par, aP).p[aM.left[3]]; };
-    dm::Held held;
+    return math::QuatRotate(aM.r[aBone], math::Vec3{0.0f, 1.0f, 0.0f});
+}
+static double AngleDeg(math::Vec3 a, math::Vec3 b)
+{
+    const double c = math::Dot(a, b) / (static_cast<double>(Len(a)) * Len(b));
+    return Deg(std::acos(std::fmax(-1.0, std::fmin(1.0, c))));
+}
+// The twin's left arm: the mirror targets with the pose's own left clavicle (weight aOwn), written to the pose.
+static bool ApplyTwinMirror(const dm::Mirror& aM, std::vector<BoneTransform>& aP, float aOwn)
+{
+    BoneTransform t[dm::kPairs];
+    if (!dm::MirroredLeftLocals(aM, aP.data(), t, aOwn))
+        return false;
+    for (int k = 0; k < dm::kPairs; ++k)
+        aP[aM.left[k]] = t[k];
+    return true;
+}
+static void DumpPose(std::FILE* aF, const char* aTag, const std::string& aName, const std::vector<BoneTransform>& aP)
+{
+    if (aF == nullptr)
+        return;
+    std::fprintf(aF, "pose %s %s\n", aTag, aName.c_str());
+    for (const auto& b : aP)
+        std::fprintf(aF, "%.7f %.7f %.7f %.7f %.7f %.7f %.7f\n", b.p.x, b.p.y, b.p.z, b.q.x, b.q.y, b.q.z, b.q.w);
+}
+
+struct TwinStats
+{
+    double worstPlaneDeg = 0.0, worstParallelDeg = 0.0, worstElev = 0.0, minHands = 1e9, maxHands = 0.0, minGuns = 1e9, maxTurnDeg = 0.0;
+    int poses = 0;
+};
+
+static void CheckTwin(const char* aTag, const std::string& aName, const RigData& aR, const dm::Mirror& aM,
+                      const std::vector<BoneTransform>& aIn, TwinStats& aS, std::FILE* aDump)
+{
+    const size_t bytes = sizeof(BoneTransform) * aIn.size();
     {
-        std::vector<BoneTransform> a = aReady, b = aReady;
-        dm::Apply(aM, a.data(), 1.0f);
-        dm::ApplyOrHold(aM, held, b.data(), 1.0f, false, dt);
-        Check(std::memcmp(a.data(), b.data(), bytes) == 0 && held.valid, std::string(aTag) + ": hold: outside the stance it is the plain mirror");
+        std::vector<BoneTransform> z = aIn;
+        Check(dm::ApplyTwinRight(aM, z.data(), 0.0f) == 0.0 && std::memcmp(z.data(), aIn.data(), bytes) == 0,
+              std::string(aTag) + " " + aName + ": twin weight 0: pose bit-identical");
     }
-    std::vector<BoneTransform> ready = aReady;
-    dm::Apply(aM, ready.data(), 1.0f);
-    const math::Vec3 readyHand = leftHand(ready);
-    std::vector<BoneTransform> plain = rightAt(1.0f);
-    dm::Apply(aM, plain.data(), 1.0f);
-    const double plainAway = Len(leftHand(plain) - readyHand);
-    double farthest = 0.0, worstStep = 0.0;
-    math::Vec3 prev = readyHand;
-    bool finite = true;
-    for (int f = 0; f < 60; ++f) // into the stance over 0.25 s, then held
+    const Model m0 = Fk(aR.par, aIn);
+    std::vector<BoneTransform> out = aIn;
+    double spread = 0.0;
+    const double turn = dm::ApplyTwinRight(aM, out.data(), 1.0f, &spread);
+    bool onlyArm = true;
+    for (size_t i = 0; i < out.size(); ++i)
+        if (static_cast<int32_t>(i) != aM.right[1] && static_cast<int32_t>(i) != aM.right[3] &&
+            std::memcmp(&out[i], &aIn[i], sizeof(BoneTransform)) != 0)
+            onlyArm = false;
+    Check(onlyArm, std::string(aTag) + " " + aName + ": twin turn edits only RightArm / RightHand (clavicles unchanged)");
+    const double clavBefore = 100.0 * Len(Fk(aR.par, out).p[aM.left[0]] - Fk(aR.par, out).p[aM.right[0]]);
+    Check(ApplyTwinMirror(aM, out, 1.0f), std::string(aTag) + " " + aName + ": mirror applied on the twin");
+    const Model m = Fk(aR.par, out);
+    const math::Quat chestInv = math::QuatInv(m.r[aM.chest]);
+    const math::Vec3 br = math::QuatRotate(chestInv, BarrelOf(m, aM.right[4]));
+    const math::Vec3 bl = math::QuatRotate(chestInv, BarrelOf(m, aM.left[4]));
+    const math::Vec3 br0 = math::QuatRotate(math::QuatInv(m0.r[aM.chest]), BarrelOf(m0, aM.right[4]));
+    const math::Vec3 up = dm::ToF(aM.up), lat = dm::ToF(aM.lateral);
+    const double plane = Deg(std::asin(std::fmin(1.0, std::fabs(static_cast<double>(math::Dot(br, lat))) / Len(br))));
+    const double parallel = AngleDeg(br, bl);
+    const double elev = std::fabs(static_cast<double>(math::Dot(br, up) - math::Dot(br0, up)));
+    const double hands = 100.0 * Len(m.p[aM.left[3]] - m.p[aM.right[3]]);
+    const double shoulders = 100.0 * Len(m.p[aM.left[1]] - m.p[aM.right[1]]);
+    const double shouldersIn = 100.0 * Len(m0.p[aM.left[1]] - m0.p[aM.right[1]]);
+    Check(shoulders >= shouldersIn - 0.05, std::string(aTag) + " " + aName + ": shoulder joints not narrowed (" + std::to_string(shoulders) +
+                                               " cm, pose " + std::to_string(shouldersIn) + " cm)");
+    (void)clavBefore;
+    const double guns = 100.0 * Len(m.p[aM.left[4]] - m.p[aM.right[4]]);
+    const double elevDeg = Deg(std::asin(std::fmax(-1.0, std::fmin(1.0, static_cast<double>(math::Dot(br, up))))));
+    const bool heading = math::Dot(br0, dm::ToF(aM.fwd)) >= dm::kTwinHeadingFade;
+    std::printf("[%s] twin %-44s turn %6.1f deg, spread %5.1f deg, barrel out of plane %.3f deg, barrels %.3f deg apart, elevation %5.1f deg, "
+                "hands %.1f cm, guns %.1f cm%s\n", aTag, aName.c_str(), turn, spread, plane, parallel, elevDeg, hands, guns,
+                heading ? "" : " (steep: heading faded)");
+    Check(elev <= 1e-4, std::string(aTag) + " " + aName + ": barrel elevation kept");
+    if (heading)
     {
-        std::vector<BoneTransform> p = rightAt(std::fmin(1.0f, static_cast<float>(f + 1) * dt / 0.25f));
-        dm::ApplyOrHold(aM, held, p.data(), 1.0f, true, dt);
-        const math::Vec3 h = leftHand(p);
-        finite &= math::IsFinite(h);
-        farthest = std::fmax(farthest, static_cast<double>(Len(h - readyHand)));
-        worstStep = std::fmax(worstStep, static_cast<double>(Len(h - prev)));
-        prev = h;
+        Check(plane <= 0.5, std::string(aTag) + " " + aName + ": right barrel along the mid plane direction (" + std::to_string(plane) + " deg)");
+        Check(parallel <= 1.0, std::string(aTag) + " " + aName + ": barrels parallel (" + std::to_string(parallel) + " deg)");
+        Check(hands >= 25.0 && hands <= 40.0, std::string(aTag) + " " + aName + ": hands 25..40 cm apart (" + std::to_string(hands) + ")");
+        Check(guns >= 15.0, std::string(aTag) + " " + aName + ": weapons at least 15 cm apart (" + std::to_string(guns) + ")");
     }
-    double backStep = 0.0;
-    math::Vec3 last = prev;
-    for (int f = 0; f < 60; ++f) // out of the stance: the right arm returns over 0.25 s, the hold lets go over dm::kBlendSeconds
+    else
     {
-        std::vector<BoneTransform> p = rightAt(std::fmax(0.0f, 1.0f - static_cast<float>(f + 1) * dt / 0.25f));
-        dm::ApplyOrHold(aM, held, p.data(), 1.0f, false, dt);
-        last = leftHand(p);
-        finite &= math::IsFinite(last);
-        backStep = std::fmax(backStep, static_cast<double>(Len(last - prev)));
-        prev = last;
+        // steeply up (heading faded): the twin is never worse than the plain mirror of the same pose
+        std::vector<BoneTransform> plainPose = aIn;
+        dm::Apply(aM, plainPose.data(), 1.0f);
+        const Model mp = Fk(aR.par, plainPose);
+        const math::Quat ci = math::QuatInv(mp.r[aM.chest]);
+        const double plainPar = AngleDeg(math::QuatRotate(ci, BarrelOf(mp, aM.right[4])), math::QuatRotate(ci, BarrelOf(mp, aM.left[4])));
+        const double plainGuns = 100.0 * Len(mp.p[aM.left[4]] - mp.p[aM.right[4]]);
+        std::printf("[%s]      steep: plain mirror barrels %.2f deg apart, weapons %.1f cm\n", aTag, plainPar, plainGuns);
+        Check(parallel <= plainPar + 0.01, std::string(aTag) + " " + aName + ": steep: barrels no further apart than the plain mirror");
     }
-    std::printf("[%s] hold: plain mirror of the stance is %.1f cm away; held arm at most %.2f cm away, largest step in %.2f cm, out %.2f cm\n",
-                aTag, 100.0 * plainAway, 100.0 * farthest, 100.0 * worstStep, 100.0 * backStep);
-    Check(finite, std::string(aTag) + ": hold finite");
-    Check(plainAway > 0.20, std::string(aTag) + ": hold: the plain mirror of the aim stance moves the left hand far away (the case)");
-    Check(farthest <= 0.001, std::string(aTag) + ": hold: in the stance the left hand stays on the mirrored ready pose (<= 1 mm)");
-    Check(backStep <= 0.025, std::string(aTag) + ": hold: leaving the stance moves the left hand <= 2.5 cm per frame at 60 Hz");
-    Check(Len(last - readyHand) <= 1e-4f && !(held.u > 0.0f), std::string(aTag) + ": hold: after the stance the live mirror is back");
+    if (heading)
+        aS.worstPlaneDeg = std::fmax(aS.worstPlaneDeg, plane);
+    aS.worstParallelDeg = std::fmax(aS.worstParallelDeg, parallel);
+    aS.worstElev = std::fmax(aS.worstElev, elev);
+    aS.minHands = std::fmin(aS.minHands, hands);
+    aS.maxHands = std::fmax(aS.maxHands, hands);
+    aS.minGuns = std::fmin(aS.minGuns, guns);
+    aS.maxTurnDeg = std::fmax(aS.maxTurnDeg, std::fabs(turn));
+    ++aS.poses;
+    DumpPose(aDump, aTag, aName, out);
+    if (aDump != nullptr)
     {
-        std::vector<BoneTransform> z = rightAt(1.0f);
-        const std::vector<BoneTransform> z0 = z;
-        Check(!dm::ApplyOrHold(aM, held, z.data(), 0.0f, true, dt) && std::memcmp(z.data(), z0.data(), bytes) == 0 && !held.valid,
-              std::string(aTag) + ": hold: weight 0 leaves the pose and clears the hold");
-        dm::Held fresh;
-        Check(!dm::ApplyOrHold(aM, fresh, z.data(), 1.0f, true, dt) && std::memcmp(z.data(), z0.data(), bytes) == 0,
-              std::string(aTag) + ": hold: two weapons drawn inside the stance: nothing held, pose left as it is");
-    }
-    {
-        // Nothing held in the stance (a reload that ended in the stance): the ramp restarts from 0 and the mirror fades in once
-        // the stance is over.
-        dm::Ramp ramp;
-        dm::Held none;
-        for (int f = 0; f < 60; ++f)
-            ramp.Step(true, dt); // the mirror was fully on before
-        std::vector<BoneTransform> p = rightAt(1.0f);
-        const std::vector<BoneTransform> p0 = p;
-        const float r = dm::StepRamp(ramp, none, true, true, dt);
-        const bool touched = dm::ApplyOrHold(aM, none, p.data(), dm::ShownWeight(r, 1.0f, 0.0f), true, dt);
-        Check(r == 0.0f && !(ramp.u > 0.0f) && !touched && std::memcmp(p.data(), p0.data(), bytes) == 0,
-              std::string(aTag) + ": hold: nothing held in the stance: the ramp restarts from 0, pose left as it is");
-        math::Vec3 prevHand = leftHand(aReady);
-        double fadeStep = 0.0;
-        bool full = false;
-        for (int f = 0; f < 60; ++f) // the stance is over, the right arm is in the ready pose again
-        {
-            std::vector<BoneTransform> q = aReady;
-            const float w = dm::ShownWeight(dm::StepRamp(ramp, none, true, false, dt), 1.0f, 0.0f);
-            dm::ApplyOrHold(aM, none, q.data(), w, false, dt);
-            const math::Vec3 h = leftHand(q);
-            fadeStep = std::fmax(fadeStep, static_cast<double>(Len(h - prevHand)));
-            prevHand = h;
-            full |= w >= 1.0f && Len(h - readyHand) <= 1e-4f;
-        }
-        std::printf("[%s] hold: fade in after a stance with nothing held: largest step %.2f cm\n", aTag, 100.0 * fadeStep);
-        Check(fadeStep <= 0.025 && full,
-              std::string(aTag) + ": hold: after such a stance the mirror fades in (<= 2.5 cm per frame) up to the full mirror");
+        // references for the gate: the input pose and its plain mirror (no twin turn)
+        DumpPose(aDump, aTag, aName + " [input]", aIn);
+        std::vector<BoneTransform> plain = aIn;
+        dm::Apply(aM, plain.data(), 1.0f);
+        DumpPose(aDump, aTag, aName + " [mirror]", plain);
     }
 }
 
-static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char* aTag)
+// Transitions at 60 Hz: the machine's aiming weight a drives the twin turn of the right arm; the left arm follows its mirror target
+// (dm::ApplyFollow). Ready <-> aim with the hip-fire raise (0.1 s) and the aim raise (0.2 s), hip-fire taps, a reload envelope in
+// the stance. The left hand moves at most 2.5 cm per frame, and ends on the mirror of the twin stance / of the ready pose.
+static std::vector<BoneTransform> Lerped(const std::vector<BoneTransform>& aA, const std::vector<BoneTransform>& aB, float aU)
+{
+    std::vector<BoneTransform> p = aA;
+    for (size_t i = 0; i < p.size(); ++i)
+    {
+        p[i].q = math::QuatNlerpShortest(aA[i].q, aB[i].q, aU);
+        p[i].p = math::Lerp(aA[i].p, aB[i].p, aU);
+    }
+    return p;
+}
+static void TestTwinTransitions(const char* aTag, const RigData& aR, const dm::Mirror& aM, const std::vector<BoneTransform>& aReady,
+                                const std::vector<BoneTransform>& aAim, std::FILE* aDump)
+{
+    const float dt = 1.0f / 60.0f;
+    // chest frame: the ready and the aim pose also differ in the spine, which moves both hands alike (the pose blend of the frame)
+    auto leftHand = [&](const std::vector<BoneTransform>& aP) {
+        const Model m = Fk(aR.par, aP);
+        return ToChest(m, aM.chest, m.p[aM.left[3]]);
+    };
+    auto rightHand = [&](const std::vector<BoneTransform>& aP) {
+        const Model m = Fk(aR.par, aP);
+        return ToChest(m, aM.chest, m.p[aM.right[3]]);
+    };
+    auto frame = [&](dm::Follow& aF, float aAimW, float aShown, std::vector<BoneTransform>& aOut) {
+        aOut = Lerped(aReady, aAim, aAimW);
+        dm::ApplyTwinRight(aM, aOut.data(), aShown * aAimW);
+        dm::ApplyFollow(aM, aF, aOut.data(), aShown, dt, aShown * aAimW);
+    };
+    auto final = [&](float aAimW) {
+        std::vector<BoneTransform> p = Lerped(aReady, aAim, aAimW);
+        dm::ApplyTwinRight(aM, p.data(), aAimW);
+        ApplyTwinMirror(aM, p, aAimW);
+        return p;
+    };
+    struct Case
+    {
+        const char* name;
+        std::vector<float> aim; // aiming weight per frame
+        std::vector<float> shown;
+        float endAim;
+    };
+    std::vector<Case> cases;
+    auto ramp = [](std::vector<float>& v, float from, float to, float seconds) {
+        const int n = static_cast<int>(std::ceil(seconds * 60.0f));
+        for (int i = 1; i <= n; ++i)
+            v.push_back(from + (to - from) * static_cast<float>(i) / static_cast<float>(n));
+    };
+    auto hold = [](std::vector<float>& v, float value, float seconds) {
+        for (int i = 0; i < static_cast<int>(std::ceil(seconds * 60.0f)); ++i)
+            v.push_back(value);
+    };
+    {
+        Case c{"hip fire raise 0.1 s, hold, lower 0.1 s", {}, {}, 0.0f};
+        hold(c.aim, 0.0f, 0.2f), ramp(c.aim, 0.0f, 1.0f, 0.1f), hold(c.aim, 1.0f, 1.0f), ramp(c.aim, 1.0f, 0.0f, 0.1f), hold(c.aim, 0.0f, 1.0f);
+        cases.push_back(c);
+    }
+    {
+        Case c{"aim raise 0.2 s, hold", {}, {}, 1.0f};
+        hold(c.aim, 0.0f, 0.2f), ramp(c.aim, 0.0f, 1.0f, 0.2f), hold(c.aim, 1.0f, 1.0f);
+        cases.push_back(c);
+    }
+    {
+        Case c{"five hip-fire taps (0.1 s up, 0.05 s, 0.1 s down, 0.1 s)", {}, {}, 0.0f};
+        hold(c.aim, 0.0f, 0.1f);
+        for (int t = 0; t < 5; ++t)
+            ramp(c.aim, 0.0f, 1.0f, 0.1f), hold(c.aim, 1.0f, 0.05f), ramp(c.aim, 1.0f, 0.0f, 0.1f), hold(c.aim, 0.0f, 0.1f);
+        hold(c.aim, 0.0f, 1.0f);
+        cases.push_back(c);
+    }
+    {
+        Case c{"reload begun in the stance (envelope 0.3 s in, 0.5 s, 0.3 s out)", {}, {}, 1.0f};
+        hold(c.aim, 1.0f, 2.6f);
+        hold(c.shown, 1.0f, 0.8f), ramp(c.shown, 1.0f, 0.0f, 0.3f), hold(c.shown, 0.0f, 0.5f), ramp(c.shown, 0.0f, 1.0f, 0.3f);
+        cases.push_back(c);
+    }
+    for (const Case& c : cases)
+    {
+        dm::Follow f;
+        std::vector<BoneTransform> p;
+        frame(f, c.aim[0], c.shown.empty() ? 1.0f : c.shown[0], p);
+        // the follower starts on the mirror with its weight risen (dual wield on before the case)
+        for (int i = 0; i < 120; ++i)
+            frame(f, c.aim[0], c.shown.empty() ? 1.0f : c.shown[0], p);
+        math::Vec3 prev = leftHand(p), prevR = rightHand(p);
+        double worst = 0.0, worstR = 0.0;
+        bool finite = true;
+        for (size_t i = 1; i < c.aim.size(); ++i)
+        {
+            const float shown = c.shown.empty() ? 1.0f : (i < c.shown.size() ? c.shown[i] : c.shown.back());
+            frame(f, c.aim[i], shown, p);
+            const math::Vec3 h = leftHand(p);
+            finite &= math::IsFinite(h);
+            worst = std::fmax(worst, static_cast<double>(Len(h - prev)));
+            prev = h;
+            const math::Vec3 hr = rightHand(p);
+            worstR = std::fmax(worstR, static_cast<double>(Len(hr - prevR)));
+            prevR = hr;
+        }
+        const double endErr = 100.0 * Len(prev - leftHand(final(c.endAim)));
+        std::printf("[%s] transition %-62s largest step (chest frame) left hand %.2f cm, right hand %.2f cm, end %.4f cm from the mirror\n",
+                    aTag, c.name, 100.0 * worst, 100.0 * worstR, endErr);
+        Check(finite, std::string(aTag) + " " + c.name + ": finite");
+        Check(worst <= 0.025, std::string(aTag) + " " + c.name + ": left hand <= 2.5 cm per frame at 60 Hz");
+        Check(endErr <= 0.01, std::string(aTag) + " " + c.name + ": ends on the mirror of the target stance");
+    }
+    // blend frames for the anatomy gate: the aiming weight in steps of 0.25 (twin turn x mirror)
+    for (int k = 0; k <= 4; ++k)
+    {
+        DumpPose(aDump, aTag, "blend_aim_" + std::to_string(k * 25), final(0.25f * static_cast<float>(k)));
+        DumpPose(aDump, aTag, "blend_aim_" + std::to_string(k * 25) + " [input]", Lerped(aReady, aAim, 0.25f * static_cast<float>(k)));
+    }
+    // weight 0 on a fresh follower (a single weapon) leaves the pose bit-identical; a risen follower given weight 0 lowers its
+    // weight within the hand limit and then leaves the pose bit-identical and resets
+    {
+        const size_t bytes = sizeof(BoneTransform) * aAim.size();
+        dm::Follow f;
+        std::vector<BoneTransform> p = aAim;
+        const std::vector<BoneTransform> p0 = p;
+        Check(!dm::ApplyFollow(aM, f, p.data(), 0.0f, dt) && !f.valid && std::memcmp(p.data(), p0.data(), bytes) == 0,
+              std::string(aTag) + ": follower: weight 0, nothing shown: pose bit-identical");
+        for (int i = 0; i < 120; ++i)
+        {
+            p = p0;
+            dm::ApplyFollow(aM, f, p.data(), 1.0f, dt);
+        }
+        Check(f.w >= 1.0f, std::string(aTag) + ": follower: weight reaches 1");
+        int frames = 0;
+        math::Vec3 prev = leftHand(p);
+        double worst = 0.0;
+        bool edited = true;
+        while (edited && frames < 600)
+        {
+            p = p0;
+            edited = dm::ApplyFollow(aM, f, p.data(), 0.0f, dt);
+            worst = std::fmax(worst, static_cast<double>(Len(leftHand(p) - prev)));
+            prev = leftHand(p);
+            ++frames;
+        }
+        std::printf("[%s] follower release: %d frames, largest left hand step %.2f cm\n", aTag, frames, 100.0 * worst);
+        Check(!edited && !f.valid && std::memcmp(p.data(), p0.data(), bytes) == 0 && worst <= 0.025 && frames <= 60,
+              std::string(aTag) + ": follower: weight 0 releases within 1 s at <= 2.5 cm per frame, then the pose is bit-identical");
+    }
+}
+
+static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char* aTag, std::FILE* aDump)
 {
     auto db = std::make_unique<motion::MotionDatabase>();
     std::string err;
@@ -384,6 +559,50 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
         ++poses;
     }
     Check(poses >= 4, std::string(aTag) + ": one-handed weapon poses found (" + std::to_string(poses) + ")");
+    // 7) twin stance over the aim poses x the aim offset sweep (mesh-space additive, as the aim offset applies it) x a turned chest
+    {
+        TwinStats ts;
+        for (const char* aimName : {"Pose_Pistol1H_Stand_Aim_Idle", "Pose_Pistol1H_Crouch_Aim"})
+        {
+            const int pi = ovf->FindPose(aimName);
+            Check(pi >= 0, std::string(aTag) + ": pose " + aimName);
+            if (pi < 0)
+                continue;
+            const bool crouch = std::string(aimName).find("Crouch") != std::string::npos;
+            const int sweep = ovf->FindDelta(crouch ? "AO_Pistol1H_Crouch_Sweep" : "AO_Pistol1H_Stand_Sweep");
+            Check(sweep >= 0, std::string(aTag) + ": aim offset sweep of " + aimName);
+            const int frames = sweep >= 0 ? static_cast<int>(ovf->DeltaAt(sweep).numFrames) : 1;
+            for (int k = 0; k <= 8; ++k)
+            {
+                auto p = std::make_unique<ov::Pose>();
+                ovf->FramePose(ovf->PoseAt(pi).firstFrame, *p);
+                const int fr = sweep >= 0 ? (k * (frames - 1)) / 8 : 0;
+                if (sweep >= 0)
+                {
+                    auto add = std::make_unique<ov::Additive>();
+                    ovf->DeltaFrame(sweep, fr, true, *add);
+                    ov::ApplyAdditive(ovf->Skel(), *p, *add, 1.0f);
+                }
+                std::vector<BoneTransform> in = r.rest;
+                for (uint32_t i = 0; i < n; ++i)
+                    if (ovOf[i] >= 0)
+                        in[i] = BoneTransform{p->b[ovOf[i]].t, p->b[ovOf[i]].r};
+                const std::string tag = std::string(aimName) + " sweep " + std::to_string(fr) + "/" + std::to_string(frames - 1);
+                CheckTwin(aTag, tag, r, mir, in, ts, aDump);
+                if (k % 4 == 0)
+                    for (float yaw : {-35.0f, 35.0f})
+                    {
+                        std::vector<BoneTransform> turned = in;
+                        turned[spine].q = math::QuatNormalize(math::QuatMul(turned[spine].q, AxisAngle({0.0f, 0.0f, 1.0f}, yaw)));
+                        CheckTwin(aTag, tag + " chest " + std::to_string(static_cast<int>(yaw)), r, mir, turned, ts, aDump);
+                    }
+            }
+        }
+        std::printf("[%s] twin: %d poses, turn up to %.1f deg, out of plane <= %.4f deg, barrels <= %.4f deg apart, elevation change <= %.2e, "
+                    "hands %.1f..%.1f cm, weapons >= %.1f cm\n", aTag, ts.poses, ts.maxTurnDeg, ts.worstPlaneDeg, ts.worstParallelDeg,
+                    ts.worstElev, ts.minHands, ts.maxHands, ts.minGuns);
+        Check(ts.poses >= 20, std::string(aTag) + ": twin stance poses measured");
+    }
     std::printf("[%s] %d poses: worst mirror error %.5f cm, %.5f deg\n", aTag, poses, worstCm, worstDeg);
     // 4b) the gate never asks for the mirror with a single weapon, whatever the overlay
     for (int o = 0; o < static_cast<int>(ov::PoseOverlay::Count); ++o)
@@ -396,10 +615,10 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
     // 5) blend
     if (!blendPose.empty())
         TestBlend(aTag, r, mir, blendPose);
-    // 5b) stance hold
-    Check(!blendPose.empty() && !stancePose.empty(), std::string(aTag) + ": ready and standing aim poses found for the hold test");
+    // 7b) twin stance transitions
+    Check(!blendPose.empty() && !stancePose.empty(), std::string(aTag) + ": ready and standing aim poses found for the transitions");
     if (!blendPose.empty() && !stancePose.empty())
-        TestHold(aTag, r, mir, blendPose, stancePose);
+        TestTwinTransitions(aTag, r, mir, blendPose, stancePose, aDump);
     // gap in the stepping: still wanted -> no drop (no pop); no longer wanted -> exactly 0, pose bit-identical
     {
         dm::Ramp g;
@@ -438,11 +657,16 @@ int main(int argc, char** argv)
 {
     if (argc < 5)
     {
-        std::printf("usage: utpp_dualwield_mirror_test <woman.utppmm> <woman.utppov> <man.utppmm> <man.utppov>\n");
+        std::printf("usage: utpp_dualwield_mirror_test <woman.utppmm> <woman.utppov> <man.utppmm> <man.utppov> [pose dump file]\n");
         return 2;
     }
-    TestRig(argv[1], argv[2], motion::kRigIdentityWoman, "woman");
-    TestRig(argv[3], argv[4], motion::kRigIdentityMan, "man");
+    std::FILE* dump = nullptr;
+    if (argc >= 6 && fopen_s(&dump, argv[5], "w") != 0)
+        dump = nullptr;
+    TestRig(argv[1], argv[2], motion::kRigIdentityWoman, "woman", dump);
+    TestRig(argv[3], argv[4], motion::kRigIdentityMan, "man", dump);
+    if (dump != nullptr)
+        std::fclose(dump);
     std::printf("dualwield mirror test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
