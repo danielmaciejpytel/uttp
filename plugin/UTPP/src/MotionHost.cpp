@@ -47,6 +47,7 @@
 #include "mm/OffsetRoot.hpp"
 #include "mm/PlaybackRate.hpp"
 #include "mm/PoseTrace.hpp"
+#include "mm/ReloadTraceRing.hpp"
 #include "mm/SpeedBands.hpp"
 #include "mm/SpeedCalibration.hpp"
 #include "mm/StanceGuard.hpp"
@@ -7675,6 +7676,7 @@ bool SetFeedDump(bool aOn)
     if (!aOn)
     {
         mm::posetrace::g_dump.Stop();
+        mm::reload_trace::g_ring.Stop(); // reload diagnostic record (mm/ReloadTraceRing.hpp) follows the feed dump
         if (g_feedDumpOn)
         {
             g_feedDump.Stop(); // the writer writes the rest, closes the file and exits
@@ -7706,6 +7708,13 @@ bool SetFeedDump(bool aOn)
         }
         else if (g_log)
             g_log("UTPP pose trace FAILED to start");
+    }
+    // Reload diagnostic record (mm/ReloadTraceRing.hpp): on with the feed dump, i.e. with the diagnostic logs.
+    if (ok && !mm::reload_trace::g_ring.Enabled())
+    {
+        const bool recordOn = mm::reload_trace::g_ring.Start(g_feedDumpDir);
+        if (g_log)
+            g_log(recordOn ? ("UTPP reload record on: " + mm::reload_trace::g_ring.Status()).c_str() : "UTPP reload record FAILED to start");
     }
     g_feedDumpOn = ok;
     g_feedDumpFailLogged = false;
@@ -7768,6 +7777,7 @@ void Shutdown()
     }
     g_feedDump.Shutdown(); // batch 1b: stop + join (the writer writes the rest and closes the file)
     mm::posetrace::g_dump.Stop();
+    mm::reload_trace::g_ring.Stop();
     g_feedDumpOn = false;
     g_enabled = false;
     g_accelSampleTicks = 0;

@@ -40,6 +40,7 @@
 #include "mm/CoreWriteRecord.hpp"
 #include "BodyHelperRuntime.hpp"
 #include "mm/NativeReloadContactsRuntime.hpp"
+#include "mm/ReloadTraceRing.hpp"
 #include "mm/VaultShoulder.hpp"
 #include "mm/VaultTorso.hpp"
 #include "mm/VehicleTransition.hpp"
@@ -111,6 +112,15 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
         mm::reload_contacts_runtime::Capture(reloadConfig, snap, bones, aCount, true, reloadCycle);
     if (reloadCaptured)
         g_hot.rcCaptured.value.fetch_add(1, std::memory_order_relaxed);
+    // Reload diagnostic record (mm/ReloadTraceRing.hpp; on with the diagnostic logs): one record per reload-related call and a short tail
+    // after it, also when no correction runs (the hand-back alone). Read-only; off = one relaxed load.
+    mm::reload_trace::Record reloadRec;
+    const bool reloadRecOn = mm::reload_trace::g_ring.Wanted(snap.reloadContactsEligible || reloadHaveConfig ||
+            (snap.traceAction == 2 && mm::reload_contacts_runtime::ReloadContactsOverlay(snap.traceOverlay))) &&
+        (reloadHaveConfig || mm::reload_contacts_runtime::g_config.Read(reloadConfig));
+    if (reloadRecOn)
+        mm::reload_contacts_runtime::TraceBegin(reloadConfig, snap, bones, aCount, aNow, reloadOwner, reloadEligible, reloadHaveConfig,
+                                                reloadCaptured, reloadRec);
     mm::posetrace::Frame trace;
     const bool tracing = mm::posetrace::g_dump.Enabled();
     bool captured = false;
@@ -153,6 +163,8 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
     // contacts, which stay the last core write. Gate = MM ownership x (1 - melee fade); idle: two relaxed loads, no write.
     utpp::headlook::Apply(bones, aCount, reinterpret_cast<void*>(aMergedRig), snap.weight, snap.upperScale, snap.meleeAimWeight,
                           snap.traceOverlay, aNow);
+    if (reloadRecOn)
+        mm::reload_contacts_runtime::TraceClavicles(reloadConfig, bones, aCount, reloadRec.clavIn);
     if (reloadCaptured)
     {
         // g_continuity belongs to one animation job at a time. A job that loses the lock keeps the ORDINARY baseline records
@@ -171,14 +183,24 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
                     g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed));
             // Last core operation before helper evaluation: no later AO may move the preserved contacts.
             const int64_t qpcFrequency = util::QpcFrequency();
+            if (reloadRecOn)
+            {
+                reloadRec.path = mm::reload_trace::kPathFinish;
+                if (permitted) reloadRec.flags |= mm::reload_trace::kFlagPermitted;
+            }
+            mm::reload_contacts_runtime::g_continuity.trace = reloadRecOn ? &reloadRec : nullptr; // only while this call holds the state
             if (mm::reload_contacts_runtime::Finish(reloadConfig, snap, bones, aCount,
                 permitted, reloadCycle, reloadResult, snap.reloadContactsWeight,
                 mm::reload_contacts_runtime::kAuthoredContactMinReach,
                 &mm::reload_contacts_runtime::g_continuity, int64_t(commitNow.QuadPart), qpcFrequency))
                 g_hot.rcFinishWritten.value.fetch_add(1, std::memory_order_relaxed);
+            mm::reload_contacts_runtime::g_continuity.trace = nullptr;
         }
         else
+        {
             g_hot.rcLockLost.value.fetch_add(1, std::memory_order_relaxed);
+            if (reloadRecOn) reloadRec.path = mm::reload_trace::kPathLockLost;
+        }
     }
     else if (reloadHaveConfig)
     {
@@ -193,9 +215,18 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
             const bool permitted = g_hot.armed.load(std::memory_order_acquire) &&
                 g_hot.perspectiveWrite.Allows(holdNow.QuadPart,
                     g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed));
+            if (reloadRecOn)
+            {
+                reloadRec.path = mm::reload_trace::kPathHold;
+                if (permitted) reloadRec.flags |= mm::reload_trace::kFlagPermitted;
+            }
+            mm::reload_contacts_runtime::g_continuity.trace = reloadRecOn ? &reloadRec : nullptr; // only while this call holds the state
             mm::reload_contacts_runtime::HoldOnly(reloadConfig, snap, bones, aCount, permitted,
                 mm::reload_contacts_runtime::g_continuity, int64_t(holdNow.QuadPart), holdFrequency);
+            mm::reload_contacts_runtime::g_continuity.trace = nullptr;
         }
+        else if (reloadRecOn)
+            reloadRec.path = mm::reload_trace::kPathLockLost;
     }
     else if (!reloadEligible && mm::reload_contacts_runtime::ObservesRifle(snap.traceOverlay, reloadOwner) &&
         mm::reload_contacts_runtime::g_config.Read(reloadConfig))
@@ -212,6 +243,11 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
         }
     }
 
+    if (reloadRecOn)
+    {
+        mm::reload_contacts_runtime::TraceClavicles(reloadConfig, bones, aCount, reloadRec.clavOut);
+        mm::reload_trace::g_ring.Push(reloadRec);
+    }
     if (captured && mm::posetrace::Capture(trace, 2, bones, aCount)) mm::posetrace::g_dump.Push(trace);
     return n;
 }

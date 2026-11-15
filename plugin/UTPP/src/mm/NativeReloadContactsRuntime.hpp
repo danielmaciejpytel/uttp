@@ -7,6 +7,7 @@
 #include "GameIntegration.hpp"
 #include "Overlay.hpp"
 #include "ForearmTwist.hpp"
+#include "ReloadTrace.hpp"
 
 namespace utpp::mm::reload_contacts_runtime
 {
@@ -1696,6 +1697,14 @@ inline float JointSlewForOverlay(int32_t overlay,float correctionWeight)
     if(kRifleOrdinaryRampSlew && overlay==static_cast<int32_t>(ov::PoseOverlay::Rifle))return kJointSlewRadPerSec;
     return JointSlewFor(correctionWeight);
 }
+// Diagnostic view of one JointLimiter::Limit call (reload_trace): requested change per tracked bone, the frame's limit, limited bones.
+struct JointTrace
+{
+    bool valid=false; // the limiter had a previous output to limit against
+    float reqDeg[6]={-1.0f,-1.0f,-1.0f,-1.0f,-1.0f,-1.0f};
+    float maxDeg=-1.0f;
+    uint32_t limited=0;
+};
 struct JointLimiter
 {
     bool valid=false;
@@ -1726,19 +1735,22 @@ struct JointLimiter
         return t;
     }
     // Limits the candidate against the previous OUTPUT (accepted, held or baseline) of this reload.
+    // `trace` (diagnostics, may be nullptr) receives what the limiter saw; it does not change the result.
     void Limit(const Prepared& p,ov::Pose& candidate,uint64_t rigId,int64_t ticks,int64_t ticksPerSecond,
-               float slewRadPerSec=kJointSlewRadPerSec) const
+               float slewRadPerSec=kJointSlewRadPerSec,JointTrace* trace=nullptr) const
     {
         int tracked[6];const int t=Tracked(p,tracked);
         if(!valid || rig!=rigId || n!=t || ticks<=0 || ticksPerSecond<=0 || ticks<=lastTicks ||
            (ticks-lastTicks)>ticksPerSecond/4)
             return;
         const float maxRad=slewRadPerSec*std::min(float(double(ticks-lastTicks)/double(ticksPerSecond)),.05f);
+        if(trace){trace->valid=true;trace->maxDeg=maxRad*(180.0f/math::kPi);}
         for(int k=0;k<t;++k)
         {
             if(bone[k]!=tracked[k])continue;
             math::Quat& q=candidate.b[tracked[k]].r;
             const float angle=2.0f*std::acos(std::fabs(std::clamp(math::QuatDot(prev[k],q),-1.0f,1.0f)));
+            if(trace){trace->reqDeg[k]=angle*(180.0f/math::kPi);if(angle>maxRad)trace->limited|=1u<<k;}
             if(angle>maxRad)q=Slerp(prev[k],q,maxRad,angle);
         }
     }
@@ -1754,12 +1766,12 @@ struct JointLimiter
     // Final stage on the written records: limit the tracked rotations against the previous OUTPUT, write back what changed,
     // remember the result. Covers every path (accepted, replayed hold, ramp-in, baseline).
     void Apply(const Prepared& p,uint8_t* records,uint32_t count,uint64_t rigId,int64_t ticks,int64_t ticksPerSecond,
-               float slewRadPerSec=kJointSlewRadPerSec)
+               float slewRadPerSec=kJointSlewRadPerSec,JointTrace* trace=nullptr)
     {
         ov::Pose pose;
         if(!RecordsInBounds(p,records,count) || !Read(p,records,pose)){valid=false;return;}
         const ov::Pose before=pose;
-        Limit(p,pose,rigId,ticks,ticksPerSecond,slewRadPerSec);
+        Limit(p,pose,rigId,ticks,ticksPerSecond,slewRadPerSec,trace);
         int tracked[6];const int t=Tracked(p,tracked);
         for(int k=0;k<t;++k)
         {
@@ -1942,6 +1954,9 @@ struct Continuity
     PublishedStart published;
     SwivelState swivel;
     FinalLimitSide finalSide;
+    // Diagnostic record of the current call (reload_trace), set by the caller while it holds the state and cleared before it lets go;
+    // nullptr = nothing is recorded. Read-only for the correction: never part of Reset.
+    reload_trace::Record* trace=nullptr;
     void Reset(){placement.Reset();divergence.Reset();reject.Reset();joints.Reset();stock.Reset();leftArm.Reset();weaponFollow.Reset();published.Reset();swivel.Reset();
                  finalSide.Reset();}
     // Last stage of a frame: the final records (after replay / ramp / limiter) become the reference of the next frame's
@@ -2007,6 +2022,36 @@ inline void ResetContinuityOnDenial()
         ContinuityLock retry; // the owner may have left meanwhile: taking the lock honours the request at once
     }
 }
+// ---- diagnostic record helpers (reload_trace). Read-only on every pose and state they are given.
+inline void TracePut3(float* d,const math::Vec3& v){d[0]=v.x;d[1]=v.y;d[2]=v.z;}
+inline void TracePut4(float* d,const math::Quat& q){d[0]=q.x;d[1]=q.y;d[2]=q.z;d[3]=q.w;}
+inline void TraceAnat(reload_trace::Record& r,int row,const ArmAnatomy& a)
+{
+    if(!a.ok || row<0 || row>=reload_trace::kAnatRows)return;
+    r.anat[row][0]=a.upperTwistDeg;r.anat[row][1]=a.pronationDeg;r.anat[row][2]=a.bendDeg;
+}
+// Inputs of the left-arm solve: the hand target (position / rotation) and the elbow guide of the placed target, the game's own hand
+// rotation (before any transport) and V's chest rotation of the solver input.
+inline void TraceSolveInputs(const Prepared& p,const ov::Pose& native,const ov::Pose& own,const ov::Pose& target,reload_trace::Record& r)
+{
+    const auto& sk=p.skeleton;const auto& L=p.arms.left;
+    const auto hand=native_reload::Model(sk,target,L.hand);
+    TracePut3(r.handTarget,hand.t);TracePut4(r.handTargetRot,hand.r);
+    TracePut3(r.guide,native_reload::Model(sk,target,L.lower).t);
+    TracePut4(r.handGameRot,native_reload::Model(sk,native,L.hand).r);
+    const int clavicle=sk.parent[L.upper];
+    const int chest=clavicle>=0 ? sk.parent[clavicle] : -1;
+    if(chest>=0)TracePut4(r.chestRot,native_reload::Model(sk,own,chest).r);
+}
+// Left arm of a pose at one stage: elbow position, anatomy row; with `reach` also the shoulder and the clavicle reach step.
+inline void TraceLeftArm(const Prepared& p,const ov::Pose& pose,int row,reload_trace::Record& r,float* elbow,
+                         const native_reload_clavicle_reach::Result* reach)
+{
+    const auto& sk=p.skeleton;const auto& L=p.arms.left;
+    if(elbow)TracePut3(elbow,native_reload::Model(sk,pose,L.lower).t);
+    if(reach){TracePut3(r.shoulder,native_reload::Model(sk,pose,L.upper).t);r.reachClavDeg=reach->leftDegrees;}
+    TraceAnat(r,row,MeasureArm(pose,L));
+}
 // Invoke after BlendIntoRecords and AO, BEFORE helper evaluation and original FK. On any
 // failure the ordinary blended records remain byte-for-byte untouched. A Cycle
 // is consumed once even on failure; never carry one across FK, frames or rigs.
@@ -2018,18 +2063,23 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
     PlacementGate* const placementGate=continuity ? &continuity->placement : nullptr;
     RejectHold* const rejectHold=continuity ? &continuity->reject : nullptr;
     DivergenceState* const divergenceState=continuity ? &continuity->divergence : nullptr;
+    // Diagnostic record (reload_trace): written only through `tr`, never read back by the correction.
+    reload_trace::Record* const tr=continuity ? continuity->trace : nullptr;
+    const auto leave=[tr](uint8_t exitCode,bool value){if(tr)tr->exit=exitCode;return value;};
+    if(tr)tr->corrIn=correctionWeight;
     const bool captured=cycle.valid;cycle.valid=false;result={};
     if(!captured || !perspectiveAllowed || cycle.records!=records || cycle.count!=count ||
-       cycle.sequence!=s.sequence || cycle.rig!=s.rig || !Valid(p,s,count))return false;
-    if(!std::isfinite(correctionWeight) || correctionWeight<0 || correctionWeight>1)return false;
+       cycle.sequence!=s.sequence || cycle.rig!=s.rig || !Valid(p,s,count))return leave(reload_trace::kExitNotCaptured,false);
+    if(!std::isfinite(correctionWeight) || correctionWeight<0 || correctionWeight>1)return leave(reload_trace::kExitBadWeight,false);
     // A new episode starts every follower from the baseline: the correction weight reached 0 (the lag is gone with it).
     // The arm-limit swivel always restarts at 0 deg there.
     const auto resetFollowers=[&]{
         if(continuity)continuity->swivel.Reset();
         if(continuity && kResetFollowersAtZero){continuity->leftArm.Reset();continuity->weaponFollow.Reset();}};
-    if(correctionWeight<=0){resetFollowers();result.ok=true;result.reject=native_reload_contacts::Reject::None;return true;} // exact baseline; no IK
+    if(correctionWeight<=0){resetFollowers();result.ok=true;result.reject=native_reload_contacts::Reject::None;
+                            return leave(reload_trace::kExitWeightZero,true);} // exact baseline; no IK
     ov::Pose authored,candidate,target;
-    if(!Read(p,records,authored))return false;
+    if(!Read(p,records,authored))return leave(reload_trace::kExitReadFail,false);
     const ov::Pose baseline=authored; // records as handed in (the masked-bone blend below edits `authored` only)
     // Continuous target: local blend of the actual final baseline towards THIS
     // cycle native pose; Contacts preserves its resulting MODEL hands/weapons.
@@ -2052,10 +2102,11 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
             // Rifle: always the chest frame (see kReloadContactsRifle); pistols keep the divergence-driven choice above.
             if constexpr(kRifleChestTransport)
                 if(s.traceOverlay==static_cast<int32_t>(ov::PoseOverlay::Rifle)){lambda=1.0f;divergence=1.0f;}
+            if(tr){tr->divergence=divergence;tr->lambda=lambda;}
             if(divergence<1.0f)
             {
                 correctionWeight*=divergence;
-                if(correctionWeight<=0){resetFollowers();return false;} // gated out: Finish() fades the last correction (RejectHold)
+                if(correctionWeight<=0){resetFollowers();return leave(reload_trace::kExitDivergenceOut,false);} // gated out: Finish() fades the last correction (RejectHold)
                 ov::Blend(authored,cycle.native,correctionWeight,target);
             }
         }
@@ -2146,22 +2197,28 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
         }
         return true;
     };
-    if(!place())return false;
+    if(tr)tr->girdleWeight=girdleWeight;
+    if(!place())return leave(reload_trace::kExitPlaceFail,false);
     // Placement guard: shrink the correction (continuously, before the target is built) while the transported native
     // placement would put the weapon inside the head or the left hand under the MM pelvis.
     {
         float placement=PlacementWeight(p,authored,target);
+        if(tr)tr->placementRaw=placement;
         if(placementGate)placement=placementGate->Step(placement,s.rig,nowTicks,ticksPerSecond);
+        if(tr)tr->placementGate=placement;
         if(placement<1.0f)
         {
             correctionWeight*=placement;
-            if(correctionWeight<=0){resetFollowers();return false;} // gated out: Finish() fades the last correction (RejectHold)
+            if(tr)tr->corrFinal=correctionWeight;
+            if(correctionWeight<=0){resetFollowers();return leave(reload_trace::kExitPlacementOut,false);} // gated out: Finish() fades the last correction (RejectHold)
             ov::Blend(authored,cycle.native,correctionWeight,target);
-            if(!place())return false;
+            if(!place())return leave(reload_trace::kExitPlaceFail,false);
         }
     }
+    if(tr)tr->corrFinal=correctionWeight;
     // The solver then restores exact native MODEL contacts, native fingers and both weapon bindings from THIS cycle.
-    if(!restoreMasked(authored))return false;
+    if(!restoreMasked(authored))return leave(reload_trace::kExitRestoreFail,false);
+    if(tr)TraceSolveInputs(p,cycle.native,authored,target,*tr);
     native_reload_clavicle_reach::Result reachCorrection;
     const float rightGuideCap=s.traceOverlay==static_cast<int32_t>(ov::PoseOverlay::Pistol2H)
         ? kPistolReloadRightGuideTurnCapRad : native_reload::kUnboundedGuideTurnRad;
@@ -2169,7 +2226,12 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
                                              s.reloadAuthoredClip ? 20.0f*correctionWeight : 20.0f,
                                              1.0f,native_reload::kUnboundedGuideTurnRad,
                                              rightGuideCap,s.reloadAuthoredClip,
-                                             s.reloadAuthoredClip ? authoredMinReach : 0.0f))return false;
+                                             s.reloadAuthoredClip ? authoredMinReach : 0.0f))
+    {
+        if(tr)tr->solveReject=uint8_t(result.reject);
+        return leave(reload_trace::kExitSolveReject,false);
+    }
+    if(tr)TraceLeftArm(p,candidate,reload_trace::kAnatSolve,*tr,tr->elbowSolve,&reachCorrection);
 #if !(defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==24) // mutation 24: no arm limits after the reach step
     {
         const float swivelStep=continuity ? continuity->swivel.Begin(s.rig,nowTicks,ticksPerSecond) : -1.0f;
@@ -2177,12 +2239,15 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
         for(const gik::ArmChain* arm:{&p.arms.left,&p.arms.right})
         {
             float* const prev=swivelStep>=0.0f ? &continuity->swivel.deg[side] : nullptr;
-            LimitArmBySwivel(candidate,p.skeleton,arm->upper,arm->lower,arm->hand,kReloadPronationLimitDeg,kReloadWristBendLimitDeg,
-                             kReloadMaxSwivelDeg,kGirdlePlacementUngated ? girdleWeight : correctionWeight,prev,swivelStep);
+            const ArmLimitResult limited=LimitArmBySwivel(candidate,p.skeleton,arm->upper,arm->lower,arm->hand,kReloadPronationLimitDeg,
+                                                          kReloadWristBendLimitDeg,kReloadMaxSwivelDeg,
+                                                          kGirdlePlacementUngated ? girdleWeight : correctionWeight,prev,swivelStep);
+            if(tr && side==0){tr->swivelDeg=limited.swivelDeg;if(limited.applied)tr->flags|=reload_trace::kFlagSwivel;}
             ++side;
         }
     }
 #endif
+    if(tr)TraceLeftArm(p,candidate,reload_trace::kAnatSwivel,*tr,tr->elbowSwivel,nullptr);
     result.stockShift=stockShift;result.leftArmShift=leftArmShift;
     if(rejectHold)
     {
@@ -2217,7 +2282,7 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
         const float t[3]={x.t.x,x.t.y,x.t.z},q[4]={x.r.x,x.r.y,x.r.z,x.r.w};
         std::memcpy(r,t,sizeof(t));std::memcpy(r+16,q,sizeof(q));
     }
-    return true;
+    return leave(reload_trace::kExitAccepted,true);
 }
 // The game's own left arm of this frame (the records as handed in), for LimitArmFinal; !ok where the stage does not run (rifle only).
 inline ArmAnatomy OwnLeftArm(const Prepared& p,const integ::PoseSnapshot& s,const uint8_t* records,uint32_t count,bool eligible)
@@ -2248,6 +2313,42 @@ inline bool ApplyLeftArmFinalLimits(const Prepared& p,const integ::PoseSnapshot&
     if(joints.valid)joints.Capture(p,records,count,s.rig,ticks);
     return true;
 }
+// ---- diagnostic record (reload_trace) around Finish / HoldOnly. Read-only.
+// The game's own left arm of this frame (the records as handed in).
+inline void TraceOwnLeftArm(const Prepared& p,const integ::PoseSnapshot& s,const uint8_t* records,uint32_t count,const ArmAnatomy& own,
+                            reload_trace::Record& r)
+{
+    if(own.ok){TraceAnat(r,reload_trace::kAnatOwn,own);return;}
+    (void)s;
+    ov::Pose pose;
+    if(JointLimiter::RecordsInBounds(p,records,count) && Read(p,records,pose))TraceAnat(r,reload_trace::kAnatOwn,MeasureArm(pose,p.arms.left));
+}
+// Left arm of the records at one stage, with the joint limiter's view of the frame.
+inline void TraceRecordsLeftArm(const Prepared& p,const uint8_t* records,uint32_t count,int row,const JointTrace& joints,reload_trace::Record& r)
+{
+    if(joints.valid)r.flags|=reload_trace::kFlagJointsValid;
+    for(int k=0;k<6;++k)r.jointReqDeg[k]=joints.reqDeg[k];
+    r.jointMaxDeg=joints.maxDeg;r.jointLimited=joints.limited;
+    ov::Pose pose;
+    if(JointLimiter::RecordsInBounds(p,records,count) && Read(p,records,pose))TraceAnat(r,row,MeasureArm(pose,p.arms.left));
+}
+// End of a Finish / HoldOnly call: outcome flags, the reject hold after the frame, the written left arm.
+inline void TraceAfterFrame(const Prepared& p,const uint8_t* records,uint32_t count,const Continuity& c,bool accepted,bool written,
+                            const native_reload_contacts::Result& result,reload_trace::Record& r)
+{
+    (void)accepted;
+    if(written)r.flags|=reload_trace::kFlagWritten;
+    if(c.reject.haveDelta)r.flags|=reload_trace::kFlagHoldDelta;
+    if(c.reject.girdleRelative)r.flags|=reload_trace::kFlagReplayGirdle;
+    r.holdAmp=c.reject.amp;r.holdWeight=c.reject.weight;r.holdGirdleWeight=c.reject.girdleWeight;
+    r.stockShift=result.stockShift;r.leftArmShift=result.leftArmShift;
+    ov::Pose pose;
+    if(!JointLimiter::RecordsInBounds(p,records,count) || !Read(p,records,pose))return;
+    const auto& sk=p.skeleton;const auto& L=p.arms.left;
+    TracePut3(r.elbowOut,native_reload::Model(sk,pose,L.lower).t);
+    TracePut4(r.handOutRot,native_reload::Model(sk,pose,L.hand).r);
+    TraceAnat(r,reload_trace::kAnatFinal,MeasureArm(pose,L));
+}
 // Public entry (signature unchanged for existing callers; the trailing arguments are optional).
 inline bool Finish(const Prepared& p,const integ::PoseSnapshot& s,
                    uint8_t* records,uint32_t count,bool perspectiveAllowed,
@@ -2262,18 +2363,38 @@ inline bool Finish(const Prepared& p,const integ::PoseSnapshot& s,
         correctionWeight<=1 && Valid(p,s,count);
     RejectHold* const rejectHold=continuity ? &continuity->reject : nullptr;
     if(continuity && !perspectiveAllowed)continuity->Reset();
+    reload_trace::Record* const tr=continuity ? continuity->trace : nullptr;
     const ArmAnatomy leftOwn=OwnLeftArm(p,s,records,count,reachedSolver);
+    if(tr)
+    {
+        tr->path=reload_trace::kPathFinish;
+        if(reachedSolver)tr->flags|=reload_trace::kFlagReachedSolver;
+        TraceOwnLeftArm(p,s,records,count,leftOwn,*tr);
+    }
     const bool ok=FinishCore(p,s,records,count,perspectiveAllowed,cycle,result,correctionWeight,authoredMinReach,
                              continuity,nowTicks,ticksPerSecond);
     bool written=ok;
-    if(!ok && reachedSolver && rejectHold)written=rejectHold->OnReject(p,s,records,count,nowTicks,ticksPerSecond,correctionWeight);
+    if(!ok && reachedSolver && rejectHold)
+    {
+        written=rejectHold->OnReject(p,s,records,count,nowTicks,ticksPerSecond,correctionWeight);
+        if(tr)
+        {
+            tr->replayOwnWeight=std::min(correctionWeight,rejectHold->girdleWeight);
+            if(written)tr->flags|=reload_trace::kFlagReplayWritten;
+        }
+    }
     if(continuity && reachedSolver)
     {
-        continuity->joints.Apply(p,records,count,s.rig,nowTicks,ticksPerSecond,JointSlewForOverlay(s.traceOverlay,correctionWeight));
-        if(written)ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,correctionWeight,continuity->joints,continuity->finalSide,nowTicks,
-                                           ticksPerSecond);
+        JointTrace joints;
+        continuity->joints.Apply(p,records,count,s.rig,nowTicks,ticksPerSecond,JointSlewForOverlay(s.traceOverlay,correctionWeight),
+                                 tr ? &joints : nullptr);
+        if(tr)TraceRecordsLeftArm(p,records,count,reload_trace::kAnatJoints,joints,*tr);
+        if(written && ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,correctionWeight,continuity->joints,continuity->finalSide,nowTicks,
+                                              ticksPerSecond) && tr)
+            tr->flags|=reload_trace::kFlagFinalLimit;
         continuity->NoteOutput(p,records,count);
     }
+    if(tr)TraceAfterFrame(p,records,count,*continuity,ok,written,result,*tr);
     return written;
 }
 // HoldOnly writes through the same validated snapshot as Finish: a Prepared that does not match THIS snapshot (a remap
@@ -2294,10 +2415,85 @@ inline bool HoldOnly(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* rec
     if constexpr(kHoldOnlyValidates)
         if(!Valid(p,s,count))return false;
     const ArmAnatomy leftOwn=OwnLeftArm(p,s,records,count,Valid(p,s,count));
+    reload_trace::Record* const tr=state.trace;
+    if(tr){tr->path=reload_trace::kPathHold;TraceOwnLeftArm(p,s,records,count,leftOwn,*tr);}
     const bool written=state.reject.OnReject(p,s,records,count,nowTicks,ticksPerSecond,s.reloadContactsWeight);
-    state.joints.Apply(p,records,count,s.rig,nowTicks,ticksPerSecond,JointSlewForOverlay(s.traceOverlay,s.reloadContactsWeight));
-    if(written)ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,s.reloadContactsWeight,state.joints,state.finalSide,nowTicks,ticksPerSecond);
+    if(tr)
+    {
+        tr->replayOwnWeight=std::min(s.reloadContactsWeight,state.reject.girdleWeight);
+        if(written)tr->flags|=reload_trace::kFlagReplayWritten;
+    }
+    JointTrace joints;
+    state.joints.Apply(p,records,count,s.rig,nowTicks,ticksPerSecond,JointSlewForOverlay(s.traceOverlay,s.reloadContactsWeight),
+                       tr ? &joints : nullptr);
+    if(tr)TraceRecordsLeftArm(p,records,count,reload_trace::kAnatJoints,joints,*tr);
+    if(written && ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,s.reloadContactsWeight,state.joints,state.finalSide,nowTicks,ticksPerSecond) &&
+       tr)
+        tr->flags|=reload_trace::kFlagFinalLimit;
     state.NoteOutput(p,records,count);
+    if(tr)
+    {
+        native_reload_contacts::Result none;
+        TraceAfterFrame(p,records,count,state,false,written,none,*tr);
+    }
     return written;
+}
+// ---- diagnostic record of a pose hook call (reload_trace), outside the correction: snapshot state, clavicles of a record buffer.
+// Mask bits, snapshot weights and V's own clavicles (the snapshot pose) of this frame.
+inline void TraceSnapshot(const Prepared& p,const integ::PoseSnapshot& s,reload_trace::Record& r)
+{
+    r.sequence=s.sequence;r.overlay=uint8_t(s.traceOverlay);r.action=int8_t(s.traceAction);
+    if(s.reloadContactsEligible)r.flags|=reload_trace::kFlagEligible;
+    if(s.reloadAuthoredClip)r.flags|=reload_trace::kFlagAuthored;
+    if(s.traceAiming)r.flags|=reload_trace::kFlagAiming;
+    r.snapWeight=s.weight;r.upperScale=s.upperScale;r.lowerScale=s.lowerScale;r.contactWeight=s.reloadContactsWeight;
+    if(!p.skeleton.Valid() || !p.arms.Valid(p.skeleton))return;
+    const auto& sk=p.skeleton;const auto& A=p.arms;
+    const int clav[2]={sk.parent[A.left.upper],sk.parent[A.right.upper]};
+    const int chest=clav[0]>=0 ? sk.parent[clav[0]] : -1;
+    const auto bit=[&](int b,uint32_t m){if(b>=0 && b<sk.n && integ::SnapshotUpperBone(s,uint32_t(b)))r.mask|=m;};
+    bit(clav[0],reload_trace::kMaskClavL);bit(clav[1],reload_trace::kMaskClavR);
+    bit(A.left.upper,reload_trace::kMaskUpperL);bit(A.right.upper,reload_trace::kMaskUpperR);
+    bit(A.left.lower,reload_trace::kMaskForeL);bit(A.right.lower,reload_trace::kMaskForeR);
+    bit(A.left.hand,reload_trace::kMaskHandL);bit(A.right.hand,reload_trace::kMaskHandR);
+    bit(chest,reload_trace::kMaskSpine3);bit(p.head,reload_trace::kMaskHead);bit(A.weaponRight,reload_trace::kMaskWeaponR);
+    for(int side=0;side<2;++side)
+    {
+        const int b=clav[side];
+        if(b<0 || uint32_t(b)>=s.numBones || uint32_t(b)>=uint32_t(integ::kMaxMMBones))continue;
+        const float* v=s.pose+size_t(b)*7;
+        for(int k=0;k<3;++k)r.clavOwn[side][k]=v[k];
+    }
+}
+// Start of the record of one pose hook call, BEFORE the blend: the hook's view (owner, admission, config, native cycle), the snapshot and
+// the game's own clavicles (`records` as the game handed them in).
+inline void TraceClavicles(const Prepared& p,const uint8_t* records,uint32_t count,float out[2][3]);
+inline void TraceBegin(const Prepared& p,const integ::PoseSnapshot& s,const uint8_t* records,uint32_t count,int64_t ticks,HookOwner owner,
+                       bool admitted,bool haveConfig,bool captured,reload_trace::Record& r)
+{
+    reload_trace::Clear(r);
+    r.ticks=ticks;
+    if(owner==HookOwner::Mapping)r.flags|=reload_trace::kFlagOwnerMapping;
+    if(admitted)r.flags|=reload_trace::kFlagAdmitted;
+    if(haveConfig)r.flags|=reload_trace::kFlagHaveConfig;
+    if(captured)r.flags|=reload_trace::kFlagCaptured;
+    TraceSnapshot(p,s,r);
+    TraceClavicles(p,records,count,r.clavGame);
+}
+// Local translations of both clavicles in a record buffer (48-byte local records, game bone order).
+inline void TraceClavicles(const Prepared& p,const uint8_t* records,uint32_t count,float out[2][3])
+{
+    if(!records || !p.skeleton.Valid() || !p.arms.Valid(p.skeleton))return;
+    const int clav[2]={p.skeleton.parent[p.arms.left.upper],p.skeleton.parent[p.arms.right.upper]};
+    for(int side=0;side<2;++side)
+    {
+        const int b=clav[side];
+        if(b<0)continue;
+        const int g=p.gameIndex[b];
+        if(g<0 || uint32_t(g)>=count)continue;
+        float t[3];
+        std::memcpy(t,records+size_t(g)*48,sizeof(t));
+        for(int k=0;k<3;++k)out[side][k]=t[k];
+    }
 }
 } // namespace utpp::mm::reload_contacts_runtime

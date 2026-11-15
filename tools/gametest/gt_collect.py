@@ -5,6 +5,7 @@ A session writes, into the game's red4ext log folder,
                                    as soon as the next one is closed
   utpp-pose-<stamp>.utpppose       the single-file form of the pose recording (nothing is deleted)
   utpp-feed-<stamp>.txt            the input dump
+  utpp-reload-<stamp>.bin          the reload diagnostic record (reload_trace.py)
   utpp-<stamp>.log (+ .N.log)      the mod log of the session
 SessionCollector.collect() copies what is new or changed since the last call into <dest>, never raising on a file problem:
   between = True   only ring segments that are finished (every ring segment except the newest one, which the game still writes)
@@ -31,6 +32,7 @@ STAMP_RE = re.compile(r'(\d{4})-(\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d)')
 RING_PREFIX = 'utpp-pose-ring-'
 POSE_GLOB = 'utpp-pose-*.utpppose'
 FEED_GLOB = 'utpp-feed-*.txt'
+RELOAD_GLOB = 'utpp-reload-*.bin'  # reload diagnostic record (read with reload_trace.py)
 SEGMENT_S = 60.0                  # nominal length of a ring segment
 GAP_TOLERANCE_S = 20.0            # a stamp distance above SEGMENT_S + this is a gap (a segment the ring dropped)
 CHUNK = 1 << 20
@@ -92,6 +94,7 @@ class SessionCollector:
         for p in glob.glob(os.path.join(self.src_dir, POSE_GLOB)):
             found.append((p, 'pose-ring' if is_ring(p) else 'pose'))
         found += [(p, 'feed') for p in glob.glob(os.path.join(self.src_dir, FEED_GLOB))]
+        found += [(p, 'reload') for p in glob.glob(os.path.join(self.src_dir, RELOAD_GLOB))]
         picked = []
         for p, kind in found:
             st = name_stamp(p)

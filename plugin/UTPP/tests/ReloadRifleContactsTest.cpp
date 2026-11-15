@@ -21,6 +21,8 @@
 #include "../src/mm/ReloadContactFade.hpp"
 #include "TestFailFast.hpp"
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -1026,7 +1028,9 @@ int main(int argc,char** argv)
         const auto angle=[](math::Quat a,math::Quat b){
             return 2.0f*std::acos(std::clamp(std::fabs(math::QuatDot(math::QuatNormalize(a),math::QuatNormalize(b))),0.0f,1.0f))*180.0f/math::kPi;};
         struct Sample{bool ok;float gate,clavT,armT,clavDeg,socketStep,width,bendL,bendR;bool written=false;float pronL=0.0f,twistL=0.0f;};
-        const auto run=[&](float leanDeg,std::vector<Sample>& out){
+        // section 14: optional diagnostic record per frame, an entry ramp of the weight and one HoldOnly frame; the written records are kept
+        struct TraceRun{bool trace=false,ramp=false;int holdFrame=-1;std::vector<std::vector<unsigned char>> written;std::vector<reload_trace::Record> recs;};
+        const auto run=[&](float leanDeg,std::vector<Sample>& out,TraceRun* opt=nullptr){
             rt::Continuity state;out.clear();
             math::Vec3 prevSocket{};bool havePrev=false;
             for(int k=0;k<frames;++k)
@@ -1034,7 +1038,8 @@ int main(int argc,char** argv)
                 // lean: 0 for 10 frames, ramp over 4, held 16, back over 4, 0 for the rest
                 const float e=k<10 ? 0.0f : k<14 ? float(k-9)/4.0f : k<30 ? 1.0f : k<34 ? float(33-k)/4.0f : 0.0f;
                 const auto mm=leaned(leanDeg*e);
-                integ::PoseSnapshot s=snap;s.traceOverlay=int(ov::PoseOverlay::Rifle);s.sequence=uint64_t(3000+k);s.reloadContactsWeight=1.0f;
+                const float weight=(opt && opt->ramp) ? std::min(1.0f,float(k)*0.25f) : 1.0f;
+                integ::PoseSnapshot s=snap;s.traceOverlay=int(ov::PoseOverlay::Rifle);s.sequence=uint64_t(3000+k);s.reloadContactsWeight=weight;
                 s.upperScale=0.0f;s.lowerScale=1.0f;
                 for(int b=0;b<sk.n;++b)
                 {
@@ -1046,8 +1051,15 @@ int main(int argc,char** argv)
                 integ::BlendIntoRecords(records.data(),uint32_t(sk.n),s,1.0f);
                 native_reload_contacts::Result r;
                 ov::Pose o;
-                m.written=captured && rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,1.0f,rt::kAuthoredContactMinReach,&state,
-                                                 int64_t(k+1)*step,tps);
+                reload_trace::Record rec;reload_trace::Clear(rec);
+                state.trace=(opt && opt->trace) ? &rec : nullptr;
+                if(opt && k==opt->holdFrame)
+                    m.written=rt::HoldOnly(prepared,s,records.data(),sk.n,true,state,int64_t(k+1)*step,tps);
+                else
+                    m.written=captured && rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,weight,rt::kAuthoredContactMinReach,&state,
+                                                     int64_t(k+1)*step,tps);
+                state.trace=nullptr;
+                if(opt){opt->written.push_back(records);opt->recs.push_back(rec);}
                 m.ok=m.written && r.ok;
                 m.gate=state.placement.value;
                 if(!rt::Read(prepared,records.data(),o)){out.push_back(Sample{false,-1.0f,9.0f,9.0f,180.0f,9.0f,0.0f,180.0f,180.0f});continue;}
@@ -1114,6 +1126,55 @@ int main(int argc,char** argv)
                             written,frames,wB,wP,wT,own.bendDeg,std::fabs(own.pronationDeg),std::fabs(own.upperTwistDeg));
                 Check(written>=40 && wB<=rt::kReloadWristBendLimitDeg+0.05f && wP<=rt::kReloadPronationLimitDeg+0.5f && wT<=rt::kReloadUpperArmTwistCapDeg+0.05f,
                       "final left arm limits (rifle): every written frame keeps the left wrist bend, pronation and upper-arm twist within the limits");
+            }
+            // 14. Diagnostic record (reload_trace): the same production run (entry ramp of the weight from 0, the placement guard partly and
+            //     fully engaged, rejects with replays, one HoldOnly frame) with the record on and off: the written records are identical byte
+            //     for byte on every frame, and the record shows the stages the run went through.
+            {
+                TraceRun off,on;off.ramp=on.ramp=true;off.holdFrame=on.holdFrame=45;on.trace=true;
+                std::vector<Sample> vOff,vOn;
+                const auto t0=std::chrono::steady_clock::now();
+                for(int rep=0;rep<5;++rep){off.written.clear();off.recs.clear();run(lean,vOff,&off);}
+                const auto t1=std::chrono::steady_clock::now();
+                for(int rep=0;rep<5;++rep){on.written.clear();on.recs.clear();run(lean,vOn,&on);}
+                const auto t2=std::chrono::steady_clock::now();
+                bool same=off.written.size()==size_t(frames) && on.written.size()==size_t(frames);
+                int differing=0;
+                for(size_t k=0;same && k<off.written.size();++k)
+                    if(off.written[k].size()!=on.written[k].size() ||
+                       std::memcmp(off.written[k].data(),on.written[k].data(),off.written[k].size())!=0)++differing;
+                int exits[16]{},replays=0,holds=0,finalLimited=0,gateMatch=0,gateFrames=0,bendMatch=0,bendFrames=0,elbowFinite=0,accepted=0;
+                for(int k=0;k<frames && k<int(on.recs.size());++k)
+                {
+                    const auto& rc=on.recs[size_t(k)];
+                    ++exits[rc.exit&15];
+                    if(rc.flags&reload_trace::kFlagReplayWritten)++replays;
+                    if(rc.path==reload_trace::kPathHold)++holds;
+                    if(rc.flags&reload_trace::kFlagFinalLimit)++finalLimited;
+                    if(std::isfinite(rc.placementGate)){++gateFrames;if(rc.placementGate==vOn[size_t(k)].gate)++gateMatch;}
+                    if(vOn[size_t(k)].written && std::isfinite(rc.anat[reload_trace::kAnatFinal][2]))
+                    {++bendFrames;if(std::fabs(rc.anat[reload_trace::kAnatFinal][2]-vOn[size_t(k)].bendL)<1.0e-3f)++bendMatch;}
+                    if(rc.exit==reload_trace::kExitAccepted)
+                    {
+                        ++accepted;
+                        bool fin=true;
+                        for(int i=0;i<3;++i)fin=fin && std::isfinite(rc.elbowSolve[i]) && std::isfinite(rc.elbowSwivel[i]) && std::isfinite(rc.elbowOut[i]) &&
+                                                  std::isfinite(rc.shoulder[i]) && std::isfinite(rc.guide[i]) && std::isfinite(rc.handTarget[i]);
+                        if(fin)++elbowFinite;
+                    }
+                }
+                const double msOff=std::chrono::duration<double,std::milli>(t1-t0).count()/(5.0*frames);
+                const double msOn=std::chrono::duration<double,std::milli>(t2-t1).count()/(5.0*frames);
+                std::printf("  record: %d/%d frames differ (record on vs off) | exits: weight0 %d, placement out %d, solve reject %d, accepted %d | "
+                            "replays %d, hold frames %d, final-limit frames %d | gate %d/%d, final bend %d/%d match | per frame %.3f ms off, %.3f ms on\n",
+                            differing,frames,exits[reload_trace::kExitWeightZero],exits[reload_trace::kExitPlacementOut],exits[reload_trace::kExitSolveReject],
+                            accepted,replays,holds,finalLimited,gateMatch,gateFrames,bendMatch,bendFrames,msOff,msOn);
+                Check(same && differing==0,"record: the written records are identical with the record on and off on every frame");
+                Check(exits[reload_trace::kExitWeightZero]>=1 && exits[reload_trace::kExitPlacementOut]>=1 && accepted>=20 && holds==1 &&
+                      on.recs[45].path==reload_trace::kPathHold && on.recs[0].exit==reload_trace::kExitWeightZero,
+                      "record: the weight-0 frame, the placement guard cut, the accepted frames and the HoldOnly frame are told apart");
+                Check(replays>=1 && gateFrames>=20 && gateMatch==gateFrames && bendFrames>=20 && bendMatch==bendFrames && elbowFinite==accepted,
+                      "record: replays flagged, placement gate and final left wrist bend equal the production values, accepted frames carry the left-arm solve");
             }
         }
     }
