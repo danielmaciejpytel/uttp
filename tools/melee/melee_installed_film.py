@@ -15,9 +15,10 @@ the set on the third-person body), right "Ultimate Third Person Project" (the cl
 
 Sequence: guard, draw (melee_equip), light combo (combo_attack_01..m, each cut at the game clip's recover start + crossfade as the game
 switches), the final attack that follows combo m (final_attack_0(m+1); a set without final attacks plays its whole light combo chain),
-strong attack (hold_start_01, hold_loop_01, heavy_attack_01), the safe attack (arm blades only),
-block start / hold / end (not for the knife), one hit reaction (parried_left), guard.  A clip that is not in the packed set plays the
-game's own clip on the right as well (listed in the info file).  Before rendering, every packed clip used is checked with the base
+strong attack (hold_start_01, hold_loop_01, heavy_attack_01), the safe attack (arm blades only), a deflected attack
+(combo_attack_01 + combo_attack_01_deflect, arm blades only), block start / hold / end (not for the knife; the arm blades add a
+deflect inside the block: block_deflect_left), one hit reaction (parried_left), guard (arm blades: then melee_unequip).  A clip
+that is not in the packed set plays the game's own clip on the right as well (listed in the info file).  Before rendering, every packed clip used is checked with the base
 anatomy gate (anatomy_gate_base.frame_gate, the builders' limits) on all of its frames; a failing clip refuses the film.  For two-hand
 weapons (katana, bat) hand_cross_* is reported but does not refuse the film.  npc_blade_film.py is imported unchanged; its loader is
 replaced in this process only.
@@ -138,10 +139,15 @@ def plan(weapon):
         out += [c('combo_attack_%02d' % k, 'chain') for k in range(1, m + 1)] + [c('final_attack_%02d' % (m + 1)), g(12)]
     out += [c('hold_start_01'), c('hold_loop_01', 'cycle', 20, 1), c('heavy_attack_01', ov=1), g(12)]
     if weapon == 'mantis':
-        out += [c('safe_attack'), g(12)]
-    if weapon != 'knife':
+        out += [c('safe_attack'), g(12), c('combo_attack_01'), c('combo_attack_01_deflect'), g(12)]
+    if weapon == 'mantis':   # a deflected hit while blocking, then back to the block
+        out += [c('block_start'), c('block', 'cycle', 30, 1), c('block_deflect_left'), c('block', 'cycle', 15, 1), c('block_end', ov=1),
+                g(12)]
+    elif weapon != 'knife':
         out += [c('block_start'), c('block', 'cycle', 30, 1), c('block_end', ov=1), g(12)]
     out += [c('parried_left'), g(16)]
+    if weapon == 'mantis':
+        out += [c('melee_unequip')]
     return [e for e in out if e[0] == 'guard' or game_has(e[0])]
 
 

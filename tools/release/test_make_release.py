@@ -125,8 +125,8 @@ class DayOfBuild(unittest.TestCase):
         for g, files in want.items():
             have = {p for p, v in data.items() if v[0] == g} | {p for p, v in code.items() if v[0] == g}
             self.assertEqual(have, files)
-        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (27721728,
-                         "02bdb447cf41bbffd331d579fbd38cc65d7394f1827c4505a4348d919d6ef0c2"))  # fists + knife, katana, blunt, baton, two-handed blunt, arm blades
+        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (29638656,
+                         "84cb2a09b50ccf14ac2b81d86c6379aa17bbf3ab4aade93307e9a5b0872067b6"))  # fists + knife, katana, blunt, baton, two-handed blunt, arm blades
         # the bike archive was checked in game (2026-11-10) and is pinned in the core DATA list, not in a day-of group
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", [r for r, _ in mr.DATA_PENDING])
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", data)
@@ -231,7 +231,7 @@ class ParriedGraph(unittest.TestCase):
         self.assertEqual(mr.parried_graph_rule(real, MELEE_SHA), (True, []))
         self.assertEqual(mr.parse_states_table(real), ({"w_melee_fists": 3669472, "w_melee_knife": 3668192, "w_melee_katana": 3669472,
                                                         "w_melee_one_hand_blunt": 3669472, "w_melee_baton": 3669472,
-                                                        "w_two_hand_blunt": 3669472, "mantis_blade": 26816}, []))
+                                                        "w_two_hand_blunt": 3669472, "mantis_blade": 1567200}, []))
         # the same lines without the Parried bit (graph-less fallback): not needed
         self.assertEqual(mr.parried_graph_rule(t(("w_melee_knife", 3668160), ("w_melee_katana", 3669440),
                                                  ("w_melee_one_hand_blunt", 3669440), ("w_melee_baton", 3669440),

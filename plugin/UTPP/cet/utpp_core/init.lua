@@ -2498,7 +2498,8 @@ local function applyMeleeAimTilt(v)
   M.Log("melee aim tilt -> " .. tostring(on))
 end
 
--- melee guard (DLL mm/MeleeFullBody.hpp GuardGate): with fists drawn (never Gorilla Arms) the upper body keeps
+-- melee guard (DLL mm/MeleeFullBody.hpp GuardGate): with fists drawn (Gorilla Arms: from the first melee action since the draw,
+-- scripts/utpp_melee.reds UTPPMeleeGuardActionNext) the upper body keeps
 -- the game's guard pose (the shipped third-person melee_idlepose = the start / end pose of every fist clip) between strikes;
 -- guardFullBody = the legs too while standing in the guard (default off: the guard stance is 67 cm between the ankles, the feet
 -- would slide on entering and leaving it); guardAimTilt = the melee aim tilt also through the guard, so it does not fade in and
@@ -2749,7 +2750,8 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
   M.Register({ key = "melee.guard", section = "animation", type = "bool", default = true,
     label = "Melee guard (experimental)",
     desc = "With fists drawn V keeps the fighting guard between strikes (and while walking) instead of lowering the arms "
-      .. "after every hit (not with Gorilla Arms). Off: the arms return to the walking pose about 1 second after the last strike.",
+      .. "after every hit (with Gorilla Arms from the first strike on). Off: the arms return to the walking pose about 1 second after "
+      .. "the last strike.",
     apply = applyMeleeGuard })
   M.Register({ key = "melee.guardFullBody", section = "animation", type = "bool", default = false,
     label = "Melee guard: legs (experimental)",

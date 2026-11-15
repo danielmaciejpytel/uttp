@@ -30,7 +30,8 @@
 // holds, so the legs never flash back to MM during a full close. Root / Trajectory are never written (firstBone) as before.
 // Flag off (default at DLL load): Update never returns true, the fade stays 0, lowerScale stays 1 = the previous output bit for bit.
 //
-// Guard: while a guard-capable melee weapon is drawn (script flag UTPPSetMeleeGuard: fists only for now, never Gorilla Arms)
+// Guard: while a guard-capable melee weapon is drawn (script flag UTPPSetMeleeGuard: the fists, and the strong arms after their first
+// melee action since the draw)
 // and the user setting melee.guard is on, the upper body stays on the game pose (the graph's Ready / Idle pose = the guard
 // once the third-person melee_idlepose is installed) between strikes too, so the mask does not drop and rise on every strike.
 // Conditions (GuardGate): TPP, v1 owns the pose, the effective gate open, PSM.MeleeWeapon Idle 2 or Parried..EquipAttack 5..21

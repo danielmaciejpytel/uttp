@@ -150,7 +150,9 @@ class ScriptTables(unittest.TestCase):
         self.assertEqual(gw.expected_states(t, 'w_melee_hammer'), t['default_states'])
         self.assertFalse(gw.is_covered(t, 'w_melee_hammer'))
         self.assertTrue(gw.is_covered(t, 'mantis_blade'))            # the arm blades have their own clip sets
-        self.assertEqual(t['states']['mantis_blade'], 26816)         # hold, charged hold, light combo, strong and safe attack
+        self.assertEqual(t['states']['mantis_blade'], 1567200)       # parried, hold, charged hold, block, light combo, strong, safe,
+        #                                                              block attack, sprint, crouch, jump and deflect attacks (no
+        #                                                              block deflect: third-person clips on one body only)
         self.assertTrue(gw.weapon_covered(gw.WEAPONS['mantis'], t))
         sa = gw.WEAPONS['strong_arms']
         self.assertEqual(sa['anim_var'], 'w_strong_arms')           # its own variable in the hand, not the fists one

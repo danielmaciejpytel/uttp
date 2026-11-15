@@ -18,7 +18,8 @@
 //     per-weapon table UTPPMeleeFullBodyStates (key = clip variable of the drawn weapon; default = the attacks without
 //     ThrowAttack), also sent when the drawn weapon changes;
 //   * the GUARD flag (UTPPSetMeleeGuard): the same conditions with the guard list (UTPPMeleeGuardCoveredName: the weapon's own
-//     third-person melee_idlepose must be installed; fists only for now, the strong arms through their clip variable);
+//     third-person melee_idlepose must be installed; fists only for now, the strong arms through their clip variable, and for
+//     them only after the first melee action since the draw: UTPPMeleeGuardNeedsAction / UTPPMeleeGuardActionNext);
 // and, at most 20 Hz while a melee weapon is drawn in third person, the game's melee target (UTPPSetMeleeAimTarget: the
 // vanilla melee target query DefaultTransition.GetTargetObject, hostile / neutral active NPC within 5 m, its feet).
 // The DLL adds its own conditions (melee mask reason, standing, stick released and no sustained capsule speed, on the ground,
@@ -82,10 +83,13 @@ public func UTPPMeleeFullBodyCoveredName(n: CName) -> Bool {
 // baton and two-handed blunt: the same states as the fists = 3669472. The per-strike parried clips of these weapons
 // (parried_left_<strike> / parried_right_<strike>) are picked by the melee parried graph archive; without that archive drop
 // Parried 5 (knife 3668160, the other four 3669440).
-// Arm blades (mantis_blade): only the states whose clips are all third-person on both bodies: Hold 6 + ChargedHold 7 (hold_start_01,
-// hold_start_offscreen_01 / _02, hold_loop_01 / _02) + ComboAttack 11 (combo_attack_01 .. 09) + StrongAttack 13 (heavy_attack_01 / _02)
-// + SafeAttack 14 (safe_attack) = 0x68C0 = 26816. The other states of the arm blades (Parried, Block, Deflect, FinalAttack and the
-// sprint, crouch, jump, block, deflect and equip attacks) keep the game's clips and stay out of the line.
+// Arm blades (mantis_blade): only the states whose clips are all third-person on both bodies: Parried 5 (parried_left / _right) +
+// Hold 6 + ChargedHold 7 (hold_start_01, hold_start_offscreen_01 / _02, hold_loop_01 / _02) + Block 8 (block_start, block, block_end)
+// + ComboAttack 11 (combo_attack_01 .. 09) + StrongAttack 13 (heavy_attack_01 / _02) + SafeAttack 14 (safe_attack) + BlockAttack 15
+// (block_attack, block_attack_hit) + SprintAttack 16 + CrouchAttack 17 + JumpAttack 18 + DeflectAttack 20 (combo_attack_01 .. 09_deflect
+// and the safe, sprint, crouch, jump and block attack deflects) = 0x17E9E0 = 1567200. Deflect 10 (block_deflect_left / _right) has
+// third-person clips for Male V only; the line is per variable, not per body, so the bit stays out: Male V plays its own block deflect
+// clips with the legs on motion matching, Female V the game's. The set has no final attack and no equip attack (12 and 21 stay out).
 // Format: one line per variable between the UTPP_STATES_TABLE markers (read by the melee stage installer).
 public func UTPPMeleeStatesDefault() -> Int32 {
   return 3667968;
@@ -99,7 +103,7 @@ public func UTPPMeleeFullBodyStates(n: CName) -> Int32 {
   if Equals(n, n"w_melee_one_hand_blunt") { return 3669472; }
   if Equals(n, n"w_melee_baton") { return 3669472; }
   if Equals(n, n"w_two_hand_blunt") { return 3669472; }
-  if Equals(n, n"mantis_blade") { return 26816; }
+  if Equals(n, n"mantis_blade") { return 1567200; }
   // UTPP_STATES_TABLE end
   return UTPPMeleeStatesDefault();
 }
@@ -177,6 +181,7 @@ public func UTPPMeleeTppWeapon(player: ref<PlayerPuppet>) -> ref<WeaponObject> {
 @addField(PlayerPuppet) public let utppMeleeStatesVar: CName;  // table key of the last state mask sent (n"" = default)
 @addField(PlayerPuppet) public let utppMeleeAimAt: Float;      // sim time of the last melee target send
 @addField(PlayerPuppet) public let utppMeleeAimSent: Int32;    // 0 = nothing sent, 1 = invalid sent, 2 = a target sent
+@addField(PlayerPuppet) public let utppMeleeGuardAction: Bool; // a melee action ran since the draw (UTPPMeleeGuardActionNext)
 
 public func UTPPMeleeFullBodyWanted(player: ref<PlayerPuppet>) -> Bool {
   if !IsDefined(player) || !player.utppFootTppWanted {
@@ -206,6 +211,57 @@ public func UTPPMeleeGuardWanted(player: ref<PlayerPuppet>) -> Bool {
     return false;
   }
   return UTPPMeleeGuardCoveredName(variable);
+}
+
+// Guard after the draw. The strong arms (in-hand variable w_strong_arms) share the fists guard, but after the draw the game holds the
+// cyberware's own ready pose in Idle (clavicles pulled together on the third-person body) until the first melee action; after any
+// melee action Idle shows the fist guard. So for them the guard flag waits for the first melee action since the draw (PSM.MeleeWeapon
+// Parried 5 .. EquipAttack 21); until then the upper body stays on UTPP's own standing pose. The first strike then fades in like a
+// strike without the guard (the upper mask fade), and the guard holds from its end on. Fists and every other variable: no wait.
+public func UTPPMeleeGuardNeedsAction(animVariable: CName) -> Bool {
+  return Equals(animVariable, n"w_strong_arms");
+}
+
+// The strong arms by item type (robust to the record variants, as UTPPMeleeIsArmCyberware).
+public func UTPPMeleeIsStrongArms(weapon: ref<WeaponObject>) -> Bool {
+  if !IsDefined(weapon) {
+    return false;
+  }
+  let rec: ref<WeaponItem_Record> = TweakDBInterface.GetWeaponItemRecord(ItemID.GetTDBID(weapon.GetItemID()));
+  if !IsDefined(rec) || !IsDefined(rec.ItemType()) {
+    return false;
+  }
+  return Equals(rec.ItemType().Type(), gamedataItemType.Cyb_StrongArms);
+}
+
+// Next value of the "melee action since the draw" latch: cleared without a weapon that needs it, and when the weapon is not ready or
+// being drawn (NotReady 0, Equipping 1, not reported -1: a new draw); set by a melee action state 5..21; otherwise kept (Idle 2,
+// Safe 3, PublicSafe 4).
+public func UTPPMeleeGuardActionNext(latched: Bool, needsAction: Bool, meleeState: Int32) -> Bool {
+  if !needsAction || meleeState <= 1 {
+    return false;
+  }
+  if meleeState >= 5 && meleeState <= 21 {
+    return true;
+  }
+  return latched;
+}
+
+// The guard flag sent to the DLL: the guard list (UTPPMeleeGuardWanted) and, for a weapon that needs it, a melee action since the draw.
+public func UTPPMeleeGuardFlag(wanted: Bool, needsAction: Bool, latched: Bool) -> Bool {
+  return wanted && (!needsAction || latched);
+}
+
+// PSM.MeleeWeapon of the player (-1 = not reported).
+public func UTPPMeleeWeaponStateOf(player: ref<PlayerPuppet>) -> Int32 {
+  if !IsDefined(player) {
+    return -1;
+  }
+  let bb: ref<IBlackboard> = GameInstance.GetBlackboardSystem(player.GetGame()).GetLocalInstanced(player.GetEntityID(), GetAllBlackboardDefs().PlayerStateMachine);
+  if !IsDefined(bb) {
+    return -1;
+  }
+  return bb.GetInt(GetAllBlackboardDefs().PlayerStateMachine.MeleeWeapon);
 }
 
 // The game's melee target for the melee aim tilt: at most 20 Hz while a melee weapon is drawn in third person (the DLL drops it
@@ -239,7 +295,10 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
     return;
   }
   let want: Bool = UTPPMeleeFullBodyWanted(player);
-  let guard: Bool = UTPPMeleeGuardWanted(player);
+  let guardWeapon: ref<WeaponObject> = UTPPMeleeTppWeapon(player);
+  let guardNeedsAction: Bool = UTPPMeleeGuardNeedsAction(UTPPMeleeWeaponAnimVariable(guardWeapon)) || UTPPMeleeIsStrongArms(guardWeapon);
+  player.utppMeleeGuardAction = UTPPMeleeGuardActionNext(player.utppMeleeGuardAction, guardNeedsAction, UTPPMeleeWeaponStateOf(player));
+  let guard: Bool = UTPPMeleeGuardFlag(UTPPMeleeGuardWanted(player), guardNeedsAction, player.utppMeleeGuardAction);
   let code: Int32 = 1;
   if want {
     code = 2;
