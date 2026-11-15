@@ -49,6 +49,7 @@
 #include "mm/MeleeBaseRuntime.hpp" // melee chest base correction (2026-11-13)
 #include "mm/MeleePoseRuntime.hpp" // melee full pose
 #include "mm/HeadLookRuntime.hpp" // head look layer
+#include "mm/VaultShoulder.hpp" // vault shoulder limiter (2026-11-15)
 #include "mm/VaultTorso.hpp" // vault torso limiter (2026-11-10)
 #include "mm/BodyDeformerTrace.hpp"
 #include "mm/CoreWriteRecord.hpp"
@@ -895,6 +896,7 @@ int32_t ArmLocked(bool aLogAlways)
         utpp::meleepose::OnArmed(info.metaRig, hashes, parents); // melee full pose: key bones + Hips, Spine, legs (fail closed)
         utpp::headlook::OnArmed(info.metaRig, hashes, parents); // head look: Spine3, Neck, Neck1, Head, eyes (fail closed)
         utpp::mm::vaulttorso::rt::OnArmed(info.metaRig, hashes, parents); // vault torso limiter: Hips, Spine..Spine3 (fail closed)
+        utpp::mm::vaultshoulder::rt::OnArmed(info.metaRig, hashes, parents); // vault shoulder limiter: Spine3, shoulders, upper arms (fail closed)
         g_hot.armed.store(true, std::memory_order_release);
         PublishBodyTraceContinuousLocked(info, hashes, parents); // continuous capture follows the rig (no-op unless on)
     }

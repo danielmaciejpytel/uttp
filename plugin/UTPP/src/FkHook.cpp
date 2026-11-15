@@ -40,6 +40,7 @@
 #include "mm/CoreWriteRecord.hpp"
 #include "BodyHelperRuntime.hpp"
 #include "mm/NativeReloadContactsRuntime.hpp"
+#include "mm/VaultShoulder.hpp"
 #include "mm/VaultTorso.hpp"
 #include "mm/VehicleTransition.hpp"
 #include "ragdoll/RagdollEpisode.hpp"
@@ -286,12 +287,13 @@ void ApplyMotionMatching(uint8_t* aDesc, void* aRig, uint32_t aCount, int64_t aN
     // Skin helper recompute on the frames of the weight-0 writers below (BodyHelperRuntime.hpp SetZeroWriterRecompute): the window of
     // this call, opened only while one of them can write and the body is shown in third person - by the vehicle camera (mounted
     // third-person flag of the vehicle layer) for the vehicle transition, the vehicle guards and the neck cut; by the camera's
-    // pose-write permission for the vault torso.
+    // pose-write permission for the vault torso and the vault shoulders.
     if (bodyhelperruntime::Enabled() && bodyhelperruntime::ZeroWriterRecompute())
     {
         const bool vehicleThirdPerson = mm::vehtrans::Wanted() && mm::vehtrans::g_mountTpp.load(std::memory_order_acquire);
+        const int64_t vaultTps = util::QpcFrequency();
         if (vehicleThirdPerson ||
-            (mm::vaulttorso::rt::Active(aNow, util::QpcFrequency()) &&
+            ((mm::vaulttorso::rt::Active(aNow, vaultTps) || mm::vaultshoulder::rt::Active(aNow, vaultTps)) &&
              g_hot.perspectiveWrite.Allows(aNow, g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed))))
             mm::corewrite::MarkZeroWindow(vehicleThirdPerson);
     }
@@ -309,6 +311,12 @@ void ApplyMotionMatching(uint8_t* aDesc, void* aRig, uint32_t aCount, int64_t aN
         if (mm::vaulttorso::rt::Active(aNow, vaultTps) &&
             mm::vaulttorso::rt::FkPass(*reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff), aCount, aRig, aNow, vaultTps,
                                        g_hot.perspectiveWrite.Allows(aNow, g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed))))
+            mm::corewrite::Mark(mm::corewrite::kVaultTorso);
+        // Vault shoulder limiter (mm/VaultShoulder.hpp): the same released car vault in every weapon state squeezes the shoulder joints; the
+        // clavicles are brought back toward V's own pose (the shoulder width stays in the body's band). Same stage, rules and writer bit.
+        if (mm::vaultshoulder::rt::Active(aNow, vaultTps) &&
+            mm::vaultshoulder::rt::FkPass(*reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff), aCount, aRig, aNow, vaultTps,
+                                          g_hot.perspectiveWrite.Allows(aNow, g_hot.perspectiveWriteMaxAge.load(std::memory_order_relaxed))))
             mm::corewrite::Mark(mm::corewrite::kVaultTorso);
     }
     // Ownership is session-scoped, not a per-frame fallback. A rejected early

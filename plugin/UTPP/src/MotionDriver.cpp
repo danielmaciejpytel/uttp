@@ -19,6 +19,7 @@
 #include "mm/RootMontage.hpp"
 #include "mm/SlideDeRoll.hpp"
 #include "mm/Steering.hpp"
+#include "mm/VaultShoulder.hpp" // vault shoulder limiter: the vehicle vault event without the overlay test
 #include "input/LocomotionCore.hpp" // Reason bits only (pure logic): H2 safeguard cause of a native body turn that is off
 #include "ragdoll/GetUpProbe.hpp"   // ragdoll R0 probe (pure logic: clamp, phases, watchdog, pose composition)
 #include "ragdoll/GetUpClips.hpp"   // frame 0 of the motion get-up clips (the v2 databases do not carry them)
@@ -861,6 +862,13 @@ void TravOwnLocked(bool aOn) { g_ownsTrav.store(aOn, std::memory_order_release);
 // read lock-free by the v1 feed (which holds its own mutex).
 std::atomic<bool> g_vehVaultEvt{false};
 std::atomic<int32_t> g_poseMirror{0};
+// Every store of the event goes through here: the vault shoulder limiter (mm/VaultShoulder.hpp) reads the same event in every weapon
+// state (no overlay test), lock-free from the v1 feed.
+void SetVehVaultEvt(bool aOn)
+{
+    g_vehVaultEvt.store(aOn, std::memory_order_release);
+    ::utpp::mm::vaultshoulder::rt::g_vehicleVault.store(aOn, std::memory_order_release);
+}
 
 // ---- ragdoll R0 probe (CET utpp_probe RagdollProbe -> UTPPRagdollGetUpProbe): publishes frame 0 of a motion get-up clip (embedded table, ragdoll/GetUpClips.hpp: the v2 databases carry no get-up clip)
 // with the root children (Hips) moved offsetM along the character-frame +Y, for a few seconds, then hands back to MM.
@@ -1111,7 +1119,7 @@ void TravResetLocked(bool aDropPending)
         g_trav.yawBackT = -1.0f; // dropped (disable / body switch / bundle): no handback turn pending
     }
     g_travProbe.active = g_travProbe.yielding = false;
-    g_vehVaultEvt.store(false, std::memory_order_release); // vault torso limiter: the episode is over (a re-planned event sets it again)
+    SetVehVaultEvt(false); // vault torso limiter: the episode is over (a re-planned event sets it again)
     // a pending event survives (bundle swap re-plan, or an event that arrived during the episode now ending): still owned while
     // v2 can plan it (contract above); otherwise not owned
     TravOwnLocked(g_trav.havePending && TravCanPlanLaterLocked());
@@ -1774,7 +1782,7 @@ void Skip(uint64_t& aCounter, const char* aWhy)
     if (pendingOnDetail)
     {
         g_trav.havePending = false;
-        g_vehVaultEvt.store(false, std::memory_order_release); // vault torso limiter: the deferred event never planned, nothing to keep
+        SetVehVaultEvt(false); // vault torso limiter: the deferred event never planned, nothing to keep
     }
     if (g_trav.active || g_trav.episode || (g_trav.planned && g_trav.planOk && g_stepDetail == g_trav.ev.action) ||
         pendingOnDetail)
@@ -3234,7 +3242,7 @@ void TravPlanLocked(Bundle& b)
         g_trav.plan.result = motiontrav::StartResult::MontageFailed; // no traversal data for this body
     const motiontrav::Plan& p = g_trav.plan;
     g_travProbe.lastResult = static_cast<int32_t>(p.result);
-    g_vehVaultEvt.store(o.action == motiontrav::GameAction::Vault && o.kind == 1 && p.result != motiontrav::StartResult::Ok, std::memory_order_release); // vault torso limiter
+    SetVehVaultEvt(o.action == motiontrav::GameAction::Vault && o.kind == 1 && p.result != motiontrav::StartResult::Ok); // vault torso limiter
     g_travProbe.startFrame = p.startFrame;
     g_travProbe.endFrame = p.endFrame;
     g_travProbe.maxPlanStep = static_cast<float>(p.gatePlanarStep);
@@ -4482,7 +4490,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             if (!g_trav.planned && !g_trav.active && !g_trav.episode)
             {
                 TravOwnLocked(false); // a deferred event aged out (contract: then v1 releases to the game animation)
-                g_vehVaultEvt.store(false, std::memory_order_release); // vault torso limiter: never planned, nothing to keep
+                SetVehVaultEvt(false); // vault torso limiter: never planned, nothing to keep
             }
             if (g_trav.planned)
             {
@@ -4493,7 +4501,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
                 // vault torso limiter: a vehicle vault is planned at the event and never started while the gate is closed, so it ages out
                 // after 0.5 s of a ~0.7 s slide - the flag lives on until the PSM leaves the event's action (the episode is over)
                 if (g_stepDetail != g_trav.ev.action)
-                    g_vehVaultEvt.store(false, std::memory_order_release);
+                    SetVehVaultEvt(false);
             }
         }
     }

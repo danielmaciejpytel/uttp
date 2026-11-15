@@ -41,6 +41,7 @@
 #include "mm/FootLocker.hpp"
 #include "mm/GameIntegration.hpp"
 #include "mm/MeleeFullBody.hpp" // melee full body (2026-11-09)
+#include "mm/VaultShoulder.hpp" // vault shoulder limiter (2026-11-15)
 #include "mm/VaultTorso.hpp" // vault torso limiter (2026-11-10)
 #include "mm/BaseMatcher.hpp"
 #include "mm/OffsetRoot.hpp"
@@ -2936,6 +2937,7 @@ void OnDisarmed()
         g_motion->disarmed(); // UTPP-MOTION SEAM
     g_weight.Reset();
     mm::vaulttorso::rt::OnDisarmed(); // vault torso limiter: forgets the rig and the episode (under g_mutex, like its Feed)
+    mm::vaultshoulder::rt::OnDisarmed(); // vault shoulder limiter: the same
     PublishLocked(0.0f);
 }
 
@@ -4180,6 +4182,24 @@ void Feed(const FeedInput& aRawIn)
                                       static_cast<unsigned long long>(mm::vaulttorso::rt::g_saturated.load()),
                                       static_cast<double>(mm::vaulttorso::rt::g_minElevDeg.load()),
                                       static_cast<double>(mm::vaulttorso::rt::g_maxCorrDeg.load()));
+                    g_log(line);
+                }
+                // Vault shoulder limiter (mm/VaultShoulder.hpp): the same feed inputs, any weapon state (the motion driver's vehicle vault event
+                // without the overlay test).
+                const int shoulderEdge = mm::vaultshoulder::rt::Feed(vaultGate, mm::vaultshoulder::rt::g_vehicleVault.load(std::memory_order_acquire),
+                                                                     aRaw.dt, Qpc(), vaultTps);
+                if (shoulderEdge != 0 && g_log)
+                {
+                    char line[160];
+                    if (shoulderEdge > 0)
+                        std::snprintf(line, sizeof(line), "UTPP trav: vault shoulder limiter on (released vault over a vehicle, floor %.1f cm)",
+                                      static_cast<double>(mm::vaultshoulder::kFloorM * 100.0f));
+                    else
+                        std::snprintf(line, sizeof(line), "UTPP trav: vault shoulder limiter off (applied=%llu saturated=%llu minWidth=%.1f maxShift=%.1f cm)",
+                                      static_cast<unsigned long long>(mm::vaultshoulder::rt::g_applied.load()),
+                                      static_cast<unsigned long long>(mm::vaultshoulder::rt::g_saturated.load()),
+                                      static_cast<double>(mm::vaultshoulder::rt::g_minWidthM.load() * 100.0f),
+                                      static_cast<double>(mm::vaultshoulder::rt::g_maxShiftM.load() * 100.0f));
                     g_log(line);
                 }
             }
