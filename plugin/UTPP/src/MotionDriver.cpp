@@ -8,6 +8,7 @@
 #include "mm/MotionRootFrame.hpp"
 #include "mm/HeadLead.hpp"
 #include "mm/HipFirePose.hpp"
+#include "mm/DualWieldMirror.hpp"
 #include "mm/LeanRuntime.hpp"
 #include "mm/LocomotionSignalBlend.hpp"
 #include "mm/MagTap.hpp"
@@ -127,6 +128,7 @@ struct Bundle
     std::vector<uint64_t> dbHashes; // integ::CNameHash of the database bones (BuildBoneMap)
     std::vector<int32_t> dbParents;
     std::vector<BoneTransform> pose;
+    dualmirror::Mirror dualMirror; // dual wield left arm (DualWieldMirror.hpp), built on the database rest pose; off when not symmetric
     adapter::ResolveInputs res;
     bool styleOk = false;
     bool travOk = false;
@@ -354,10 +356,14 @@ std::atomic<bool> g_tier2Slow{false};
 std::atomic<bool> g_selectionGuards{true};
 // Dual-wield D0: last raw psmBlock of UTPPFeedLocomotion (FeedAirFromInput); status string (dualWield= upperBodyRaw=) only.
 std::atomic<uint32_t> g_feedPsmRaw{0};
+// Dual wield left arm: the mirror weight shown on the last frame (DualWieldMirrorStepLocked); status " dualMirror=".
+float g_dualMirrorW = 0.0f;
 std::string DualStatusSuffix()
 {
-    char buf[64];
-    integ::PsmDualStatusSuffix(buf, sizeof buf, g_feedPsmRaw.load(std::memory_order_relaxed));
+    char buf[96];
+    const int used = integ::PsmDualStatusSuffix(buf, sizeof buf, g_feedPsmRaw.load(std::memory_order_relaxed));
+    if (used > 0 && used < static_cast<int>(sizeof buf))
+        std::snprintf(buf + used, sizeof buf - static_cast<size_t>(used), " dualMirror=%.2f", static_cast<double>(g_dualMirrorW));
     return buf;
 }
 std::atomic<bool> g_aimJogOff{true}; // G9: the last UTPPMMAimJogTarget answer was 0 (vanilla aim walk speed; default before any query)
@@ -1195,6 +1201,16 @@ std::unique_ptr<Bundle> LoadBundle(Body aBody, const Paths& aPaths)
         b->dbHashes[i] = integ::CNameHash(b->db.BoneName(i));
         b->dbParents[i] = b->db.BoneParent(i);
     }
+    {
+        std::vector<BoneTransform> rest(n);
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            const auto& rr = b->db.RigRest(i);
+            rest[i] = BoneTransform{math::Vec3{rr.px, rr.py, rr.pz}, math::QuatNormalize(math::Quat{rr.qx, rr.qy, rr.qz, rr.qw})};
+        }
+        b->dualMirror = dualmirror::Build(n, [&](uint32_t i) { return b->db.BoneName(i); }, [&](uint32_t i) { return b->db.BoneParent(i); },
+                                          rest.data());
+    }
     if (r.dbRigIdentity != adapter::ExpectedRigIdentity(aBody))
     {
         b->err = "db rig identity of another body";
@@ -1707,6 +1723,9 @@ float WallP95Locked() { return P95Of(g_wallTimes); } // status / log only, never
 
 // Two weapons drawn (PSM UpperBody DualWield or IsDualWielding, the flag of the last feed's psmBlock).
 bool DualWieldNow() { return integ::PsmDualOf(g_feedPsmRaw.load(std::memory_order_relaxed)); }
+// Dual wield left arm: ramp of the mirror (DualWieldMirror.hpp) and when it last stepped (the shown weight: g_dualMirrorW).
+dualmirror::Ramp g_dualMirrorRamp;
+int64_t g_dualMirrorNs = 0;
 
 ov::PoseOverlay OverlayLocked()
 {
@@ -3621,6 +3640,8 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
     in.montageBase = true; // DB and raw traversal share the protected external bridge
     motionpose::FrameInfo info;
     g_ovArmsNow = false; // traversal montage frames never claim both hands on the weapon
+    g_dualMirrorRamp.Reset(); // dual wield left arm: not on montage frames; fades in again afterwards
+    g_dualMirrorW = 0.0f;
     const bool ok = fromPoses ? b.eval.EvaluateWithPose(dt, mr, b.travRaw.data(), in, b.pose.data(),
                                                         static_cast<uint32_t>(b.pose.size()), &info)
                               : b.eval.Evaluate(dt, mr, in, b.pose.data(), static_cast<uint32_t>(b.pose.size()), &info);
@@ -3845,6 +3866,27 @@ void MagTapAgePendingLocked()
         ++g_magTapDropped;
         ++g_magTapUnowned;
     }
+}
+
+// Dual wield left arm: with two weapons drawn and the one-handed weapon pose as the overlay, the left arm (clavicle .. hand and
+// WeaponLeft) takes the mirror image of the right arm across the chest mid plane (DualWieldMirror.hpp). Shown weight = the 0.65 s
+// ramp x the right arm layer of the weapon pose (a right arm that follows the locomotion is not copied) x (1 - reload envelope)
+// (the reload keeps its own behaviour); no ramp during a weapon action (reload). Weight 0 leaves the pose untouched, so a single
+// weapon is bit-identical. After 0.25 s without a step (skipped frames, pause) the ramp keeps its value while still wanted and is 0
+// at once when not (dualmirror::Ramp aGap).
+void DualWieldMirrorStepLocked(Bundle& b, const motionpose::FrameInfo& aInfo, float aDt)
+{
+    const int64_t now = SteadyNs();
+    const bool gap = g_dualMirrorNs == 0 || now - g_dualMirrorNs > 250000000ll;
+    g_dualMirrorNs = now;
+    // Not while aiming: the one-handed aim is a side stance, and its mirror image would point the left weapon far away from
+    // the target; the left arm then keeps the pose it has without the mirror.
+    const bool wanted = b.dualMirror.Valid() && ov::DualWieldMirrorWanted(OverlayLocked(), DualWieldNow()) && g_weaponAction != 2 &&
+                        !g_aimingNow;
+    const float ramp = g_dualMirrorRamp.Step(wanted, aDt, gap);
+    const float armR = (aInfo.curves.present & (1u << ov::kArmR)) != 0 ? aInfo.curves[ov::kArmR] : 0.0f;
+    g_dualMirrorW = dualmirror::ShownWeight(ramp, armR, g_reloadUpperWeight);
+    dualmirror::Apply(b.dualMirror, b.pose.data(), g_dualMirrorW);
 }
 
 // MM owns the arms in TPP: ApplyLocked publishes the MM upper body at upperScale 1 (weapon overlay drawn, no release, no reload action /
@@ -5359,6 +5401,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     OrientWarpStepLocked(b, f, r.clip, dt);
     PelvisTrimStepLocked(b, f, dt);
     BodyOffsetStepLocked(b, f, integ::PsmMeleeBits(aRaw.psmBlock) != 0 || integ::PsmMeleeStateOf(aRaw.psmBlock) >= 5, dt);
+    DualWieldMirrorStepLocked(b, info, dt); // dual wield left arm (chest-relative; before the reload edits of the pose)
     const bool mmOwnsArms = MMOwnsArmsLocked(aRaw, aEffGate, f);
     SlideReloadTorsoStepLocked(b, mmOwnsArms, dt);
     MagTapStepLocked(b, mmOwnsArms, dt); // last pose edit of the frame: FrameLocked / ApplyLocked publish b.pose as left here

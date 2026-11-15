@@ -444,6 +444,12 @@ inline PoseOverlay DualWieldOverlay(PoseOverlay aOverlay, bool aDualWield)
         return PoseOverlay::Pistol1H;
     return aOverlay;
 }
+// Dual wield left arm (DualWieldMirror.hpp): the left arm mirrors the right arm of the one-handed weapon pose only while two weapons
+// are drawn and that pose is the overlay; a single weapon never asks for it. aOverlay = the overlay after DualWieldOverlay.
+inline bool DualWieldMirrorWanted(PoseOverlay aOverlay, bool aDualWield)
+{
+    return aDualWield && aOverlay == PoseOverlay::Pistol1H;
+}
 
 // ---- per-clip style weight by source family ----------------------------------------------
 // The style delta can be scaled per source family of the active clip: the dP weight is weight(style, family of the

@@ -449,6 +449,16 @@ foreach(_dw_mut 1 2)
   add_test(NAME utpp_dualwield_psm_test_mut${_dw_mut} COMMAND utpp_dualwield_psm_test_mut${_dw_mut})
   set_tests_properties(utpp_dualwield_psm_test_mut${_dw_mut} PROPERTIES PASS_REGULAR_EXPRESSION "FAIL B")
 endforeach()
+# ---- dual wield left arm: mirror of the right arm across the chest mid plane (src/mm/DualWieldMirror.hpp), both rigs.
+# Rest pose and bone order from the baked motion databases, weapon poses from the overlay files (outside git); a missing file fails.
+set(UTPP_DUALMIRROR_DATA "${CMAKE_CURRENT_SOURCE_DIR}/../../../Data" CACHE PATH "Data folder of the dual wield mirror test")
+add_executable(utpp_dualwield_mirror_test tests/DualWieldMirrorTest.cpp src/mm/DualWieldMirror.hpp src/mm/Overlay.hpp
+               src/mm/OverlayFile.hpp src/mm/MotionDatabase.hpp src/mm/MMMath.hpp)
+target_compile_options(utpp_dualwield_mirror_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_dualwield_mirror_test PRIVATE cxx_std_20)
+add_test(NAME utpp_dualwield_mirror_test COMMAND utpp_dualwield_mirror_test
+         "${UTPP_DUALMIRROR_DATA}/utpp_motion_woman.utppmm" "${UTPP_DUALMIRROR_DATA}/motion/utpp_overlays_woman.utppov"
+         "${UTPP_DUALMIRROR_DATA}/utpp_motion_man.utppmm" "${UTPP_DUALMIRROR_DATA}/motion/utpp_overlays_man.utppov")
 
 # ---- 0.6.4 item render plane (TPP: RPl_Weapon from the animation parameter broadcast -> RPl_Scene) ----
 target_sources(UTPP PRIVATE src/render/ItemPlane.cpp src/render/ItemPlane.hpp)
