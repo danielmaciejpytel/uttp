@@ -342,11 +342,11 @@ DAYOF_DATA = [
 #   utpp_melee.reds           f500feb7... -> c555abd5...  FUNCTIONAL: the mantis_blade state line 1567200 -> 1568224 (Deflect 10
 #                                                           added: block deflect clips on both bodies)
 # Re-pinned 2026-11-15 (arm IK requests):
-#   utpp_melee.reds           c555abd5... -> 3efded4f...  FUNCTIONAL: while a covered melee weapon is drawn in third person, IK
+#   utpp_melee.reds           c555abd5... -> aa3c1117...  FUNCTIONAL: while a covered melee weapon is drawn in third person, IK
 #                                                           requests with weight 0 keep the base graph's arm solve off
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "3efded4f07f1ce870c6c39cb3d0e195d8f583de7d6c66b27baacfe1b43d1c50d"),
+     "aa3c11170aaeb66342646ebbe5554b799a412b0a55f5f781100ff849128f6ed1"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
      "e9d806ec607eb6145860992b235632a08020722a490f3adea3c4a0b0367dd57d"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",

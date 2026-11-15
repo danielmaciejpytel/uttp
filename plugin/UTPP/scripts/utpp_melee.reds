@@ -296,7 +296,6 @@ public func UTPPMeleeAimTargetTick(player: ref<PlayerPuppet>, scriptInterface: r
 // person an IK request with weight 0 keeps that solve off for both arms; its priority is below the game's own requests.
 @addField(PlayerPuppet) public let utppMeleeArmIkRight: ref<IKTargetAddEvent>;
 @addField(PlayerPuppet) public let utppMeleeArmIkLeft: ref<IKTargetAddEvent>;
-@addField(PlayerPuppet) public let utppMeleeArmIkAt: Float; // sim time of the last request
 
 public func UTPPMeleeArmIkRequest(player: ref<PlayerPuppet>, chain: CName) -> ref<IKTargetAddEvent> {
   let ev: ref<IKTargetAddEvent> = new IKTargetAddEvent();
@@ -311,24 +310,16 @@ public func UTPPMeleeArmIkRequest(player: ref<PlayerPuppet>, chain: CName) -> re
   return ev;
 }
 
-// A new request first, then the old one is removed: the chain is never without a request in between.
-public func UTPPMeleeArmIkSwap(player: ref<PlayerPuppet>, old: ref<IKTargetAddEvent>, chain: CName) -> ref<IKTargetAddEvent> {
-  let fresh: ref<IKTargetAddEvent> = UTPPMeleeArmIkRequest(player, chain);
-  if IsDefined(old) {
-    IKTargetRemoveEvent.QueueRemoveIkTargetRemoveEvent(player, old);
-  }
-  return fresh;
-}
-
-// wanted = a covered melee weapon is drawn in UTPP third person (UTPPMeleeFullBodyWanted). The requests are renewed every 2 s
-// (a request dropped by the game comes back) and removed when that ends (weapon put away, first person, mounted, the other
-// animation pack).
-public func UTPPMeleeArmIkTick(player: ref<PlayerPuppet>, wanted: Bool, now: Float) -> Void {
+// wanted = a covered melee weapon is drawn in UTPP third person (UTPPMeleeFullBodyWanted). The requests are added once when that
+// begins and removed when it ends (weapon put away, first person, mounted, the other animation pack). They are not renewed while it
+// lasts: replacing a request moves the arm for one frame.
+public func UTPPMeleeArmIkTick(player: ref<PlayerPuppet>, wanted: Bool) -> Void {
   if wanted {
-    if !IsDefined(player.utppMeleeArmIkRight) || now - player.utppMeleeArmIkAt >= 2.0 || now < player.utppMeleeArmIkAt {
-      player.utppMeleeArmIkRight = UTPPMeleeArmIkSwap(player, player.utppMeleeArmIkRight, n"ikRightArm");
-      player.utppMeleeArmIkLeft = UTPPMeleeArmIkSwap(player, player.utppMeleeArmIkLeft, n"ikLeftArm");
-      player.utppMeleeArmIkAt = now;
+    if !IsDefined(player.utppMeleeArmIkRight) {
+      player.utppMeleeArmIkRight = UTPPMeleeArmIkRequest(player, n"ikRightArm");
+    }
+    if !IsDefined(player.utppMeleeArmIkLeft) {
+      player.utppMeleeArmIkLeft = UTPPMeleeArmIkRequest(player, n"ikLeftArm");
     }
     return;
   }
@@ -383,7 +374,7 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
     UTPPSetMeleeFullBody(want);
     UTPPSetMeleeGuard(guard);
   }
-  UTPPMeleeArmIkTick(player, want, now);
+  UTPPMeleeArmIkTick(player, want);
   UTPPMeleeAimTargetTick(player, scriptInterface, now);
 }
 
