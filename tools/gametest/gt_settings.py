@@ -25,6 +25,9 @@ DIAG_KEY = 'core.diagnosticLogs'
 DIAG_DEPS = ('core.log', 'mm.trace', 'mm.feedDump', 'camera.trace', 'perspective.log')
 DIAG_VALUES = {'off': 'off', 'timed': 'timed', 'until': 'until'}
 DIAG_LEFT_TEXT = 'diagnostic logs left ON - restore needed'
+# The mod's animation pack option (--animation-pack utpp | game): set through the ledger like the other session settings.
+PACK_KEY = 'animation.pack'
+PACK_VALUES = ('utpp', 'game')
 
 # The mod settings a test session runs with. 'author' = the values the author plays with (the harness applies them itself,
 # through the ledger, so they are put back before the game is quit); 'shipped' = the registered defaults of the same keys.

@@ -926,6 +926,12 @@ class Night:
                 values[key] = value
             else:
                 missed.append(key)
+        pack = str(getattr(self.args, 'animation_pack', '') or '')
+        if pack:
+            ent = self.settings.apply(self.settings_io(None, guard), gs.PACK_KEY, pack, '--animation-pack')
+            info['animation_pack'] = {k: ent[k] for k in ('requested', 'state', 'previous', 'note')}
+            if ent['state'] != 'applied':
+                self.log(f'[settings] WARNING: --animation-pack {pack} not applied ({ent["note"]}): the run plays the pack in force')
         # a key that was not applied keeps the value the game had: it is listed, not guessed
         self.session_settings = {'mode': mode, 'values': values, 'not_applied': missed,
                                  'differs_from_shipped': gs.differs_from_shipped(values),
@@ -5009,6 +5015,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help='mod settings of the session: author = the author\'s own values (body yaw offset 4, pelvis yaw trim 2, camera '
                         'side 1, Shinobi bonus reload on, first person in scenes off, blend 0.6), set after arming and put back before '
                         'ExitGame; shipped = the registered defaults of the same keys. The run record lists what differs from shipped.')
+    p.add_argument('--animation-pack', default='', choices=[''] + list(gs.PACK_VALUES),
+                   help="the mod's animation pack option of the session: utpp | game, set after arming through the same ledger and "
+                        'put back before ExitGame; empty (default) = the option is not touched')
     p.add_argument('--diag', default='keep', choices=['keep', 'off', 'timed', 'until'],
                    help="the mod's diagnostic logs option: keep = do not touch (default); off | timed (5 minutes) | until = set "
                         'at arm and put back (previous value read first) before every ExitGame and on every exit path; if the '

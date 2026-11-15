@@ -484,6 +484,28 @@ class SessionSettingsTests(unittest.TestCase):
         self.assertIn('NOT applied: camera.side', rec['line'])
         self.assertNotIn('camera.side', io.store)
 
+    def test_the_animation_pack_option_goes_through_the_same_ledger(self):
+        import night
+        player = dict(self.PLAYER, **{gs.PACK_KEY: 'utpp'})
+        n, io = self.make_night('shipped', player)
+        info = {}
+        n.apply_session_settings(None, info)
+        self.assertNotIn('animation_pack', info)                             # not asked for: the option is not touched
+        self.assertEqual(io.store[gs.PACK_KEY], 'utpp')
+        n, io = self.make_night('shipped', player)
+        n.args.animation_pack = 'game'
+        info = {}
+        n.apply_session_settings(None, info)
+        self.assertEqual(io.store[gs.PACK_KEY], 'game')
+        self.assertEqual(info['animation_pack']['state'], 'applied')
+        self.assertEqual([list(p) for p in info['animation_pack']['previous']], [[gs.PACK_KEY, 'utpp']])
+        res = n.settings.restore_all(io, 'test')
+        self.assertEqual(res['failed'], [])
+        self.assertEqual(io.store, player)                                   # the player's pack is back
+        args = night.build_parser().parse_args(['--out-root', 'unused', '--animation-pack', 'game'])
+        self.assertEqual(args.animation_pack, 'game')
+        self.assertEqual(night.build_parser().parse_args(['--out-root', 'unused']).animation_pack, '')
+
     def test_the_summary_line_reaches_the_body_summary(self):
         import gt_session
         d = {'run': 'r', 'result': 'ok', 'pose_body': 'woman', 'scenarios': {}, 'settings_line': 'settings author: x'}
