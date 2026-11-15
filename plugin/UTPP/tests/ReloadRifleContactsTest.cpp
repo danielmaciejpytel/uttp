@@ -13,6 +13,7 @@
 // UTPP_RELOAD_CONTACT_MUTATION=25: the reject replay / ramp-in fades towards the records as handed in (the game's girdle), section 10.
 // UTPP_RELOAD_CONTACT_MUTATION=26: the girdle is restored with the weight shrunk by the placement guard (the game's girdle), section 12.
 // UTPP_RELOAD_CONTACT_MUTATION=27: no final anatomy stage of the left arm (LimitArmFinal), sections 12 (13e) and 13.
+// UTPP_RELOAD_CONTACT_MUTATION=28: the girdle is restored with the correction weight under a hand-back that ramps with it, section 15.
 // UTPP_RELOAD_GROUND_KEEP_MUTATION=1: no ground keep, 2: no edge latch (a pistol reload begun moving stays uncorrected), 3: no girdle
 // hold after an early episode end (sections 9 and 11).
 // Every mutation build must report an assertion FAIL (ctest PASS_REGULAR_EXPRESSION "FAIL ").
@@ -1245,6 +1246,109 @@ int main(int argc,char** argv)
             std::printf("  final left arm limits: twist 150 -> 210 deg: output %.1f .. %.1f deg, largest step %.1f deg\n",minTw,maxTw,maxJump);
             Check(maxJump<=0.1f && minTw>=rt::kReloadUpperArmTwistCapDeg-0.1f && maxTw<=rt::kReloadUpperArmTwistCapDeg+0.1f,
                   "final left arm limits: a twist that wraps through 180 deg keeps the output on its side (no flip to -100)");
+        }
+    }
+
+    // 15. Entry and exit of a reload under the hand-back (kGirdleOwnUnderHandBack). In the game the hand-back weight (1 - upperScale) ramps
+    //     together with the correction weight; the records carry the game's girdle (section 10's girdle) with that share on the masked
+    //     channels. Schedule at 60 fps with the production Continuity: one frame before the reload, entry ramp of 8 frames (weight k/8), frames 3 - 6 without an accepted
+    //     solve (the replay after an accepted LOW-weight frame, HoldOnly), full weight, exit ramp of 8 frames with one replay frame, weight 0.
+    //     Every frame with the hand-back on keeps V's own clavicle and arm bone translations and V's shoulder width; the hands and the
+    //     weapon move at most at the entry-in-motion bounds per frame. (a) the rule itself: share 1 gives the correction weight bit for bit,
+    //     weight 1 gives 1. Mutation 28 restores the girdle with the correction weight (the game's girdle shows on the ramps and replays).
+    {
+        {
+            bool shareOne=true,weightOne=true;
+            integ::PoseSnapshot s=snap;s.weight=1.0f;s.upperScale=0.0f;
+            for(int i=0;i<=64;++i){const float w=float(i)/64.0f;const float g=rt::HandBackGirdleWeight(s,w);shareOne=shareOne && std::memcmp(&g,&w,sizeof(float))==0;}
+            for(int i=0;i<=64;++i){s.upperScale=float(i)/64.0f;weightOne=weightOne && (s.upperScale>=1.0f || rt::HandBackGirdleWeight(s,1.0f)==1.0f);}
+            s.upperScale=0.75f;
+            const float ramp=rt::HandBackGirdleWeight(s,0.25f);
+            std::printf("  hand-back girdle weight: share .25, weight .25 -> %.3f\n",ramp);
+            Check(shareOne && weightOne,"hand-back girdle: a hand-back at full share keeps the correction weight bit for bit, weight 1 keeps 1");
+            Check(!rt::kGirdleOwnUnderHandBack || ramp==1.0f,"hand-back girdle: a hand-back ramping with the correction restores V's own girdle in full");
+        }
+        const int lc=sk.parent[rig.left.upper],rc=sk.parent[rig.right.upper];
+        auto game=std::make_unique<ov::Pose>(*base);
+        {
+            const auto lm=native_reload::Model(sk,*base,lc).t,rm=native_reload::Model(sk,*base,rc).t;
+            const math::Vec3 in=(rm-lm)*(1.0f/gik::Len(rm-lm));
+            for(int side=0;side<2;++side)
+            {
+                const int c=side ? rc : lc;
+                auto m=native_reload::Model(sk,*game,c);
+                m.t=m.t+in*(side ? -0.08f : 0.08f)+(side ? math::Vec3{} : math::Vec3{0.0f,0.04f,0.045f});
+                game->b[c]=native_reload::Relative(native_reload::Model(sk,*game,sk.parent[c]),m);
+            }
+            game->b[rig.left.upper].t=game->b[rig.left.upper].t*1.08f;
+        }
+        const int64_t tps=10000000,step=tps/60;
+        const int frames=44;
+        const auto weightAt=[](int k){return k<8 ? float(k+1)/8.0f : k<30 ? 1.0f : k<38 ? float(37-k)/8.0f : 0.0f;};
+        const auto heldAt=[](int k){return (k>=3 && k<=6) || k==33;};
+        const auto angle=[](math::Quat a,math::Quat b){
+            return 2.0f*std::acos(std::clamp(std::fabs(math::QuatDot(math::QuatNormalize(a),math::QuatNormalize(b))),0.0f,1.0f))*180.0f/math::kPi;};
+        const float wOwn=gik::Len(native_reload::Model(sk,*base,rig.left.upper).t-native_reload::Model(sk,*base,rig.right.upper).t);
+        const float wGame=gik::Len(native_reload::Model(sk,*game,rig.left.upper).t-native_reload::Model(sk,*game,rig.right.upper).t);
+        for(int pass=0;pass<2;++pass)
+        {
+            const bool pistol=pass==1;
+            rt::Continuity state;
+            float clavT=0,clavTRamp=0,clavTReplay=0,armT=0,clavDeg=0,minWidth=9,socketStep=0,handStep=0,weaponStep=0,minReplayOwn=9,minRampGirdle=9;
+            int accepted=0,replays=0,rampAccepted=0;bool ok=true;
+            math::Vec3 prevSocket{},prevHand{},prevWeapon{};bool havePrev=false;int handStepAt=-2;
+            for(int k=-1;k<frames;++k) // k = -1: the frame before the reload (weight 0, no hand-back)
+            {
+                const float w=weightAt(k);const bool held=heldAt(k);
+                integ::PoseSnapshot s=snap;s.traceOverlay=pistol ? int(ov::PoseOverlay::Pistol2H) : int(ov::PoseOverlay::Rifle);
+                s.sequence=uint64_t(5000+k);s.reloadContactsWeight=w;s.weight=1.0f;s.upperScale=1.0f-w;s.lowerScale=1.0f;
+                std::vector<unsigned char> records;Records(*game,records);rt::Cycle cycle;
+                const bool captured=!held && w>0.0f && rt::Capture(prepared,s,records.data(),sk.n,true,cycle);
+                integ::BlendIntoRecords(records.data(),uint32_t(sk.n),s,1.0f);
+                reload_trace::Record rec;reload_trace::Clear(rec);state.trace=&rec;
+                native_reload_contacts::Result r;bool written=false;
+                if(held)written=rt::HoldOnly(prepared,s,records.data(),sk.n,true,state,int64_t(k+1)*step,tps);
+                else if(captured)written=rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,w,rt::kAuthoredContactMinReach,&state,int64_t(k+1)*step,tps);
+                state.trace=nullptr;
+                const bool acc=!held && written && r.ok && rec.exit==reload_trace::kExitAccepted;
+                accepted+=acc ? 1 : 0;
+                if(held && written){++replays;minReplayOwn=std::min(minReplayOwn,std::isfinite(rec.replayOwnWeight) ? rec.replayOwnWeight : -1.0f);}
+                if(acc && w<1.0f){++rampAccepted;minRampGirdle=std::min(minRampGirdle,rec.girdleWeight);}
+                ov::Pose o;
+                if(!rt::Read(prepared,records.data(),o)){ok=false;continue;}
+                const float ct=std::max(gik::Len(o.b[lc].t-base->b[lc].t),gik::Len(o.b[rc].t-base->b[rc].t));
+                float at=0.0f;
+                for(const int b:{rig.left.upper,rig.left.lower,rig.left.hand,rig.right.upper,rig.right.lower,rig.right.hand})
+                    at=std::max(at,gik::Len(o.b[b].t-base->b[b].t));
+                clavT=std::max(clavT,ct);armT=std::max(armT,at);
+                if(held)clavTReplay=std::max(clavTReplay,ct);else if(w<1.0f)clavTRamp=std::max(clavTRamp,ct);
+                clavDeg=std::max(clavDeg,std::max(angle(o.b[lc].r,base->b[lc].r),angle(o.b[rc].r,base->b[rc].r)));
+                minWidth=std::min(minWidth,gik::Len(native_reload::Model(sk,o,rig.left.upper).t-native_reload::Model(sk,o,rig.right.upper).t));
+                const math::Vec3 socket=inSpine3(o,rig.left.upper),hand=native_reload::Model(sk,o,rig.left.hand).t,
+                                 weapon=native_reload::Model(sk,o,rig.weaponRight).t;
+                if(havePrev)
+                {
+                    socketStep=std::max(socketStep,gik::Len(socket-prevSocket));
+                    if(gik::Len(hand-prevHand)>handStep){handStep=gik::Len(hand-prevHand);handStepAt=k;}
+                    weaponStep=std::max(weaponStep,gik::Len(weapon-prevWeapon));
+                }
+                prevSocket=socket;prevHand=hand;prevWeapon=weapon;havePrev=true;
+            }
+            std::printf("  hand-back entry / exit (%s): accepted %d (ramp %d), replays %d | own width %.1fcm, game %.1fcm, min width %.1fcm | "
+                        "clavicle translation %.2fmm (ramp %.2f, replay %.2f), arm bone translation %.2fmm, clavicle turn %.1fdeg | "
+                        "girdle weight on ramp frames min %.3f, replay own weight min %.3f | step per frame: socket %.2fcm, left hand %.2fcm (frame %d), weapon %.2fcm\n",
+                        pistol ? "Pistol2H" : "Rifle",accepted,rampAccepted,replays,wOwn*100.0f,wGame*100.0f,minWidth*100.0f,clavT*1000.0f,
+                        clavTRamp*1000.0f,clavTReplay*1000.0f,armT*1000.0f,clavDeg,minRampGirdle,minReplayOwn,socketStep*100.0f,handStep*100.0f,
+                        handStepAt,weaponStep*100.0f);
+            const char* tag=pistol ? "hand-back entry / exit (pistol)" : "hand-back entry / exit (rifle)";
+            Check(ok && rampAccepted>=8 && replays==5 && wGame<wOwn-0.10f,
+                  (std::string("fixture: ")+tag+": accepted ramp frames, 5 replay frames, the game's girdle 10 cm narrower than V's own").c_str());
+            Check(clavT<0.001f && armT<0.001f,(std::string(tag)+": V's own clavicle and arm bone translations on every frame").c_str());
+            Check(clavDeg<=20.5f && minWidth>=wOwn-0.005f && socketStep<0.015f,
+                  (std::string(tag)+": V's shoulder width, the clavicle turns at most by the reach step, no shoulder pop").c_str());
+            Check(handStep<=0.055f && weaponStep<=0.05f,(std::string(tag)+": no step of the left hand / weapon above the entry bounds").c_str());
+            Check(minRampGirdle>=0.999f && minReplayOwn>=0.999f,
+                  (std::string(tag)+": the record shows V's own girdle in full on ramp frames and replays").c_str());
         }
     }
     std::printf("%d passed, %d failed\n",g_pass,g_fail);

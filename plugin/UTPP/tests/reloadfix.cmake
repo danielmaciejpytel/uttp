@@ -185,6 +185,13 @@ if(DEFINED _utpp_pmotion_wov)
   target_compile_definitions(utpp_reload_rifle_contacts_cmut27 PRIVATE UTPP_RELOAD_CONTACT_MUTATION=27)
   add_test(NAME utpp_reload_rifle_contacts_cmut27 COMMAND utpp_reload_rifle_contacts_cmut27 "${_utpp_pmotion_wov}")
   set_tests_properties(utpp_reload_rifle_contacts_cmut27 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
+  # Contact mutation 28: the girdle is restored with the correction weight under a hand-back that ramps with it (entry / exit), section 15.
+  add_executable(utpp_reload_rifle_contacts_cmut28 tests/ReloadRifleContactsTest.cpp)
+  target_compile_options(utpp_reload_rifle_contacts_cmut28 PRIVATE ${UTPP_WARNINGS} /EHsc)
+  target_compile_features(utpp_reload_rifle_contacts_cmut28 PRIVATE cxx_std_20)
+  target_compile_definitions(utpp_reload_rifle_contacts_cmut28 PRIVATE UTPP_RELOAD_CONTACT_MUTATION=28)
+  add_test(NAME utpp_reload_rifle_contacts_cmut28 COMMAND utpp_reload_rifle_contacts_cmut28 "${_utpp_pmotion_wov}")
+  set_tests_properties(utpp_reload_rifle_contacts_cmut28 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
   # Ground keep mutations (sections 9 and 11): 1 = no keep (former run-start withdrawal), 2 = no edge latch (a pistol reload begun moving
   # stays uncorrected), 3 = no girdle hold after an early episode end.
   foreach(_m 1 2 3)

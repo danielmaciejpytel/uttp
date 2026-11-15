@@ -1505,6 +1505,41 @@ inline constexpr bool kGirdlePlacementUngated=false;
 #else
 inline constexpr bool kGirdlePlacementUngated=true;
 #endif
+// The reload hand-back (upper-body mask at upperScale = 1 - the reload envelope) ramps in and out together with the correction weight.
+// On the masked channels the records then carry the game's girdle with the share 1 - weight * upperScale; restored with the correction
+// weight w, (1 - w) of that share stayed: on the entry and exit ramps the clavicles sat up to a quarter of the game's girdle offset away
+// from V's own (left clavicle 6.4 cm of a 25.5 cm offset), and a replay after an accepted ramp frame rebuilt the girdle with that frame's
+// low weight (7.8 cm). The girdle is therefore restored with the weight that leaves only the part of the game's share the correction
+// does not cover: min(1, w / share). Share 1 (hand-back at full weight) gives w and weight 1 gives 1: those frames are unchanged.
+// Mutation 28 restores the girdle with w again.
+#if defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==28
+inline constexpr bool kGirdleOwnUnderHandBack=false;
+#else
+inline constexpr bool kGirdleOwnUnderHandBack=true;
+#endif
+// Share of the game's pose on the masked channels after BlendIntoRecords (same clamps: weight <= 0 or non-finite writes nothing,
+// a non-finite upperScale counts as 1).
+inline float HandBackGameShare(const integ::PoseSnapshot& s)
+{
+    const float w=s.weight>0.0f ? std::min(s.weight,1.0f) : 0.0f;
+    const float us=std::isfinite(s.upperScale) ? std::clamp(s.upperScale,0.0f,1.0f) : 1.0f;
+    return 1.0f-w*us;
+}
+// Weight of V's own girdle for a correction weight `w` (kGirdleOwnUnderHandBack). Returns `w` itself where the rule does not apply.
+inline float HandBackGirdleWeight(const integ::PoseSnapshot& s,float w)
+{
+    if constexpr(!kGirdleOwnUnderHandBack)
+    {
+        (void)s;
+        return w;
+    }
+    else
+    {
+        const float share=HandBackGameShare(s);
+        if(!(share>0.0f) || !(w>0.0f) || !(w<=1.0f))return w;
+        return w>=share ? 1.0f : w/share;
+    }
+}
 // V's own value of masked channel `b` restored over `base` with weight `w` (the restoreMasked rule); unmasked channels keep `base`.
 inline bool OwnChannel(const Prepared& p,const integ::PoseSnapshot& s,int b,const ov::Xf& base,float w,ov::Xf& out)
 {
@@ -1542,6 +1577,7 @@ struct RejectHold
     int64_t lastTicks=0;
     float weight=0,amp=1;
     float girdleWeight=0; // weight of V's own girdle in the last accepted frame (GirdlePlacementUngated: before the placement guard)
+    float usedOwnWeight=0; // weight of V's own girdle the last OnReject call rebuilt (diagnostic record only; NaN = not reached)
     float headM=-1.0f; // weapon-head distance of the previous frame's final output (reference of HeadClearance); < 0 unknown
     int n=0;
     int bone[8]{};
@@ -1605,6 +1641,7 @@ struct RejectHold
     bool OnReject(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* records,uint32_t count,
                   int64_t ticks,int64_t ticksPerSecond,float currentWeight)
     {
+        usedOwnWeight=std::numeric_limits<float>::quiet_NaN();
         if constexpr(kRejectFade)
         {
             if(!Advance(s.rig,ticks,ticksPerSecond,-1.0f)){amp=0.0f;haveDelta=false;return false;}
@@ -1616,9 +1653,11 @@ struct RejectHold
             ov::Pose base;
             if(!Read(p,records,base))return false;
             // Replay reference: the records, or (delta taken against GirdleReference) V's own girdle restored with the lower of the
-            // current and the recorded weight - continuous with the last accepted frame and with the exit ramp of the weight.
+            // current and the recorded weight - continuous with the last accepted frame and with the exit ramp of the weight. The current
+            // weight counts as its girdle weight under the hand-back (HandBackGirdleWeight: 1 while the hand-back ramps with it).
             ov::Xf ref[8];
-            const float ownWeight=std::min(currentWeight,girdleWeight);
+            const float ownWeight=std::min(HandBackGirdleWeight(s,currentWeight),girdleWeight);
+            usedOwnWeight=ownWeight;
             for(int k=0;k<n;++k)
             {
                 const int b=bone[k];
@@ -2115,8 +2154,10 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
     // Fail open: a skeleton without that chain keeps the absolute native model positions.
     // Ordinary action masking retained native shoulders/arms. Restore ONLY those mask channels from the final authored snapshot
     // (weighted like the correction); lower body and unmasked torso keep the just-blended pose.
-    // Girdle weight (kGirdlePlacementUngated): the correction weight before the placement guard below.
-    const float girdleWeight=correctionWeight;
+    // Girdle weight (kGirdlePlacementUngated): the correction weight before the placement guard below; under a hand-back that ramps with
+    // the correction, V's own girdle in full (kGirdleOwnUnderHandBack). The arm limits keep the weight before the guard.
+    const float limitWeight=correctionWeight;
+    const float girdleWeight=HandBackGirdleWeight(s,correctionWeight);
     const auto armChainBone=[&](int i){
         return i==p.arms.left.upper || i==p.arms.left.lower || i==p.arms.left.hand ||
                i==p.arms.right.upper || i==p.arms.right.lower || i==p.arms.right.hand;};
@@ -2241,7 +2282,7 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
             float* const prev=swivelStep>=0.0f ? &continuity->swivel.deg[side] : nullptr;
             const ArmLimitResult limited=LimitArmBySwivel(candidate,p.skeleton,arm->upper,arm->lower,arm->hand,kReloadPronationLimitDeg,
                                                           kReloadWristBendLimitDeg,kReloadMaxSwivelDeg,
-                                                          kGirdlePlacementUngated ? girdleWeight : correctionWeight,prev,swivelStep);
+                                                          kGirdlePlacementUngated ? limitWeight : correctionWeight,prev,swivelStep);
             if(tr && side==0){tr->swivelDeg=limited.swivelDeg;if(limited.applied)tr->flags|=reload_trace::kFlagSwivel;}
             ++side;
         }
@@ -2379,7 +2420,7 @@ inline bool Finish(const Prepared& p,const integ::PoseSnapshot& s,
         written=rejectHold->OnReject(p,s,records,count,nowTicks,ticksPerSecond,correctionWeight);
         if(tr)
         {
-            tr->replayOwnWeight=std::min(correctionWeight,rejectHold->girdleWeight);
+            tr->replayOwnWeight=rejectHold->usedOwnWeight;
             if(written)tr->flags|=reload_trace::kFlagReplayWritten;
         }
     }
@@ -2420,7 +2461,7 @@ inline bool HoldOnly(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* rec
     const bool written=state.reject.OnReject(p,s,records,count,nowTicks,ticksPerSecond,s.reloadContactsWeight);
     if(tr)
     {
-        tr->replayOwnWeight=std::min(s.reloadContactsWeight,state.reject.girdleWeight);
+        tr->replayOwnWeight=state.reject.usedOwnWeight;
         if(written)tr->flags|=reload_trace::kFlagReplayWritten;
     }
     JointTrace joints;
