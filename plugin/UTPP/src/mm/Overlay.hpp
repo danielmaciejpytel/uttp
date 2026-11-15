@@ -172,11 +172,149 @@ struct LayerInputs
     };
     TorsoSide torso[2];
     float torsoCrouch = 0.0f; // crouch share s of B (0 < s < 1 while the sides are set)
+    // Form of the legs region (see ComposeLayers, knee hinge). The runtime keeps the default (Mesh); the other forms exist so tests
+    // and analysis tools can compare them on the same frame.
+    enum class LegsForm : uint8_t
+    {
+        Hinge, // mesh-space D_MS(B -> L), the shins with the local D_LS(B -> L)
+        Mesh,  // mesh-space D_MS(B -> L) on every bone (the runtime form)
+        Local  // local D_LS(B -> L) on every bone
+    };
+    LegsForm legsForm = LegsForm::Mesh;
+    // Swing gate of the legs region (LegSwingGate below): share of the composed legs weight each leg keeps (left, right) and the
+    // thigh bone of that leg. A share of 1 or a thigh < 0 leaves the leg as composed, bit for bit (the default).
+    float legsShare[2] = {1.0f, 1.0f};
+    int legsThigh[2] = {-1, -1};
 };
+
+// Swing gate of the legs region (run / sprint stop and start with a weapon drawn). The legs region is OP + D_MS(B -> L) at the
+// weight c[Layering_Legs]; a leg far from the base pose B (a swing leg) receives the mesh rotation change of its shin on top of a
+// thigh of another orientation, so the knee stops being a hinge (shin roll 33 - 45 deg, side bend 25 - 29 deg) whenever that weight
+// is above 0 while the leg swings. The weight only changes inside the overlay crossfade between the moving pose (Layering_Legs 0)
+// and the idle stance (1), so the gate acts there: per leg, a cap on the crossfade's legs weight w that
+//   - does not rise while the leg's foot has no contact (swing) or while its knee flex is more than kneeFreeDeg away from the base
+//     pose's knee flex (a planted leg still deep in the stop: the twist scales with that flex change), and follows w down at once;
+//   - while w is falling (a start or another fade out of the leg layer) also falls by kFallRate per second during a swing, so the
+//     lifting leg leaves the layer ahead of the crossfade;
+//   - with the foot planted and the knee near the base pose's, follows w when it was not held (cap == w: the ungated composition bit
+//     for bit), and a held cap rises by kRiseRate per second (the rate of the 0.2 s pose crossfade), clamped to w, so it lands on w
+//     exactly. kneeFreeDeg sits above the knee flex difference of the idle loops against the stand idle base pose (11.5 / 12.7 deg),
+//     so a held cap is released in the idle stance.
+// A settled stance (w steady) and plain locomotion (w steady) are never changed. Unknown contacts or knees count as planted / free.
+// The cap is a share of w (Share), applied after the air / idle pistol factors, which multiply the same weight, so a landing keeps
+// its own fade. Mutation 1 (UTPP_OVLEGS_SWING_MUTATION) = no gate; 2 = no faster fall on a start.
+//
+// Knee flex (deg) of a shin's local rotation against its rest rotation: the z angle of the intrinsic ZYX decomposition (bend > 0).
+inline float KneeFlexDeg(const Quat& aRest, const Quat& aLocal)
+{
+    const Quat q = math::QuatNormalize(math::QuatMul(math::QuatInv(aRest), aLocal));
+    const float m00 = 1.0f - 2.0f * (q.y * q.y + q.z * q.z), m10 = 2.0f * (q.x * q.y + q.z * q.w);
+    return -std::atan2(m10, m00) * (180.0f / math::kPi);
+}
+
+struct LegSwingGate
+{
+    static constexpr float kRiseRate = 5.0f;   // 1 / s: one pose crossfade (OverlayTimes::poseSwitch 0.2 s)
+    static constexpr float kFallRate = 10.0f;  // 1 / s, only during a swing while w falls
+    static constexpr float kContactOn = 0.5f;  // contact >= this = planted
+    float kneeFreeDeg = 13.0f; // a planted leg whose knee flex is within this of the base pose's knee flex is free to rise
+    float cap[2] = {1.0f, 1.0f};
+    float prevW = 0.0f;
+    bool have = false;
+
+    void Reset() { have = false; }
+    // aW: legs layer weight of the overlay crossfade (before the air / idle pistol factors); aContact: foot contact per leg
+    // (left, right), null = unknown (planted); aKneeDeg: |knee flex of the locomotion pose - knee flex of the base pose| per leg
+    // (KneeFlexDeg), null = unknown (free).
+    void Update(float aW, const float* aContact, const float* aKneeDeg, float aDt)
+    {
+        const float w = Clamp01(aW);
+        if (!have)
+        {
+            cap[0] = cap[1] = w;
+            prevW = w;
+            have = true;
+            return;
+        }
+        const float dt = aDt > 0.0f && std::isfinite(aDt) ? aDt : 0.0f;
+        const bool falling = w < prevW;
+        for (int s = 0; s < 2; ++s)
+        {
+            float c = cap[s];
+            const bool planted = !aContact || !(aContact[s] < kContactOn);
+            const bool free = planted && (!aKneeDeg || !(aKneeDeg[s] > kneeFreeDeg));
+            if (free) // a cap that followed w keeps following it; a held cap rises back onto w
+                c = c >= prevW ? w : std::min(w, c + kRiseRate * dt);
+            else if (planted) // planted, knee far from the base pose: no rise
+                c = std::min(c, w);
+            else
+            {
+                c = std::min(c, w);
+#if !(defined(UTPP_OVLEGS_SWING_MUTATION) && UTPP_OVLEGS_SWING_MUTATION == 2)
+                if (falling)
+                    c = std::max(0.0f, c - kFallRate * dt);
+#endif
+            }
+            cap[s] = c;
+        }
+        prevW = w;
+    }
+    // Share of w the leg keeps (1 = ungated).
+    float Share(int aSide, float aW) const
+    {
+#if defined(UTPP_OVLEGS_SWING_MUTATION) && UTPP_OVLEGS_SWING_MUTATION == 1
+        (void)aSide;
+        (void)aW;
+        return 1.0f;
+#else
+        const float w = Clamp01(aW);
+        if (!have || !(cap[aSide] < w))
+            return 1.0f;
+        return cap[aSide] / w;
+#endif
+    }
+};
+
+// Shins of the legs region: the children of the thighs, found on the pelvis mask (a thigh has pelvis weight 0 under a parent with
+// pelvis weight > 0). Returns the count (0 = not found: the legs region keeps the mesh-space form).
+inline int FindShins(const Skeleton& aSk, const Regions& aR, int (&aOut)[4])
+{
+    int thighs = 0, n = 0;
+    for (int i = 0; i < aSk.n; ++i)
+    {
+        const int p = aSk.parent[i];
+        if (p < 0 || aR.pelvis.w[i] > 0.0f || aR.pelvis.w[p] <= 0.0f)
+            continue;
+        ++thighs;
+        for (int k = i + 1; k < aSk.n; ++k)
+            if (aSk.parent[k] == i && n < 4)
+                aOut[n++] = k;
+    }
+    return thighs == 2 && n >= 2 ? n : 0;
+}
+
+// Gives each shin the local rotation (L_shin * B_shin^-1) * OP_shin (aDls = D_LS(B -> L) at full weight, aOp = the overlay pose the
+// region started from) under the thigh of aIo, and keeps the mesh rotation of the shin's children (the foot).
+inline void HingeShins(const Skeleton& aSk, const int* aShin, int aCount, const Additive& aDls, const Pose& aOp, Pose& aIo)
+{
+    Quat m[kMaxBones];
+    MeshRotations(aSk, aIo, m);
+    for (int j = 0; j < aCount; ++j)
+    {
+        const int k = aShin[j];
+        const Quat q = math::QuatNormalize(math::QuatMul(aDls.b[k].r, aOp.b[k].r));
+        const Quat mk = math::QuatNormalize(math::QuatMul(m[aSk.parent[k]], q));
+        for (int c = k + 1; c < aSk.n; ++c)
+            if (aSk.parent[c] == k)
+                aIo.b[c].r = math::QuatNormalize(math::QuatMul(math::QuatInv(mk), m[c]));
+        aIo.b[k].r = q;
+    }
+}
 
 struct LayerScratch // ~100 KB; keep one per character, not on the stack of a hook
 {
-    Additive dLms, dLls, dSide;
+    Additive dLms, dLls, dSide, dSideLs;
+    int shins[4]{};
     Pose inner, regionTmp, legs, pelvis, spine, head, armL, armR, acc;
     Pose spineSide[2], headSide[2], legsSide[2], pelvisSide[2];
 };
@@ -193,9 +331,13 @@ inline void ComposeLayers(const Skeleton& aSk, const Regions& aR, const LayerInp
     const Curves& c = aIn.curves;
     MakeAdditive(aSk, *aIn.B, L, true, aS.dLms);
     MakeAdditive(aSk, *aIn.B, L, false, aS.dLls);
-    auto region = [&](float aAdd, bool aLocalLoco, float aWeight, Pose& aDst, float aStyle = 1.0f, const Pose* aOp = nullptr) {
+    int shinCount = 0; // > 0: the legs take the knee hinge (below)
+    auto region = [&](float aAdd, bool aLocalLoco, float aWeight, Pose& aDst, float aStyle = 1.0f, const Pose* aOp = nullptr,
+                      bool aHinge = false) {
         aS.inner = aOp ? *aOp : *aIn.OP;
         ApplyAdditive(aSk, aS.inner, aLocalLoco ? aS.dLls : aS.dLms, aAdd);
+        if (aHinge && shinCount > 0 && aWeight > kZeroWeight)
+            HingeShins(aSk, aS.shins, shinCount, aS.dLls, aOp ? *aOp : *aIn.OP, aS.inner);
         if (aIn.dP && aIn.dPWeight > 0.0f)
             ApplyAdditive(aSk, aS.inner, *aIn.dP, aAdd * aIn.dPWeight * Clamp01(aStyle));
         Blend(L, aS.inner, aWeight, aDst);
@@ -239,9 +381,27 @@ inline void ComposeLayers(const Skeleton& aSk, const Regions& aR, const LayerInp
 #else
     const bool lowerSides = sides;
 #endif
+    // Knee hinge (run / sprint stop with a weapon drawn). With the mesh-space additive on every leg bone (the runtime form, Mesh) the
+    // shin receives the mesh rotation change of L against B on top of a thigh of the overlay pose, which has another orientation, so a
+    // leg far from the base pose (a swing leg while the overlay crossfades from the moving pose, legs layering 0, to the idle stance,
+    // legs layering 1) can roll 33 - 39 deg about its own axis and bend 25 - 27 deg sideways at the knee. The Hinge form gives each shin
+    // the local change instead, (L_shin * B_shin^-1) * OP_shin under the composed thigh (a hinge when the three knees are), and keeps
+    // the thighs and feet in mesh space; the stance fade sides do the same with D_LS(B_side -> L). It is not the runtime form yet: the
+    // base poses' knees are not hinges like the locomotion knees, so the Hinge form also moves the settled weapon stance and the stance
+    // return after a landing. At L = B every form gives OP. tests/OverlayLegsHingeTest.cpp compares the forms; mutation 1
+    // (UTPP_OVLEGS_HINGE_MUTATION) = the Mesh form on both paths whatever the input asks for.
+#if defined(UTPP_OVLEGS_HINGE_MUTATION) && UTPP_OVLEGS_HINGE_MUTATION == 1
+    const LayerInputs::LegsForm legsForm = LayerInputs::LegsForm::Mesh;
+#else
+    const LayerInputs::LegsForm legsForm = aIn.legsForm;
+#endif
+    const bool legsLocal = legsForm == LayerInputs::LegsForm::Local;
+    const bool legsHinge = legsForm == LayerInputs::LegsForm::Hinge;
+    if (legsHinge)
+        shinCount = FindShins(aSk, aR, aS.shins);
     if (!lowerSides)
     {
-        region(1.0f, false, c[kLegs], aS.legs, 1.0f, aIn.OPLower);
+        region(1.0f, legsLocal, c[kLegs], aS.legs, 1.0f, aIn.OPLower, legsHinge);
         region(1.0f, false, c[kPelvis], aS.pelvis, 1.0f, aIn.OPLower);
     }
     if (sides)
@@ -250,9 +410,13 @@ inline void ComposeLayers(const Skeleton& aSk, const Regions& aR, const LayerInp
         {
             const LayerInputs::TorsoSide& sd = aIn.torso[k];
             MakeAdditive(aSk, *sd.B, L, true, aS.dSide);
-            auto side = [&](float aAdd, float aWeight, Pose& aDst) {
+            if ((legsLocal || shinCount > 0) && lowerSides)
+                MakeAdditive(aSk, *sd.B, L, false, aS.dSideLs); // knee hinge: the legs of each side as on the single path
+            auto side = [&](float aAdd, float aWeight, Pose& aDst, const Additive* aD = nullptr, bool aHinge = false) {
                 aS.inner = *sd.OP;
-                ApplyAdditive(aSk, aS.inner, aS.dSide, aAdd);
+                ApplyAdditive(aSk, aS.inner, aD ? *aD : aS.dSide, aAdd);
+                if (aHinge && shinCount > 0 && aWeight > kZeroWeight)
+                    HingeShins(aSk, aS.shins, shinCount, aS.dSideLs, *sd.OP, aS.inner);
                 if (aIn.dP && aIn.dPWeight > 0.0f)
                     ApplyAdditive(aSk, aS.inner, *aIn.dP, aAdd * aIn.dPWeight);
                 Blend(L, aS.inner, aWeight, aDst);
@@ -261,7 +425,7 @@ inline void ComposeLayers(const Skeleton& aSk, const Regions& aR, const LayerInp
             side(sd.headAdd, sd.head, aS.headSide[k]);
             if (lowerSides)
             {
-                side(1.0f, sd.legs, aS.legsSide[k]);
+                side(1.0f, sd.legs, aS.legsSide[k], legsLocal ? &aS.dSideLs : nullptr, legsHinge);
                 side(1.0f, sd.pelvis, aS.pelvisSide[k]);
             }
         }
@@ -278,6 +442,24 @@ inline void ComposeLayers(const Skeleton& aSk, const Regions& aR, const LayerInp
     {
         region(c[kSpineAdd], false, c[kSpine], aS.spine, 1.0f, opTorso);
         region(c[kHeadAdd], false, c[kHead], aS.head, 1.0f, opTorso);
+    }
+    // Swing gate (LegSwingGate): a gated leg keeps the share of its composed legs weight, Blend(L, legs, share); the thigh takes the
+    // mesh rotation of that blend (the pelvis layer above keeps a thigh's mesh rotation), the rest of the leg its local transforms.
+    for (int side = 0; side < 2; ++side)
+    {
+        const int th = aIn.legsThigh[side];
+        if (th <= 0 || th >= aSk.n || !(aIn.legsShare[side] < 1.0f))
+            continue;
+        Blend(L, aS.legs, aIn.legsShare[side], aS.regionTmp);
+        Quat mL[kMaxBones], mT[kMaxBones];
+        MeshRotations(aSk, aS.legs, mL);
+        MeshRotations(aSk, aS.regionTmp, mT);
+        const int p = aSk.parent[th];
+        aS.legs.b[th] = aS.regionTmp.b[th];
+        aS.legs.b[th].r = math::QuatNormalize(math::QuatMul(math::QuatInv(mL[p]), mT[th]));
+        for (int k = th + 1; k < aSk.n; ++k)
+            if (aSk.IsAncestorOrSelf(th, k))
+                aS.legs.b[k] = aS.regionTmp.b[k];
     }
     region(c[kArmLAdd], true, c[kArmL], aS.armL, aIn.styleArmL);
     region(c[kArmRAdd], true, c[kArmR], aS.armR, aIn.styleArmR);

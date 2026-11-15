@@ -454,8 +454,11 @@ public:
     // must not shorten the touchdown blend to 0). Stays armed until a request consumes it or it is disarmed.
     void SetIgnoreDeficitOnNextBlend(bool aOn) { m_ignoreDeficit = aOn; }
     bool IgnoreDeficitArmed() const { return m_ignoreDeficit; }
+    // Swing gate of the weapon pose's legs layer (ov::LegSwingGate); on by default, off = the ungated composition (analysis tools).
+    void SetLegSwingGate(bool aOn) { m_legSwingOn = aOn; }
     void Reset()
     {
+        m_legSwing.Reset();
         m_inertial.Reset();
         m_stack.Reset();
         m_externalBase = m_usesLiveBase = false;
@@ -549,6 +552,31 @@ private:
             info.inertialActive = m_inertial.Active();
             info.inertialDuration = m_inertial.Duration();
         }
+        // foot contacts of the base pose for the swing gate of the legs layer: the live stack's blended signals, the matched clip's
+        // contact curves, none for an external pose (counts as planted)
+        float legContact[2] = {1.0f, 1.0f};
+        bool legContactKnown = false;
+        if (live)
+        {
+            legContact[0] = m_stack.OutputSignals().left;
+            legContact[1] = m_stack.OutputSignals().right;
+            legContactKnown = true;
+        }
+        else if (!external && aMatch.clip >= 0 && static_cast<uint32_t>(aMatch.clip) < m_db->NumClips() && std::isfinite(aMatch.clipTime))
+        {
+            const auto& rec = m_db->Clip(static_cast<uint32_t>(aMatch.clip));
+            if (rec.numFrames > 0)
+            {
+                const float ph = std::clamp(aMatch.clipTime * m_db->Header().fps, 0.0f, static_cast<float>(rec.numFrames - 1));
+                const uint32_t f0 = static_cast<uint32_t>(ph), f1 = std::min(f0 + 1, rec.numFrames - 1);
+                const float u = ph - static_cast<float>(f0);
+                const auto& c0 = m_db->Contact(rec.firstFrame + f0);
+                const auto& c1 = m_db->Contact(rec.firstFrame + f1);
+                legContact[0] = c0.l + (c1.l - c0.l) * u;
+                legContact[1] = c0.r + (c1.r - c0.r) * u;
+                legContactKnown = true;
+            }
+        }
         m_externalBase = external;
         m_usesLiveBase = live;
         m_havePrev = true;
@@ -577,6 +605,24 @@ private:
         {
             ToOv(m_base.data(), *m_L);
             info.curves = BuildLayerInputs();
+            // swing gate (ov::LegSwingGate) on the crossfade's legs weight, before the idle pistol / air factors
+            const float legsRaw = info.curves[ov::kLegs];
+            float kneeDeg[2] = {0.0f, 0.0f};
+            bool kneeKnown = true;
+            for (int side = 0; side < 2; ++side)
+            {
+                const int shin = m_legDb[side][1];
+                const int o = shin >= 0 && static_cast<size_t>(shin) < m_dbToOv.size() ? m_dbToOv[static_cast<size_t>(shin)] : -1;
+                if (o < 0)
+                    kneeKnown = false;
+                else
+                {
+                    const auto& rr = m_db->RigRest(static_cast<uint32_t>(shin));
+                    const math::Quat rest = math::QuatNormalize(math::Quat{rr.qx, rr.qy, rr.qz, rr.qw});
+                    kneeDeg[side] = std::fabs(ov::KneeFlexDeg(rest, m_L->b[o].r) - ov::KneeFlexDeg(rest, m_B->b[o].r));
+                }
+            }
+            m_legSwing.Update(legsRaw, legContactKnown ? legContact : nullptr, kneeKnown ? kneeDeg : nullptr, aDt);
             const float idleLower = m_machine.LowerIdlePistolWeight(); // idle weight of the B2 keys
             auto scaleLower = [&](ov::Curves& aCurves) { // the legs / pelvis weights of the evaluator: info.curves and the stance sides below
                 ov::PreserveIdlePistolLowerBody(m_machine, aIn.bodyWoman, aCurves, idleLower);
@@ -619,6 +665,13 @@ private:
             li.styleArmR = ov::IdlePistolRightArmStyleWeight(m_machine, aIn.bodyWoman) *
                            ov::IdlePistolRightArmStyleWeight(m_machine, aIn.maleIdlePistolStance, ov::Style::Masculine); // x 1.0f: bit-identical for either body alone
             const ov::Skeleton& sk = m_ov->Skel();
+            if (m_legSwingOn)
+                for (int side = 0; side < 2; ++side)
+                {
+                    const int th = m_legDb[side][0];
+                    li.legsThigh[side] = th >= 0 && static_cast<size_t>(th) < m_dbToOv.size() ? m_dbToOv[static_cast<size_t>(th)] : -1;
+                    li.legsShare[side] = m_legSwing.Share(side, legsRaw);
+                }
             ov::ComposeLayers(sk, m_ov->Masks(), li, *m_scratch, *m_lay);
             KeepLowerFootHeight(li, info);
             // Mesh-space arms put the whole locomotion Spine3 deviation into the clavicle (Turn_180 aim-align, heavy
@@ -1686,7 +1739,10 @@ private:
             const int foot = m_dbToOv[m_legDb[side][2]];
             const float d0 = OvBoneZ(*aLi.torso[0].OP, foot) - OvBoneZ(*aLi.torso[0].B, foot);
             const float d1 = OvBoneZ(*aLi.torso[1].OP, foot) - OvBoneZ(*aLi.torso[1].B, foot);
-            const float target = OvBoneZ(*aLi.L, foot) + (1.0f - s) * c0 * d0 + s * c1 * d1;
+            // a leg held by the swing gate (ov::LegSwingGate) carries that share of the overlay's offset
+            const float share = aLi.legsShare[side];
+            const float target = share < 1.0f ? OvBoneZ(*aLi.L, foot) + share * ((1.0f - s) * c0 * d0 + s * c1 * d1)
+                                               : OvBoneZ(*aLi.L, foot) + (1.0f - s) * c0 * d0 + s * c1 * d1;
             const float dz = gate * std::fmax(0.0f, target - OvBoneZ(*m_lay, foot));
             if (!std::isfinite(dz))
                 return;
@@ -1783,6 +1839,8 @@ private:
     const ov::OverlayFile* m_ov = nullptr;
     uint32_t m_n = 0;
     std::vector<int> m_dbToOv;
+    ov::LegSwingGate m_legSwing; // swing gate of the legs layer (ComposeLayers legsShare)
+    bool m_legSwingOn = true;
     motionFeet::Warp m_lowerWarp; // OVLEGS: KeepLowerFootHeight
     bool m_lowerReady = false;
     std::vector<BoneTransform> m_lowerPose;
