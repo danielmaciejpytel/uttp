@@ -31,6 +31,13 @@ INVALID (not scored, listed in `invalid_phases`), V leaves the vehicle again and
                    episode ended. Passes when the magazine was refilled and the movement began before the episode ended; a reload
                    that had already ended before V moved makes the phase INVALID. The press time, the push time, the episode end
                    and the measured start of the movement are recorded in the phase record.
+The game ignores the trigger and the reload button while it is busy with the weapon (the bolt cycle after a sniper shot lasts about
+2.5 s, a reload goes on after the magazine count has grown, a quick melee). The weapon state is in the position lines (`psmW=`); the
+shots before a moving reload and every reload press wait (up to 4 s) until that state is no longer one of WEAPON_BUSY. Shots that
+left the magazine full and the ammunition count unchanged are sent once more (a pull can also only raise a lowered weapon). A
+magazine that is full again although rounds were fired belongs to a weapon one pull empties (the double-barrel shotgun): the game
+reloads it by itself, so the two phases pull the trigger where they would press the reload button (`reload_by: shot` in the phase
+record). The standing reload waits for the end of the reload as well, so its duration is known to the moving phases.
 Option `ranged_phases` (night.py: --ranged-phases a,b) runs only the listed phases (equip, draw and the cleanup always run; `reload`
 is added when `reload_then_run` is listed, it supplies the duration).
 
@@ -93,6 +100,11 @@ RELOAD_UNKNOWN_S = 2.5                # length assumed for the scenario when the
 RELOAD_MOVING_MIN_M = 0.3             # displacement from where V stood at the push that counts as "moving"
 RELOAD_PREP_MAX_SHOTS = 2             # shots fired before a moving reload so that the magazine is short
 UNREADABLE_WAIT_S = 3.0               # wait after the reload tap when the magazine cannot be read (only a reload log line could end it)
+# weapon states of the position lines (`psmW=`) in which the game ignores the trigger and the reload button
+WEAPON_BUSY = {2: 'reloading', 3: 'in a quick melee', 4: 'out of ammunition', 8: 'cycling after a shot'}
+WEAPON_READY_WAIT_S = 4.0             # longest wait for the weapon to leave such a state before shots or a reload press
+WEAPON_READY_POLL_S = 0.25
+WEAPON_STATE_TAIL = 20000             # bytes at the end of the log searched for the newest position line
 PROBE_PHASES = ('walk', 'sprint')       # walking phases that look at the ground ahead first (the others reuse the ground just covered)
 DRAW_POLLS = 4                        # hand reads (0.6 s apart) before the one re-draw
 LOG_PREFIX = '[ranged]'
@@ -459,6 +471,17 @@ def pos_records(text: str) -> list[dict]:
     return out
 
 
+_WEAPON_STATE_RE = re.compile(r'\[night\] POS p=[^\n]*?\bpsmW=(\d+)')
+
+
+def weapon_state(text: str) -> int | None:
+    """Weapon state of the newest `[night] POS` line of a log text (its `psmW=` field); None when no position line carries it."""
+    found = None
+    for m in _WEAPON_STATE_RE.finditer(text or ''):
+        found = m
+    return int(found.group(1)) if found else None
+
+
 def position_at(samples: list[dict], t: datetime):
     """Position (x, y) at time `t`, interpolated between the two samples around it (the nearest sample outside their span);
     None without samples."""
@@ -521,18 +544,25 @@ def reload_walk_timing(reload_s: float | None) -> dict:
             'duration': round(RELOAD_WALK_LEAD_S + est + RELOAD_WALK_TAIL_S, 2)}
 
 
-def reload_walk_dict(reload_s: float | None = None) -> dict:
+def _reload_trigger(press: float, by_shot: bool) -> dict:
+    """What starts the reload at `press`: the reload button, or (`by_shot`: a weapon whose magazine one pull empties, the game
+    then reloads it by itself) one pull of the trigger."""
+    if by_shot:
+        return {'rt': {'keys': [[0, 0], [press, 1], [round(press + 0.1, 3), 0]], 'interp': 'step'}}
+    return {'buttons': [{'t': press, 'button': 'X', 'hold': 0.12}]}
+
+
+def reload_walk_dict(reload_s: float | None = None, by_shot: bool = False) -> dict:
     t = reload_walk_timing(reload_s)
     return {'steps': [dict(_IDLE, name='reload_walk', duration=t['duration'], interp='step',
-                           ls=[[0, 0, 0], [0.05, 0, RELOAD_WALK_STICK]],
-                           buttons=[{'t': t['press'], 'button': 'X', 'hold': 0.12}])]}
+                           ls=[[0, 0, 0], [0.05, 0, RELOAD_WALK_STICK]], **_reload_trigger(t['press'], by_shot))]}
 
 
-def reload_then_run_dict(reload_s: float | None = None) -> dict:
+def reload_then_run_dict(reload_s: float | None = None, by_shot: bool = False) -> dict:
     t = reload_run_timing(reload_s)
     return {'steps': [dict(_IDLE, name='reload_run', duration=t['duration'], interp='step',
                            ls=[[0, 0, 0], [t['push'], 0, 0], [round(t['push'] + 0.05, 3), 0, 1.0]],
-                           buttons=[{'t': t['press'], 'button': 'X', 'hold': 0.12}])]}
+                           **_reload_trigger(t['press'], by_shot))]}
 
 
 def judge_reload_walk(res: dict, moved_m: float | None) -> dict:
@@ -667,10 +697,11 @@ def phase_plan(tag: str) -> list[str]:
     return ['equip'] + list(phases_of(tag)) + ['remove']
 
 
-def scenario_for(tag: str, phase: str, shots: tuple[int, int] = (3, 3), reload_s: float | None = None):
+def scenario_for(tag: str, phase: str, shots: tuple[int, int] = (3, 3), reload_s: float | None = None, by_shot: bool = False):
     """The Scenario of a pad phase (named rf_<family>_<phase>); the moving phases are copies of the static parts of
     scenarios.json (loaded by the runner), so this builds only the phases without one. `reload_s` = reload duration of the weapon for
-    the two moving-reload phases; `reload_prep` = the shots that make the magazine short before them (`shots[0]` of them)."""
+    the two moving-reload phases; `reload_prep` = the shots that make the magazine short before them (`shots[0]` of them);
+    `by_shot` = the two moving-reload phases pull the trigger where they would press the reload button."""
     from gt_scenario import parse_scenario
     name = phase_label(tag, phase)
     if phase in ('hip_fire', 'aim_fire'):
@@ -678,9 +709,9 @@ def scenario_for(tag: str, phase: str, shots: tuple[int, int] = (3, 3), reload_s
     elif phase == 'reload_prep':
         raw = fire_scenario_dict('hip_fire', FAMILIES[tag]['gap'], shots[0])
     elif phase == 'reload_walk':
-        raw = reload_walk_dict(reload_s)
+        raw = reload_walk_dict(reload_s, by_shot)
     elif phase == 'reload_then_run':
-        raw = reload_then_run_dict(reload_s)
+        raw = reload_then_run_dict(reload_s, by_shot)
     else:
         raw = static_scenario_dict(phase)
     return parse_scenario(name, dict(raw, description=f'ranged family {tag}: {phase}'))
@@ -785,7 +816,7 @@ class _Run:
         return rec
 
 
-def _register(run: _Run, phase: str, shots=(3, 3), reload_s: float | None = None):
+def _register(run: _Run, phase: str, shots=(3, 3), reload_s: float | None = None, by_shot: bool = False):
     """The Scenario of a phase, registered in the runner's table under its own name (the walking helpers look scenarios up there)."""
     n = run.night
     name = phase_label(run.tag, phase)
@@ -793,9 +824,33 @@ def _register(run: _Run, phase: str, shots=(3, 3), reload_s: float | None = None
         base = n.scenarios[MOVING_PARTS[phase]]
         sc = dataclasses.replace(base, name=name, description=f'ranged family {run.tag}: {phase} ({MOVING_PARTS[phase]})')
     else:
-        sc = scenario_for(run.tag, phase, shots, reload_s)
+        sc = scenario_for(run.tag, phase, shots, reload_s, by_shot)
     n.scenarios[name] = sc
     return sc
+
+
+def _wait_weapon_ready(run: _Run, why: str, limit: float | None = None) -> int | None:
+    """Hold the next shot or reload press until the game takes it: the newest position line must show a weapon state that is not in
+    WEAPON_BUSY (the bolt cycle of a sniper rifle lasts about 2.5 s; a reload goes on after the magazine count has grown). Returns
+    the state; None = the position lines carry no weapon state, so there is nothing to wait for."""
+    log = run.night.utpp_log
+
+    def newest() -> int | None:
+        return weapon_state(read_since(log, max(0, file_size(log) - WEAPON_STATE_TAIL)))
+
+    state = newest()
+    if state not in WEAPON_BUSY:
+        return state
+    limit = WEAPON_READY_WAIT_S if limit is None else limit
+    first, t0 = state, time.monotonic()
+    while state in WEAPON_BUSY and time.monotonic() - t0 < limit:
+        run.guard.wait(WEAPON_READY_POLL_S)
+        state = newest()
+    if state in WEAPON_BUSY:
+        run.warns.append(f'{why}: the weapon was still {WEAPON_BUSY[state]} after {limit:g} s; the button was sent anyway')
+    else:
+        run.say(f'{why}: waited {time.monotonic() - t0:.1f} s for the weapon ({WEAPON_BUSY[first]})')
+    return state
 
 
 def _extend_run_end(plan: dict, name: str, end: datetime) -> None:
@@ -973,9 +1028,16 @@ def _reload_phase(run: _Run) -> dict:
         shot_in_phase = bool(h and total_start is not None and run.total is not None and run.total < total_start)
         if shot_in_phase and run.mag is not None and run.mag < run.cap:
             mag_start = run.mag            # the magazine is short now: the reload below fills it
+    if not shot_in_phase:
+        _wait_weapon_ready(run, 'reload: before the press')
     sc = _register(run, 'reload')
     run.night.play(run.pad, run.guard, sc.name, run.plan, sc)
     res, limit = _wait_refill(run, mag_start, off, shot_in_phase)
+    if res['detected'] and not res['episodes']:
+        # the magazine count grows before the reload has ended: the log line with its duration (the moving phases are timed with
+        # it) is written, and the game takes the next button, only once the reload is over
+        _wait_weapon_ready(run, 'reload: end of the reload')
+        res['episodes'] = _gn().reload_episodes(read_since(run.night.utpp_log, off))
     if res['episodes']:
         run.reload_dur = res['episodes'][-1]
     t1 = datetime.now()
@@ -1071,13 +1133,27 @@ def _reload_motion_phase(run: _Run, phase: str) -> dict | None:
         run.fails.append(f'{phase}: the weapon could not be put back in the hand; phase skipped')
         return None
     # shots first: the magazine must be short, else there is nothing to reload
+    _wait_weapon_ready(run, f'{phase}: before the shots')
+    total_start = run.total
     prep = _register(run, 'reload_prep', (reload_prep_shots(run.cap), 0))
-    night.play(run.pad, run.guard, prep.name, run.plan, prep)
-    run.guard.wait(0.3)
-    h = run.hand(f'mag-{phase}-prep')
-    if run.cap is not None and run.mag is not None and run.mag >= run.cap:
+    h, full, fired = None, False, False
+    for attempt in (1, 2):
+        night.play(run.pad, run.guard, prep.name, run.plan, prep)
+        run.guard.wait(0.3)
+        h = run.hand(f'mag-{phase}-prep')
+        full = run.cap is not None and run.mag is not None and run.mag >= run.cap
+        fired = bool(h) and total_start is not None and run.total is not None and run.total < total_start
+        if not full or fired or attempt == 2:
+            break
+        # no round left the weapon: the pulls came while the game was still busy with it, or only raised a lowered weapon
+        run.say(f'{phase}: the shots before the reload did not fire ({run.mag} of {run.cap}); sent once more')
+        _wait_weapon_ready(run, f'{phase}: before the second shots')
+    if full and not fired:
         return _not_scored(run, phase, f'the magazine is still full after the shots ({run.mag} of {run.cap}): nothing to reload',
                            datetime.now())
+    # full again although rounds were fired: one pull empties this magazine and the game reloads it by itself, so the reload of the
+    # phase is started by a pull of the trigger instead of the reload button
+    by_shot = full and fired
     mag_start = run.mag if h else None
     seated, pos0 = _mount_state(run)
     if seated is True:
@@ -1086,17 +1162,20 @@ def _reload_motion_phase(run: _Run, phase: str) -> dict | None:
         return _not_scored(run, phase, 'V was in a vehicle before the reload press' + ('' if left else ' and could not leave it'),
                            t_end, t1=t_end)
     reload_s = run.reload_dur
-    sc = _register(run, phase, (0, 0), reload_s)
+    sc = _register(run, phase, (0, 0), reload_s, by_shot)
     clear = getattr(night, 'clear_path', None)
     if phase == 'reload_walk' and clear is not None:
         clear(run.pad, run.guard, run.plan, sc.name)                 # open ground ahead (one probe, no repeat of the phase)
+    _wait_weapon_ready(run, f'{phase}: before the press')            # a press during the shot cycle or a reload is ignored
+    total_before = run.total
     off, t0 = file_size(night.utpp_log), datetime.now()
     played = night.play(run.pad, run.guard, sc.name, run.plan, sc) or {}
     steps = played.get('steps') or []
     start = steps[0].get('start') if steps and isinstance(steps[0], dict) and steps[0].get('start') else t0
     timing = reload_walk_timing(reload_s) if phase == 'reload_walk' else reload_run_timing(reload_s)
     press_at = start + timedelta(seconds=timing['press'])
-    when = {'press_at': gw._stamp(press_at)}                          # what the scenario commanded, kept for every outcome
+    # what the scenario commanded, kept for every outcome
+    when = {'press_at': gw._stamp(press_at), 'reload_by': 'shot' if by_shot else 'button'}
     if phase == 'reload_then_run':
         when['push_at'] = gw._stamp(start + timedelta(seconds=timing['push']))
     text = read_since(night.utpp_log, off)
@@ -1114,7 +1193,7 @@ def _reload_motion_phase(run: _Run, phase: str) -> dict | None:
         if rep:
             return _not_scored(run, phase, f'V was stuck while the stick was pushed (stall {rep["stall_s"]} s)', t0,
                                dict(when, blocked=rep['stall_s']))
-    res, limit = _wait_refill(run, mag_start, off)
+    res, limit = _wait_refill(run, mag_start, off, by_shot)
     t1 = datetime.now()
     text = read_since(night.utpp_log, off)
     samples = pos_records(text)
@@ -1123,11 +1202,16 @@ def _reload_motion_phase(run: _Run, phase: str) -> dict | None:
         left = _leave_vehicle(run, None, f'{phase}: after the press')
         return _not_scored(run, phase, 'the reload button mounted V into a vehicle (seen after the scenario)'
                            + ('' if left else ' (V could not leave it)'), t0, dict(when, mounted=True), t1)
+    if by_shot and not res['episodes'] and not (total_before is not None and run.total is not None and run.total < total_before):
+        # a full magazine alone does not show a reload here: without a fired round the game had nothing to refill
+        return _not_scored(run, phase, f'the pull of the trigger fired no round (ammunition {total_before} -> {run.total}): the game '
+                           'had nothing to reload', t0, when, t1)
     stamps = [(t, d) for t, d in reload_episode_stamps(text) if t is not None]
     ep_end, ep_dur = (stamps[-1] if stamps else (None, None))
     detail: dict = {'result': res, 'wait_limit_s': limit, 'mag_start': mag_start, 'reload_s_used': reload_s,
                     'reload_s_source': 'standing reload episode' if reload_s else 'unknown (fallback timing)',
-                    'press_at': when['press_at'], 'episode_end': gw._stamp(ep_end) if ep_end else None}
+                    'press_at': when['press_at'], 'reload_by': when['reload_by'],
+                    'episode_end': gw._stamp(ep_end) if ep_end else None}
     if phase == 'reload_walk':
         a = ep_end - timedelta(seconds=ep_dur) if ep_end else press_at
         b = ep_end if ep_end else start + timedelta(seconds=timing['end'])

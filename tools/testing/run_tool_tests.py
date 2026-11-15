@@ -130,6 +130,7 @@ REGISTRY = {
     'gametest/test_night_data.py': {},
     'gametest/test_night_speed.py': {},
     'gametest/test_pose_metrics.py': {'note': 'the helper mismatch case SKIPs without the extracted deformer graph'},
+    'gametest/test_reload_trace.py': {},
     'gametest/test_select_save.py': {},
     'lua-tests/test_utpp_camera_run.py': {'markers': {'slow'}, 'note': 'Lua 5.1 DLL replay, ~140 s'},
     'melee/test_anatomy_gate.py': {},

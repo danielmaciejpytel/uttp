@@ -84,7 +84,9 @@ class FakeNight:
         now = datetime.now()
         plan['runs'].append({'scenario': name, 'run': 1, 'aborted': None,
                              'steps': [{'name': 'step', 'start': now, 'end': now, 'metrics': True}]})
-        self.append(self.script('play:' + name, ''))
+        # the script of a game is told whether the scenario pulls the trigger ('rt') or not ('')
+        pulls = 'rt' if sc is not None and any(f.rt > 0.5 for _, f in sc.sample(0.05)) else ''
+        self.append(self.script('play:' + name, pulls))
         return {'steps': []}
 
     def play_walking(self, pad, guard, plan, name, key_crouch=False, clear=True):
@@ -497,12 +499,14 @@ def with_bash_line(script, tag='handgun', line=BASH_GATE):
     return wrapped
 
 
-def run_macro(script, args=None, patch_reload=True, raises=None, fams=None):
+def run_macro(script, args=None, patch_reload=True, raises=None, fams=None, guard=None):
+    """`guard` = a function (night) -> guard, for a game that goes on while the macro waits (default: waits do nothing)."""
     with tempfile.TemporaryDirectory() as d:
         n = FakeNight(d, script, args)
         if fams:
             n.args.ranged_families = fams
         plan = {'runs': []}
+        g = guard(n) if guard else _G()
         if raises:
             orig = n.play
 
@@ -515,7 +519,7 @@ def run_macro(script, args=None, patch_reload=True, raises=None, fams=None):
         ctx2 = mock.patch.object(rf, 'UNREADABLE_WAIT_S', 0.05) if patch_reload else mock.patch.object(rf, 'UNREADABLE_WAIT_S', rf.UNREADABLE_WAIT_S)
         with ctx, ctx2:
             try:
-                res = rf.run_ranged_macro(n, _Pad(), _G(), plan, 'ranged_families', {'name': 'ranged_families', 'run': 1})
+                res = rf.run_ranged_macro(n, _Pad(), g, plan, 'ranged_families', {'name': 'ranged_families', 'run': 1})
             except RuntimeError as e:
                 return n, e, plan
         return n, res, plan
@@ -1486,6 +1490,226 @@ class ReloadMotion(unittest.TestCase):
                                    + sum(rf.scenario_for(tag, p).duration for p in ('aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'crouch_aim'))
                                    + rf.reload_motion_pad_seconds(tag), places=6)
         self.assertGreater(rf.time_limit_s(1), 150.0)
+
+
+def state_line(state: int) -> str:
+    """A position line of now that carries the weapon state (`psmW=`)."""
+    return logline(datetime.now(), 0.0, f'[night] POS p=0.00,0.00,0.00 cf=1.00,0.00 v=nil src=none w=1 m=0 freeMove=1/0x0 '
+                                         f'psmW={state} ub=0 wi=Items.Test n=1')
+
+
+class _GameGuard(_G):
+    """A guard whose waits let the game go on: `busy(n)` makes the n-th wait from now write a position line with the ready state."""
+
+    def __init__(self, night):
+        self.night, self.left, self.waits = night, None, 0
+
+    def busy(self, waits: int) -> None:
+        self.left = waits
+
+    def wait(self, s):
+        self.waits += 1
+        if self.left is not None:
+            self.left -= 1
+            if self.left <= 0:
+                self.left = None
+                self.night.calls.append(('ready',))
+                self.night.append([state_line(5)])
+
+
+def with_weapon_states(script, guards: list, tag='handgun', busy_after=('reload_prep',), state=8, waits=3, stuck=False):
+    """The game also writes the weapon state: playing one of the `busy_after` phases leaves the weapon in the busy `state`, which
+    ends `waits` waits of the macro later (`stuck`: never). `guards` receives the guard of the run (made by `guard_of`)."""
+    def wrapped(event, cmd):
+        r = script(event, cmd)
+        if any(event == f'play:rf_{tag}_{ph}' for ph in busy_after):
+            if not stuck:
+                guards[0].busy(waits)
+            return list(r or []) + [state_line(state)]
+        return r
+    wrapped.state = getattr(script, 'state', None)
+    return wrapped
+
+
+def guard_of(guards: list):
+    def make(night):
+        guards[:] = [_GameGuard(night)]
+        return guards[0]
+    return make
+
+
+def self_reloading(script, tag='handgun', rounds=2):
+    """A weapon whose magazine one pull empties: the game refills it by itself, so the magazine reads full after every shot and
+    only the ammunition count drops. The reload button does nothing (the magazine is full); a pull inside a moving-reload scenario
+    fires and starts the reload."""
+    st = script.state
+    st['total'] = 250
+    st['pulls'] = []
+
+    def wrapped(event, cmd):
+        if event == f'play:rf_{tag}_reload_prep':
+            st['total'] -= rounds
+            return []
+        if event in (f'play:rf_{tag}_reload_walk', f'play:rf_{tag}_reload_then_run'):
+            st['pulls'].append((event.rsplit('_reload_', 1)[-1], cmd))
+            if cmd == 'rt':
+                st['total'] -= rounds
+            return []                                             # the magazine is full before and after
+        r = script(event, cmd)
+        if event == 'RF_HAND' and r:
+            r = [ln.replace('total=250', f'total={st["total"]}') for ln in r]
+        return r
+    wrapped.state = st
+    return wrapped
+
+
+class WeaponBusy(unittest.TestCase):
+    """The game ignores the trigger and the reload button while it is busy with the weapon."""
+
+    def test_weapon_state_is_read_from_the_newest_position_line(self):
+        t0 = datetime(2026, 11, 14, 10, 0, 0)
+        self.assertIsNone(rf.weapon_state(''))
+        self.assertIsNone(rf.weapon_state(pos_line(t0, 0, 1.0)))                    # a position line without the field
+        text = '\n'.join([state_line(8), state_line(5)])
+        self.assertEqual(rf.weapon_state(text), 5)
+        self.assertEqual(rf.weapon_state(text + '\n' + state_line(2) + '\n' + pos_line(t0, 0, 1.0)), 2)
+        self.assertEqual(rf.weapon_state('UTPP MOTION psmW=8 not a position line'), None)
+        self.assertEqual(set(rf.WEAPON_BUSY), {2, 3, 4, 8})                         # reload, quick melee, no ammunition, shot
+
+    def test_the_reload_press_waits_until_the_shot_cycle_is_over(self):
+        guards: list = []
+        script = with_weapon_states(with_motion(good_script('handgun')), guards)
+        n, res, plan = run_macro(script, fams='handgun', guard=guard_of(guards))
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        self.assertEqual(r['invalid_phases'], [])
+        calls = [c for c in n.calls if c[0] in ('play', 'ready')]
+        for phase in ('reload_walk', 'reload_then_run'):
+            i = calls.index(('play', f'rf_handgun_{phase}'))
+            self.assertEqual(calls[i - 2:i], [('play', 'rf_handgun_reload_prep'), ('ready',)], phase)   # shots, ready, then the press
+            self.assertTrue(any(f'{phase}: before the press: waited' in m and 'cycling after a shot' in m for m in n.logs), phase)
+        self.assertFalse([w for w in r['warnings'] if 'the weapon was still' in w])
+
+    def test_a_weapon_that_stays_busy_gets_the_press_after_the_limit_with_a_warning(self):
+        guards: list = []
+        script = with_weapon_states(with_motion(good_script('handgun')), guards, stuck=True)
+        with mock.patch.object(rf, 'WEAPON_READY_WAIT_S', 0.05):
+            n, res, plan = run_macro(script, fams='handgun', guard=guard_of(guards))
+        r = res['families']['handgun']
+        self.assertIn('rf_handgun_reload_walk', n.plays())
+        self.assertIn('rf_handgun_reload_then_run', n.plays())
+        self.assertTrue(any(w.startswith('reload_walk: before the press: the weapon was still cycling after a shot after 0.05 s')
+                            for w in r['warnings']), r['warnings'])
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])                          # a warning, the phases are judged as always
+
+    def test_position_lines_without_the_state_cost_no_wait(self):
+        guards: list = []
+        n, res, plan = run_macro(with_motion(good_script('handgun')), fams='handgun', guard=guard_of(guards))
+        self.assertEqual(res['families']['handgun']['verdict'], 'PASS')
+        self.assertFalse(any('waited' in m for m in n.logs))
+        self.assertNotIn(('ready',), n.calls)
+
+    def test_shots_that_did_not_fire_are_sent_once_more(self):
+        base = with_motion(good_script('handgun'))
+        seen = {'n': 0}
+
+        def script(event, cmd):
+            if event == 'play:rf_handgun_reload_prep':
+                seen['n'] += 1
+                if seen['n'] == 1:
+                    return []                                     # the pulls came too early: no round left the weapon
+            return base(event, cmd)
+        script.state = base.state
+        n, res, plan = run_macro(script, fams='handgun')
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        self.assertEqual(r['invalid_phases'], [])
+        plays = n.plays()
+        i = plays.index('rf_handgun_reload')
+        self.assertEqual(plays[i + 1:i + 6], ['rf_handgun_reload_prep', 'rf_handgun_reload_prep', 'rf_handgun_reload_walk',
+                                              'rf_handgun_reload_prep', 'rf_handgun_reload_then_run'])
+        self.assertTrue(any('reload_walk: the shots before the reload did not fire (12 of 12); sent once more' in m for m in n.logs))
+
+    def test_shots_that_never_fire_are_sent_twice_and_the_phase_is_invalid(self):
+        n, res, plan = run_motion({'shots_fired': False})
+        r = res['families']['handgun']
+        self.assertEqual([p['phase'] for p in r['invalid_phases']], ['reload_walk', 'reload_then_run'])
+        self.assertEqual(n.plays().count('rf_handgun_reload_prep'), 4)              # two tries per phase, never a third
+        self.assertNotIn('rf_handgun_reload_walk', n.plays())
+
+    def test_a_magazine_one_pull_empties_is_reloaded_by_a_pull_of_the_trigger(self):
+        script = with_motion(self_reloading(good_script('handgun', cap=2)))
+        n, res, plan = run_macro(script, fams='handgun')
+        r = res['families']['handgun']
+        self.assertEqual(r['invalid_phases'], [], r['warnings'])
+        walk, run = phase_rec(res, 'reload_walk'), phase_rec(res, 'reload_then_run')
+        self.assertEqual((walk['verdict'], run['verdict']), ('PASS', 'PASS'), (walk, run))
+        self.assertEqual((walk['reload_by'], run['reload_by']), ('shot', 'shot'))
+        self.assertEqual(script.state['pulls'], [('walk', 'rt'), ('then_run', 'rt')])
+        self.assertEqual(n.plays().count('rf_handgun_reload_prep'), 2)              # one set of shots per phase: they did fire
+        for phase, press in (('reload_walk', rf.RELOAD_WALK_LEAD_S), ('reload_then_run', rf.RELOAD_PRESS_AT_S)):
+            sc = n.scenarios[f'rf_handgun_{phase}']
+            self.assertEqual([b.button for st in sc.steps for b in st.buttons], [], phase)        # no reload button
+            pulled = [round(f.t, 2) for _, f in sc.sample(0.05) if f.rt > 0.5]
+            self.assertAlmostEqual(pulled[0], press, delta=0.06, msg=phase)
+            self.assertLessEqual(pulled[-1] - pulled[0], 0.16, phase)                             # one short pull
+        self.assertGreaterEqual(walk['moved_m'], rf.RELOAD_WALK_MIN_M)
+        self.assertEqual(walk['result']['via'], 'log')                               # the reload episode of the log
+
+    def test_a_pull_that_fires_no_round_is_not_a_reload(self):
+        base = self_reloading(good_script('handgun', cap=2))
+
+        def script(event, cmd):
+            if event in ('play:rf_handgun_reload_walk', 'play:rf_handgun_reload_then_run'):
+                return []                                         # the pull does nothing: no shot, no episode line
+            return base(event, cmd)
+        script.state = base.state
+        n, res, plan = run_macro(script, fams='handgun')
+        r = res['families']['handgun']
+        self.assertEqual([p['phase'] for p in r['invalid_phases']], ['reload_walk', 'reload_then_run'])
+        self.assertTrue(all('fired no round' in p['reason'] for p in r['invalid_phases']), r['invalid_phases'])
+        self.assertFalse([f for f in r['fails'] if f.startswith('reload_')])
+
+    def test_the_button_phases_keep_the_reload_button(self):
+        n, res, plan = run_motion()
+        self.assertEqual((phase_rec(res, 'reload_walk')['reload_by'], phase_rec(res, 'reload_then_run')['reload_by']),
+                         ('button', 'button'))
+        walk = rf.scenario_for('handgun', 'reload_walk', reload_s=2.0, by_shot=True)
+        self.assertEqual(walk.name, 'rf_handgun_reload_walk')
+        self.assertEqual(walk.duration, rf.scenario_for('handgun', 'reload_walk', reload_s=2.0).duration)
+
+    def test_the_standing_reload_waits_for_its_end_and_gives_the_duration(self):
+        """The magazine count grows before the reload has ended: the episode line comes later, with the end of the reload state."""
+        guards: list = []
+        base = with_motion(good_script('handgun'), standing_episode=False)
+
+        def script(event, cmd):
+            r = base(event, cmd)
+            if event == 'play:rf_handgun_reload':
+                guards[0].late = True
+                return list(r or []) + [state_line(2)]            # reloading, no episode line yet
+            return r
+        script.state = base.state
+
+        class Guard(_GameGuard):
+            late = False
+
+            def wait(self, s):
+                super().wait(s)
+                if self.late and s == rf.WEAPON_READY_POLL_S:     # the first poll of the end-of-reload wait
+                    self.late = False
+                    self.night.append(['UTPPMotion RELOAD episode weapon=Items.Test dur=1.70', state_line(5)])
+
+        def make(night):
+            guards[:] = [Guard(night)]
+            return guards[0]
+        n, res, plan = run_macro(script, fams='handgun', guard=make)
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        run = phase_rec(res, 'reload_then_run')
+        self.assertEqual((run['reload_s_used'], run['reload_s_source']), (1.7, 'standing reload episode'))
+        self.assertEqual(phase_rec(res, 'reload')['result']['episodes'], [1.7])
+        self.assertTrue(any('reload: end of the reload: waited' in m for m in n.logs), n.logs[-20:])
 
 
 if __name__ == '__main__':

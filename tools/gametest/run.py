@@ -130,14 +130,19 @@ INVALID_VERDICT = 'INVALID'   # step not scored: the MM v2 precondition failed (
 
 BLOCKED_SPEED_MAX = 0.3     # m/s: on every tick with the stick pushed (gt_log.PUSHED_STICK) the capsule stayed below
 BLOCKED_MIN_TICKS = 2       # pushed ticks needed to judge (ticks are ~1 Hz)
+BLOCKED_SHARE_MAX = 0.35    # m/s per unit of the movement vector: ... and below this share of the movement the game asked for
 
 
 def step_blocked(m: dict) -> bool:
     """True when V pushed the left stick on foot but the capsule did not move on any of those ticks (Female V
     2026-11-11 17:37: walked into a bush, |v| 0.07-0.18 m/s with the stick at 0.8; the slowest free walk, aim_walk,
-    0.52-0.83 m/s). Ticks after a release (stop steps) do not count."""
+    0.52-0.83 m/s). Ticks after a release (stop steps) do not count. A slow walk that moves as the game asked is not blocked:
+    the aimed walk with a light machine gun covers 0.29-0.31 m/s at a movement vector of 0.27 (1.07 m/s per unit, the other
+    weapons 1.26), the bush 0.09-0.23 m/s per unit. Metrics without that share are judged by the speed alone."""
     vmax, n, loco = m.get('pushed_speed_max'), m.get('pushed_ticks') or 0, m.get('loco_fraction')
+    share = m.get('pushed_speed_share_max')
     return (vmax is not None and n >= BLOCKED_MIN_TICKS and vmax < BLOCKED_SPEED_MAX
+            and (share is None or share < BLOCKED_SHARE_MAX)
             and loco is not None and loco >= 0.5)
 
 

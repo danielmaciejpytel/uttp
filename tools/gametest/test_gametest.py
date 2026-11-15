@@ -1939,10 +1939,6 @@ class BackgroundGuardTests(unittest.TestCase):
             g.check()
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class BlockedStepTests(unittest.TestCase):
     """A walking step whose capsule never moved (V against an obstacle) is not scored (INVALID, mechanics failure)."""
 
@@ -1959,6 +1955,29 @@ class BlockedStepTests(unittest.TestCase):
                        {'loco_fraction': 0.0}):      # in a vehicle
             self.assertFalse(gt_run.step_blocked(dict(base, **change)), change)
 
+    def test_a_slow_walk_that_moves_as_asked_is_scored(self):
+        # light machine gun, aimed walk, Male V 2026-11-15 04:36:57: |v| 0.29 m/s on both ticks at a movement vector of 0.27
+        slow = {'pushed_speed_max': 0.29, 'pushed_ticks': 2, 'loco_fraction': 1.0, 'pushed_speed_share_max': 1.07}
+        self.assertFalse(gt_run.step_blocked(slow))
+        # the bush: 0.18 m/s at a movement vector of 0.8
+        bush = {'pushed_speed_max': 0.18, 'pushed_ticks': 3, 'loco_fraction': 1.0, 'pushed_speed_share_max': 0.23}
+        self.assertTrue(gt_run.step_blocked(bush))
+        # an aimed walk against a wall: nearly no speed at the small vector of the aim
+        self.assertTrue(gt_run.step_blocked(dict(slow, pushed_speed_max=0.05, pushed_speed_share_max=0.19)))
+        self.assertLess(0.23, gt_run.BLOCKED_SHARE_MAX)
+        self.assertLess(gt_run.BLOCKED_SHARE_MAX, 1.07)
+
+    def test_the_share_of_the_asked_movement_is_a_metric(self):
+        head = '[2026-11-14 10:00:{s:06.3f}] [info    ] [ 1] [UTPP] UTPP MMTRACE tick clip=A f=1 cost=0.1 velChar=(0.00,{v}) |v|={v} '
+        tail = 'rate=1.00 yawRate=0.00 w=1.00 gate=0x0 loco=1 tpp=1 searches=1 trans=0 mv=(0.00,{mv}) cam=0 pl=0 fl=1'
+        text = '\n'.join((head + tail).format(s=1.0 + i, v=v, mv=mv) for i, (v, mv) in enumerate([(0.29, 0.27), (0.31, 0.27), (0.0, 0.0)]))
+        lines = gt_log.parse_text(text)
+        t0 = datetime(2026, 11, 14, 10, 0, 0)
+        m = gt_log.compute_metrics(lines, t0, t0 + timedelta(seconds=5))
+        self.assertEqual((m['pushed_ticks'], m['pushed_speed_max']), (2, 0.31))
+        self.assertAlmostEqual(m['pushed_speed_share_max'], 0.31 / 0.27, places=2)
+        self.assertFalse(gt_run.step_blocked(m))
+
     def test_pushed_speed_from_ticks(self):
         # the sprint_stop excerpt: the stick is released, so its 0.0 m/s ticks are not 'pushed'
         lines = gt_log.parse_file(MOTION_EXCERPT)
@@ -1970,3 +1989,7 @@ class BlockedStepTests(unittest.TestCase):
         mech, metr = gn.split_failures([{'scenario': 'weapon_aim', 'run': 1, 'step': 'walk_armed',
                                          'fails': ['blocked: V did not move (speed_max 0.18 m/s < 0.3 with the stick at 0.8)']}], [])
         self.assertEqual((len(mech), len(metr)), (1, 0))
+
+
+if __name__ == '__main__':
+    unittest.main()

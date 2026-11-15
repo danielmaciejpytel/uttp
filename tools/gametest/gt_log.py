@@ -944,13 +944,17 @@ def compute_metrics(lines: list[LogLine], t0: datetime, t1: datetime, saturation
     m['speed_mean'], m['speed_max'] = _r(vmean, 2), _r(vmax, 2)
     # capsule speed on the ticks where the left stick was pushed (|mv| >= PUSHED_STICK): a walk against an obstacle
     # keeps it near 0 (run.step_blocked); ticks after a release (stop steps) are left out
-    pushed = []
+    pushed, share = [], []
     for l in trace:
         mv, v = l.pair('mv'), l.num('|v|')
         if mv is not None and v is not None and math.hypot(*mv) >= PUSHED_STICK:
             pushed.append(v)
+            share.append(v / math.hypot(*mv))
     m['pushed_ticks'] = len(pushed)
     m['pushed_speed_max'] = _r(max(pushed), 2) if pushed else None
+    # the same speed per unit of the movement vector the game asked for: an aimed walk with a heavy weapon is slow but moves as
+    # asked (0.29 m/s at |mv| 0.27), a walk against an obstacle does not (0.07-0.18 m/s at |mv| 0.8)
+    m['pushed_speed_share_max'] = _r(max(share), 2) if share else None
 
     bt_time = sum(d for l, d in segs if (l.num('bt') or 0) > 0)
     m['bodyturn_active_s'] = round(bt_time, 3)
