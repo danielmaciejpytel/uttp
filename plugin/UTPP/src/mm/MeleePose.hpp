@@ -662,6 +662,10 @@ struct BorderInfo
     bool active = false, hipsLimited = false, stepStarted = false;
     int planted = 0; // feet held at their plant this call
     float hipsOffset = 0.0f;
+    int hingeLegs = 0;        // legs solved with the knee hinge this call (SolveHingeLeg; 0 = the two-bone solve as it is)
+    float offHingeDeg = 0.0f; // largest knee rotation off its flex axis of the two-bone solve this call (deg)
+    float foldM = 0.0f;       // largest fold of a leg by the Hips height limit this call (m): the smaller of the incoming hip-ankle
+                              // distance minus the hip-target distance and the Hips height held below the incoming one
 };
 
 // Model transforms of the lower chain from the local records: parent of Hips (root first through the ancestors), Hips, and per leg
@@ -718,6 +722,104 @@ inline float MoveToward(float aFrom, float aTo, float aMaxStep)
 
 inline float Horizontal(Vec3 aA, Vec3 aB) { return std::sqrt((aA.x - aB.x) * (aA.x - aB.x) + (aA.y - aB.y) * (aA.y - aB.y)); }
 
+// ------------------------------------------------------------------------------------------------ knee hinge of the border leg solve
+//
+// The border leg solve (legik::SolveTwoBone) bends the knee in the plane of the incoming knee's offset from the hip-ankle line. For an
+// almost straight incoming leg that offset is small, and on a rig whose standing knee carries a sideways bend comparable to its flex
+// it points well sideways (Male V standing: flex ~13 deg, sideways ~17 deg, offset ~60 deg out of the forward direction). When the Hips
+// height limit holds the Hips far below the incoming pose (a crouch attack that stands up while the layer comes in: 20-30 cm), that solve
+// folds the knee by ~100 deg in the sideways plane: the shin rolls by up to ~90 deg and the knee bends ~40 deg sideways.
+// Where the Hips height limit folds the leg (the target more than kHingeFoldOn closer to the hip than the incoming ankle while the Hips
+// are held more than kHingeFoldOn below the incoming height), the knee is solved as a hinge instead: it only flexes about the thigh's local z axis (the knee's flex axis: Leg' = Rz(d) * Leg, the rest local of the Leg being
+// the identity, so its sideways bend and roll stay the incoming ones), then the thigh swings by the minimal rotation that puts the ankle
+// on the target; the foot keeps its model rotation. Between kHingeFoldOn and kHingeFoldFull the two solves are blended and the thigh
+// re-aimed at the target. At or below kHingeFoldOn the two-bone result is used as it is (bit for bit the previous output: the standing
+// strikes and their fades stay below it).
+inline constexpr float kHingeFoldOn = 0.03f;   // m (the recorded standing strikes stay below 0.5 cm)
+inline constexpr float kHingeFoldFull = 0.06f; // m
+inline constexpr float kKneeFlexMaxDeg = 150.0f; // the hinge solve never flexes the knee beyond this (the ankle then stays short of the target)
+
+// Rotation of the knee by a solve, off its flex axis: the swing away from z of D = aNew * inv(aIn) (Leg locals), deg.
+inline float OffHingeDeg(Quat aIn, Quat aNew)
+{
+    const Quat d = math::QuatNormalize(math::QuatMul(math::QuatNormalize(aNew), math::QuatInv(math::QuatNormalize(aIn))));
+    const float c = std::sqrt(d.w * d.w + d.z * d.z);
+    return 2.0f * std::acos(c > 1.0f ? 1.0f : c) * meleebase::kRadToDeg;
+}
+
+// Knee flex of a Leg local (deg): minus the z angle of its ZYX decomposition.
+inline float KneeFlexDeg(Quat aLeg)
+{
+    const Quat q = math::QuatNormalize(aLeg);
+    return -std::atan2(2.0f * (q.x * q.y + q.z * q.w), 1.0f - 2.0f * (q.y * q.y + q.z * q.z)) * meleebase::kRadToDeg;
+}
+
+// Thigh swing (minimal rotation about the hip) that turns the ankle direction from aAnkle - aHip onto aTarget - aHip, given the UpLeg's
+// parent and the new UpLeg / Leg locals; fills aLocal (UpLeg, Leg, Foot) with the foot keeping its model rotation aFootModel.
+inline bool AimThigh(const mm::BoneTransform& gp, Vec3 aHip, Quat aUpLegLocal, Quat aLegLocal, Vec3 aLegOffset, Vec3 aFootOffset, Vec3 aTarget,
+                     Quat aFootModel, Quat aLocal[3])
+{
+    const Quat qa0 = math::QuatNormalize(math::QuatMul(gp.q, aUpLegLocal));
+    const Quat qb0 = math::QuatNormalize(math::QuatMul(qa0, aLegLocal));
+    const Vec3 knee = aHip + math::QuatRotate(qa0, aLegOffset);
+    const Vec3 ankle = knee + math::QuatRotate(qb0, aFootOffset);
+    const Quat ra = legik::FromTo(ankle - aHip, aTarget - aHip);
+    const Quat qa = math::QuatNormalize(math::QuatMul(ra, qa0));
+    const Quat qb = math::QuatNormalize(math::QuatMul(qa, aLegLocal));
+    aLocal[0] = math::QuatNormalize(math::QuatMul(math::QuatInv(gp.q), qa));
+    aLocal[1] = math::QuatNormalize(aLegLocal);
+    aLocal[2] = math::QuatNormalize(math::QuatMul(math::QuatInv(qb), aFootModel));
+    return math::IsFinite(aLocal[0]) && math::IsFinite(aLocal[1]) && math::IsFinite(aLocal[2]);
+}
+
+// The hinge solve (see above) on the model transforms of the UpLeg's parent, UpLeg, Leg and Foot. Reach: the soft limit of
+// legik::SolveTwoBone. False (nothing written) for a degenerate leg or a non-finite result.
+inline bool SolveHingeLeg(const mm::BoneTransform& gp, const mm::BoneTransform& ga, const mm::BoneTransform& gb, const mm::BoneTransform& gc,
+                          Vec3 aTarget, float aMaxExtension, float aSoftExtension, Quat aLocal[3])
+{
+    const Vec3 a = ga.p, b = gb.p, c = gc.p;
+    const Vec3 u = b - a, v = c - b;
+    const float lab = legik::Len(u), lcb = legik::Len(v);
+    if (!(lab > 1e-4f) || !(lcb > 1e-4f))
+        return false;
+    const float lac = legik::Len(c - a);
+    const float reach = std::fmax((lab + lcb) * aMaxExtension, lac);
+    const float softStart = std::fmin(std::fmax((lab + lcb) * aSoftExtension, lac), reach);
+    float lat = std::fmax(legik::Len(aTarget - a), 1e-4f);
+    if (lat > softStart && reach > softStart)
+        lat = softStart + (reach - softStart) * (1.0f - std::exp(-(lat - softStart) / (reach - softStart)));
+    lat = std::fmin(lat, reach);
+    // knee flex d about h (the thigh's local z in model space): |u + R(h, d) v|^2 = lab^2 + lcb^2 + 2 u.R(h, d) v, with
+    // u.R(h, d) v = (u.h)(v.h) + A cos d + B sin d
+    const Vec3 h = legik::Norm(math::QuatRotate(ga.q, Vec3{0.0f, 0.0f, 1.0f}));
+    const float uh = math::Dot(u, h), vh = math::Dot(v, h);
+    const float A = math::Dot(u, v - h * vh), B = math::Dot(u, math::Cross(h, v));
+    const float C = 0.5f * (lat * lat - lab * lab - lcb * lcb) - uh * vh;
+    const float R = std::sqrt(A * A + B * B);
+    if (!(R > 1e-6f))
+        return false;
+    const float k = C / R;
+    const float phi = std::atan2(B, A); // the straightest knee about h
+    // the root on the flexed side of the straightest knee (the other one bends the knee backwards); out of reach -> the nearest end
+    float d = phi - std::acos(k > 1.0f ? 1.0f : (k < -1.0f ? -1.0f : k));
+    if (d <= -math::kPi)
+        d += 2.0f * math::kPi;
+    else if (d > math::kPi)
+        d -= 2.0f * math::kPi;
+    const Quat legIn = math::QuatNormalize(math::QuatMul(math::QuatInv(ga.q), gb.q));
+    Quat leg = math::QuatNormalize(math::QuatMul(legik::AxisAngle(Vec3{0.0f, 0.0f, 1.0f}, d), legIn));
+    const float flex = KneeFlexDeg(leg);
+    if (flex > kKneeFlexMaxDeg)
+    {
+        d += (flex - kKneeFlexMaxDeg) / meleebase::kRadToDeg; // flex = -z: a larger d flexes less
+        leg = math::QuatNormalize(math::QuatMul(legik::AxisAngle(Vec3{0.0f, 0.0f, 1.0f}, d), legIn));
+    }
+    const Quat upIn = math::QuatNormalize(math::QuatMul(math::QuatInv(gp.q), ga.q));
+    // bone offsets in the parent frames (the records' translations)
+    const Vec3 legOff = math::QuatRotate(math::QuatInv(ga.q), u), footOff = math::QuatRotate(math::QuatInv(gb.q), v);
+    return AimThigh(gp, a, upIn, leg, legOff, footOff, aTarget, gc.q, aLocal);
+}
+
 inline void StartStep(FootState& aF, Vec3 aFrom, Vec3 aTo)
 {
     const float d = Horizontal(aFrom, aTo);
@@ -731,8 +833,9 @@ inline void StartStep(FootState& aF, Vec3 aFrom, Vec3 aTo)
 // One FK call. aWriting = the layer wrote this call (weight aWeight > 0); aPre = the lower chain before the layer's write of this call
 // (used when the borders start). Returns true while the borders are active (records possibly changed). The records keep their bone
 // translations except the Hips height; only UpLeg / Leg / Foot rotations change for the feet.
+// aKneeHinge = the knee hinge of the leg solve (SolveHingeLeg; false: the two-bone solve as it is, for comparisons).
 inline bool BorderStep(BorderState& aS, uint8_t* aBones, uint32_t aCount, const LowerRig& aRig, const LowerModel* aPre, bool aWriting,
-                       float aWeight, float aDt, BorderInfo* aInfo = nullptr, bool aCapsuleMoving = false)
+                       float aWeight, float aDt, BorderInfo* aInfo = nullptr, bool aCapsuleMoving = false, bool aKneeHinge = true)
 {
     BorderInfo info;
     const float dt = (std::isfinite(aDt) && aDt > 0.0f) ? (aDt > kMaxDt ? kMaxDt : aDt) : 0.0f;
@@ -930,8 +1033,39 @@ inline bool BorderStep(BorderState& aS, uint8_t* aBones, uint32_t aCount, const 
                                                                     kLegMaxExtension, kLegSoftExtension, true, true);
             if (sol.status == legik::TwoBoneStatus::kOk)
             {
+                Quat local[3] = {sol.local[0], sol.local[1], sol.local[2]};
+                // the knee stays a hinge (see SolveHingeLeg) where the Hips height limit folds the leg: the target closer to the hip than
+                // the incoming ankle, and the Hips held below the incoming height, both by more than kHingeFoldOn
+                const Quat legIn = math::QuatNormalize(math::QuatMul(math::QuatInv(cur.leg[s][0].q), cur.leg[s][1].q));
+                info.offHingeDeg = std::fmax(info.offHingeDeg, OffHingeDeg(legIn, sol.local[1]));
+                const float fold = std::fmin(legik::Len(c - cur.leg[s][0].p) - legik::Len(target - cur.leg[s][0].p), -aS.hipsOffset);
+                info.foldM = std::fmax(info.foldM, fold);
+#if defined(UTPP_MELEE_LEGS_MUTATION) && UTPP_MELEE_LEGS_MUTATION == 1
+                aKneeHinge = false; // mutation: the two-bone solve as it is
+#endif
+                Quat hinge[3];
+                if (aKneeHinge && fold > kHingeFoldOn &&
+                    SolveHingeLeg(cur.hips, cur.leg[s][0], cur.leg[s][1], cur.leg[s][2], target, kLegMaxExtension, kLegSoftExtension, hinge))
+                {
+                    const float k = Smooth01((fold - kHingeFoldOn) / (kHingeFoldFull - kHingeFoldOn));
+                    if (k >= 1.0f)
+                        for (int j = 0; j < 3; ++j)
+                            local[j] = hinge[j];
+                    else
+                    {
+                        // blend of the two solves, the thigh re-aimed so the ankle stays on the target
+                        const Vec3 legOff = math::QuatRotate(math::QuatInv(cur.leg[s][0].q), cur.leg[s][1].p - cur.leg[s][0].p);
+                        const Vec3 footOff = math::QuatRotate(math::QuatInv(cur.leg[s][1].q), cur.leg[s][2].p - cur.leg[s][1].p);
+                        Quat blend[3];
+                        if (AimThigh(cur.hips, cur.leg[s][0].p, math::QuatNlerpShortest(sol.local[0], hinge[0], k),
+                                     math::QuatNlerpShortest(sol.local[1], hinge[1], k), legOff, footOff, target, cur.leg[s][2].q, blend))
+                            for (int j = 0; j < 3; ++j)
+                                local[j] = blend[j];
+                    }
+                    ++info.hingeLegs;
+                }
                 for (int j = 0; j < 3; ++j)
-                    aim::WriteLocalRot(aBones, uint32_t(aRig.bone[2 + j + 3 * s]), sol.local[j]);
+                    aim::WriteLocalRot(aBones, uint32_t(aRig.bone[2 + j + 3 * s]), local[j]);
                 anyCorrection = true;
             }
         }

@@ -73,6 +73,7 @@ core::BorderState g_border;
 int64_t g_borderTicks = 0;
 std::atomic<bool> g_borderActive{false};
 std::atomic<uint64_t> g_borderCalls{0}, g_planted{0}, g_steps{0}, g_hipsLimited{0}, g_tailCalls{0};
+std::atomic<uint64_t> g_kneeHinge{0};
 uint64_t g_loggedCalls = 0, g_loggedGuardCalls = 0, g_loggedBorderCalls = 0; // game thread (FormatLogLine)
 std::atomic<int64_t> g_costTicks{0}, g_costMax{0};
 std::atomic<int32_t> g_lastClip{-1};
@@ -263,6 +264,8 @@ void BorderTail(uint8_t* aBones, uint32_t aCount, void* aRig, int64_t aNowTicks)
         g_steps.fetch_add(1, std::memory_order_relaxed);
     if (bi.hipsLimited)
         g_hipsLimited.fetch_add(1, std::memory_order_relaxed);
+    if (bi.hingeLegs > 0)
+        g_kneeHinge.fetch_add(1, std::memory_order_relaxed);
     g_borderActive.store(g_border.active, std::memory_order_relaxed);
     g_busy.clear(std::memory_order_release);
 }
@@ -371,6 +374,8 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
                 g_steps.fetch_add(1, std::memory_order_relaxed);
             if (bi.hipsLimited)
                 g_hipsLimited.fetch_add(1, std::memory_order_relaxed);
+            if (bi.hingeLegs > 0)
+                g_kneeHinge.fetch_add(1, std::memory_order_relaxed);
         }
         g_borderActive.store(g_border.active, std::memory_order_relaxed);
     }
@@ -421,6 +426,7 @@ Counters GetCounters()
     c.planted = g_planted.load();
     c.steps = g_steps.load();
     c.hipsLimited = g_hipsLimited.load();
+    c.kneeHinge = g_kneeHinge.load();
     const double us = 1e6 / Freq();
     c.meanMicros = c.calls ? double(g_costTicks.load()) * us / double(c.calls) : 0.0;
     c.maxMicros = double(g_costMax.load()) * us;
@@ -458,7 +464,7 @@ bool FormatLogLine(char* aBuf, size_t aLen)
         aBuf, aLen,
         "UTPP MELEEPOSE calls=%llu written=%llu held=%llu relocks=%llu frozen=%llu toBase=%llu busy=%llu noTable=%llu noWeapon=%llu "
         "border=%llu tail=%llu planted=%llu steps=%llu hipsLimited=%llu guardCalls=%llu guardReplaced=%llu guardPassed=%llu "
-        "guardBusy=%llu w=%.2f state=%d",
+        "guardBusy=%llu w=%.2f state=%d kneeHinge=%llu",
         static_cast<unsigned long long>(c.calls), static_cast<unsigned long long>(c.written), static_cast<unsigned long long>(c.held),
         static_cast<unsigned long long>(c.relocks), static_cast<unsigned long long>(c.frozen), static_cast<unsigned long long>(c.toBase),
         static_cast<unsigned long long>(c.busy), static_cast<unsigned long long>(c.noTable), static_cast<unsigned long long>(c.noWeapon),
@@ -466,7 +472,8 @@ bool FormatLogLine(char* aBuf, size_t aLen)
         static_cast<unsigned long long>(c.planted), static_cast<unsigned long long>(c.steps),
         static_cast<unsigned long long>(c.hipsLimited), static_cast<unsigned long long>(c.guardCalls),
         static_cast<unsigned long long>(c.guardHeld), static_cast<unsigned long long>(c.guardPassed),
-        static_cast<unsigned long long>(c.guardBusy), static_cast<double>(g_lastWeight.load()), g_meleeState.load());
+        static_cast<unsigned long long>(c.guardBusy), static_cast<double>(g_lastWeight.load()), g_meleeState.load(),
+        static_cast<unsigned long long>(c.kneeHinge));
     return n > 0 && size_t(n) < aLen;
 }
 

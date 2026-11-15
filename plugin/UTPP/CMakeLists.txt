@@ -982,6 +982,7 @@ target_compile_definitions(utpp_melee_pose_replay_test PRIVATE UTPP_REPLAY_FULL_
 target_compile_options(utpp_melee_pose_replay_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_melee_pose_replay_test COMMAND utpp_melee_pose_replay_test "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/melee_pose"
          "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/melee_base_male.bin" "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/melee_base_blend_male.bin")
+include(${CMAKE_CURRENT_SOURCE_DIR}/tests/melee_legs.cmake OPTIONAL) # melee full pose borders: knee hinge mutation target
 # ---- head look layer: Spine3 / Neck / Neck1 / Head and the eyes toward the target of utpp_core (self-contained block) ----
 # HeadLook.hpp: gaze, spring, distribution, limits, eyes (header-only core); HeadLook.cpp: FK detour glue (after the melee tilt).
 target_sources(UTPP PRIVATE src/mm/HeadLook.cpp src/mm/HeadLook.hpp src/mm/HeadLookRuntime.hpp)

@@ -556,6 +556,172 @@ void TestGuardRecorded(const std::string& aPath)
     // what stays: the cuts between two clips whose poses differ (no reference frame) and the jump from the held pose to the next clip
     Check(r.popsOut * 2 < r.popsIn, "hand steps above 100 deg at least halved", r.popsOut);
 }
+// ------------------------------------------------------------------------------------------------ knee hinge of the border leg solve
+//
+// Synthetic legs (thigh and shin 0.45 m along their local x, knee flex = minus the rotation about the thigh's local z, rest local of the
+// Leg = identity as on both V rigs). The incoming pose rises from a crouch (Hips 0.50 m, knee flex 118 deg) to a standing pose whose knee
+// carries a sideways bend comparable to its flex (flex 13 deg, sideways 17 deg: the standing legs of Male V); the borders start at the
+// crouch with a short low-weight write and then hold the Hips height (kHipsSpeed) while the incoming pose stands, as in a crouch attack.
+// KH-1 the knees stay hinges (roll <= 9.3 deg, sideways <= 23.2 deg: the Male bands of the shape measure); KH-2 the ankles land where the
+// two-bone solve puts them (no extra slide); KH-3 a standing correction of 2 cm stays bit for bit the two-bone solve; KH-4 the setup shows
+// the fault without the hinge (the check is meaningful).
+namespace kneehinge
+{
+constexpr int kBones = 9; // Root, Hips, Spine, LeftUpLeg, LeftLeg, LeftFoot, RightUpLeg, RightLeg, RightFoot
+const char* const kNames[kBones] = {"Root", "Hips", "Spine", "LeftUpLeg", "LeftLeg", "LeftFoot", "RightUpLeg", "RightLeg", "RightFoot"};
+const int16_t kParents[kBones] = {-1, 0, 1, 1, 3, 4, 1, 6, 7};
+
+struct LegPose
+{
+    float hipsZ, thighDeg, flexDeg, devDeg;
+};
+
+// the thigh frame maps local x down, y forward, z right (Ry 90 deg in the Hips frame); thighDeg swings it forward about its local z
+std::vector<uint8_t> MakePose(const LegPose& aP)
+{
+    std::vector<uint8_t> b(size_t(kBones) * integ::kGameBoneStride, 0);
+    const math::Quat id{0.0f, 0.0f, 0.0f, 1.0f};
+    SetRec(b, 0, math::Vec3{}, id);
+    SetRec(b, 1, math::Vec3{0.0f, 0.0f, aP.hipsZ}, id);
+    SetRec(b, 2, math::Vec3{0.0f, 0.0f, 0.1f}, id);
+    for (int s = 0; s < 2; ++s)
+    {
+        const uint32_t up = s == 0 ? 3u : 6u;
+        const math::Quat thigh = math::QuatNormalize(math::QuatMul(AxisAngle(0, 1, 0, 90.0f), AxisAngle(0, 0, 1, aP.thighDeg)));
+        SetRec(b, up, math::Vec3{s == 0 ? -0.1f : 0.1f, 0.0f, 0.0f}, thigh);
+        const float dev = s == 0 ? -aP.devDeg : aP.devDeg;
+        SetRec(b, up + 1, math::Vec3{0.45f, 0.0f, 0.0f}, math::QuatNormalize(math::QuatMul(AxisAngle(0, 0, 1, -aP.flexDeg), AxisAngle(0, 1, 0, dev))));
+        SetRec(b, up + 2, math::Vec3{0.45f, 0.0f, 0.0f}, math::QuatNormalize(math::QuatInv(math::QuatMul(thigh, AxisAngle(0, 0, 1, aP.thighDeg - aP.flexDeg)))));
+    }
+    return b;
+}
+
+std::vector<uint8_t> Lerp(const std::vector<uint8_t>& aA, const std::vector<uint8_t>& aB, float aT)
+{
+    std::vector<uint8_t> o = aA;
+    for (uint32_t i = 0; i < uint32_t(kBones); ++i)
+    {
+        const aim::Xf a = aim::ReadLocal(aA.data(), i), b = aim::ReadLocal(aB.data(), i);
+        SetRec(o, i, a.p + (b.p - a.p) * aT, math::QuatNlerpShortest(a.q, b.q, aT));
+    }
+    return o;
+}
+
+struct KneeDeg
+{
+    float flex, dev, roll;
+};
+// ZYX of the Leg local (rest local = identity): flex = -z, sideways = |y|, roll = |x|
+KneeDeg KneeOf(math::Quat aQ)
+{
+    const math::Quat q = math::QuatNormalize(aQ);
+    const float r00 = 1 - 2 * (q.y * q.y + q.z * q.z), r10 = 2 * (q.x * q.y + q.z * q.w), r20 = 2 * (q.x * q.z - q.y * q.w);
+    const float r21 = 2 * (q.y * q.z + q.x * q.w), r22 = 1 - 2 * (q.x * q.x + q.y * q.y);
+    return KneeDeg{-std::atan2(r10, r00) * 57.29578f, std::fabs(std::asin(std::fmax(-1.0f, std::fmin(1.0f, -r20)))) * 57.29578f,
+                   std::fabs(std::atan2(r21, r22)) * 57.29578f};
+}
+
+struct RunResult
+{
+    float roll = 0.0f, dev = 0.0f, flex = 0.0f, step = 0.0f, hipsSpeed = 0.0f;
+    int hingeFrames = 0;
+    std::vector<std::vector<uint8_t>> out;
+};
+
+// aStand: a standing incoming pose with the borders' plants 2 cm off (a small correction); otherwise the crouch attack entry
+RunResult Run(bool aHinge, bool aStand)
+{
+    std::vector<uint64_t> hashes(kBones);
+    for (int i = 0; i < kBones; ++i)
+        hashes[size_t(i)] = integ::CNameHash(kNames[i]);
+    const meleepose::LowerRig rig = meleepose::ResolveLowerRig(hashes, std::span<const int16_t>(kParents, kBones));
+    RunResult r;
+    if (!rig.ok)
+        return r;
+    const std::vector<uint8_t> crouch = MakePose(LegPose{0.50f, 59.0f, 118.0f, 0.0f});
+    const std::vector<uint8_t> stand = MakePose(LegPose{0.92f, 6.5f, 13.0f, 17.0f});
+    const float dt = 1.0f / 60.0f;
+    meleepose::BorderState bs;
+    math::Vec3 prev[2]{};
+    float prevHips = 0.0f;
+    for (int f = 0; f < 36; ++f)
+    {
+        std::vector<uint8_t> b = aStand ? stand : Lerp(crouch, stand, std::fmin(1.0f, float(f) / 12.0f));
+        meleepose::LowerModel pre;
+        bool havePre = false;
+        if (f == 0)
+        {
+            // the plants: the crouch (entry) or the standing pose with both ankles 2 cm forward (standing correction)
+            std::vector<uint8_t> p = aStand ? MakePose(LegPose{0.92f, 7.5f, 13.0f, 17.0f}) : crouch;
+            havePre = meleepose::ComputeLowerModel(p.data(), uint32_t(kBones), rig, pre);
+        }
+        const bool writing = aStand || f < 3;
+        meleepose::BorderInfo bi;
+        meleepose::BorderStep(bs, b.data(), uint32_t(kBones), rig, havePre ? &pre : nullptr, writing, writing ? (aStand ? 1.0f : 0.01f) : 0.0f, dt, &bi,
+                              false, aHinge);
+        if (bi.hingeLegs > 0)
+            ++r.hingeFrames;
+        meleepose::LowerModel m;
+        meleepose::ComputeLowerModel(b.data(), uint32_t(kBones), rig, m);
+        for (int s = 0; s < 2; ++s)
+        {
+            const KneeDeg k = KneeOf(aim::ReadLocal(b.data(), uint32_t(rig.bone[3 + 3 * s])).q);
+            r.roll = std::fmax(r.roll, k.roll);
+            r.dev = std::fmax(r.dev, k.dev);
+            r.flex = std::fmax(r.flex, k.flex);
+            if (f > 0)
+            {
+                const math::Vec3 d = m.leg[s][2].p - prev[s];
+                r.step = std::fmax(r.step, std::sqrt(math::Dot(d, d)));
+            }
+            prev[s] = m.leg[s][2].p;
+        }
+        if (f > 0)
+            r.hipsSpeed = std::fmax(r.hipsSpeed, std::fabs(m.hipsLocalZ - prevHips) / dt);
+        prevHips = m.hipsLocalZ;
+        r.out.push_back(std::move(b));
+    }
+    return r;
+}
+} // namespace kneehinge
+
+void TestKneeHingeSynthetic()
+{
+    const kneehinge::RunResult on = kneehinge::Run(true, false), off = kneehinge::Run(false, false);
+    std::printf("knee hinge, crouch attack entry: two-bone roll %.1f sideways %.1f flex %.1f -> hinge roll %.1f sideways %.1f flex %.1f deg, "
+                "%d hinge frames; ankle step max %.2f -> %.2f cm, Hips speed %.2f -> %.2f m/s\n",
+                off.roll, off.dev, off.flex, on.roll, on.dev, on.flex, on.hingeFrames, off.step * 100.0f, on.step * 100.0f, off.hipsSpeed, on.hipsSpeed);
+    Check(off.roll > 30.0f, "KH-4 the setup shows the shin roll of the two-bone solve", off.roll);
+    Check(on.roll <= 9.3f && on.dev <= 23.2f, "KH-1 crouch attack entry: the knees stay hinges (roll <= 9.3, sideways <= 23.2 deg)", on.roll);
+    Check(on.flex <= meleepose::kKneeFlexMaxDeg + 0.1f, "KH-1b knee flex within the hinge solve's limit", on.flex);
+    float ankleDiff = 0.0f;
+    {
+        std::vector<uint64_t> hashes(kneehinge::kBones);
+        for (int i = 0; i < kneehinge::kBones; ++i)
+            hashes[size_t(i)] = integ::CNameHash(kneehinge::kNames[i]);
+        const meleepose::LowerRig rig = meleepose::ResolveLowerRig(hashes, std::span<const int16_t>(kneehinge::kParents, kneehinge::kBones));
+        for (size_t f = 0; f < on.out.size() && f < off.out.size(); ++f)
+        {
+            meleepose::LowerModel a, b;
+            meleepose::ComputeLowerModel(on.out[f].data(), uint32_t(kneehinge::kBones), rig, a);
+            meleepose::ComputeLowerModel(off.out[f].data(), uint32_t(kneehinge::kBones), rig, b);
+            for (int s = 0; s < 2; ++s)
+            {
+                const math::Vec3 d = a.leg[s][2].p - b.leg[s][2].p;
+                ankleDiff = std::fmax(ankleDiff, std::sqrt(math::Dot(d, d)));
+            }
+        }
+    }
+    std::printf("knee hinge: largest ankle distance hinge vs two-bone %.2f mm\n", ankleDiff * 1000.0f);
+    Check(ankleDiff <= 0.002f, "KH-2 the ankles land where the two-bone solve puts them (m)", ankleDiff);
+    const kneehinge::RunResult sOn = kneehinge::Run(true, true), sOff = kneehinge::Run(false, true);
+    int changed = 0;
+    for (size_t f = 0; f < sOn.out.size(); ++f)
+        changed += sOn.out[f] != sOff.out[f] ? 1 : 0;
+    std::printf("knee hinge, standing 2 cm correction: %d hinge frames, %d frames changed\n", sOn.hingeFrames, changed);
+    Check(sOn.hingeFrames == 0 && changed == 0, "KH-3 standing correction bit for bit the two-bone solve", changed);
+}
+
 // ------------------------------------------------------------------------------------------------ borders and clip choice on recorded frames
 //
 // "MPB1" (tools/melee/melee_pose_border_fixture.py): full-body episodes of a melee run, both recorded stages (stage 0 = the engine pose,
@@ -1054,7 +1220,12 @@ void RunBorderFixture(const std::string& aPath, const PoseTables* aTables)
             // borders: recorded (stage 1) against after the borders on the same written pose
             std::vector<math::Vec3> l0, r0, l1, r1;
             std::vector<float> h0, h1;
-            meleepose::BorderState bs;
+            meleepose::BorderState bs, bsTwoBone;
+            int hingeEngaged = 0, hingeChanged = 0, hingeChangedOutside = 0;
+            float hingeOffMax = 0.0f; // largest off-hinge knee rotation of the two-bone solve on frames the hinge did not engage
+            float hingeOnMax = 0.0f;  // ... and on the frames it engaged
+            float foldMax = 0.0f, foldEngagedMin = 1e9f; // largest leg fold of the window; smallest fold on an engaged frame (m)
+            float hipsOffMax = 0.0f;                     // largest Hips height offset of the borders (m)
             for (int32_t f = 0; f < nf; ++f)
             {
                 meleepose::LowerModel m;
@@ -1065,8 +1236,26 @@ void RunBorderFixture(const std::string& aPath, const PoseTables* aTables)
                 std::vector<uint8_t> b = s1[size_t(f)];
                 meleepose::LowerModel pre;
                 const bool havePre = f > 0 && meleepose::ComputeLowerModel(s1[size_t(f) - 1].data(), uint32_t(nb), lower, pre);
+                meleepose::BorderInfo kbi;
                 meleepose::BorderStep(bs, b.data(), uint32_t(nb), lower, havePre ? &pre : nullptr, writing[size_t(f)] != 0, weight[size_t(f)],
-                                      dt[size_t(f)]);
+                                      dt[size_t(f)], &kbi);
+                // the knee hinge: the same step with the two-bone solve as it is; a frame may differ only where the hinge solve engaged
+                std::vector<uint8_t> b2 = s1[size_t(f)];
+                meleepose::BorderStep(bsTwoBone, b2.data(), uint32_t(nb), lower, havePre ? &pre : nullptr, writing[size_t(f)] != 0, weight[size_t(f)],
+                                      dt[size_t(f)], nullptr, false, false);
+                hingeEngaged += kbi.hingeLegs > 0 ? 1 : 0;
+                hingeOffMax = std::fmax(hingeOffMax, kbi.hingeLegs > 0 ? 0.0f : kbi.offHingeDeg);
+                hingeOnMax = std::fmax(hingeOnMax, kbi.hingeLegs > 0 ? kbi.offHingeDeg : 0.0f);
+                foldMax = std::fmax(foldMax, kbi.foldM);
+                hipsOffMax = std::fmax(hipsOffMax, std::fabs(kbi.hipsOffset));
+                if (kbi.hingeLegs > 0)
+                    foldEngagedMin = std::fmin(foldEngagedMin, kbi.foldM);
+                if (b != b2)
+                {
+                    ++hingeChanged;
+                    if (kbi.hingeLegs == 0)
+                        ++hingeChangedOutside;
+                }
                 meleepose::ComputeLowerModel(b.data(), uint32_t(nb), lower, m);
                 l1.push_back(m.leg[0][2].p);
                 r1.push_back(m.leg[1][2].p);
@@ -1075,6 +1264,10 @@ void RunBorderFixture(const std::string& aPath, const PoseTables* aTables)
             std::vector<uint8_t> fadeMask(frames, 0);
             for (size_t f = 0; f < frames; ++f)
                 fadeMask[f] = (phase[f] == 1 || phase[f] == 3) && weight[f] < 0.999f ? 1 : 0;
+            std::printf("  %-16s knee hinge: %d of %d frames engaged, %d frames differ from the two-bone solve (%d outside), largest "
+                        "off-hinge rotation left to the two-bone solve %.2f deg, on the engaged frames %.2f deg, largest leg fold %.1f cm, Hips offset %.1f cm\n",
+                        label, hingeEngaged, nf, hingeChanged, hingeChangedOutside, hingeOffMax, hingeOnMax, foldMax * 100.0f, hipsOffMax * 100.0f);
+            Check(hingeChangedOutside == 0, "knee hinge: recorded frames differ from the two-bone solve only where the hinge engaged", hingeChangedOutside);
             const TravelMetrics before = MeasureTravel(l0, r0, h0, dt, phase, fadeMask), after = MeasureTravel(l1, r1, h1, dt, phase, fadeMask);
             // the layer as the game runs it (LayerCall: match on the engine keys, write, borders) on the engine pose of stage 0 with the
             // modelled fade; the state is carried across the windows of one fixture only through the window's own frames
@@ -1263,6 +1456,7 @@ int main(int aArgc, char** aArgv)
     Check(tot.strikes == 10, "weapon runs (5 weapons x 2 bodies)", tot.strikes);
     TestGuardSynthetic();
     TestSwitchBlendSynthetic();
+    TestKneeHingeSynthetic();
     TestGuardRecorded(dir + "/melee_pose_guard_female.bin");
     // further recordings by magic: guard fixtures (e.g. a whole run cut with --all; reported, judged only for frames that must not change)
     // and border / clip choice fixtures

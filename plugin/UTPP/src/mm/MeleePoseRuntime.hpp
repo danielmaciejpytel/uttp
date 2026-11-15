@@ -46,6 +46,7 @@ struct Counters
     uint64_t calls = 0, written = 0, held = 0, relocks = 0, noTable = 0, noWeapon = 0, busy = 0;
     uint64_t guardCalls = 0, guardHeld = 0, guardPassed = 0, guardBusy = 0;
     uint64_t frozen = 0, toBase = 0, borderCalls = 0, tailCalls = 0, planted = 0, steps = 0, hipsLimited = 0;
+    uint64_t kneeHinge = 0; // border calls that solved a leg with the knee hinge (meleepose::BorderInfo::hingeLegs > 0)
     double meanMicros = 0.0, maxMicros = 0.0;
 };
 Counters GetCounters();
