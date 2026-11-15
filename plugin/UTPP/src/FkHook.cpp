@@ -53,6 +53,30 @@ namespace utpp
 HotState g_hot;
 mm::integ::SeqlockBuffer<mm::integ::PoseSnapshot> g_mmPose;
 
+namespace
+{
+// Gun bash wrist limit of the game's left arm (mm/NativeReloadContactsRuntime.hpp ApplyGunBashWristLimit): the last write on the game's
+// arms of a gun bash frame (ranged weapon overlay, melee mask reason on). It runs where the published pose has passed every gate
+// (third person, weight > 0, rig, age), so the writer mark and the shadow skeleton refresh of the caller cover it. Off the bash it runs
+// only while a remaining cut shrinks.
+mm::reload_contacts_runtime::GunBashWristState g_gunBashWrist;
+void ApplyGunBashWrist(uint8_t* bones, uint32_t aCount, uint64_t aMergedRig, const mm::integ::PoseSnapshot& snap, int64_t aNow)
+{
+    const bool bash = mm::reload_contacts_runtime::GunBashFrame(snap);
+    if (!bash && !g_gunBashWrist.held.load(std::memory_order_relaxed))
+        return;
+    if (snap.rig != aMergedRig)
+        return;
+    const int64_t stale = g_hot.mmStaleTicks.load(std::memory_order_relaxed);
+    if (aNow < snap.publishTicks || (stale > 0 && (aNow - snap.publishTicks) > stale))
+        return;
+    mm::reload_contacts_runtime::Prepared cfg;
+    if (!mm::reload_contacts_runtime::g_config.Read(cfg) || cfg.skeleton.n <= 0)
+        return;
+    mm::reload_contacts_runtime::ApplyGunBashWristLimit(cfg, aMergedRig, bones, aCount, bash, g_gunBashWrist, aNow, util::QpcFrequency());
+}
+} // namespace
+
 uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCount,
                            uint64_t aMergedRig, const mm::integ::PoseSnapshot& snap, int64_t aNow)
 {
@@ -163,6 +187,8 @@ uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCoun
     // contacts, which stay the last core write. Gate = MM ownership x (1 - melee fade); idle: two relaxed loads, no write.
     utpp::headlook::Apply(bones, aCount, reinterpret_cast<void*>(aMergedRig), snap.weight, snap.upperScale, snap.meleeAimWeight,
                           snap.traceOverlay, aNow);
+    // Gun bash: wrist bend limit of the game's left arm, after every layer that writes the arms (no reload correction runs in a bash).
+    ApplyGunBashWrist(bones, aCount, aMergedRig, snap, aNow);
     if (reloadRecOn)
         mm::reload_contacts_runtime::TraceClavicles(reloadConfig, bones, aCount, reloadRec.clavIn);
     if (reloadCaptured)

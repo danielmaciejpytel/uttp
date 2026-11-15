@@ -15,6 +15,8 @@
 // UTPP_RELOAD_CONTACT_MUTATION=27: no final anatomy stage of the left arm (LimitArmFinal), sections 12 (13e) and 13.
 // UTPP_RELOAD_CONTACT_MUTATION=28: the girdle is restored with the correction weight under a hand-back that ramps with it, section 15.
 // UTPP_RELOAD_CONTACT_MUTATION=29: no final elbow swivel of the weapon (right) arm, section 16.
+// UTPP_RELOAD_CONTACT_MUTATION=30: no final left-arm stage on pistol frames with V's girdle kept, section 17.
+// UTPP_RELOAD_CONTACT_MUTATION=31: no gun bash wrist limit of the game's left arm, section 18.
 // UTPP_RELOAD_GROUND_KEEP_MUTATION=1: no ground keep, 2: no edge latch (a pistol reload begun moving stays uncorrected), 3: no girdle
 // hold after an early episode end (sections 9 and 11).
 // Every mutation build must report an assertion FAIL (ctest PASS_REGULAR_EXPRESSION "FAIL ").
@@ -1470,6 +1472,181 @@ int main(int argc,char** argv)
             Check(relaxOverStep==0 && relaxBendMax<=rt::kReloadWristBendLimitDeg+0.05f,
                   "final right arm swivel: the swivel relaxes to 0 at the rate, the wrist stays inside the limit while it does");
             Check(afterZeroSame==afterZero,"final right arm swivel: after the relax the records are bit for bit again");
+        }
+    }
+
+    // 17. Final left-arm stage on pistol / revolver frames with V's girdle kept (OwnLeftArm + ApplyLeftArmFinalLimits, the pair Finish and
+    //     HoldOnly call). The last 0.5 s of a pistol reload that turns into a run: the ground keep clears the clavicle bits and the solve
+    //     rolls the left upper arm to ~130 deg (revolver) or bends the wrist to ~98 deg (handgun) while the game's own arm stays inside.
+    //     (a) revolver: upper-arm twist swept at 60 fps -40 -> -130 -> -40 deg in 5 deg steps, game's own arm at -65 deg; (b) handgun:
+    //     wrist bend swept 50 -> 98 -> 50 deg, game's own bend 45 deg. Per frame: with the clavicle bits cleared the written twist / bend
+    //     stays at its limit, frames inside the limits are bit for bit, the elbow does not move, the hand moves no more per frame than
+    //     its input does; with the clavicle bits set (a standing pistol reload) every frame is bit for bit. Mutation 30 drops the pistol part.
+    {
+        const auto& L=rig.left;
+        const int64_t tps=60000;
+        ov::Pose a=*base;
+        a.b[L.lower].r=ov::AxisAngleQuat(math::Vec3{0.0f,0.0f,1.0f},60.0f);
+        a.b[L.hand].r=ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},30.0f);
+        const auto twisted=[&](ov::Pose x,float d){
+            x.b[L.upper].r=math::QuatNormalize(math::QuatMul(rt::kUpperArmRestLocal,ov::AxisAngleQuat(math::Vec3{1.0f,0.0f,0.0f},d)));return x;};
+        const auto bent=[&](ov::Pose x,float d){x.b[L.hand].r=ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},d);return x;};
+        integ::PoseSnapshot kept=snap;kept.reloadContactsWeight=1.0f;
+        rt::ClearShoulderGirdleBits(kept.upperBits,uint32_t(sk.n),2,[&](uint32_t b){return file.BoneName(b);});
+        integ::PoseSnapshot standing=snap;standing.reloadContactsWeight=1.0f;
+        struct Sweep{const char* tag;int overlay;bool twist;float from,to,step,own;};
+        const Sweep sweeps[2]={{"revolver twist",int32_t(ov::PoseOverlay::Pistol1H),true,-40.0f,-130.0f,5.0f,-65.0f},
+                               {"handgun bend",int32_t(ov::PoseOverlay::Pistol2H),false,50.0f,98.0f,4.0f,45.0f}};
+        for(const Sweep& sw:sweeps)
+        {
+            std::vector<float> values;
+            for(float d=sw.from;sw.twist ? d>=sw.to-1e-3f : d<=sw.to+1e-3f;d+=sw.twist ? -sw.step : sw.step)values.push_back(d);
+            for(int k=int(values.size())-2;k>=0;--k)values.push_back(values[size_t(k)]);
+            const ov::Pose ownPose=sw.twist ? twisted(a,sw.own) : bent(twisted(a,-20.0f),sw.own);
+            std::vector<unsigned char> ownRec;Records(ownPose,ownRec);
+            for(int girdle=0;girdle<2;++girdle)
+            {
+                integ::PoseSnapshot s=girdle==0 ? kept : standing;s.traceOverlay=sw.overlay;
+                const rt::ArmAnatomy own=rt::OwnLeftArm(prepared,s,ownRec.data(),sk.n,true);
+                rt::JointLimiter joints;rt::FinalLimitSide side;
+                int over=0,inside=0,insideSame=0,same=0,applied=0;
+                float maxIn=0.0f,maxOut=0.0f,elbowMoved=0.0f,handStepIn=0.0f,handStepOut=0.0f,rotStepIn=0.0f,rotStepOut=0.0f;
+                ov::Xf prevHi{},prevHo{};
+                for(size_t k=0;k<values.size();++k)
+                {
+                    const ov::Pose in=sw.twist ? twisted(a,values[k]) : bent(twisted(a,-20.0f),values[k]);
+                    std::vector<unsigned char> inRec;Records(in,inRec);
+                    std::vector<unsigned char> out=inRec;
+                    applied+=rt::ApplyLeftArmFinalLimits(prepared,s,out.data(),sk.n,own,1.0f,joints,side,int64_t(k+1)*(tps/60),tps);
+                    ov::Pose po;rt::Read(prepared,out.data(),po);
+                    const rt::ArmAnatomy mi=rt::MeasureArm(in,L),mo=rt::MeasureArm(po,L);
+                    const float vi=sw.twist ? std::fabs(mi.upperTwistDeg) : mi.bendDeg,vo=sw.twist ? std::fabs(mo.upperTwistDeg) : mo.bendDeg;
+                    const float limit=sw.twist ? rt::kReloadUpperArmTwistCapDeg : rt::kReloadWristBendLimitDeg;
+                    const bool inLimits=std::fabs(mi.upperTwistDeg)<=rt::kReloadUpperArmTwistCapDeg && std::fabs(mi.pronationDeg)<=rt::kReloadPronationLimitDeg &&
+                                        mi.bendDeg<=rt::kReloadWristBendLimitDeg;
+                    maxIn=std::max(maxIn,vi);maxOut=std::max(maxOut,vo);
+                    if(vi>limit)++over;
+                    if(inLimits){++inside;insideSame+=out==inRec;}
+                    same+=out==inRec;
+                    elbowMoved=std::max(elbowMoved,gik::Len(native_reload::Model(sk,po,L.lower).t-native_reload::Model(sk,in,L.lower).t));
+                    const ov::Xf hi=native_reload::Model(sk,in,L.hand),ho=native_reload::Model(sk,po,L.hand);
+                    if(k>0)
+                    {
+                        handStepIn=std::max(handStepIn,gik::Len(hi.t-prevHi.t));handStepOut=std::max(handStepOut,gik::Len(ho.t-prevHo.t));
+                        const auto ang=[](const math::Quat& x,const math::Quat& y){
+                            return 2.0f*std::acos(std::min(1.0f,std::fabs(math::QuatDot(math::QuatNormalize(x),math::QuatNormalize(y)))))*57.29578f;};
+                        rotStepIn=std::max(rotStepIn,ang(hi.r,prevHi.r));rotStepOut=std::max(rotStepOut,ang(ho.r,prevHo.r));
+                    }
+                    prevHi=hi;prevHo=ho;
+                }
+                const int frames=int(values.size());
+                std::printf("  pistol final left arm (%s, %s): %d frames, over %d, applied %d | %s max %.1f -> %.1f deg | inside %d (%d bit for bit), "
+                            "unchanged %d | elbow moved %.2f cm | hand step max %.2f -> %.2f cm/frame, %.1f -> %.1f deg/frame\n",sw.tag,
+                            girdle==0 ? "girdle kept" : "standing mask",frames,over,applied,sw.twist ? "twist" : "bend",maxIn,maxOut,inside,
+                            insideSame,same,elbowMoved*100.0f,handStepIn*100.0f,handStepOut*100.0f,rotStepIn,rotStepOut);
+                const std::string tag=std::string("pistol final left arm, ")+sw.tag;
+                if(girdle==0)
+                {
+                    Check(own.ok && over>=10 && inside>=6,(tag+": fixture: the swept arm passes the limit and comes back inside").c_str());
+                    Check(maxOut<=(sw.twist ? rt::kReloadUpperArmTwistCapDeg : rt::kReloadWristBendLimitDeg)+0.05f,
+                          (tag+": with V's girdle kept the written value stays at its limit").c_str());
+                    Check(insideSame==inside,(tag+": frames inside the limits are bit for bit").c_str());
+                    Check(elbowMoved<1e-4f && handStepOut<=handStepIn+1e-4f && rotStepOut<=rotStepIn+0.05f,
+                          (tag+": the elbow does not move, the hand steps no more per frame than its input").c_str());
+                }
+                else
+                    Check(!own.ok && applied==0 && same==frames,(tag+": a standing pistol reload (clavicle bits in the mask) is bit for bit").c_str());
+            }
+        }
+    }
+
+    // 18. Gun bash wrist limit of the game's left arm (GunBashFrame + ApplyGunBashWristLimit, called by the FK hook as the last write on
+    //     the game's arms). The sniper rifle bash after a scoped aim: the game's left wrist bend rises past the limit on the first frames
+    //     the plugin may write (recorded 96 - 104 deg). Fixture at 60 fps: frame 0 already at 99 deg (the pass starts past the limit), sweep
+    //     to 104 and back to 50 deg, then the bash ends with the hand at 99 deg (a cut still held) and later at 50. Per frame: the cut
+    //     grows / shrinks by at most kGunBashCutRateDegPerSec * dt, the bend never exceeds the limit once the cut has caught up, only the
+    //     left hand local rotation changes (right arm and weapon bit for bit), frames under the limit with no cut are bit for bit. A melee
+    //     weapon (no ranged overlay) and a frame without the melee mask reason are untouched. Mutation 31 drops the pass.
+    {
+        const auto& L=rig.left;
+        const int64_t tps=60000;
+        ov::Pose a=*base;
+        a.b[L.lower].r=ov::AxisAngleQuat(math::Vec3{0.0f,0.0f,1.0f},60.0f);
+        const auto bent=[&](float d){ov::Pose x=a;x.b[L.hand].r=ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},d);return x;};
+        integ::PoseSnapshot bash=snap;bash.traceOverlay=int32_t(ov::PoseOverlay::Rifle);bash.meleeAimWeight=0.2f;
+        integ::PoseSnapshot melee=bash;melee.traceOverlay=int32_t(ov::PoseOverlay::Default);
+        integ::PoseSnapshot noMask=bash;noMask.meleeAimWeight=0.0f;
+        Check(rt::GunBashFrame(bash) && !rt::GunBashFrame(melee) && !rt::GunBashFrame(noMask),
+              "gun bash wrist: a ranged overlay with the melee mask reason is a gun bash frame; a melee weapon / no melee reason is not");
+        std::vector<float> bendIn;std::vector<bool> active;
+        bendIn.push_back(99.0f);active.push_back(true);
+        for(float d=100.0f;d<=104.0f;d+=1.0f){bendIn.push_back(d);active.push_back(true);}
+        for(float d=104.0f;d>=50.0f;d-=3.0f){bendIn.push_back(d);active.push_back(true);}
+        for(int k=0;k<8;++k){bendIn.push_back(99.0f);active.push_back(k<3);} // the bash ends with a cut held
+        for(int k=0;k<6;++k){bendIn.push_back(50.0f);active.push_back(false);}
+        rt::GunBashWristState st;
+        int under=0,underSame=0,otherChanged=0,stepOver=0,heldAfter=0;
+        float maxOut=0.0f,maxCutStep=0.0f,prevCut=0.0f,maxRotStepIn=0.0f,maxRotStepOut=0.0f,handMoved=0.0f;
+        math::Quat prevHi{},prevHo{};
+        int trackMiss=0,caughtFrames=0,caughtOver=0;float expect=0.0f;
+        for(size_t k=0;k<bendIn.size();++k)
+        {
+            const ov::Pose in=bent(bendIn[k]);
+            std::vector<unsigned char> inRec;Records(in,inRec);
+            std::vector<unsigned char> out=inRec;
+            const bool cutBefore=st.cutDeg>0.0f;
+            rt::ApplyGunBashWristLimit(prepared,123,out.data(),sk.n,active[k] && rt::GunBashFrame(bash),st,int64_t(k+1)*(tps/60),tps);
+            ov::Pose po;rt::Read(prepared,out.data(),po);
+            const float bo=rt::WristBendDeg(po.b[L.hand].r);
+            const float cutNow=std::fmax(0.0f,bendIn[k]-bo);
+            if(k>0)maxCutStep=std::max(maxCutStep,std::fabs(cutNow-prevCut));
+            stepOver+=k>0 && std::fabs(cutNow-prevCut)>rt::kGunBashCutRateDegPerSec/60.0f+0.05f;
+            prevCut=cutNow;
+            if(active[k])
+            {
+                if(bendIn[k]<=rt::kReloadWristBendLimitDeg+1e-3f && !cutBefore){++under;underSame+=out==inRec;}
+                // expected cut: the excess, reached at the rate (first frame: one frame of the rate)
+                const float excess=std::fmax(0.0f,bendIn[k]-rt::kReloadWristBendLimitDeg);
+                expect=std::fmin(excess,expect+rt::kGunBashCutRateDegPerSec/60.0f);
+                trackMiss+=std::fabs((bendIn[k]-bo)-expect)>0.05f;
+                if(expect>=excess-1e-3f && excess>0.0f){++caughtFrames;caughtOver+=bo>rt::kReloadWristBendLimitDeg+0.05f;maxOut=std::max(maxOut,bo);}
+            }
+            else{expect=std::fmax(0.0f,expect-rt::kGunBashCutRateDegPerSec/60.0f);if(st.cutDeg>0.0f)++heldAfter;}
+            {
+                std::vector<unsigned char> rest=out;
+                const size_t h=size_t(prepared.gameIndex[L.hand])*48;
+                std::memcpy(rest.data()+h,inRec.data()+h,48);
+                otherChanged+=rest!=inRec;
+            }
+            handMoved=std::max(handMoved,gik::Len(native_reload::Model(sk,po,L.hand).t-native_reload::Model(sk,in,L.hand).t));
+            const math::Quat hi=native_reload::Model(sk,in,L.hand).r,ho=native_reload::Model(sk,po,L.hand).r;
+            if(k>0)
+            {
+                const auto ang=[](const math::Quat& x,const math::Quat& y){
+                    return 2.0f*std::acos(std::min(1.0f,std::fabs(math::QuatDot(math::QuatNormalize(x),math::QuatNormalize(y)))))*57.29578f;};
+                maxRotStepIn=std::max(maxRotStepIn,ang(hi,prevHi));maxRotStepOut=std::max(maxRotStepOut,ang(ho,prevHo));
+            }
+            prevHi=hi;prevHo=ho;
+        }
+        std::printf("  gun bash wrist: %zu frames | bend max %.1f deg on the %d frames where the cut has caught up (%d over the limit), rate tracking misses %d | cut step "
+                    "max %.2f deg/frame (bound %.1f) | under the limit %d (%d bit for bit) | other bones changed %d, hand moved %.4f cm | hand turn "
+                    "step max %.1f -> %.1f deg/frame | frames with a cut held after the bash %d\n",bendIn.size(),maxOut,caughtFrames,caughtOver,trackMiss,maxCutStep,
+                    rt::kGunBashCutRateDegPerSec/60.0f,under,underSame,otherChanged,handMoved*100.0f,maxRotStepIn,maxRotStepOut,heldAfter);
+        Check(caughtFrames>=10 && caughtOver==0 && trackMiss==0,
+              "gun bash wrist: the cut follows the excess at the rate; once it has caught up the left wrist bend stays at the limit");
+        Check(stepOver==0,"gun bash wrist: the cut grows and shrinks by at most the rate per frame (no pop)");
+        Check(under>=5 && underSame==under,"gun bash wrist: frames under the limit with no cut held are bit for bit");
+        Check(otherChanged==0 && handMoved<1e-6f,"gun bash wrist: only the left hand local rotation changes (right arm, weapon, hand position kept)");
+        Check(heldAfter>=1 && st.cutDeg==0.0f,"gun bash wrist: after the bash a held cut shrinks at the rate to 0");
+        // a melee weapon / no melee reason with the hand past the limit: untouched
+        {
+            const ov::Pose in=bent(104.0f);
+            std::vector<unsigned char> inRec;Records(in,inRec);
+            std::vector<unsigned char> m1=inRec,m2=inRec;
+            rt::GunBashWristState s1,s2;
+            const bool d1=rt::ApplyGunBashWristLimit(prepared,123,m1.data(),sk.n,rt::GunBashFrame(melee),s1,1000,tps);
+            const bool d2=rt::ApplyGunBashWristLimit(prepared,123,m2.data(),sk.n,rt::GunBashFrame(noMask),s2,1000,tps);
+            Check(!d1 && !d2 && m1==inRec && m2==inRec,"gun bash wrist: a melee weapon and a frame without the melee reason are untouched");
         }
     }
     std::printf("%d passed, %d failed\n",g_pass,g_fail);

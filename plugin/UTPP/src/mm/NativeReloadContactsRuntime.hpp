@@ -2357,17 +2357,46 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
     }
     return leave(reload_trace::kExitAccepted,true);
 }
-// The game's own left arm of this frame (the records as handed in), for LimitArmFinal; !ok where the stage does not run (rifle only).
+// Pistol / revolver reloads with V's shoulder girdle kept under the hand-back: the driver clears both clavicle bits of the weapon-action
+// mask while the ground keep holds a pistol reload that began moving or that turns into a run (GroundMoveKeep / GirdleHold,
+// ClearShoulderGirdleBits). V's chest and shoulders then follow the locomotion while the game's arm is still posed for its own,
+// standing body; the contact solve keeps the game's hand orientation from V's shoulder and can roll the upper arm to ~130 deg or bend
+// the wrist to ~98 deg on the last 0.5 s of a reload that turns into a run. On those frames the final left-arm stage of the rifle path
+// runs as well (same limits, same weight rule). Mask with the clavicle bits (a standing pistol reload): the stage does not run, the
+// records stay bit for bit. Mutation 30 drops the pistol part.
+#if defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==30
+inline constexpr bool kPistolGirdleKeptFinalLimits=false;
+#else
+inline constexpr bool kPistolGirdleKeptFinalLimits=true;
+#endif
+inline bool PistolGirdleKept(const Prepared& p,const integ::PoseSnapshot& s)
+{
+    if(s.traceOverlay!=static_cast<int32_t>(ov::PoseOverlay::Pistol1H) && s.traceOverlay!=static_cast<int32_t>(ov::PoseOverlay::Pistol2H))
+        return false;
+    const auto& sk=p.skeleton;const auto& A=p.arms;
+    if(!sk.Valid() || !A.Valid(sk))return false;
+    const int cl=sk.parent[A.left.upper],cr=sk.parent[A.right.upper];
+    if(cl<0 || cr<0)return false;
+    return integ::SnapshotUpperBone(s,uint32_t(A.left.upper)) && !integ::SnapshotUpperBone(s,uint32_t(cl)) &&
+           !integ::SnapshotUpperBone(s,uint32_t(cr));
+}
+// Frames of the final left-arm stage: every rifle frame; pistol frames with V's girdle kept (above).
+inline bool LeftArmFinalLimitsFrame(const Prepared& p,const integ::PoseSnapshot& s)
+{
+    return s.traceOverlay==static_cast<int32_t>(ov::PoseOverlay::Rifle) || (kPistolGirdleKeptFinalLimits && PistolGirdleKept(p,s));
+}
+// The game's own left arm of this frame (the records as handed in), for LimitArmFinal; !ok where the stage does not run
+// (LeftArmFinalLimitsFrame).
 inline ArmAnatomy OwnLeftArm(const Prepared& p,const integ::PoseSnapshot& s,const uint8_t* records,uint32_t count,bool eligible)
 {
-    if(!(kLeftArmFinalLimits && eligible) || s.traceOverlay!=static_cast<int32_t>(ov::PoseOverlay::Rifle) ||
+    if(!(kLeftArmFinalLimits && eligible) || !LeftArmFinalLimitsFrame(p,s) ||
        !JointLimiter::RecordsInBounds(p,records,count))return ArmAnatomy{};
     ov::Pose own;
     if(!Read(p,records,own))return ArmAnatomy{};
     return MeasureArm(own,p.arms.left);
 }
 // Last write of a corrected frame: LimitArmFinal on the left arm of the written records; the joint limiter then remembers the final
-// output. `own.ok` false (not a rifle frame, or the game's arm could not be measured) = nothing happens.
+// output. `own.ok` false (not a frame of the stage, or the game's arm could not be measured) = nothing happens.
 inline bool ApplyLeftArmFinalLimits(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* records,uint32_t count,const ArmAnatomy& own,
                                     float weight,JointLimiter& joints,FinalLimitSide& side,int64_t ticks,int64_t ticksPerSecond)
 {
@@ -2404,6 +2433,76 @@ inline bool ApplyRightArmFinalSwivel(const Prepared& p,const integ::PoseSnapshot
         const float q[4]={pose.b[b].r.x,pose.b[b].r.y,pose.b[b].r.z,pose.b[b].r.w};
         std::memcpy(records+size_t(p.gameIndex[b])*48+16,q,sizeof(q));
     }
+    return true;
+}
+// ---- gun bash (quick melee with a ranged weapon drawn): wrist bend limit of the game's left arm.
+// A gun bash hands the upper body to the game (melee mask reason). After a scoped aim the bash starts in first person and the camera
+// returns to third person while it plays; on the frames right after the plugin may write again the MM weight and the melee mask are
+// still ramping in, and the game's left hand is bent 20 - 30 deg past the wrist limit. This pass runs on the final records of such
+// frames (ranged weapon overlay and the melee mask reason on: GunBashFrame) and brings the left wrist bend (hand local, smallest swing
+// towards the forearm axis) down to kReloadWristBendLimitDeg. Only the left hand local rotation changes: its position, the forearm, the
+// upper arm, the right arm and the weapon bones keep their records. The cut grows by at most kGunBashCutRateDegPerSec * dt per frame
+// (no pop when the pass starts on a frame already past the limit) and falls with the excess; after the bash a remaining cut shrinks at
+// the same rate. Frames under the limit with no cut held: bit for bit. Melee weapons have no ranged overlay and are not touched (their
+// own melee pose layer handles them). Mutation 31 drops the pass.
+#if defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==31
+inline constexpr bool kGunBashWristLimit=false;
+#else
+inline constexpr bool kGunBashWristLimit=true;
+#endif
+inline constexpr float kGunBashCutRateDegPerSec=600.0f;
+inline bool GunBashFrame(const integ::PoseSnapshot& s)
+{
+    const bool ranged=s.traceOverlay==static_cast<int32_t>(ov::PoseOverlay::Rifle) ||
+                      s.traceOverlay==static_cast<int32_t>(ov::PoseOverlay::Pistol1H) ||
+                      s.traceOverlay==static_cast<int32_t>(ov::PoseOverlay::Pistol2H);
+    return ranged && std::isfinite(s.meleeAimWeight) && s.meleeAimWeight>0.0f;
+}
+// One animation job at a time (try-flag; a busy state skips the pass for that call).
+struct GunBashWristState
+{
+    std::atomic<bool> busy{false};
+    std::atomic<bool> held{false}; // a cut is held (the caller runs the pass after the bash until it has shrunk to 0)
+    float cutDeg=0.0f;
+    int64_t lastTicks=0;
+    uint64_t rig=0;
+};
+inline bool ApplyGunBashWristLimit(const Prepared& p,uint64_t rig,uint8_t* records,uint32_t count,bool gunBash,GunBashWristState& st,
+                                   int64_t ticks,int64_t ticksPerSecond)
+{
+    if(!kGunBashWristLimit || st.busy.exchange(true,std::memory_order_acquire))return false;
+    struct Release
+    {
+        GunBashWristState& s;
+        ~Release(){s.held.store(s.cutDeg>0.0f,std::memory_order_relaxed);s.busy.store(false,std::memory_order_release);}
+    } release{st};
+    float dt=1.0f/60.0f;
+    const bool fresh=st.lastTicks<=0 || st.rig!=rig || ticksPerSecond<=0 || ticks<=st.lastTicks || (ticks-st.lastTicks)>ticksPerSecond/4;
+    if(fresh)st.cutDeg=0.0f;
+    else dt=std::fmin(0.05f,float(double(ticks-st.lastTicks)/double(ticksPerSecond)));
+    st.lastTicks=ticks;st.rig=rig;
+    if(!gunBash && !(st.cutDeg>0.0f))return false;
+    const int hand=p.arms.left.hand;
+    if(hand<0 || hand>=p.skeleton.n || p.gameIndex[hand]<0 || !JointLimiter::RecordsInBounds(p,records,count)){st.cutDeg=0.0f;return false;}
+    ov::Pose pose;
+    if(!Read(p,records,pose)){st.cutDeg=0.0f;return false;}
+    const math::Quat qh=math::QuatNormalize(pose.b[hand].r);
+    const float excess=std::fmax(0.0f,WristBendDeg(qh)-kReloadWristBendLimitDeg);
+    const float step=kGunBashCutRateDegPerSec*dt;
+    const float allowed=gunBash ? st.cutDeg+step : std::fmax(0.0f,st.cutDeg-step);
+    const float cut=std::fmin(excess,allowed);
+    st.cutDeg=cut;
+    if(!(cut>1e-4f))return false;
+    const math::Vec3 hx=math::QuatRotate(qh,math::Vec3{1.0f,0.0f,0.0f});
+    math::Vec3 axis=math::Cross(hx,math::Vec3{1.0f,0.0f,0.0f});
+    float al=std::sqrt(math::Dot(axis,axis));
+    if(!(al>1e-6f)){axis=math::QuatRotate(qh,math::Vec3{0.0f,0.0f,1.0f});axis.x=0.0f;al=std::sqrt(math::Dot(axis,axis));}
+    if(!(al>1e-6f) || !std::isfinite(al)){st.cutDeg=0.0f;return false;}
+    axis=axis*(1.0f/al);
+    const math::Quat out=math::QuatNormalize(math::QuatMul(ov::AxisAngleQuat(axis,cut),qh));
+    if(!math::IsFinite(out)){st.cutDeg=0.0f;return false;}
+    const float q[4]={out.x,out.y,out.z,out.w};
+    std::memcpy(records+size_t(p.gameIndex[hand])*48+16,q,sizeof(q));
     return true;
 }
 // ---- diagnostic record (reload_trace) around Finish / HoldOnly. Read-only.
