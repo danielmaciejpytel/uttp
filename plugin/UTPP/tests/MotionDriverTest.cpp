@@ -2484,6 +2484,8 @@ int main(int argc, char** argv)
             };
             mm::integ::PoseSnapshot before, first, post, optOut;
             hipStep(3, before);
+            if (hipPass == 1)
+                motiondriver::TestSetRecoilClock(1000.0); // simulated clock: the bounded wait below does not depend on the machine load
             motiondriver::SetWeaponAction(8);
             const bool firstOk = hipStep(1, first);
             const auto bit = [](const mm::integ::PoseSnapshot& snap, int bone) {
@@ -2494,9 +2496,21 @@ int main(int argc, char** argv)
                       StatusField(motiondriver::Status(), " hipFirePose=") == "1" && StatusField(motiondriver::Status(), " shootRoute=") == "0",
                       "12e hipfire first burst of a Pistol2H without a recoil profile (revolver): no native hand-over, authored arms");
             else
-                Check(firstOk && first.upperScale == 0.0f && bit(first, wr) && !bit(first, sp3) && !bit(first, hips) &&
-                      first.traceAiming == 0 && StatusField(motiondriver::Status(), " hipFirePose=") == "1",
+            {
+                // A weapon with a route: the Shoot state first waits a bounded time (0.2 s) for its first shot event on the authored
+                // arms; a Shoot state without any event then hands the arms to the native shot with a real action mask.
+                Check(firstOk && first.upperScale == 1.0f && first.traceAiming == 0 &&
+                      StatusField(motiondriver::Status(), " hipFirePose=") == "1" && StatusField(motiondriver::Status(), " shotWait=") == "1",
+                      "12e hipfire first burst: the authored arms wait for the first shot event (weaponUpper OFF)");
+                motiondriver::TestAdvanceRecoilClock(0.25); // past the bound, still no shot event
+                mm::integ::PoseSnapshot late;
+                const bool lateOk = hipStep(1, late);
+                Check(lateOk && late.upperScale == 0.0f && bit(late, wr) && !bit(late, sp3) && !bit(late, hips) &&
+                      late.traceAiming == 0 && StatusField(motiondriver::Status(), " hipFirePose=") == "1" &&
+                      StatusField(motiondriver::Status(), " shotWait=") == "0",
                       "12e hipfire first burst: actual native action mask despite weaponUpper OFF; no native ADS");
+                motiondriver::TestSetRecoilClock(-1.0);
+            }
             motiondriver::SetWeaponAction(0);
             Check(hipStep(1, post) && post.upperScale == 1.0f,
                   "12e hipfire postshot hold returns authored upper, no permanent native fallback");
