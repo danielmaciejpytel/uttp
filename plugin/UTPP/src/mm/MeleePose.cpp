@@ -92,6 +92,9 @@ std::atomic<bool> g_guardRigOk{false};
 std::atomic_flag g_guardBusy = ATOMIC_FLAG_INIT;
 core::GuardState g_guard;
 std::atomic<uint64_t> g_guardCalls{0}, g_guardHeld{0}, g_guardPassed{0}, g_guardBusySkips{0};
+// first-person girdle hold (MeleePoseGuard.hpp GirdleStep): its own stored frame, owned through g_guardBusy like g_guard
+core::GuardState g_girdle;
+std::atomic<uint64_t> g_girdleHeld{0}, g_girdlePassed{0};
 
 void GuardReset()
 {
@@ -101,6 +104,9 @@ void GuardReset()
     g_guard.have = false;
     g_guard.held = 0;
     g_guard.ticks = 0;
+    g_girdle.have = false;
+    g_girdle.held = 0;
+    g_girdle.ticks = 0;
     g_guardBusy.clear(std::memory_order_release);
 }
 
@@ -201,10 +207,12 @@ void GuardEngine(uint8_t* aBones, uint32_t aCount, void* aRig, float aMeleeWeigh
     const bool active = std::isfinite(aMeleeWeight) && aMeleeWeight > 0.0f && aBones && g_guardRigOk.load(std::memory_order_acquire);
     if (!active)
     {
-        if (g_guard.have && !g_guardBusy.test_and_set(std::memory_order_acquire))
+        if ((g_guard.have || g_girdle.have) && !g_guardBusy.test_and_set(std::memory_order_acquire))
         {
             g_guard.have = false; // the melee reason ended: the next episode starts without a stored pose
             g_guard.held = 0;
+            g_girdle.have = false;
+            g_girdle.held = 0;
             g_guardBusy.clear(std::memory_order_release);
         }
         return;
@@ -224,6 +232,20 @@ void GuardEngine(uint8_t* aBones, uint32_t aCount, void* aRig, float aMeleeWeigh
         g_guardHeld.fetch_add(1, std::memory_order_relaxed);
     else if (r == core::GuardResult::Passed)
         g_guardPassed.fetch_add(1, std::memory_order_relaxed);
+    // first-person girdle hold: a weapon with a section in the pose tables (third-person clips) in one of its attack states
+    {
+        const int32_t body = mm::meleebase::ArmedBody();
+        const uint64_t wh = g_weapon.load(std::memory_order_relaxed);
+        const bool covered = body >= 0 && body <= 1 && g_loaded[body].load(std::memory_order_acquire) && wh != 0 &&
+                             g_tables[body].Find(wh) != nullptr;
+        const bool allowed = covered && core::GirdleStateAllowed(g_meleeState.load(std::memory_order_relaxed));
+        const float girdleAge = g_girdle.have ? Age(aNowTicks, g_girdle.ticks) : 1e9f;
+        const core::GuardResult gr = core::GirdleStep(g_girdle, gm.rig, aBones, aCount, true, allowed, aNowTicks, girdleAge);
+        if (gr == core::GuardResult::Held)
+            g_girdleHeld.fetch_add(1, std::memory_order_relaxed);
+        else if (gr == core::GuardResult::Passed)
+            g_girdlePassed.fetch_add(1, std::memory_order_relaxed);
+    }
     g_guardBusy.clear(std::memory_order_release);
 }
 
@@ -427,6 +449,8 @@ Counters GetCounters()
     c.steps = g_steps.load();
     c.hipsLimited = g_hipsLimited.load();
     c.kneeHinge = g_kneeHinge.load();
+    c.girdleHeld = g_girdleHeld.load();
+    c.girdlePassed = g_girdlePassed.load();
     const double us = 1e6 / Freq();
     c.meanMicros = c.calls ? double(g_costTicks.load()) * us / double(c.calls) : 0.0;
     c.maxMicros = double(g_costMax.load()) * us;
@@ -464,7 +488,7 @@ bool FormatLogLine(char* aBuf, size_t aLen)
         aBuf, aLen,
         "UTPP MELEEPOSE calls=%llu written=%llu held=%llu relocks=%llu frozen=%llu toBase=%llu busy=%llu noTable=%llu noWeapon=%llu "
         "border=%llu tail=%llu planted=%llu steps=%llu hipsLimited=%llu guardCalls=%llu guardReplaced=%llu guardPassed=%llu "
-        "guardBusy=%llu w=%.2f state=%d kneeHinge=%llu",
+        "guardBusy=%llu w=%.2f state=%d kneeHinge=%llu girdleHeld=%llu girdlePassed=%llu",
         static_cast<unsigned long long>(c.calls), static_cast<unsigned long long>(c.written), static_cast<unsigned long long>(c.held),
         static_cast<unsigned long long>(c.relocks), static_cast<unsigned long long>(c.frozen), static_cast<unsigned long long>(c.toBase),
         static_cast<unsigned long long>(c.busy), static_cast<unsigned long long>(c.noTable), static_cast<unsigned long long>(c.noWeapon),
@@ -473,7 +497,8 @@ bool FormatLogLine(char* aBuf, size_t aLen)
         static_cast<unsigned long long>(c.hipsLimited), static_cast<unsigned long long>(c.guardCalls),
         static_cast<unsigned long long>(c.guardHeld), static_cast<unsigned long long>(c.guardPassed),
         static_cast<unsigned long long>(c.guardBusy), static_cast<double>(g_lastWeight.load()), g_meleeState.load(),
-        static_cast<unsigned long long>(c.kneeHinge));
+        static_cast<unsigned long long>(c.kneeHinge), static_cast<unsigned long long>(c.girdleHeld),
+        static_cast<unsigned long long>(c.girdlePassed));
     return n > 0 && size_t(n) < aLen;
 }
 

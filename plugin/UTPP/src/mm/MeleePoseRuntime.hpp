@@ -38,7 +38,9 @@ void Apply(uint8_t* aBones, uint32_t aCount, void* aRig, float aLowerScale, int6
 // FK detour, FIRST melee step of the call (before the lower-body keep, the key capture and the MM blend read the engine pose): the
 // reference pose guard (mm/MeleePoseGuard.hpp). aMeleeWeight = PoseSnapshot::meleeAimWeight (0 = melee mask reason off: nothing is
 // stored or written). A frame on the skeleton's reference pose gets the last good engine pose of the Spine subtree back (at most two
-// calls). No allocation, no locks, no logging.
+// calls). Then the first-person girdle hold (GirdleStep): in an attack state of a weapon with a section in the pose tables, a frame whose
+// clavicles carry a first-person clip's translation gets the last frame without it back (at most kGirdleHoldSeconds old).
+// No allocation, no locks, no logging.
 void GuardEngine(uint8_t* aBones, uint32_t aCount, void* aRig, float aMeleeWeight, int64_t aNowTicks);
 
 struct Counters
@@ -47,6 +49,7 @@ struct Counters
     uint64_t guardCalls = 0, guardHeld = 0, guardPassed = 0, guardBusy = 0;
     uint64_t frozen = 0, toBase = 0, borderCalls = 0, tailCalls = 0, planted = 0, steps = 0, hipsLimited = 0;
     uint64_t kneeHinge = 0; // border calls that solved a leg with the knee hinge (meleepose::BorderInfo::hingeLegs > 0)
+    uint64_t girdleHeld = 0, girdlePassed = 0; // first-person girdle hold (MeleePoseGuard.hpp GirdleStep): replaced / passed frames
     double meanMicros = 0.0, maxMicros = 0.0;
 };
 Counters GetCounters();

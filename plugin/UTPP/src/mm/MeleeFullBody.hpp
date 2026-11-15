@@ -492,4 +492,29 @@ private:
     bool m_tiltLong = false;
 };
 
+// ------------------------------------------------------------------------------------------------ strike out of a sprint
+
+// A strike pressed while sprinting enters PSM.MeleeWeapon Hold 6 (ChargedHold 7 when charged) with the stance still Sprint, but the game
+// graph stays in its Ready / Sprint state - the game's own first-person sprint clip - until the attack state starts (SprintAttack 16:
+// the third-person attack clip from its first frame). Recorded with the katana and the two-handed blunt on both bodies: Hold 6 + Sprint
+// for 7 feeds, the melee mask raised (debounced) 3 feeds before the attack state, so its fade-in showed that first-person clip at about
+// 4 / 15 / 26 % on 3 frames, followed by a one-frame jump to the attack clip.
+// While the upper mask has not started yet (progress 0), only the melee reason holds it, the weapon has third-person clips (script flag
+// UTPPSetMeleeFullBody) and the feed reports Hold / ChargedHold with the stance Sprint, the upper body stays on MM: the mask reason
+// keeps covering the gate (the legs on MM as before), the upper body and the melee aim tilt wait for the next state. Every other feed
+// (standing / walking hold, a mask already up, the attack states) is the previous decision bit for bit.
+inline constexpr int32_t kStanceSprint = 3; // integ::kLocoSprint
+
+inline bool SprintHoldDefersMask(bool aCoveredWeapon, bool aMeleeReasonOnly, int32_t aMeleeState, int32_t aRawStance, float aMaskProgress)
+{
+#if defined(UTPP_MELEE_EDGES_MUTATION) && UTPP_MELEE_EDGES_MUTATION == 1
+    // mutation check only (tests/MeleeFullBodyTest.cpp TestSprintHold): the mask rises on the hold state as before
+    (void)aCoveredWeapon, (void)aMeleeReasonOnly, (void)aMeleeState, (void)aRawStance, (void)aMaskProgress;
+    return false;
+#else
+    return aCoveredWeapon && aMeleeReasonOnly && (aMeleeState == kMwHold || aMeleeState == kMwChargedHold) &&
+           aRawStance == kStanceSprint && !(aMaskProgress > 0.0f);
+#endif
+}
+
 } // namespace utpp::mm::melee

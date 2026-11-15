@@ -766,6 +766,8 @@ float g_exitLeft = 0.0f;                // s of the vehicle exit window left
 // CAR-1 (vehicle batch): exit workspot latch + EXITDIAG (always on, at most kExitDiagMaxLines per exit, one line per change)
 uint32_t g_exitLatchedPsm = 0;          // PSM bits latched at the vehicle-bit falling edge (kPsmWorkspot until it first clears)
 bool g_maskUpperFromGame = false;       // last feed: UpperMaskDecision::upperFromGame (false = TPP exit window, upper body on MM)
+bool g_meleeSprintHold = false;         // last feed: mm/MeleeFullBody.hpp SprintHoldDefersMask (strike out of a sprint, upper body waits on MM)
+uint64_t g_meleeSprintHoldFeeds = 0;    // feeds deferred that way (cumulative)
 const char* g_holdWhy = nullptr;        // last feed: HoldBlocker (nullptr = hold eligible)
 constexpr float kExitDiagSeconds = 3.0f;
 constexpr uint32_t kExitDiagMaxLines = 40;
@@ -2390,6 +2392,7 @@ void ResetRuntimeLocked()
     g_exitLeft = 0.0f;
     g_exitLatchedPsm = 0; // CAR-1
     g_maskUpperFromGame = false;
+    g_meleeSprintHold = false;
     g_meleeFullGate.Reset(); // melee full body / aim tilt (flag and setting are settings: kept)
     g_meleeFullBlend.Reset();
     g_meleeAimBlend.Reset();
@@ -4088,8 +4091,25 @@ void Feed(const FeedInput& aRawIn)
         mi.maxVertical = g_gateDebounceCfg.maxVertical;
         mi.tpp = aIn.tppActive; // CAR-1 / MOTO-6: the TPP exit window keeps the upper body on MM unless a weapon is in hand
         mi.weaponAction = g_weaponUpperOn && g_weaponKnown && g_weaponHeld;
+        mi.meleeLunge = g_meleeFullFlag && g_meleeState == mm::melee::kMwSprintAttack; // sprint attack lunge: over-speed stays under the mask
         const UpperMaskDecision md = (g_upperMaskOn && g_upperMask.ok) ? DecideUpperMask(mi) : UpperMaskDecision{};
-        g_maskUpperFromGame = md.upperFromGame;
+        // strike out of a sprint (mm/MeleeFullBody.hpp SprintHoldDefersMask): the game graph still plays its own sprint clip in the hold
+        // state, the upper body waits on MM for the attack state (the mask reason keeps covering the gate)
+        const bool sprintHold = md.reasons != 0 &&
+                                mm::melee::SprintHoldDefersMask(g_meleeFullFlag, md.reasons == kMaskStateMelee, g_meleeState, aIn.locoState,
+                                                                g_maskBlend.Progress());
+        if (sprintHold)
+            ++g_meleeSprintHoldFeeds;
+        if (g_trace && g_log && sprintHold != g_meleeSprintHold)
+        {
+            char line[160];
+            std::snprintf(line, sizeof(line), "UTPP MMSPRINTHOLD %s meleeState=%d loco=%d mask=%.2f feeds=%llu", sprintHold ? "on" : "off",
+                          g_meleeState, aIn.locoState, static_cast<double>(g_maskBlend.Weight()),
+                          static_cast<unsigned long long>(g_meleeSprintHoldFeeds));
+            g_log(line);
+        }
+        g_meleeSprintHold = sprintHold;
+        g_maskUpperFromGame = md.upperFromGame && !sprintHold;
         if (md.reasons != 0 && g_maskReasons == 0)
             ++g_maskSwitches;
         if (md.reasons != 0)

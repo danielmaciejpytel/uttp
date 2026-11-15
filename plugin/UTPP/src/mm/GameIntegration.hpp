@@ -959,6 +959,12 @@ struct UpperMaskInput
     // behaviour (upper body on the game pose for every mask reason).
     bool tpp = false;
     bool weaponAction = false;
+    // Sprint attack lunge (2026-11-15): PSM.MeleeWeapon SprintAttack 16 with a weapon that has third-person clips. The lunge pushes the
+    // capsule past the over-speed cap (13 - 15 m/s recorded) for 0.07 - 0.32 s; that closure ended the mask reason and froze the mask
+    // fade where it was (one feed after the attack start: at 3 %). With this flag the melee mask also covers kGateOverSpeed while the PSM
+    // reports no block (a jump / fall / dodge keeps the full close; |vz| is not checked: a lunge down a slope reached 1.9 m/s), so the
+    // attack's upper body keeps fading in. Default false = the previous decision.
+    bool meleeLunge = false;
 };
 
 struct UpperMaskDecision
@@ -995,6 +1001,10 @@ inline UpperMaskDecision DecideUpperMask(const UpperMaskInput& aIn)
         detailOk = aIn.psmDetail == kPsmDetailAimWalk || ((r & kMaskStateExit) != 0 && aIn.psmDetail == kPsmDetailNotInBase);
     if (still && detailOk)
         covered |= kGateLocoState | (aIn.psm != 0 ? uint32_t(kGatePsmBlock) : 0u);
+#if !(defined(UTPP_MELEE_EDGES_MUTATION) && UTPP_MELEE_EDGES_MUTATION == 3) // mutation 3: the lunge closes the mask as before
+    if (aIn.meleeLunge && (r & kMaskStateMelee) && aIn.psm == 0)
+        covered |= kGateOverSpeed;
+#endif
     if ((aIn.gate & ~covered) != 0)
         return d;
     d.reasons = r;

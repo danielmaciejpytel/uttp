@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1681,8 +1682,162 @@ static void TestGuardSequences()
     }
 }
 
+// ------------------------------------------------------------------------------------------------ strike out of a sprint
+
+// One recorded feed: dt, raw stance, PSM.MeleeWeapon state, melee gate bit raised (debounced MeleeGate output).
+struct SprintFeed
+{
+    float dt;
+    int32_t stance;
+    int32_t state;
+    bool gate;
+};
+
+// The upper-mask weight per feed of the driver chain (MotionHost.cpp Feed): melee reason = the melee gate bit, upper body from the game
+// unless SprintHoldDefersMask, UpperMaskBlend with kMaskFadeSeconds both ways (gate open = no gate bit). aDefer false = the decision
+// before the change (no deferral).
+static std::vector<float> SprintMaskWeights(const SprintFeed* aFeeds, size_t aCount, bool aCovered, bool aDefer)
+{
+    std::vector<float> w;
+    UpperMaskBlend mask;
+    for (size_t i = 0; i < aCount; ++i)
+    {
+        const SprintFeed& f = aFeeds[i];
+        const bool reason = f.gate;
+        const bool defer = aDefer && reason && melee::SprintHoldDefersMask(aCovered, true, f.state, f.stance, mask.Progress());
+        const bool upperFromGame = reason && !defer;
+        melee::DriverIn di;
+        di.maskReasonsUpper = upperFromGame;
+        di.meleeMask = upperFromGame;
+        const melee::DriverTerms t = melee::CombineDriverTerms(di);
+        w.push_back(mask.UpdateInOut(t.maskWanted, !f.gate, true, f.dt, kMaskFadeSeconds, kMaskFadeSeconds));
+    }
+    return w;
+}
+
+static void TestSprintHold()
+{
+    // Female V, katana, sprint attack (in-game feed dump, 13:40.661 .. 13:40.860): Hold 6 + Sprint for 7 feeds, the melee gate from the
+    // 4th, SprintAttack 16 + Stand from the 8th - the feed on which the game graph shows the third-person attack clip.
+    static const SprintFeed katanaF[] = {
+        {0.0163f, 3, 6, false}, {0.0164f, 3, 6, false}, {0.0164f, 3, 6, false}, {0.0158f, 3, 6, true}, {0.0173f, 3, 6, true},
+        {0.0161f, 3, 6, true},  {0.0165f, 3, 6, true},  {0.0169f, 1, 16, true}, {0.0176f, 1, 16, true}, {0.0155f, 1, 16, true},
+        {0.0173f, 1, 16, true}, {0.0162f, 1, 16, true}, {0.0174f, 1, 16, true}};
+    // Male V, two-handed blunt, sprint attack (7:22.843 .. 7:22.976): the same order, 4 gate feeds in Hold before the attack state.
+    static const SprintFeed batM[] = {
+        {0.0172f, 3, 6, false}, {0.0162f, 3, 6, false}, {0.0165f, 3, 6, false}, {0.0173f, 3, 6, false}, {0.0157f, 3, 6, true},
+        {0.0167f, 3, 6, true},  {0.0176f, 3, 6, true},  {0.0161f, 3, 6, true},  {0.0166f, 1, 16, true}};
+    struct Case
+    {
+        const char* name;
+        const SprintFeed* feeds;
+        size_t count;
+    } cases[] = {{"katana Female", katanaF, std::size(katanaF)}, {"two-handed blunt Male", batM, std::size(batM)}};
+    for (const Case& c : cases)
+    {
+        const std::vector<float> fix = SprintMaskWeights(c.feeds, c.count, true, true);
+        const std::vector<float> old = SprintMaskWeights(c.feeds, c.count, true, false);
+        float holdMax = 0.0f, oldHoldMax = 0.0f;
+        size_t firstAttack = c.count;
+        for (size_t i = 0; i < c.count; ++i)
+        {
+            if (c.feeds[i].state == melee::kMwHold)
+            {
+                holdMax = std::max(holdMax, fix[i]);
+                oldHoldMax = std::max(oldHoldMax, old[i]);
+            }
+            else if (firstAttack == c.count)
+                firstAttack = i;
+        }
+        // SH-1: no share of the game pose (its first-person sprint clip) on any feed of the hold state
+        if (holdMax == 0.0f)
+            Expect((std::string("SH-1 sprint hold: upper mask 0 on every hold feed, ") + c.name).c_str(), true, Fmt("before the change %.3f", oldHoldMax));
+        else
+            Expect((std::string("FAIL SH-1 sprint hold mask on the game sprint clip, ") + c.name).c_str(), false,
+                   Fmt("largest hold weight %.3f (before the change %.3f)", holdMax, oldHoldMax));
+        // SH-2: the mask rises from the attack state on, with the first step of the ordinary fade-in (no one-frame jump)
+        const float first = firstAttack < c.count ? fix[firstAttack] : 0.0f;
+        float step = 0.0f;
+        for (size_t i = firstAttack; i < c.count; ++i)
+            step = std::max(step, fix[i] - (i > 0 ? fix[i - 1] : 0.0f));
+        Expect((std::string("SH-2 sprint hold: the mask starts on the attack state with the ordinary fade-in, ") + c.name).c_str(),
+               first > 0.0f && first < 0.05f && step < 0.2f, Fmt("first %.3f, largest step per feed %.3f", first, step));
+    }
+    // SH-3: every other case is the previous decision: a hold while standing / walking, an uncovered weapon, the attack states, a mask
+    // that is already up, a hold entered while the mask fades out (progress > 0), the stance Sprint outside Hold / ChargedHold
+    {
+        bool same = true;
+        for (int st = -1; st <= melee::kMwLastState + 1; ++st)
+            for (int stance = 0; stance <= 3; ++stance)
+                for (int cov = 0; cov <= 1; ++cov)
+                    for (int only = 0; only <= 1; ++only)
+                        for (float p : {0.0f, 0.01f, 0.5f, 1.0f})
+                        {
+                            const bool d = melee::SprintHoldDefersMask(cov != 0, only != 0, st, stance, p);
+                            const bool expect = cov && only && (st == melee::kMwHold || st == melee::kMwChargedHold) && stance == 3 && p <= 0.0f;
+                            same = same && d == expect;
+                        }
+        Expect("SH-3 sprint hold: deferral only for a covered weapon, melee reason alone, Hold / ChargedHold, stance Sprint, mask at 0", same);
+        // a standing hold (the same feeds with the stance Stand): bit for bit the previous weights
+        std::vector<SprintFeed> stand(std::begin(katanaF), std::end(katanaF));
+        for (SprintFeed& f : stand)
+            f.stance = 1;
+        const std::vector<float> a = SprintMaskWeights(stand.data(), stand.size(), true, true);
+        const std::vector<float> b = SprintMaskWeights(stand.data(), stand.size(), true, false);
+        Expect("SH-3b standing hold: mask weights identical to the previous decision on every feed", a == b);
+        const std::vector<float> c = SprintMaskWeights(katanaF, std::size(katanaF), false, true);
+        const std::vector<float> e = SprintMaskWeights(katanaF, std::size(katanaF), false, false);
+        Expect("SH-3c uncovered weapon: mask weights identical to the previous decision on every feed", c == e);
+    }
+}
+
+// The sprint attack lunge (recorded: SprintAttack 16, gate 0x600 = melee + over-speed for 0.07 - 0.32 s, PSM block 0, vz ~0): the
+// melee mask keeps covering the gate with UpperMaskInput::meleeLunge; everything else is the previous decision.
+static void TestSprintLunge()
+{
+    UpperMaskInput in;
+    in.gate = kGateMelee | kGateOverSpeed;
+    in.meleeActive = true;
+    in.states = kMaskStatesAll;
+    in.tpp = true;
+    in.vz = 0.0f;
+    in.maxVertical = 1.0f;
+    in.meleeLunge = true;
+    const UpperMaskDecision d = DecideUpperMask(in);
+    if (!(d.reasons == kMaskStateMelee && d.covered == (kGateMelee | kGateOverSpeed) && d.upperFromGame))
+        Expect("FAIL SL-1 sprint attack lunge: over-speed closes the melee mask", false, Fmt("reasons 0x%X covered 0x%X", d.reasons, d.covered));
+    else
+        Expect("SL-1 sprint attack lunge: the melee mask covers melee + over-speed, upper body from the game", true);
+    in.meleeLunge = false;
+    Expect("SL-2 without the lunge flag: over-speed closes the mask (previous decision)", DecideUpperMask(in).reasons == 0u);
+    in.meleeLunge = true;
+    in.psm = kPsmDetailed; // dodge / jump / fall ...
+    in.psmDetail = 7;
+    Expect("SL-3 lunge flag with a PSM block (dodge): no mask (previous decision)", DecideUpperMask(in).reasons == 0u);
+    in.psm = 0;
+    in.psmDetail = -1;
+    in.vz = -1.9f; // recorded: a sprint attack down a slope, no PSM block
+    Expect("SL-4 lunge down a slope (vz -1.9, no PSM block): the melee mask covers melee + over-speed",
+           DecideUpperMask(in).reasons == kMaskStateMelee && DecideUpperMask(in).covered == (kGateMelee | kGateOverSpeed));
+    in.meleeLunge = false;
+    Expect("SL-4b the same without the lunge flag: no mask (previous decision)", DecideUpperMask(in).reasons == 0u);
+    in.meleeLunge = true;
+    in.vz = 0.0f;
+    in.meleeActive = false;
+    in.gate = kGateOverSpeed;
+    Expect("SL-5 lunge flag without the melee reason: no mask (previous decision)", DecideUpperMask(in).reasons == 0u);
+    in.meleeActive = true;
+    in.gate = kGateMelee;
+    UpperMaskInput base = in;
+    base.meleeLunge = false;
+    const UpperMaskDecision a = DecideUpperMask(in), b = DecideUpperMask(base);
+    Expect("SL-6 melee gate alone: the lunge flag changes nothing", a.reasons == b.reasons && a.covered == b.covered && a.upperFromGame == b.upperFromGame);
+}
+
 int main()
 {
+    TestSprintHold();
+    TestSprintLunge();
     TestStandingGrounded();
     TestDecision();
     TestSpeedAndStick();

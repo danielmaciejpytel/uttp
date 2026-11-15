@@ -427,6 +427,8 @@ void TestGuardSynthetic()
 struct GuardFixtureResult
 {
     int frames = 0, signatureIn = 0, held = 0, passed = 0, signatureOut = 0, changedOther = 0, popsIn = 0, popsOut = 0;
+    int girdleSig = 0; // frames with the first-person girdle signature (MeleePoseGuard.hpp GirdleSignature) in the recorded engine pose
+    bool girdleRig = false;
 };
 
 GuardFixtureResult RunGuardFixture(const std::string& aPath, bool aVerbose)
@@ -465,6 +467,7 @@ GuardFixtureResult RunGuardFixture(const std::string& aPath, bool aVerbose)
         rd(&nwin, 4);
         const meleepose::GuardRig rig = meleepose::ResolveGuardRig(hashes, par);
         Check(rig.ok == 1, "guard rig of the recorded catalogue");
+        res.girdleRig = rig.girdleOk != 0;
         int32_t hand[2] = {-1, -1};
         for (int32_t i = 0; i < nb; ++i)
         {
@@ -506,6 +509,7 @@ GuardFixtureResult RunGuardFixture(const std::string& aPath, bool aVerbose)
                                       Q[size_t(i) * 4 + 3] / 32767.0f});
                 const std::vector<uint8_t> before = b;
                 const bool sig = meleepose::GuardSignature(b.data(), rig);
+                res.girdleSig += meleepose::GirdleSignature(b.data(), rig) ? 1 : 0;
                 const int64_t now = int64_t(t * 1e6);
                 const float age = st.have ? float(double(now - st.ticks) * 1e-6) : 1e9f;
                 const meleepose::GuardResult r = meleepose::GuardStep(st, rig, b.data(), uint32_t(nb), true, now, age);
@@ -544,6 +548,8 @@ GuardFixtureResult RunGuardFixture(const std::string& aPath, bool aVerbose)
     std::printf("guard %s: frames %d, reference frames in %d, held %d, passed %d, reference frames out %d, other frames changed %d, "
                 "hand steps >100 deg %d -> %d\n",
                 aPath.c_str(), res.frames, res.signatureIn, res.held, res.passed, res.signatureOut, res.changedOther, res.popsIn, res.popsOut);
+    std::printf("girdle %s: girdle rig %d, frames with the first-person girdle signature %d\n", aPath.c_str(), res.girdleRig ? 1 : 0,
+                res.girdleSig);
     return res;
 }
 
@@ -555,6 +561,125 @@ void TestGuardRecorded(const std::string& aPath)
     Check(r.changedOther == 0, "no other recorded frame changed", r.changedOther);
     // what stays: the cuts between two clips whose poses differ (no reference frame) and the jump from the held pose to the next clip
     Check(r.popsOut * 2 < r.popsIn, "hand steps above 100 deg at least halved", r.popsOut);
+    // first-person girdle hold: the clavicles of the recorded catalogue resolve (the signature count is reported above: the engine poses
+    // of these windows include the game's own first-person clips on one side of the handover)
+    Check(r.girdleRig, "girdle rig (both clavicles, one parent) in the recorded catalogue");
+}
+
+// ------------------------------------------------------------------------------------------------ first-person girdle hold
+// Clavicle local translations recorded in game (Male V, knife strikes while walking, 05:44:45.479 .. 45.580 of an in-game recording
+// of 2026-11-15): the third-person strike (rest translation, mirrored), the graph's 5-frame blend toward a first-person pose, then the next
+// third-person strike. Synthetic rig: Root, Hips, Spine, Spine3, both clavicles, both upper arms, Head.
+void TestGirdleHold()
+{
+    const char* names[] = {"Root", "Hips", "Spine", "Spine3", "LeftShoulder", "RightShoulder", "LeftArm", "RightArm", "Head"};
+    const int16_t parents[] = {-1, 0, 1, 2, 3, 3, 4, 5, 3};
+    std::vector<uint64_t> h;
+    for (const char* n : names)
+        h.push_back(integ::CNameHash(n));
+    const meleepose::GuardRig rig = meleepose::ResolveGuardRig(h, parents);
+    Check(rig.ok == 1 && rig.girdleOk == 1 && rig.leftClav == 4 && rig.rightClav == 5, "GH-0 girdle rig resolved", rig.girdleOk);
+    {
+        const int16_t other[] = {-1, 0, 1, 2, 3, 2, 4, 5, 3}; // RightShoulder under Spine: not one parent -> the hold stays off
+        Check(meleepose::ResolveGuardRig(h, other).girdleOk == 0 && meleepose::ResolveGuardRig(h, other).ok == 1,
+              "GH-0b clavicles with different parents: girdle hold off, reference guard unchanged");
+    }
+    struct Clav
+    {
+        float l[3], r[3];
+    };
+    const Clav restC = {{0.1412f, -0.0891f, -0.0199f}, {0.1412f, -0.0891f, 0.0199f}};
+    const Clav fpp[] = {{{0.099f, -0.059f, 0.006f}, {0.114f, -0.049f, -0.034f}}, {{0.068f, -0.038f, 0.025f}, {0.095f, -0.020f, -0.072f}},
+                        {{0.050f, -0.024f, 0.037f}, {0.083f, -0.002f, -0.096f}}, {{0.040f, -0.018f, 0.042f}, {0.077f, 0.007f, -0.108f}},
+                        {{0.037f, -0.016f, 0.044f}, {0.075f, 0.010f, -0.111f}}};
+    const uint32_t nb = 9;
+    auto frame = [&](const Clav& aC, float aArmDeg, float aLegDeg) {
+        std::vector<uint8_t> b(size_t(nb) * integ::kGameBoneStride, 0);
+        for (uint32_t k = 0; k < nb; ++k)
+            SetRec(b, k, math::Vec3{0.0f, 0.1f, 0.0f}, math::Quat{0, 0, 0, 1});
+        SetRec(b, 4, math::Vec3{aC.l[0], aC.l[1], aC.l[2]}, AxisAngle(0, 0, 1, 10.0f + 0.2f * aArmDeg));
+        SetRec(b, 5, math::Vec3{aC.r[0], aC.r[1], aC.r[2]}, AxisAngle(0, 0, 1, -10.0f - 0.2f * aArmDeg));
+        SetRec(b, 6, math::Vec3{0.12f, 0, 0}, AxisAngle(0, 1, 0, aArmDeg));
+        SetRec(b, 7, math::Vec3{0.12f, 0, 0}, AxisAngle(1, 1, 0, -aArmDeg));
+        SetRec(b, 3, math::Vec3{0.1f, 0, 0}, AxisAngle(0, 0, 1, 0.5f * aArmDeg));
+        SetRec(b, 1, math::Vec3{0, 0.95f, 0}, AxisAngle(1, 0, 0, aLegDeg));
+        return b;
+    };
+    // the window: 3 third-person frames, the 5 first-person frames, 3 third-person frames; 1/60 s apart
+    std::vector<std::vector<uint8_t>> in;
+    std::vector<bool> isFpp;
+    for (int f = 0; f < 3; ++f, isFpp.push_back(false))
+        in.push_back(frame(restC, 20.0f + 3.0f * float(f), 1.0f));
+    for (const Clav& c : fpp)
+        in.push_back(frame(c, -35.0f, 1.0f)), isFpp.push_back(true);
+    for (int f = 0; f < 3; ++f, isFpp.push_back(false))
+        in.push_back(frame(restC, 32.0f + 3.0f * float(f), 1.0f));
+    auto run = [&](bool aAllowed, std::vector<std::vector<uint8_t>>& aOut, int& aHeld, int& aPassed) {
+        meleepose::GuardState st;
+        aOut = in;
+        aHeld = aPassed = 0;
+        for (size_t f = 0; f < aOut.size(); ++f)
+        {
+            const int64_t now = int64_t(f) * 16667;
+            const float age = st.have ? float(double(now - st.ticks) * 1e-6) : 1e9f;
+            const meleepose::GuardResult r = meleepose::GirdleStep(st, rig, aOut[f].data(), nb, true, aAllowed, now, age);
+            aHeld += r == meleepose::GuardResult::Held ? 1 : 0;
+            aPassed += r == meleepose::GuardResult::Passed ? 1 : 0;
+        }
+    };
+    std::vector<std::vector<uint8_t>> out;
+    int held = 0, passed = 0;
+    run(true, out, held, passed);
+    int sigIn = 0, sigOut = 0, otherChanged = 0;
+    bool heldIsLast = true;
+    for (size_t f = 0; f < in.size(); ++f)
+    {
+        sigIn += meleepose::GirdleSignature(in[f].data(), rig) ? 1 : 0;
+        sigOut += meleepose::GirdleSignature(out[f].data(), rig) ? 1 : 0;
+        if (!isFpp[f] && in[f] != out[f])
+            ++otherChanged;
+        if (isFpp[f])
+            for (uint32_t k = 2; k < nb; ++k) // the Spine subtree = the last third-person frame (index 2); Hips (1) stays the frame's own
+                heldIsLast = heldIsLast && std::memcmp(out[f].data() + k * integ::kGameBoneStride, in[2].data() + k * integ::kGameBoneStride,
+                                                       integ::kGameBoneStride) == 0;
+        if (isFpp[f])
+            heldIsLast = heldIsLast && std::memcmp(out[f].data() + integ::kGameBoneStride, in[f].data() + integ::kGameBoneStride,
+                                                   integ::kGameBoneStride) == 0;
+    }
+    Check(sigIn == 5, "GH-1a the recorded first-person frames show the signature (5 of 5), the third-person ones do not", sigIn);
+    if (!(held == 5 && sigOut == 0))
+        std::printf("FAIL GH-1 first-person girdle reaches the output (held %d, signature frames out %d)\n", held, sigOut), ++g_fail;
+    Check(heldIsLast, "GH-1b held frames = the last third-person frame for the Spine subtree, Hips untouched");
+    Check(otherChanged == 0, "GH-2 third-person frames unchanged bit for bit", otherChanged);
+    // not allowed (uncovered weapon / a state left to the game): every frame passes unchanged
+    {
+        std::vector<std::vector<uint8_t>> o;
+        int hh = 0, pp = 0;
+        run(false, o, hh, pp);
+        Check(o == in && hh == 0 && pp == 5, "GH-3 not allowed: every frame unchanged, the 5 first-person frames pass", hh);
+    }
+    // a first-person stretch longer than kGirdleHoldSeconds: held while the stored frame is fresh, then passed unchanged
+    {
+        meleepose::GuardState st;
+        int hh = 0, pp = 0;
+        for (int f = 0; f < 30; ++f)
+        {
+            std::vector<uint8_t> b = f < 2 ? frame(restC, 20.0f, 1.0f) : frame(fpp[4], -35.0f, 1.0f);
+            const int64_t now = int64_t(f) * 16667;
+            const float age = st.have ? float(double(now - st.ticks) * 1e-6) : 1e9f;
+            const meleepose::GuardResult r = meleepose::GirdleStep(st, rig, b.data(), nb, true, true, now, age);
+            hh += r == meleepose::GuardResult::Held ? 1 : 0;
+            pp += r == meleepose::GuardResult::Passed ? 1 : 0;
+        }
+        // stored at frame 1 (t = 16.7 ms); fresh up to 0.2 s -> frames 2..12 held (age 16.7 .. 183 ms), 13.. passed
+        Check(hh == 11 && pp == 17, "GH-4 hold capped at kGirdleHoldSeconds of the last third-person frame", hh);
+        meleepose::GuardState st2;
+        std::vector<uint8_t> b = frame(fpp[0], -35.0f, 1.0f);
+        Check(meleepose::GirdleStep(st2, rig, b.data(), nb, true, true, 0, 1e9f) == meleepose::GuardResult::Passed,
+              "GH-5 a first-person frame without a stored third-person frame passes");
+        Check(meleepose::GirdleStep(st, rig, b.data(), nb, false, true, 0, 0.0f) == meleepose::GuardResult::Off && !st.have,
+              "GH-6 inactive clears");
+    }
 }
 // ------------------------------------------------------------------------------------------------ knee hinge of the border leg solve
 //
@@ -1455,6 +1580,7 @@ int main(int aArgc, char** aArgv)
     // the lower body follows the clip (the old behaviour leaves the engine's base: tens of degrees, hips several cm off)
     Check(tot.strikes == 10, "weapon runs (5 weapons x 2 bodies)", tot.strikes);
     TestGuardSynthetic();
+    TestGirdleHold();
     TestSwitchBlendSynthetic();
     TestKneeHingeSynthetic();
     TestGuardRecorded(dir + "/melee_pose_guard_female.bin");

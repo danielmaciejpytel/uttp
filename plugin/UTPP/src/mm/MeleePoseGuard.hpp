@@ -33,6 +33,9 @@ struct GuardRig
     uint32_t leftSlot = 0, rightSlot = 0; // position of the upper arms in bones[] (= in the stored pose)
     uint32_t count = 0;                   // bones of the Spine subtree (Spine included)
     uint16_t bones[kGuardMaxBones] = {};
+    // first-person girdle hold (GirdleStep): both clavicles inside the subtree with the same parent (0 = that hold stays off)
+    uint32_t girdleOk = 0;
+    int32_t leftClav = -1, rightClav = -1;
 };
 
 // Spine and every descendant (by the rig's parent indices; a parent may come after its child), plus both upper arms. Fail closed: a missing
@@ -101,6 +104,23 @@ inline GuardRig ResolveGuardRig(std::span<const uint64_t> aHashes, std::span<con
     if (!hasL || !hasR)
         return GuardRig{};
     r.ok = 1;
+    {
+        const uint64_t hcl = integ::CNameHash("LeftShoulder"), hcr = integ::CNameHash("RightShoulder");
+        int32_t cl = -1, cr = -1;
+        for (uint32_t k = 0; k < r.count; ++k)
+        {
+            if (aHashes[r.bones[k]] == hcl)
+                cl = int32_t(r.bones[k]);
+            else if (aHashes[r.bones[k]] == hcr)
+                cr = int32_t(r.bones[k]);
+        }
+        if (cl >= 0 && cr >= 0 && aParents[size_t(cl)] == aParents[size_t(cr)])
+        {
+            r.leftClav = cl;
+            r.rightClav = cr;
+            r.girdleOk = 1;
+        }
+    }
     return r;
 }
 
@@ -179,6 +199,89 @@ inline GuardResult GuardStep(GuardState& aS, const GuardRig& aRig, uint8_t* aBon
         if (aS.held > 0)
             ++aS.held;
         return GuardResult::Passed;
+    }
+    for (uint32_t k = 0; k < aRig.count; ++k)
+        std::memcpy(aS.rec + size_t(k) * integ::kGameBoneStride, aBones + size_t(aRig.bones[k]) * integ::kGameBoneStride,
+                    integ::kGameBoneStride);
+    aS.have = true;
+    aS.held = 0;
+    aS.ticks = aNowTicks;
+    return GuardResult::Stored;
+}
+
+// ------------------------------------------------------------------------------------------------ first-person girdle hold
+// Between two strikes of a covered weapon the game's graph may blend for a few frames toward one of its own first-person clips (recorded:
+// knife strikes while walking, 2 - 5 frames, then a cut to the next third-person strike). The first-person clips translate both
+// clavicles (LeftShoulder / RightShoulder local translation) inward and asymmetrically; every third-person clip of the mod and the
+// motion matching pose keep them on the rig's mirrored rest translations (recorded on both bodies: equal to 1 mm, sign of one axis
+// flipped). Signature: the two clavicle translations are not mirror images (some axis differs in magnitude by more than kGirdleMirrorM).
+// While the caller allows it (covered weapon, a state with third-person clips, melee mask reason on), such a frame gets the last frame
+// without the signature back for the Spine subtree, as long as that frame is at most kGirdleHoldSeconds old; a longer signature passes
+// through unchanged (the hold never freezes the upper body for longer).
+inline constexpr float kGirdleMirrorM = 0.005f;    // m: per-axis magnitude difference of the two clavicle translations
+inline constexpr float kGirdleHoldSeconds = 0.2f;  // the last frame without the signature older than this is not used
+
+// PSM.MeleeWeapon states the hold may act in: the attack states every covered weapon line has third-person clips for (ComboAttack 11,
+// StrongAttack 13, SafeAttack 14, BlockAttack 15, SprintAttack 16, CrouchAttack 17, JumpAttack 18, DeflectAttack 20). Not: ThrowAttack
+// 19 and the states some lines leave to the game (FinalAttack 12, EquipAttack 21), the holds / blocks and the release hold (Idle 2).
+inline constexpr bool GirdleStateAllowed(int32_t aState)
+{
+    return aState == 11 || aState == 13 || aState == 14 || aState == 15 || aState == 16 || aState == 17 || aState == 18 || aState == 20;
+}
+
+inline math::Vec3 GirdlePos(const uint8_t* aRec, uint32_t aBone)
+{
+    const float* r = reinterpret_cast<const float*>(aRec + size_t(aBone) * integ::kGameBoneStride);
+    return math::Vec3{r[0], r[1], r[2]};
+}
+
+// True when the clavicle translations of the records are not mirror images (first-person girdle). False without a girdle rig.
+inline bool GirdleSignature(const uint8_t* aBones, const GuardRig& aRig)
+{
+    if (!aRig.girdleOk)
+        return false;
+    const math::Vec3 l = GirdlePos(aBones, uint32_t(aRig.leftClav)), r = GirdlePos(aBones, uint32_t(aRig.rightClav));
+    const float d[3] = {std::fabs(std::fabs(l.x) - std::fabs(r.x)), std::fabs(std::fabs(l.y) - std::fabs(r.y)),
+                        std::fabs(std::fabs(l.z) - std::fabs(r.z))};
+    for (float v : d)
+        if (!(v <= kGirdleMirrorM)) // a non-finite translation counts as the signature
+            return true;
+    return false;
+}
+
+// One FK call, after GuardStep. aActive = the melee mask reason is on; aAllowed = the caller's covered weapon and state; aAgeSeconds = time
+// since aS.ticks. Uses the same state type as GuardStep (its own instance).
+inline GuardResult GirdleStep(GuardState& aS, const GuardRig& aRig, uint8_t* aBones, uint32_t aCount, bool aActive, bool aAllowed,
+                              int64_t aNowTicks, float aAgeSeconds)
+{
+#if defined(UTPP_MELEE_EDGES_MUTATION) && UTPP_MELEE_EDGES_MUTATION == 2
+    aAllowed = false; // mutation check only (tests/MeleePoseTest.cpp TestGirdleHold): the first-person frames pass as before
+#endif
+    if (!aActive || !aRig.ok || !aRig.girdleOk || !aBones || uint32_t(aRig.leftClav) >= aCount || uint32_t(aRig.rightClav) >= aCount)
+    {
+        aS.have = false;
+        aS.held = 0;
+        return GuardResult::Off;
+    }
+    for (uint32_t k = 0; k < aRig.count; ++k)
+        if (aRig.bones[k] >= aCount)
+        {
+            aS.have = false;
+            aS.held = 0;
+            return GuardResult::Off;
+        }
+    if (GirdleSignature(aBones, aRig))
+    {
+        const bool fresh = aS.have && std::isfinite(aAgeSeconds) && aAgeSeconds >= 0.0f && aAgeSeconds <= kGirdleHoldSeconds;
+        if (aAllowed && fresh)
+        {
+            for (uint32_t k = 0; k < aRig.count; ++k)
+                std::memcpy(aBones + size_t(aRig.bones[k]) * integ::kGameBoneStride, aS.rec + size_t(k) * integ::kGameBoneStride,
+                            integ::kGameBoneStride);
+            ++aS.held;
+            return GuardResult::Held;
+        }
+        return GuardResult::Passed; // the stored frame stays (never refreshed with a first-person frame)
     }
     for (uint32_t k = 0; k < aRig.count; ++k)
         std::memcpy(aS.rec + size_t(k) * integ::kGameBoneStride, aBones + size_t(aRig.bones[k]) * integ::kGameBoneStride,
