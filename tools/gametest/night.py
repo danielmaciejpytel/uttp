@@ -1918,11 +1918,12 @@ class Night:
 
     def vehicle_spawn_modes(self) -> list[str]:
         """--vehicle-spawn in order. With --background the keyboard modes (vtap, vhold) are left out and the pad's own vehicle
-        call (dpad) comes first: the run sends no key."""
+        call (dpad) takes their place at the front: the run sends no key. An order given without keyboard modes is kept as it is
+        (a scripted car only: --vehicle-spawn codeware)."""
         modes = [m.strip() for m in self.args.vehicle_spawn.split(',') if m.strip()]
         if getattr(self.args, 'background', False):
             kept = [m for m in modes if m not in ('vtap', 'vhold')]
-            if 'dpad' not in kept:
+            if 'dpad' not in kept and kept != modes:
                 kept.insert(0, 'dpad')
             if kept != modes:
                 self.log(f'[vehicle] --background: keyboard spawn modes left out, order {",".join(kept)}')

@@ -1609,6 +1609,8 @@ class MacroTests(unittest.TestCase):
         self.assertTrue(any('keyboard spawn modes left out' in m for m in n.logged), n.logged)
         n.args.vehicle_spawn = 'codeware,dpad'
         self.assertEqual(n.vehicle_spawn_modes(), ['codeware', 'dpad'])                         # an order without keys is kept
+        n.args.vehicle_spawn = 'codeware'
+        self.assertEqual(n.vehicle_spawn_modes(), ['codeware'])                                 # a scripted car only: no pad call added
 
     def test_summon_first_far_goes_to_vhold(self):
         n = self.n
