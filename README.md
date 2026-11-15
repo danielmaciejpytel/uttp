@@ -8,14 +8,14 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 <p align="center">
   <img src="https://img.shields.io/badge/Cyberpunk_2077-2.5-FCEE0A?style=for-the-badge&labelColor=1a1a1a" alt="Cyberpunk 2077 2.5">
   <img src="https://img.shields.io/badge/Phantom_Liberty-required-FF2A6D?style=for-the-badge&labelColor=1a1a1a" alt="Phantom Liberty required">
-  <img src="https://img.shields.io/badge/version-0.1.0-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/version-0.1.1-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Version 0.1.1">
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/RED4ext-1.31.0-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="RED4ext 1.31.0">
+  <img src="https://img.shields.io/badge/RED4ext-1.31.1-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="RED4ext 1.31.1">
   <img src="https://img.shields.io/badge/redscript-0.5.32-00E5FF?style=flat-square&labelColor=1a1a1a" alt="redscript 0.5.32">
   <img src="https://img.shields.io/badge/CET-1.38.1-FF2A6D?style=flat-square&labelColor=1a1a1a" alt="CET 1.38.1">
-  <img src="https://img.shields.io/badge/Codeware-1.21.2-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="Codeware 1.21.2">
-  <img src="https://img.shields.io/badge/ArchiveXL-1.28.6-00E5FF?style=flat-square&labelColor=1a1a1a" alt="ArchiveXL 1.28.6">
+  <img src="https://img.shields.io/badge/Codeware-1.21.4-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="Codeware 1.21.4">
+  <img src="https://img.shields.io/badge/ArchiveXL-1.28.8-00E5FF?style=flat-square&labelColor=1a1a1a" alt="ArchiveXL 1.28.8">
   <img src="https://img.shields.io/badge/Input_Loader-required-FF2A6D?style=flat-square&labelColor=1a1a1a" alt="Input Loader">
 </p>
 
@@ -25,6 +25,7 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
   <a href="#features">Features</a> ·
   <a href="#requirements">Requirements</a> ·
   <a href="#how-to-report-a-problem">Report a problem</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
   <a href="#for-developers">For developers</a>
 </p>
 
@@ -33,7 +34,7 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 ## Quick start
 
 > [!NOTE]
-> Version 0.1.0 is the first public release and an early foundation. Feedback is very welcome.
+> Version 0.1.1 adds melee weapons, a first version of dual wield, smoother keyboard movement and many body and shadow fixes. It is still an early version; see the [changelog](CHANGELOG.md). Feedback is very welcome.
 
 1. Install the [requirements](#requirements): RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL and Input Loader.
 2. Install UTPP with Vortex (**Mod manager download**) or extract the archive into the game folder.
@@ -53,7 +54,7 @@ Left: the game's own animations. Right: Ultimate Third Person Project. Real-time
 | | | |
 |:---|:---|:---|
 | 🏃 **Motion Matching**<br>Locomotion picked frame by frame from a large animation database. | 🔄 **Body rotation**<br>V turns naturally with the camera and the movement direction. | 🦶 **Foot locking**<br>Less visible sliding on starts, stops and turns. |
-| 🎯 **Aiming**<br>The most responsive third-person aiming and shooting in the game. | 🔫 **Recoil and grip**<br>Recoil from the game's weapon animations, left hand on the handguard, stock at the shoulder. | 🥊 **Fists**<br>Third-person fist combat built from the game's own combat animations. |
+| 🎯 **Aiming**<br>The most responsive third-person aiming and shooting in the game. | 🔫 **Recoil and grip**<br>Recoil from the game's weapon animations, left hand on the handguard, stock at the shoulder. | 🥊 **Melee**<br>Fists, knives, katanas, blunt weapons, batons, Mantis Blades and Gorilla Arms in third person, built from the game's own combat animations. |
 | 🚗 **Vehicles**<br>Third-person entering and leaving of cars and motorcycles. | ↔️ **Shoulder swap**<br>One key on keyboard and controller, assignable in Mod Settings. | 🎞️ **Animation pack**<br>UTPP animations or the game's own, switchable in the menu. |
 | 🩻 **Deformation fixes**<br>Body skin recalculated for the mod's poses, plus targeted corrections for arms and forearms. | ✨ **Smooth transitions**<br>Less snapping and popping between animations. | 🧾 **Diagnostic logs**<br>Built-in logs and a report file for easy problem reports. |
 
@@ -69,11 +70,16 @@ Left: the game's own animations. Right: Ultimate Third Person Project. Real-time
 - The most responsive third-person aiming and shooting behavior in Cyberpunk 2077 ever created
 - Improved recoil and upper-body animation blending
 - Better hand, weapon and reload pose continuity, including a left-hand grip on the rifle handguard and the stock at the shoulder
-- Third-person fist combat built from the game's own combat animations
+- Third-person melee combat built from the game's own combat animations: fists, knives, katanas, one-handed and two-handed blunt weapons, batons, Mantis Blades and Gorilla Arms
+- A guard stance between strikes, strikes that move the whole body while standing, and crouched melee poses
+- Fists: V turns towards the enemy the game tracks when she strikes
+- Dual wield (first version): third-person poses, aiming and recoil for two one-handed weapons
+- Ground dodges with their own animations, in the direction you press
 - Third-person entering and leaving of cars and motorcycles
 - A shoulder swap key (keyboard and controller, assignable in Mod Settings)
 - Head look: V turns her head and eyes towards where the camera looks while standing or walking
 - Body skin recalculated for the mod's poses on both V bodies instead of deforming
+- V's shadow follows the third-person body, also with ray-traced shadows
 - Targeted corrections for arm and forearm deformation
 - Reduced snapping and popping during animation transitions
 - Your choice of animations: the UTPP animations or the game's own animations with the third-person camera and body kept
@@ -118,13 +124,13 @@ The following requirements are needed for UTPP to work correctly.
 
 **Required frameworks and supporting mods**
 
-- **RED4ext 1.31.0** - loads the main UTPP plugin.
-- **redscript 0.5.32** - required for UTPP scripts. Do not use redscript 1.0.0 yet: UTPP 0.1.0 does not load with it.
+- **RED4ext 1.31.1** - loads the main UTPP plugin.
+- **redscript 0.5.32** - required for UTPP scripts. Do not use redscript 1.0.0 yet: the UTPP scripts compile with it since 0.1.1, but the frameworks UTPP needs were not ready for it when this version was built, so it is not supported.
 - **Cyber Engine Tweaks 1.38.1** - provides settings, camera, body and vehicle logic used by UTPP.
-- **Codeware 1.21.2** - provides API extensions used by UTPP scripts.
-- **ArchiveXL 1.28.6** - provides additional animation and archive support used by UTPP.
-- **Input Loader** - provides the shoulder swap key; everything else works without it.
-- **Mod Settings** (recommended) - the Ultimate Third Person page of the game's settings screen.
+- **Codeware 1.21.4** - provides API extensions used by UTPP scripts.
+- **ArchiveXL 1.28.8** - provides additional animation and archive support used by UTPP.
+- **Input Loader** (tested with 0.2.6) - provides the shoulder swap key; everything else works without it.
+- **Mod Settings** (recommended, tested with 0.2.30) - the Ultimate Third Person page of the game's settings screen.
 
 > [!WARNING]
 > The versions listed above are the versions tested with this release. Older versions will not work with game version 2.5. Newer versions may work, but compatibility is not guaranteed until tested.
@@ -162,6 +168,8 @@ Do not use outdated, duplicate or mixed versions of the required frameworks. If 
 
 > [!CAUTION]
 > When updating UTPP, remove obsolete files only when instructed by the release notes. Do not mix files from different UTPP versions.
+
+**Updating from 0.1.0 to 0.1.1:** install 0.1.1 over 0.1.0 and let it replace every file. No file of 0.1.0 has to be removed. At the first start of 0.1.1 the settings of the mod are reset to their defaults once, because the defaults and the way several options work changed; a message on the screen tells you when it happened. The two "Swap shoulder" controls are not changed. This happens once: afterwards your settings are kept as before.
 
 Always keep a backup of your mod setup before installing or updating UTPP.
 
@@ -230,6 +238,8 @@ UTPP may interact with other mods that modify:
 
 Compatibility with every existing mod cannot be guaranteed. If another mod changes the same systems as UTPP, disable it temporarily and test again before reporting an issue.
 
+UTPP replaces three animation graphs of the base game: `player_melee.animgraph` (the parried clip is picked per attack; file `utpp_melee_parried_graph.archive`, new in 0.1.1) and `player_ranged.animgraph` and `weapon.animgraph` (the optional authored reload of the Nue pistol; file `utpp_nue_reload.archive`). Mods that replace the same graphs conflict with these files.
+
 For the best troubleshooting results, test UTPP with the required dependencies and without additional third-person, animation or combat-overhaul mods. After confirming that UTPP works correctly, re-enable other mods one at a time to identify possible conflicts.
 
 </details>
@@ -239,7 +249,7 @@ For the best troubleshooting results, test UTPP with the required dependencies a
 <details>
 <summary><b>Details</b></summary>
 
-Version 0.1.0 is the first publicly available release of UTPP and an early version of the project.
+Version 0.1.1 is the second public release of UTPP and still an early version of the project.
 
 Some poses, weapons, body states, story animations and transitions require further refinement. Results may also vary depending on the installed character, weapon and animation setup.
 
@@ -254,34 +264,36 @@ You may still encounter:
 - Two-handed weapons: the upper body can lean and shift slightly when aiming starts or ends
 - Animation behavior affected by other installed mods
 - Arm and shoulder deformation when the Game Animations option is used
-- Features planned for future releases but not yet fully implemented (for example melee weapons other than fists)
+- Features planned for future releases but not yet fully implemented (for example hammers, the monowire, finishers and takedowns, which keep the game's animations)
 
 The project is being developed in stages, with continued focus on movement quality, animation continuity, body deformation and combat integration.
 
 </details>
 
-## Known issues in 0.1.0
+## Known issues in 0.1.1
 
 <details>
 <summary><b>Details</b></summary>
 
-These problems are known in version 0.1.0 and are planned to be fixed in the next updates. You do not need to report them.
+These problems are known in version 0.1.1 and are planned to be fixed in the next updates. You do not need to report them. What was fixed since 0.1.0 is listed in the [changelog](CHANGELOG.md).
 
 - redscript 1.0.0 is not supported yet: use redscript 0.5.32
 - Rare game crash a few seconds after loading a save in which V sits on a vehicle; loading again works
-- Fists: at the start of a punch the arms can jump to a wide pose for a single frame
-- Fists: the third, heavy punch of a combo has a long overhead wind-up
-- Fists: only the upper body plays the punch; the hips and legs keep their pose
-- Fists: V holds no guard between punches, and the fists drop to the sides after a combo
-- Fists: a punch does not always reach or turn towards a nearby enemy
+- Knife: when the next strike of a combo starts late while V walks, the arms can snap between the two strikes
+- Mantis Blades and Gorilla Arms: drawing them plays the game's own animation
+- Hammers, the monowire, finishers and takedowns keep the game's animations
+- Dual wield is a first version: the reload uses a basic animation and the stance still needs polish
+- Sniper rifles: aiming through the scope uses the first-person view; after you stop aiming the view stays in first person for about a second, and the camera passes through V's body on the way back
 - Two-handed weapons: V leans far forward while moving, and some rifle stocks do not reach the shoulder
 - Shotguns, sniper and precision rifles and heavy machine guns have no UTPP recoil animation yet
+- Reloads: in some rifle reloads the elbow of the supporting arm can swing sharply for a single frame
 - Head look: with the camera far behind V's shoulder the head turns close to its limit and can look stiff
-- Sharp 180-degree turns and sprint dashes can look rough, most of all on steep slopes and next to obstacles
-- Slide: when a slide changes to another variant the body can twist sharply for a moment, mostly on male V
+- Sprint dashes use short dodge animations and can look stiff
+- Steps in the terrain higher than about 30 cm can interrupt the run animation for a moment
 - Vaulting or sliding over a car hood with a weapon drawn: the upper body can lean back
 - Vehicles: when leaving some cars the lower leg can dip into the door sill and the pose can shift briefly
 - Motorcycle in the first-person camera: the arms and torso can look distorted
+- Scenes and dialogues stay in third person by default and play the game's own animations, which were made for the first-person view: V's body can look distorted in some of them. Switch on "First person in scenes and dialogues" to see them in first person
 
 </details>
 
@@ -316,7 +328,7 @@ Thanks to the creators of the licensed animation content and the technical refer
 UTPP is designed, directed and tested in game by its author. Generative AI was used in its making:
 
 - Code: most of the plugin, scripts and tools were written with AI coding agents under the author's direction
-- Animation: some transition and vehicle-exit clips were generated locally with NVIDIA Kimodo and MotionBricks
+- Animation: some transition, vehicle-exit and melee clips were generated locally with NVIDIA Kimodo and MotionBricks
 - Mod page: the logo, the trailer and the mod page description were made with the help of AI
 - Not used: AI voices, AI textures or AI translations
 - Nothing in the download is taken or derived from other mods without permission or a license
@@ -328,7 +340,7 @@ UTPP is designed, directed and tested in game by its author. Generative AI was u
 Ultimate Third Person Project is (c) Daniel Maciej Pytel. All rights reserved except where a third-party license says otherwise.
 
 - **Animation data.** The motion-matching databases, overlays, traversal and lean tables shipped with UTPP are original work. They are based on licensed GASPALS 1.2 content by Polygon Hive, then heavily modified, extended, tuned and blended with the game's own animations for Cyberpunk 2077. The GASPALS content was used under a purchased license.
-- **Generated clips.** Some transition and vehicle-exit animation clips were generated locally with NVIDIA Kimodo and NVIDIA MotionBricks (models licensed by NVIDIA Corporation under the NVIDIA Open Model License and the NVIDIA Open Model Agreement, respectively). No NVIDIA model is included.
+- **Generated clips.** Some transition, vehicle-exit and melee animation clips were generated locally with NVIDIA Kimodo and NVIDIA MotionBricks (models licensed by NVIDIA Corporation under the NVIDIA Open Model License and the NVIDIA Open Model Agreement, respectively). No NVIDIA model is included.
 - **Content derived from Cyberpunk 2077.** Weapon recoil profiles and animation clips, graphs and resource patches built from or for the animations and resources of Cyberpunk 2077 and its Phantom Liberty expansion (c) CD PROJEKT RED are derived from game content. They do not contain the game and work only together with a legitimate copy of it.
 - **Open-source code (MIT)** used in `UTPP.dll`: RED4ext.SDK (c) 2020 - present Octavian Dima (plugin API headers); cyberpunk-vr-port (c) 2026 dariulone (logic and memory offsets for arming the player animation were adapted from it); Motion-Matching (c) 2021 Daniel Holden (inertialization and motion matching algorithms re-implemented from it). The full license texts are in [`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt) and ship with every release.
 

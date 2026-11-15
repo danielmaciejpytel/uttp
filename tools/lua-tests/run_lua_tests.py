@@ -88,6 +88,7 @@ try:
                           (Path(__file__).with_name("test_utpp_modsettings.lua"), True),
                           (Path(__file__).with_name("test_utpp_diagnostic_logs.lua"), True),
                           (Path(__file__).with_name("test_utpp_animation_pack.lua"), True),
+                          (Path(__file__).with_name("test_utpp_settings_reset.lua"), True),
                           (utpp_reload_probe_mod, False),
                           (Path(__file__).with_name("test_utpp_reload_probe.lua"), True),
                           (Path(__file__).with_name("test_utpp_reload_probe_positions.lua"), True),

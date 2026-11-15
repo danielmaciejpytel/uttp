@@ -31,6 +31,11 @@ local function newCore()
   core.Register({ key = "t.steps", section = "test", type = "int", default = 3, min = 1, max = 6, label = "Steps" })
   return core
 end
+-- first line of a settings file of the current reset level (a file without that line is not read: it is reset to the defaults)
+local LEVEL_LINE = (function()
+  local core = newCore()
+  return core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n"
+end)()
 
 -- Mod Settings mock: fields = field -> text; push compares texts (the bridge compares values)
 local function mockMS(fields)
@@ -404,12 +409,13 @@ local ok, err = pcall(function()
     and b9:find("bind.somethingElse=1", 1, true) ~= nil and b9:find("t.steps=5", 1, true) ~= nil, b9)
 
   -- ---------------------------------------------------------------- T16 migrated value vs the Mod Settings class default (2026-11-09)
-  -- a player of an older version: utpp_settings.txt holds mm.shoulderNarrow=2 (-> mm.shoulderWidth 1), the baseline of the
+  -- a settings file (of the current reset level) that still holds the replaced key: utpp_settings.txt holds
+  -- mm.shoulderNarrow=2 (-> mm.shoulderWidth 1), the baseline of the
   -- last sync has no mm.shoulderWidth line, and Mod Settings shows the new field at its class default 0 (no user.ini entry):
   -- the migrated CET value must win and be pushed (the bridge must not undo the migration)
   os.remove(settingsFile)
   local fs = SAVED.open(settingsFile, "w")
-  fs:write("# UTPP settings\nmm.shoulderNarrow=2\nt.steps=3\n")
+  fs:write("# UTPP settings\n" .. LEVEL_LINE .. "mm.shoulderNarrow=2\nt.steps=3\n")
   fs:close()
   local fb2 = SAVED.open(baseFile, "w")
   fb2:write("# UTPP: values last synced with Mod Settings\nmm.shoulderNarrow=2.5\nt.steps=3\n")

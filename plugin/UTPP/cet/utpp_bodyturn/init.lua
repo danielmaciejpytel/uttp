@@ -83,9 +83,9 @@ local E = {
                         -- overrides the game's FPP look for that tick (pitch -> ~0, yaw -> V), so V is turned only when
                         -- the camera is clearly away; the DLL AimOffset (30 deg) covers the arm in between
   aimAlignMaxSum = 540, -- deg turned in one aim without reaching the look -> stop (spin guard)
-  -- melee strike turn (setting bodyturn.meleeStrikeTurn, default off): while a fists strike runs and the game has a tracked target,
+  -- melee strike turn (setting bodyturn.meleeStrikeTurn, default on): while a fists strike runs and the game has a tracked target,
   -- V turns toward the direction the game's hit will take (api.meleeStrikeYaw, utpp_melee.reds UTPPMeleeStrikeYaw)
-  strikeTurn = false,
+  strikeTurn = true,
   strikeMax = 50,       -- deg: V ends within this of the facing it had when the episode (a strike series) started; the rest stays with the tilt
   strikeRate = 540,     -- deg/s cap
   strikeGain = 20,      -- 1/s ease-out gain (time constant 0.05 s)
@@ -779,7 +779,7 @@ function M.RegisterSettings(core)
     desc = "Turns the body at up to 540 deg/s with ease-out. Starts beyond 35 deg, at least 0.3 s between episodes; "
       .. "requires a weapon in hand or UpperBody Aim stable for 0.1 s. Off = legacy 1080 deg/s alignment.",
     apply = function(v) M.SetAimSmooth(v); M.log("[utpp_bodyturn] aim smooth -> " .. tostring(E.aimSmooth)) end })
-  core.Register({ key = "bodyturn.meleeStrikeTurn", section = "bodyturn", type = "bool", default = false,
+  core.Register({ key = "bodyturn.meleeStrikeTurn", section = "bodyturn", type = "bool", default = true,
     label = "Fists: turn toward the target when striking",
     desc = "In third person the game's fist hit goes toward the target it tracks, while V's body keeps its own facing (the "
       .. "upper-body tilt covers only 25 deg). With this on, V turns toward that target during a fists strike, eased, at most 50 deg "

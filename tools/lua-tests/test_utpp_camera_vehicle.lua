@@ -3762,7 +3762,12 @@ end
 -- 0.14 m at veh (-0.94,-2.36,1.36). Replayed with the logged exit camera, the standard3 record (its box), V standing beside the rear door 0.48 m below the
 -- vehicle origin and the orbit boom shortened to 1.3 m after the unmount (the logged dist=1.27/2.95 hits=4). The rendered camera is never inside the box of
 -- the record (depth > 0, the product's M.HullDepth), the step / rotation limits of r13e hold; mutation exitFollowAroundAtRest = false (r13e = HEAD 2b318a9).
+-- The replay keeps the shoulder offset of the recorded session (0.50 m, SIDE below): with it the settled orbit of the replay, (-1.17,-1.86,1.21), is the
+-- logged one within 0.02 m. The ray mock of this block is a fixed 1.3 m hit that does not know the car, so with the wider default offset (1.00 m) the
+-- settled orbit of this replay would lie 0.13 m inside the box, while a ray mock that also stops at the car's box keeps it outside (checked 2026-11-15);
+-- the path logic under test does not depend on the offset.
 runBlock(function()
+  local SIDE = 0.50
   local REC = "Vehicle.v_standard3_chevalier_emperor"
   local PAR = { x = -9.49, y = -2.09, z = 4.63, pitch = -10, yaw = -75 } -- the logged exit match pose ('exit match: cam=(-9.49,-2.09,4.63) yaw=-75 pitch=-10')
   local PAR2 = { x = -7.61, y = -5.70, z = 4.74, pitch = -11, yaw = -51 } -- the second logged exit (t=291.08; 5 frames, 0.10 m at t=294.13 - 294.19)
@@ -3771,6 +3776,8 @@ runBlock(function()
     local W = makeWorld({ far = far or PAR, recordId = REC })
     local cam, vc = load(W)
     for k, v in pairs(vcc or {}) do vc.ctrl.cfg[k] = v end
+    cam.profiles[cam.FIXED_PROFILE].side = SIDE
+    CM.blendRetarget(cam.blend, cam.profiles[cam.FIXED_PROFILE])
     local T = timeline({ ride = 3.0, exitDur = 2.05, after = 3.5, tm = fps < 60 and 14.0 or nil })
     local base = T.script
     local seat, out = CM.v3(-0.35, 0.25, -0.3), CM.v3(-1.30, -0.7, -0.48)

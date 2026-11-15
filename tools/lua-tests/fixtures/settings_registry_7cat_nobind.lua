@@ -17,7 +17,7 @@ return {
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
     ["bodyturn.guardFix"] = "true",
-    ["bodyturn.meleeStrikeTurn"] = "false",
+    ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "false",
     ["bodyturn.turnRate"] = "true",
     ["bodyturn.turnRateMax"] = "1.5",
@@ -60,7 +60,7 @@ return {
     ["camera.poseNudge"] = "true",
     ["camera.predictBodyTurn"] = "false",
     ["camera.sens"] = "1",
-    ["camera.side"] = "0.5",
+    ["camera.side"] = "1",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
     ["camera.worldCamera"] = "true",
@@ -106,7 +106,7 @@ return {
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
-    ["mm.bodyYawOffset"] = "8",
+    ["mm.bodyYawOffset"] = "4",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
@@ -126,11 +126,11 @@ return {
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
     ["mm.orientWarp"] = "true",
-    ["mm.pelvisYawTrim"] = "5",
+    ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
     ["mm.selectionGuards"] = "true",
-    ["mm.shinobiBonusReload"] = "false",
+    ["mm.shinobiBonusReload"] = "true",
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
@@ -152,7 +152,7 @@ return {
     ["perspective.meleeBlockTpp"] = "true",
     ["perspective.minGap"] = "0.5",
     ["perspective.scanner"] = "false",
-    ["perspective.scene"] = "true",
+    ["perspective.scene"] = "false",
     ["perspective.sceneExit"] = "1.5",
     ["perspective.sceneTier"] = "3",
     ["perspective.shortScopeFpp"] = "false",
@@ -202,7 +202,8 @@ return {
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
     "apply mm.shootTransfer(true,\"ok\")",
-    "apply mm.shinobiBonusReload(false,\"ok\")",
+    "mm setMotionMagTap(true)",
+    "apply mm.shinobiBonusReload(true,\"ok\")",
     "mm setAimUpperFade(true)",
     "apply mm.aimUpperFade(true,\"ok\")",
     "mm setIdleHold(true)",
@@ -247,7 +248,7 @@ return {
     "apply bodyturn.aimJogSpeed(3.2999999999999998,\"ok\")",
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
-    "apply bodyturn.meleeStrikeTurn(false,\"ok\")",
+    "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
     "native UTPPSetMotionShooterMode(false)",
     "apply bodyturn.shooterMode(false,\"ok\")",
     "apply mm.motionDriver(true,\"ok\")",
@@ -262,10 +263,10 @@ return {
     "v2 setOrientWarp(true)",
     "apply mm.orientWarp(true,\"ok\")",
     "apply mm.shoulderWidth(0,\"ok\")",
-    "native UTPPSetMotionPelvisYawTrim(5)",
-    "apply mm.pelvisYawTrim(5,\"ok\")",
-    "native UTPPSetMotionBodyYawOffset(8)",
-    "apply mm.bodyYawOffset(8,\"ok\")",
+    "native UTPPSetMotionPelvisYawTrim(2)",
+    "apply mm.pelvisYawTrim(2,\"ok\")",
+    "native UTPPSetMotionBodyYawOffset(4)",
+    "apply mm.bodyYawOffset(4,\"ok\")",
     "native UTPPSetMotionWalkSpeed(1.6000000000000001)",
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "native UTPPSetMotionMinAnalogWalk(0.81999999999999995)",
@@ -331,12 +332,12 @@ return {
     "apply camera.fppWithWeapon(true,\"ok\")",
     "apply camera.distance(2.75,\"ok\")",
     "apply camera.height(-0.34999999999999998,\"ok\")",
-    "apply camera.side(0.5,\"ok\")",
+    "apply camera.side(1,\"ok\")",
     "apply camera.fov(55,\"ok\")",
     "apply camera.framingSens(1,\"ok\")",
     "apply perspective.startInLastView(true,\"ok\")",
     "apply perspective.defaultTpp(true,\"ok\")",
-    "apply perspective.scene(true,\"ok\")",
+    "apply perspective.scene(false,\"ok\")",
     "apply perspective.sceneTier(3,\"ok\")",
     "apply perspective.combat(\"tpp\",\"ok\")",
     "apply perspective.weaponDrawn(\"tpp\",\"ok\")",
@@ -404,7 +405,8 @@ return {
     "apply mm.grip(true,\"ok\")",
     "mm setMotionShootTransfer(true)",
     "apply mm.shootTransfer(true,\"ok\")",
-    "apply mm.shinobiBonusReload(false,\"ok\")",
+    "mm setMotionMagTap(true)",
+    "apply mm.shinobiBonusReload(true,\"ok\")",
     "mm setAimUpperFade(true)",
     "apply mm.aimUpperFade(true,\"ok\")",
     "mm setIdleHold(true)",
@@ -449,7 +451,7 @@ return {
     "apply bodyturn.aimJogSpeed(3.2999999999999998,\"ok\")",
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
-    "apply bodyturn.meleeStrikeTurn(false,\"ok\")",
+    "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
     "native UTPPSetMotionShooterMode(true)",
     "apply bodyturn.shooterMode(true,\"ok\")",
     "apply mm.motionDriver(false,\"ok\")",
@@ -459,8 +461,8 @@ return {
     "apply mm.slide(true,\"ok\")",
     "apply mm.orientWarp(true,\"ok\")",
     "apply mm.shoulderWidth(0,\"ok\")",
-    "apply mm.pelvisYawTrim(5,\"ok\")",
-    "apply mm.bodyYawOffset(8,\"ok\")",
+    "apply mm.pelvisYawTrim(2,\"ok\")",
+    "apply mm.bodyYawOffset(4,\"ok\")",
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
@@ -519,12 +521,12 @@ return {
     "apply camera.fppWithWeapon(true,\"ok\")",
     "apply camera.distance(2.2345678900000001,\"ok\")",
     "apply camera.height(-0.34999999999999998,\"ok\")",
-    "apply camera.side(0.5,\"ok\")",
+    "apply camera.side(1,\"ok\")",
     "apply camera.fov(55,\"ok\")",
     "apply camera.framingSens(1,\"ok\")",
     "apply perspective.startInLastView(false,\"ok\")",
     "apply perspective.defaultTpp(true,\"ok\")",
-    "apply perspective.scene(true,\"ok\")",
+    "apply perspective.scene(false,\"ok\")",
     "apply perspective.sceneTier(3,\"ok\")",
     "apply perspective.combat(\"fpp\",\"ok\")",
     "apply perspective.weaponDrawn(\"tpp\",\"ok\")",
@@ -703,7 +705,7 @@ return {
       ["type"] = "bool"
     },
     ["bodyturn.meleeStrikeTurn"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -1100,7 +1102,7 @@ return {
       ["type"] = "float"
     },
     ["camera.side"] = {
-      ["default"] = "0.5",
+      ["default"] = "1",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 1.2,
@@ -1512,7 +1514,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.bodyYawOffset"] = {
-      ["default"] = "8",
+      ["default"] = "4",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 20,
@@ -1686,7 +1688,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.pelvisYawTrim"] = {
-      ["default"] = "5",
+      ["default"] = "2",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 10,
@@ -1721,7 +1723,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.shinobiBonusReload"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -1918,7 +1920,7 @@ return {
       ["type"] = "bool"
     },
     ["perspective.scene"] = {
-      ["default"] = "true",
+      ["default"] = "false",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2147,7 +2149,7 @@ return {
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
     ["bodyturn.guardFix"] = "true",
-    ["bodyturn.meleeStrikeTurn"] = "false",
+    ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "false",
     ["bodyturn.turnRate"] = "true",
     ["bodyturn.turnRateMax"] = "1.5",
@@ -2190,7 +2192,7 @@ return {
     ["camera.poseNudge"] = "true",
     ["camera.predictBodyTurn"] = "false",
     ["camera.sens"] = "1",
-    ["camera.side"] = "0.5",
+    ["camera.side"] = "1",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
     ["camera.worldCamera"] = "true",
@@ -2236,7 +2238,7 @@ return {
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
-    ["mm.bodyYawOffset"] = "8",
+    ["mm.bodyYawOffset"] = "4",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
@@ -2256,11 +2258,11 @@ return {
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
     ["mm.orientWarp"] = "true",
-    ["mm.pelvisYawTrim"] = "5",
+    ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
     ["mm.selectionGuards"] = "true",
-    ["mm.shinobiBonusReload"] = "false",
+    ["mm.shinobiBonusReload"] = "true",
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
@@ -2282,7 +2284,7 @@ return {
     ["perspective.meleeBlockTpp"] = "true",
     ["perspective.minGap"] = "0.5",
     ["perspective.scanner"] = "false",
-    ["perspective.scene"] = "true",
+    ["perspective.scene"] = "false",
     ["perspective.sceneExit"] = "1.5",
     ["perspective.sceneTier"] = "3",
     ["perspective.shortScopeFpp"] = "false",
@@ -2725,7 +2727,7 @@ return {
     "apply mm.helperZeroWeightWriters(true,\"ok\")",
     "apply mm.grip(true,\"ok\")",
     "apply mm.shootTransfer(true,\"ok\")",
-    "apply mm.shinobiBonusReload(false,\"ok\")",
+    "apply mm.shinobiBonusReload(true,\"ok\")",
     "apply mm.aimUpperFade(true,\"ok\")",
     "apply mm.idleHold(true,\"ok\")",
     "apply mm.kneeFix(true,\"ok\")",
@@ -2748,7 +2750,7 @@ return {
     "apply bodyturn.aimJogSpeed(3.2999999999999998,\"ok\")",
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
-    "apply bodyturn.meleeStrikeTurn(false,\"ok\")",
+    "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
     "apply bodyturn.shooterMode(false,\"ok\")",
     "apply mm.motionDriver(true,\"ok\")",
     "glue SetPistolOneHand(true)",
@@ -2758,8 +2760,8 @@ return {
     "apply mm.slide(true,\"ok\")",
     "apply mm.orientWarp(true,\"ok\")",
     "apply mm.shoulderWidth(0,\"ok\")",
-    "apply mm.pelvisYawTrim(5,\"ok\")",
-    "apply mm.bodyYawOffset(8,\"ok\")",
+    "apply mm.pelvisYawTrim(2,\"ok\")",
+    "apply mm.bodyYawOffset(4,\"ok\")",
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
@@ -2818,12 +2820,12 @@ return {
     "apply camera.fppWithWeapon(true,\"ok\")",
     "apply camera.distance(2.75,\"ok\")",
     "apply camera.height(-0.34999999999999998,\"ok\")",
-    "apply camera.side(0.5,\"ok\")",
+    "apply camera.side(1,\"ok\")",
     "apply camera.fov(55,\"ok\")",
     "apply camera.framingSens(1,\"ok\")",
     "apply perspective.startInLastView(true,\"ok\")",
     "apply perspective.defaultTpp(true,\"ok\")",
-    "apply perspective.scene(true,\"ok\")",
+    "apply perspective.scene(false,\"ok\")",
     "apply perspective.sceneTier(3,\"ok\")",
     "apply perspective.combat(\"tpp\",\"ok\")",
     "apply perspective.weaponDrawn(\"tpp\",\"ok\")",
@@ -2860,7 +2862,8 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=2\r\
+core.defaultsRevision=3\r\
+core.settingsReset=1\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -2895,7 +2898,7 @@ melee.switchBlend=false\r\
 mm.helperZeroWeightWriters=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
-mm.shinobiBonusReload=false\r\
+mm.shinobiBonusReload=true\r\
 mm.aimUpperFade=true\r\
 mm.idleHold=true\r\
 mm.kneeFix=true\r\
@@ -2917,7 +2920,7 @@ bodyturn.aimJog=true\r\
 bodyturn.aimJogSpeed=3.3\r\
 bodyturn.guardFix=true\r\
 bodyturn.aimSmooth=true\r\
-bodyturn.meleeStrikeTurn=false\r\
+bodyturn.meleeStrikeTurn=true\r\
 bodyturn.shooterMode=false\r\
 body.impl=true\r\
 body.hideFpp=true\r\
@@ -2934,8 +2937,8 @@ mm.aimGameUpper=false\r\
 mm.slide=true\r\
 mm.orientWarp=true\r\
 mm.shoulderWidth=0\r\
-mm.pelvisYawTrim=5\r\
-mm.bodyYawOffset=8\r\
+mm.pelvisYawTrim=2\r\
+mm.bodyYawOffset=4\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
 mm.aimAtCrosshair=true\r\
@@ -2994,13 +2997,13 @@ camera.poseNudge=true\r\
 camera.fppWithWeapon=true\r\
 camera.distance=2.75\r\
 camera.height=-0.35\r\
-camera.side=0.5\r\
+camera.side=1\r\
 camera.fov=55\r\
 camera.framingSens=1\r\
 perspective.impl=true\r\
 perspective.startInLastView=true\r\
 perspective.defaultTpp=true\r\
-perspective.scene=true\r\
+perspective.scene=false\r\
 perspective.sceneTier=3\r\
 perspective.combat=tpp\r\
 perspective.weaponDrawn=tpp\r\
@@ -3277,7 +3280,7 @@ vehicle.jumpOutSidePush=true\r\
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
     ["bodyturn.guardFix"] = "true",
-    ["bodyturn.meleeStrikeTurn"] = "false",
+    ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "true",
     ["bodyturn.turnRate"] = "true",
     ["bodyturn.turnRateMax"] = "1.7",
@@ -3320,7 +3323,7 @@ vehicle.jumpOutSidePush=true\r\
     ["camera.poseNudge"] = "true",
     ["camera.predictBodyTurn"] = "false",
     ["camera.sens"] = "1.3",
-    ["camera.side"] = "0.5",
+    ["camera.side"] = "1",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
     ["camera.worldCamera"] = "true",
@@ -3366,7 +3369,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
-    ["mm.bodyYawOffset"] = "8",
+    ["mm.bodyYawOffset"] = "4",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"alt_db\"",
     ["mm.debug"] = "false",
@@ -3386,11 +3389,11 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "false",
     ["mm.orientWarp"] = "true",
-    ["mm.pelvisYawTrim"] = "5",
+    ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
     ["mm.selectionGuards"] = "true",
-    ["mm.shinobiBonusReload"] = "false",
+    ["mm.shinobiBonusReload"] = "true",
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
@@ -3412,7 +3415,7 @@ vehicle.jumpOutSidePush=true\r\
     ["perspective.meleeBlockTpp"] = "true",
     ["perspective.minGap"] = "0.5",
     ["perspective.scanner"] = "false",
-    ["perspective.scene"] = "true",
+    ["perspective.scene"] = "false",
     ["perspective.sceneExit"] = "1.5",
     ["perspective.sceneTier"] = "3",
     ["perspective.shortScopeFpp"] = "false",
@@ -3438,7 +3441,8 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=2\r\
+core.defaultsRevision=3\r\
+core.settingsReset=1\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -3473,7 +3477,7 @@ melee.switchBlend=false\r\
 mm.helperZeroWeightWriters=true\r\
 mm.grip=true\r\
 mm.shootTransfer=true\r\
-mm.shinobiBonusReload=false\r\
+mm.shinobiBonusReload=true\r\
 mm.aimUpperFade=true\r\
 mm.idleHold=true\r\
 mm.kneeFix=true\r\
@@ -3495,7 +3499,7 @@ bodyturn.aimJog=true\r\
 bodyturn.aimJogSpeed=3.3\r\
 bodyturn.guardFix=true\r\
 bodyturn.aimSmooth=true\r\
-bodyturn.meleeStrikeTurn=false\r\
+bodyturn.meleeStrikeTurn=true\r\
 bodyturn.shooterMode=true\r\
 body.impl=true\r\
 body.hideFpp=true\r\
@@ -3512,8 +3516,8 @@ mm.aimGameUpper=false\r\
 mm.slide=true\r\
 mm.orientWarp=true\r\
 mm.shoulderWidth=0\r\
-mm.pelvisYawTrim=5\r\
-mm.bodyYawOffset=8\r\
+mm.pelvisYawTrim=2\r\
+mm.bodyYawOffset=4\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
 mm.aimAtCrosshair=true\r\
@@ -3572,13 +3576,13 @@ camera.poseNudge=true\r\
 camera.fppWithWeapon=true\r\
 camera.distance=2.235\r\
 camera.height=-0.35\r\
-camera.side=0.5\r\
+camera.side=1\r\
 camera.fov=55\r\
 camera.framingSens=1\r\
 perspective.impl=true\r\
 perspective.startInLastView=false\r\
 perspective.defaultTpp=true\r\
-perspective.scene=true\r\
+perspective.scene=false\r\
 perspective.sceneTier=3\r\
 perspective.combat=fpp\r\
 perspective.weaponDrawn=tpp\r\

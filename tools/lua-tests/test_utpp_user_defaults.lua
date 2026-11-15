@@ -31,7 +31,7 @@ local EXPECTED = {
   ["mm.airRobust"] = true, ["mm.climbRelease"] = false, ["mm.database"] = "utpp_base",
   ["mm.orientWarp"] = true, ["mm.enabled"] = true, ["mm.trace"] = false,
   ["mm.footReplant"] = "crouch", ["mm.feedDump"] = false, ["mm.weaponUpper"] = false, ["mm.grip"] = true,
-  ["mm.shinobiBonusReload"] = false, -- "Reload animation during Shinobi bonus" (2026-10-27): opt-in, OFF by default
+  ["mm.shinobiBonusReload"] = true, -- "Reload animation during Shinobi bonus": on by default since defaults revision 3
   -- Animation v2
   ["mm.motionDriver"] = true, ["mm.pistol1h"] = true, ["mm.pistolAuto"] = true, ["mm.aimGameUpper"] = false,
   ["mm.slide"] = true, ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.85,
@@ -53,7 +53,11 @@ end
 local function boot(stored, dbList)
   os.remove(tmp)
   local core = newCore()
-  if stored then local f = io.open(tmp, "w"); f:write(stored); f:close(); core.Load(tmp) end
+  if stored then
+    -- a file of the current reset level (a file without that line is not read: it is reset to the defaults)
+    local f = io.open(tmp, "w"); f:write(core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n" .. stored); f:close()
+    core.Load(tmp)
+  end
   local rec = { dbRequests = {}, leanParams = {}, strafeParams = {}, turnParams = {} }
   local function rec1(name, ret)
     rec[name] = {}
@@ -135,8 +139,8 @@ do
     rec.trace[1][1] == false and rec.feedDump[1][1] == false and rec.headLead[1][1] == true and rec.airSteer[1][1] == true
     and rec.weaponUpper[1][1] == false and rec.climbRelease[1][1] == false and rec.shootTransfer[1][1] == true
     and rec.enabled[1][1] == true and rec.grip[1][1] == true)
-  check("fresh start: Shinobi bonus reload animation stays off without a native call (DLL default off)", #rec.magTap == 0
-    and core.Get("mm.shinobiBonusReload") == false)
+  check("fresh start: Shinobi bonus reload animation is switched on with one native call (the DLL starts with it off)",
+    #rec.magTap == 1 and rec.magTap[1][1] == true and core.Get("mm.shinobiBonusReload") == true)
   check("fresh start: database default utpp_base requested", rec.dbRequests[1] == "utpp_base" and core.Get("mm.database") == "utpp_base")
   local sp, tp = rec.strafeParams[#rec.strafeParams], rec.turnParams[#rec.turnParams]
   check("fresh start: bodyturn natives get unarmed strafe ON, jog 3.3 and turn clip max 1.5",
@@ -256,10 +260,11 @@ local USER_SETTINGS = {
   ["camera.zoomUnarmed.distance"] = 1.75, ["camera.zoomUnarmed.lastDistance"] = 0.6, ["camera.zoomUnarmed.fov"] = 45,
   ["camera.zoomUnarmed.lastFov"] = 25, ["camera.zoomUnarmed.fppHandoff"] = false, ["camera.collision"] = true,
   ["camera.enterTime"] = 0.45, ["camera.exitTime"] = 0.35, ["camera.poseNudge"] = true, ["camera.fppWithWeapon"] = true,
-  ["camera.distance"] = 2.75, ["camera.height"] = -0.35, ["camera.side"] = 0.5,
+  ["camera.distance"] = 2.75, ["camera.height"] = -0.35, ["camera.side"] = 1, -- shoulder offset 1 m since defaults revision 3
   ["camera.fov"] = 55, ["camera.framingSens"] = 1, ["vehicle.keepTpp"] = true, ["vehicle.pullOut"] = true, ["vehicle.rideWatchdog"] = true,
   ["perspective.impl"] = true, ["perspective.startInLastView"] = true, ["perspective.defaultTpp"] = true,
-  ["perspective.scene"] = true, ["perspective.sceneTier"] = 3, ["perspective.combat"] = "tpp",
+  ["perspective.scene"] = false, -- scenes and dialogues stay in third person since defaults revision 3
+  ["perspective.sceneTier"] = 3, ["perspective.combat"] = "tpp",
   ["perspective.weaponDrawn"] = "tpp", ["perspective.aiming"] = "tpp", ["perspective.aimingScoped"] = "fpp",
   ["perspective.shortScopeFpp"] = false, ["perspective.meleeBlockTpp"] = true, ["perspective.vehicleKeepTpp"] = true,
   ["perspective.combatCut"] = false, ["perspective.combatExit"] = 1.25, ["perspective.takedown"] = false,

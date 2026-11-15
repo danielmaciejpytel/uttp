@@ -57,6 +57,11 @@ local function loadCore(mutation, keepFile)
   core.Register({ key = "mm.debug", section = "test", type = "bool", default = false, label = "motion window" })
   return core
 end
+-- first line of a settings file of the current reset level (a file without that line is not read: it is reset to the defaults)
+local LEVEL_LINE = (function()
+  local core = loadCore()
+  return core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n"
+end)()
 
 -- natives of the diagnostic logs as a recording mock
 local function mockApi(opts)
@@ -238,7 +243,7 @@ end
 
 -- ---------------------------------------------------------------- restart rules (the game order: the file is read when core loads)
 do
-  writeFile(settingsFile, "core.diagnosticLogs=timed\nmm.trace=true\n")
+  writeFile(settingsFile, LEVEL_LINE .. "core.diagnosticLogs=timed\nmm.trace=true\n")
   local core = loadCore(nil, true)
   local m = mockApi()
   core.diag.api = m.api
@@ -275,7 +280,7 @@ do
   check("restart + Mod Settings: Off is pushed to its screen", fields.core_diagnosticLogs == "0" and #pushed >= 1, tostring(fields.core_diagnosticLogs))
 
   -- 'On until switched off' survives a restart
-  writeFile(settingsFile, "core.diagnosticLogs=until\ncore.log=false\n")
+  writeFile(settingsFile, LEVEL_LINE .. "core.diagnosticLogs=until\ncore.log=false\n")
   core = loadCore(nil, true)
   m = mockApi()
   core.diag.api = m.api
@@ -461,12 +466,12 @@ for _, mu in ipairs(MUTANTS) do
 end
 -- restart reset
 do
-  writeFile(settingsFile, "core.diagnosticLogs=timed\n")
+  writeFile(settingsFile, LEVEL_LINE .. "core.diagnosticLogs=timed\n")
   check("scenario [timed does not survive a restart] holds on the shipped source", restartScenario(loadCore(nil, true)) == true)
-  writeFile(settingsFile, "core.diagnosticLogs=timed\n")
+  writeFile(settingsFile, LEVEL_LINE .. "core.diagnosticLogs=timed\n")
   local mutant = loadCore({ "  if v == \"timed\" then\n    S.values[M.DIAG_KEY] = \"off\"", "  if false then\n    S.values[M.DIAG_KEY] = \"off\"" }, true)
   check("mutation [timed survives a restart] is caught", restartScenario(mutant) ~= true)
-  writeFile(settingsFile, "core.diagnosticLogs=timed\n")
+  writeFile(settingsFile, LEVEL_LINE .. "core.diagnosticLogs=timed\n")
   local mutant2 = loadCore({ "    M.msync.dirty[M.DIAG_KEY] = true\n    v = \"off\"", "    v = \"off\"" }, true)
   check("mutation [Off not pushed to Mod Settings after a restart] is caught", restartScenario(mutant2) ~= true)
   os.remove(settingsFile)

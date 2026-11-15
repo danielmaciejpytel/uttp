@@ -254,10 +254,10 @@ local okAll, errAll = pcall(function()
       end
     end
     check("T04: view limits / step / format = the raw fields = CM.PROFILE_LIMITS (same units)", same)
-    check("editor: shows the fixed profile (2) values, defaults = default profile 2 (2.75 m / 0.50 m / FOV 55 / -0.35 m)",
+    check("editor: shows the fixed profile (2) values, defaults = default profile 2 (2.75 m / 1.00 m / FOV 55 / -0.35 m)",
       showsSlot(B, 2) and w.distance.default == CM.DEFAULT_PROFILES[2].distance and w.fov.default == CM.DEFAULT_PROFILES[2].fov
       and w.side.default == CM.DEFAULT_PROFILES[2].side and w.height.default == CM.DEFAULT_PROFILES[2].height
-      and w.distance.value == 2.75 and w.side.value == 0.5 and w.fov.value == 55 and w.height.value == -0.35)
+      and w.distance.value == 2.75 and w.side.value == 1 and w.fov.value == 55 and w.height.value == -0.35)
     check("T04: building the menu saves nothing", B.saves == B.savesBeforeBuild and B.saves == 0 and readFile(tmpSettings) == nil,
       B.saves)
     check("editor: no new settings key (views are not settings)", B.core.settings.defs["camera.edit.distance"] == nil
@@ -421,7 +421,10 @@ local okAll, errAll = pcall(function()
 
   -- ================================================================ old settings file with camera.profile=3
   do
-    local old = "# UTPP settings (old)\ncamera.profile=3\ncamera.profileCount=5\ncamera.profileBlend=1\ncamera.p3.distance=1.5\n"
+    -- (a file of the current reset level: a file without that line is not read, it is reset to the defaults)
+    local probe = boot({}).core
+    local old = "# UTPP settings (old)\n" .. probe.SETTINGS_RESET_KEY .. "=" .. probe.SETTINGS_RESET .. "\n"
+      .. "camera.profile=3\ncamera.profileCount=5\ncamera.profileBlend=1\ncamera.p3.distance=1.5\n"
       .. "camera.distance=3.1\nbind.profile_next=IK_F9\nbind.enabled=true\n"
     local O = boot({ stored = old })
     local failedLine = false

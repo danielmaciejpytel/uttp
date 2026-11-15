@@ -188,8 +188,8 @@ do
     and defs["mm.aimGameUpper"].default == false)
   check("registered mm.slide on by default", defs["mm.slide"] ~= nil and defs["mm.slide"].default == true)
   local pt = defs["mm.pelvisYawTrim"]
-  check("registered mm.pelvisYawTrim: float -10..10 step 0.5, default 5, animation section, label <= 38 chars",
-    pt ~= nil and pt.type == "float" and pt.default == 5 and pt.min == -10 and pt.max == 10 and pt.step == 0.5
+  check("registered mm.pelvisYawTrim: float -10..10 step 0.5, default 2, animation section, label <= 38 chars",
+    pt ~= nil and pt.type == "float" and pt.default == 2 and pt.min == -10 and pt.max == 10 and pt.step == 0.5
     and pt.section == "animation" and #pt.label <= 38, pt and pt.label)
   local ws = defs["mm.walkSpeed"]
   check("registered mm.walkSpeed: float 0..3.5 step 0.1, default 1.6, animation section, label <= 38 chars, desc names the walk toggle",
@@ -200,8 +200,8 @@ do
     mw ~= nil and mw.type == "float" and mw.default == 0.82 and mw.min == 0 and mw.max == 1.6 and mw.step == 0.01
     and mw.section == "animation" and #mw.label <= 38 and type(mw.desc) == "string", mw and mw.label)
   local bo = defs["mm.bodyYawOffset"]
-  check("registered mm.bodyYawOffset: float -20..20 step 0.5, default 8, animation section, label 'Body yaw offset (deg)'",
-    bo ~= nil and bo.type == "float" and bo.default == 8 and bo.min == -20 and bo.max == 20 and bo.step == 0.5
+  check("registered mm.bodyYawOffset: float -20..20 step 0.5, default 4, animation section, label 'Body yaw offset (deg)'",
+    bo ~= nil and bo.type == "float" and bo.default == 4 and bo.min == -20 and bo.max == 20 and bo.step == 0.5
     and bo.section == "animation" and bo.label == "Body yaw offset (deg)" and type(bo.desc) == "string"
     and bo.desc:find("movement direction is unchanged", 1, true) ~= nil and bo.desc:find("Not while aiming", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
@@ -352,13 +352,14 @@ end
 do
   local tmp = UTPP_MOTION_PATH .. ".shoulder-migration-test.tmp"
   local function run(lines)
-    local fh = assert(io.open(tmp, "w"))
-    fh:write("# test\n")
-    for _, l in ipairs(lines) do fh:write(l .. "\n") end
-    fh:close()
     local v, t, core = fresh(), mock(), dofile(UTPP_CORE_PATH)
     core.sink = function() end
     core.SETTINGS_FILE = tmp
+    local fh = assert(io.open(tmp, "w"))
+    -- a file of the current reset level (a file without that line is not read: it is reset to the defaults)
+    fh:write("# test\n" .. core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n")
+    for _, l in ipairs(lines) do fh:write(l .. "\n") end
+    fh:close()
     core.Load(tmp)
     v.api = t.api
     v.RegisterSettings(core)

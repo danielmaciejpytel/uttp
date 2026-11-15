@@ -21,6 +21,7 @@ local function loadMod()
   registerForEvent, registerInput = savedRegister, savedInput
   M.cfg.combat = "fpp"   -- the rule tests below assume FPP in combat (0.2.1 default is TPP; see the policy matrix)
   M.cfg.aiming = "fpp"   -- and FPP while aiming (the fallback default is tpp, like the registered one)
+  M.cfg.scene = true     -- and first person in scenes (off by default: scenes and dialogues stay in third person)
   M.logLines = {}
   M.sink = function(line) M.logLines[#M.logLines + 1] = line end
   return M
@@ -34,6 +35,13 @@ local function loadCore(file)
   C.settings.stored, C.settings.values = {}, C.settings.values
   C.Load(file)
   return C
+end
+-- first line of a settings file of the current reset level (a file without that line is not read: it is reset to the defaults)
+local function levelLine()
+  registerForEvent, registerInput = nil, nil
+  local C = dofile(CORE)
+  registerForEvent, registerInput = savedRegister, savedInput
+  return C.SETTINGS_RESET_KEY .. "=" .. C.SETTINGS_RESET .. "\n"
 end
 local function count(lines, needle)
   local n = 0
@@ -74,6 +82,7 @@ local function cfg(over)
   for k, v in pairs(P.DEFAULTS) do c[k] = v end
   c.combat = "fpp"   -- see loadMod
   c.aiming = "fpp"   -- the rule tests below use the FPP-while-aiming policy as their baseline (the fallback default is tpp)
+  c.scene = true     -- and the first-person rule for scenes (off by default, see "default: scenes stay in third person")
   if over then for k, v in pairs(over) do c[k] = v end end
   return c
 end
@@ -157,6 +166,22 @@ do -- default-off rules
   st.lastSwitch = -100
   d = P.Step(st, 5, obs())
   check("scanner on: closing returns instantly (exit 0, instant style)", d.perspective == "TPP" and d.style == "instant")
+  -- scenes and dialogues: the first-person rule is off in the module's own defaults and in the registered option (the rule
+  -- tests of this file switch it on in their baseline)
+  check("scene off by default: the module's own default", P.DEFAULTS.scene == false)
+  local dflt = {}
+  for k, v in pairs(P.DEFAULTS) do dflt[k] = v end
+  local stD = P.New(dflt, { ready = true, wantsTpp = true })
+  P.Step(stD, 0, obs())
+  stD.lastSwitch = -100
+  check("scene off by default: a dialogue (tier 3) and a tier 5 scene stay TPP",
+    P.Step(stD, 1, obs({ high = 3 })).perspective == "TPP" and P.Step(stD, 2, obs({ high = 5 })).perspective == "TPP")
+  local Cd, Md = loadCore(os.tmpname()), loadMod()
+  Md.AttachCore(Cd)
+  check("scene off by default: the registered option is off and the module takes it from the registry",
+    Cd.settings.defs["perspective.scene"].default == false and Cd.Get("perspective.scene") == false and Md.cfg.scene == false)
+  Cd.Set("perspective.scene", true, { noSave = true })
+  check("scene option switched on: the module's rule is on", Md.cfg.scene == true)
 end
 
 -- ---------------------------------------------------------------- settings per situation
@@ -773,7 +798,7 @@ do
   -- legacy migration
   local function legacy(value)
     local fl = os.tmpname()
-    local h = io.open(fl, "w"); h:write("perspective.weapon=" .. value .. "\nperspective.combat=true\n"); h:close()
+    local h = io.open(fl, "w"); h:write(levelLine() .. "perspective.weapon=" .. value .. "\nperspective.combat=true\n"); h:close()
     local Cl = loadCore(fl)
     local Ml = loadMod()
     Ml.AttachCore(Cl)
@@ -787,7 +812,7 @@ do
   Cl = legacy("aim")
   check("migration: weapon=aim -> defaults", Cl.Get("perspective.aiming") == "fpp" and Cl.Get("perspective.weaponDrawn") == "tpp")
   local fl = os.tmpname()
-  local h = io.open(fl, "w"); h:write("perspective.weapon=never\nperspective.aiming=fpp\n"); h:close()
+  local h = io.open(fl, "w"); h:write(levelLine() .. "perspective.weapon=never\nperspective.aiming=fpp\n"); h:close()
   local Cw = loadCore(fl); local Mw = loadMod(); Mw.AttachCore(Cw)
   check("migration: stored new key wins over legacy", Cw.Get("perspective.aiming") == "fpp")
 end

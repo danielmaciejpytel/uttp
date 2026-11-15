@@ -55,6 +55,11 @@ local function logHas(text)
   for _, l in ipairs(logs) do if string.find(l, text, 1, true) then return true end end
   return false
 end
+-- first line of a settings file of the current reset level (a file without that line is not read: it is reset to the defaults)
+local LEVEL_LINE = (function()
+  local core = loadCore()
+  return core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n"
+end)()
 
 -- the motion matching switches of the core (the real registrations) with recording natives, plus the keys that other CET modules
 -- register (stubs with a recording apply)
@@ -273,7 +278,7 @@ shipped()
 
 -- ---------------------------------------------------------------- restart with the stored pack (the game order: the file is read when core loads)
 do
-  writeFile(settingsFile, "animation.pack=game\n")
+  writeFile(settingsFile, LEVEL_LINE .. "animation.pack=game\n")
   local core = loadCore(nil, true)
   check("restart: the stored pack is in force before any option registers", core.PackIsGame() == true and core.pack.pending == false
     and core.Get("animation.pack") == "game")
@@ -286,19 +291,19 @@ do
   check("restart: the other dependent options register with their forced values", lastOf(rec.applied["mm.motionDriver"]) == false
     and lastOf(rec.applied["bodyturn.shooterMode"]) == false and lastOf(rec.fullBody) == false and lastOf(rec.applied["camera.idleOrbit"]) == false)
   check("restart: the players's own values are kept", core.Get("mm.enabled") == true and core.Get("mm.motionDriver") == true)
-  writeFile(settingsFile, "animation.pack=utpp\n")
+  writeFile(settingsFile, LEVEL_LINE .. "animation.pack=utpp\n")
   core = loadCore(nil, true)
   rec = boot(core)
   check("restart: the mod's animations: nothing forced, motion matching on", core.PackIsGame() == false and lastOf(rec.mm) == true
     and lastOf(rec.applied["mm.motionDriver"]) == true)
   check("restart: the mod's animations: the pose hold is not touched", #rec.hold == 0)
   -- before the movement switch is registered nothing may be sent (an unregistered option reads as off)
-  writeFile(settingsFile, "animation.pack=utpp\n")
+  writeFile(settingsFile, LEVEL_LINE .. "animation.pack=utpp\n")
   core = loadCore(nil, true)
   local early = {}
   core.mm.setHoldPose = function(on) early[#early + 1] = on end
   check("before the options register: the session tick sends no hold switch", core.SyncHoldPose("session") == false and #early == 0)
-  writeFile(settingsFile, "animation.pack=nonsense\n")
+  writeFile(settingsFile, LEVEL_LINE .. "animation.pack=nonsense\n")
   core = loadCore(nil, true)
   check("restart: an unknown stored value falls back to the mod's animations", core.PackIsGame() == false and core.Get("animation.pack") == "utpp")
   os.remove(settingsFile)
@@ -471,14 +476,14 @@ for _, mu in ipairs(MUTANTS) do
 end
 -- the stored pack at the start
 do
-  writeFile(settingsFile, "animation.pack=game\n")
+  writeFile(settingsFile, LEVEL_LINE .. "animation.pack=game\n")
   local function startScenario(core)
     local rec = boot(core)
     for _, v in ipairs(rec.mm) do if v == true then return false end end
     return core.PackIsGame() == true
   end
   check("scenario [stored pack in force at the start] holds on the shipped source", startScenario(loadCore(nil, true)) == true)
-  writeFile(settingsFile, "animation.pack=game\n")
+  writeFile(settingsFile, LEVEL_LINE .. "animation.pack=game\n")
   local mutant = loadCore({ "  M.pack.requested = v\n  M.ApplyPack(v, \"load\")", "  M.pack.requested = v" }, true)
   check("mutation [stored pack not taken at the start] is caught", startScenario(mutant) ~= true)
   os.remove(settingsFile)

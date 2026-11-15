@@ -199,7 +199,8 @@ function M.Register(def)
   end
   local v = nil
   if S.stored[def.key] ~= nil then v = validate(def, S.stored[def.key]) end
-  if v == nil and def.initial ~= nil then v = validate(def, def.initial) end
+  -- (a start on the defaults of a settings reset does not take a value carried over from elsewhere)
+  if v == nil and def.initial ~= nil and not S.resetActive then v = validate(def, def.initial) end
   if v == nil then v = default end
   if diagHeld(def.key) then v = true end -- registered while the diagnostic logs are on (stored value ignored)
   local authority = M.FOLLOWS[def.key]
@@ -321,12 +322,34 @@ M.MIGRATED_KEYS = MIGRATED_KEYS
 -- default (it cannot be told from a value nobody chose); any other stored value is a choice and stays. Save writes the
 -- current revision, so the replacement happens once.
 M.DEFAULTS_REVISION_KEY = "core.defaultsRevision"
-M.DEFAULTS_REVISION = 2
+M.DEFAULTS_REVISION = 3
 M.DEFAULT_CHANGES = {
   { rev = 1, key = "melee.guard", from = false, to = true },
   { rev = 2, key = "body.shadowProxy", from = true, to = false },
+  { rev = 3, key = "bodyturn.meleeStrikeTurn", from = false, to = true },
+  { rev = 3, key = "mm.bodyYawOffset", from = 8, to = 4 },
+  { rev = 3, key = "mm.pelvisYawTrim", from = 5, to = 2 },
+  { rev = 3, key = "mm.shinobiBonusReload", from = false, to = true },
+  { rev = 3, key = "perspective.scene", from = true, to = false },
+  { rev = 3, key = "camera.side", from = 0.5, to = 1 },
 }
 S.fileRevision = nil
+
+-- One-time settings reset. The settings file carries the reset level it was written under (M.SETTINGS_RESET_KEY; no line =
+-- level 0). A file of a lower level than M.SETTINGS_RESET is not read: every stored value is dropped (also the values of
+-- modules that are not loaded), every option starts on its default (a value carried over from elsewhere, def.initial, is not
+-- taken either), the Mod Settings sync baseline is forgotten (the defaults are shown there too and nothing is taken back from
+-- it) and one message on the screen tells the player (M.ResetNoticeTick). Save writes the current level, so it happens once.
+-- A fresh install (no settings file) has nothing to reset and shows no message; a file without any stored value gets the
+-- current level without a message. A later version resets the settings again only when this number is raised.
+M.SETTINGS_RESET_KEY = "core.settingsReset"
+M.SETTINGS_RESET = 1
+-- written while the message has not been shown yet (the game was closed before a game session started)
+M.RESET_NOTICE_KEY = "core.settingsResetNotice"
+S.fileReset = nil       -- reset level of the file that was read (nil = no file read)
+S.resetActive = false   -- this start runs on the defaults of a reset (def.initial is not taken)
+S.resetNotice = false   -- the message is still to be shown
+S.resetDropped = nil    -- stored values dropped by the reset of this start
 
 local function sameStoredValue(text, want)
   if type(want) == "number" then return tonumber(text) == want end
@@ -338,30 +361,59 @@ function M.Load(path)
   if not f then return false end
   local before = {}
   for key, value in pairs(S.values) do before[key] = value end
-  local migrated = {}
-  local fileRevision = 0
+  -- the whole file first: the reset level decides whether its values are read at all (whatever the line order)
+  local entries = {}
+  local fileReset, fileNotice = 0, false
   for line in f:lines() do
     local k, v = string.match(line, "^%s*([%w_%.]+)%s*=%s*(.-)%s*$")
     if k and not string.match(line, "^%s*#") then
-      if k == M.DEFAULTS_REVISION_KEY then
-        fileRevision = math.floor(tonumber(v) or 0)
-      elseif MIGRATED_KEYS[k] then
-        S.stored[k] = nil
-        migrated[#migrated + 1] = { from = k, raw = v }
-      elseif RETIRED_KEYS[k] then
-        S.stored[k] = nil
-        M.LogOnce("retired:" .. k, "retired setting " .. k .. " dropped from the stored settings (no module uses it any more)")
+      if k == M.SETTINGS_RESET_KEY then
+        fileReset = math.floor(tonumber(v) or 0)
+      elseif k == M.RESET_NOTICE_KEY then
+        fileNotice = v == "1"
       else
-        S.stored[k] = v
-        local def = S.defs[k]
-        if def then
-          local val = validate(def, v)
-          if val ~= nil then S.values[k] = val end
-        end
+        entries[#entries + 1] = { k, v }
       end
     end
   end
   f:close()
+  S.fileReset = fileReset
+  local reset = fileReset < M.SETTINGS_RESET
+  if reset then
+    local dropped = 0
+    for _, e in ipairs(entries) do if e[1] ~= M.DEFAULTS_REVISION_KEY then dropped = dropped + 1 end end
+    entries = {}
+    for k in pairs(S.stored) do S.stored[k] = nil end
+    for _, key in ipairs(S.order) do S.values[key] = S.defs[key].default end
+    -- (a file that held no value, e.g. an empty one, lost nothing: it gets the current level without a message)
+    S.resetActive, S.resetNotice, S.resetDropped = true, S.resetNotice or dropped > 0, dropped
+    if M.ModSettingsForgetBase then pcall(M.ModSettingsForgetBase) end
+    M.Log("settings reset: the settings file was written before reset level " .. M.SETTINGS_RESET .. " (level " .. fileReset
+      .. "), " .. dropped .. " stored values dropped, every option starts on its default")
+  elseif fileNotice then
+    S.resetActive, S.resetNotice = true, true -- reset at an earlier start, the message was not shown yet
+  end
+  local migrated = {}
+  local fileRevision = 0
+  for _, e in ipairs(entries) do
+    local k, v = e[1], e[2]
+    if k == M.DEFAULTS_REVISION_KEY then
+      fileRevision = math.floor(tonumber(v) or 0)
+    elseif MIGRATED_KEYS[k] then
+      S.stored[k] = nil
+      migrated[#migrated + 1] = { from = k, raw = v }
+    elseif RETIRED_KEYS[k] then
+      S.stored[k] = nil
+      M.LogOnce("retired:" .. k, "retired setting " .. k .. " dropped from the stored settings (no module uses it any more)")
+    else
+      S.stored[k] = v
+      local def = S.defs[k]
+      if def then
+        local val = validate(def, v)
+        if val ~= nil then S.values[k] = val end
+      end
+    end
+  end
   -- converted after the whole file is read, so a stored new key wins whatever the line order
   for _, m in ipairs(migrated) do
     local spec = MIGRATED_KEYS[m.from]
@@ -420,8 +472,9 @@ function M.Load(path)
       if not ok then M.Log("apply " .. key .. " failed: " .. tostring(err)) end
     end
   end
-  -- a replaced default is written back at once (with the current revision), so it is replaced only once
-  if #moved > 0 then pcall(M.Save, path) end
+  -- a replaced default is written back at once (with the current revision), so it is replaced only once; a reset as well
+  -- (with the current reset level and the note that its message is still to be shown)
+  if #moved > 0 or reset then pcall(M.Save, path) end
   return true
 end
 
@@ -431,6 +484,8 @@ function M.Save(path)
   if not f then return false end
   f:write("# UTPP settings (utpp_core " .. M.VERSION .. "): key=value, delete a line to restore its default\n")
   f:write(M.DEFAULTS_REVISION_KEY .. "=" .. math.max(M.DEFAULTS_REVISION, S.fileRevision or 0) .. "\n")
+  f:write(M.SETTINGS_RESET_KEY .. "=" .. math.max(M.SETTINGS_RESET, S.fileReset or 0) .. "\n")
+  if S.resetNotice then f:write(M.RESET_NOTICE_KEY .. "=1\n") end
   local written = {}
   for _, key in ipairs(S.order) do
     if M.diag and M.diag.mode ~= "off" and DIAG_SET[key] then
@@ -1108,6 +1163,16 @@ local function msSaveBase()
   for _, k in ipairs(keys) do f:write(k .. "=" .. base[k] .. "\n") end
   f:close()
   return true
+end
+
+-- A settings reset forgets the values last synced with Mod Settings: without a baseline entry nothing is taken back from
+-- Mod Settings at the next sync and every option that differs there is pushed, so its screen shows the defaults as well.
+function M.ModSettingsForgetBase()
+  MS.base = {}
+  local f = io.open(M.MS_BASE_FILE, "r")
+  if not f then return true end -- nothing was synced yet: no file to empty
+  f:close()
+  return msSaveBase()
 end
 
 -- baseline text of a CET value (floats with full precision; the settings file keeps 4 significant digits)
@@ -1928,6 +1993,58 @@ function M.DiagTick(dt, playing)
     D.notice = nil
     diagCall("notify", text, 8.0)
   end
+end
+
+-- The message of a settings reset (see M.SETTINGS_RESET), shown once. The game's message widget shows only what is sent after
+-- its controller was initialized, and the HUD of a session is built at the end of the loading screen: a message sent earlier
+-- is never seen. So the message waits for that widget (M.ResetNoticeScreen(true), called by the observer of the in-game
+-- wiring) and RESET_NOTICE_DELAY seconds of play after it (play = a player exists and neither a menu nor the pause screen is
+-- open). Without the signal (the widget was built before this module was loaded, or the observer is not available) it is sent
+-- after RESET_NOTICE_FALLBACK seconds of play in one session. Then the note in the settings file is cleared and every
+-- registered option is written, so the file holds the whole registry on its defaults. The call is the screen message of the
+-- diagnostic logs (M.diag.api.notify in the offline tests, Game.UTPPShowMessage in the game); its counters are not used.
+-- A call that answers false (no game session) is repeated in the next frame; a call that fails ends the attempts (the reset
+-- itself is done either way). Returns true when the message was sent in this call.
+M.RESET_NOTICE_TEXT = "The default settings of Ultimate Third Person Project were restored because of major changes in the "
+  .. "mod. Have a good game!"
+M.RESET_NOTICE_DELAY = 2.0
+M.RESET_NOTICE_FALLBACK = 20.0
+M.RESET_NOTICE_SECONDS = 12.0
+M.resetNotice = { played = 0, ready = false, readyPlayed = 0, calls = 0, shown = false }
+-- ready = true: the message widget of this session exists; false: the session ended (its play time counts from zero again)
+function M.ResetNoticeScreen(ready)
+  local R = M.resetNotice
+  R.ready, R.readyPlayed = ready and true or false, 0
+  if not R.ready then R.played = 0 end
+end
+function M.ResetNoticeTick(dt, playing)
+  if not S.resetNotice or not playing then return false end
+  local R = M.resetNotice
+  dt = (type(dt) == "number" and dt == dt and dt > 0 and dt < 5) and dt or 0
+  R.played = R.played + dt
+  if R.ready then R.readyPlayed = R.readyPlayed + dt end
+  if not ((R.ready and R.readyPlayed >= M.RESET_NOTICE_DELAY) or R.played >= M.RESET_NOTICE_FALLBACK) then return false end
+  local api, fn = M.diag.api, nil
+  if type(api) == "table" then
+    fn = api.notify
+  elseif Game ~= nil then
+    fn = function(text, seconds) return Game.UTPPShowMessage(text, seconds) end
+  end
+  if type(fn) ~= "function" then return false end -- no way to show it now
+  local ok, res = pcall(fn, M.RESET_NOTICE_TEXT, M.RESET_NOTICE_SECONDS)
+  R.calls = R.calls + 1
+  if ok and res == false then return false end
+  S.resetNotice = false
+  R.shown = ok == true
+  pcall(M.Save)
+  if R.shown then
+    M.Log("settings reset: message shown" .. (S.resetDropped ~= nil and (" (" .. S.resetDropped .. " stored values dropped at "
+      .. "this start)") or " (the reset was done at an earlier start)")
+      .. string.format(", %s after %.1f s of play", R.ready and "message widget ready" or "time rule", R.played))
+  else
+    M.Log("settings reset: the message could not be shown (" .. tostring(res) .. ")")
+  end
+  return R.shown
 end
 
 M.Register({ key = M.DIAG_KEY, section = "general", type = "choice", default = "off",
@@ -2816,9 +2933,9 @@ function M.SetupMMSettings(setEnabled, setTrace, api)
     label = "Pistol 2H: native shot motion on the aim pose",
     desc = "Stationary Pistol2H: transfer fresh native shot motion onto the authored Aim pose and keep both hands on the weapon. Default on.",
     apply = applyMotionShootTransfer })
-  M.Register({ key = "mm.shinobiBonusReload", section = "animation", type = "bool", default = false,
+  M.Register({ key = "mm.shinobiBonusReload", section = "animation", type = "bool", default = true,
     label = "Reload animation during Shinobi bonus",
-    desc = "Short left-hand move to the magazine when a slide or air dash refills the magazine (Shinobi bonus). Off by default.",
+    desc = "Short left-hand move to the magazine when a slide or air dash refills the magazine (Shinobi bonus). On by default.",
     apply = applyMotionMagTap })
   M.Register({ key = "mm.aimUpperFade", section = "animation", type = "bool", default = true,
     label = "Aim exit: ease the upper body back",
@@ -3270,7 +3387,8 @@ if type(registerForEvent) == "function" then
     if announced then return end
     announced = true
     M.Log(string.format("onInit %s: settings %s, headLook=%s lootAssist=%s", M.VERSION,
-      tostring(next(S.stored) ~= nil and "loaded" or "defaults"),
+      S.resetDropped ~= nil and ("reset to the defaults (" .. S.resetDropped .. " stored values dropped)")
+        or (next(S.stored) ~= nil and "loaded" or "defaults"),
       tostring(M.Effective("headLook.impl")), tostring(M.Effective("lootView.impl"))))
     -- motion matching switches (applied now: play needs MM without console commands)
     pcall(M.SetupMMSettings, function(on) return Game.UTPPSetMMEnabled(on) end, function(on) return Game.UTPPSetMMTrace(on) end,
@@ -3307,6 +3425,15 @@ if type(registerForEvent) == "function" then
       local ok, err = pcall(observe, cls, "OnInteractionActivated", onLootActivation)
       if not ok then M.Log("loot observer " .. cls .. " FAILED: " .. tostring(err)) end
     end
+    -- the message of a settings reset waits for the game's message widget of the session (see M.ResetNoticeTick)
+    do
+      local observe = ObserveAfter or Observe
+      local ok, err = pcall(observe, "WarningMessageGameController", "OnInitialize", function() M.ResetNoticeScreen(true) end)
+      if not ok then
+        M.Log("screen message observer FAILED: " .. tostring(err) .. " - a settings reset message waits "
+          .. M.RESET_NOTICE_FALLBACK .. " s of play instead")
+      end
+    end
   end)
 
   registerForEvent("onShutdown", function()
@@ -3331,6 +3458,7 @@ if type(registerForEvent) == "function" then
     pcall(M.NightTick, dt)
     local okP, player = pcall(function() return Game.GetPlayer() end)
     if not okP or player == nil then
+      if inGame then M.ResetNoticeScreen(false) end -- the session ended: its HUD (and message widget) is gone
       inGame = false; M.xhair.live = false
       M.pack.inSession = false
       pcall(M.DiagTick, dt, false)
@@ -3346,6 +3474,7 @@ if type(registerForEvent) == "function" then
     pcall(M.CrosshairResync, clock, newSession)
     local menu = inMenu()
     pcall(M.DiagTick, dt, not menu)
+    pcall(M.ResetNoticeTick, dt, not menu)
     pcall(M.PackSend, clock, newSession)
     pcall(M.SyncHoldPose, "session") -- a call that failed earlier is repeated here
     if M.pack.pending then

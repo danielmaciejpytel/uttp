@@ -2180,10 +2180,10 @@ do
     return why, maxStep, atHit
   end
 
-  -- 1) default off: no turn although the signal is there
+  -- 1) on by default; switched off: no turn although the signal is there
   do
     local m = freshModule(true)
-    xcheck("strike turn: default OFF", m.exec.strikeTurn == false)
+    xcheck("strike turn: default ON", m.exec.strikeTurn == true)
     local w = strikeWorld(m, { strike = 40, on = false })
     local why = runStrike(m, w, 20)
     xcheck("strike turn: off -> nothing applied", #w.calls.apply == 0 and why == "locomotion inactive", why)
@@ -2402,7 +2402,7 @@ do
                          Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end })
     local d
     for _, r in ipairs(regs) do if r.key == "bodyturn.meleeStrikeTurn" then d = r end end
-    xcheck("strike turn: registered, bool, default false, section bodyturn, English text", d ~= nil and d.type == "bool" and d.default == false
+    xcheck("strike turn: registered, bool, default true, section bodyturn, English text", d ~= nil and d.type == "bool" and d.default == true
       and d.section == "bodyturn" and type(d.label) == "string" and type(d.desc) == "string" and d.desc:find("tracked target", 1, true) ~= nil)
     d.apply(true)
     local onOk = m.exec.strikeTurn == true

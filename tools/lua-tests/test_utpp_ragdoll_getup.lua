@@ -80,8 +80,9 @@ end
 
 do -- stored OFF at boot, round trip
   Game = nil
-  local f = assert(io.open(tmp, "w")); f:write("ragdoll.getUp=false\n"); f:close()
   local Y = load()
+  -- a file of the current reset level (a file without that line is not read: it is reset to the defaults)
+  local f = assert(io.open(tmp, "w")); f:write(Y.SETTINGS_RESET_KEY .. "=" .. Y.SETTINGS_RESET .. "\nragdoll.getUp=false\n"); f:close()
   Y.Load()
   local yCalls = {}
   Y.rgu.api = function(v) yCalls[#yCalls + 1] = v; return true end

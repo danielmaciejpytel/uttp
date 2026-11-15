@@ -115,6 +115,12 @@ local function loadCore()
   core.SETTINGS_FILE = tmpSettings
   return core
 end
+-- first line of a settings file of the current reset level: the stored files of these tests are files that this version wrote
+-- (a file without that line is not read, it is reset to the defaults: see "T03 settings reset")
+local LEVEL_LINE = (function()
+  local core = loadCore()
+  return core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n"
+end)()
 
 -- Boots the whole registry the way the game does: utpp_core (onInit natives + database list), then the other CET modules.
 -- opts.skip = { v2 = true, vehiclecam = true, ... } leaves modules out (late registration tests add them afterwards).
@@ -424,7 +430,7 @@ local function capture()
   os.remove(tmpSettings)
   LOG = {}
   local core2 = loadCore()
-  local f = io.open(tmpSettings, "wb"); f:write(STORED_TEXT); f:close()
+  local f = io.open(tmpSettings, "wb"); f:write(LEVEL_LINE .. STORED_TEXT); f:close()
   core2.Load(tmpSettings)
   hookRegister(core2)
   bootModules(core2)
@@ -757,7 +763,7 @@ if not WRITE then
     do
       local DEFAULTS = { ["headLook.impl"] = true, ["headLook.whileWalking"] = true, ["headLook.faceCamera"] = true,
                          ["headLook.lookAtLoot"] = true, ["headLook.maxYaw"] = 100, ["headLook.chest"] = 0.5,
-                         ["camera.aim.occlusion"] = true, ["mm.pelvisYawTrim"] = 5, ["mm.bodyYawOffset"] = 8, ["mm.minWalkSpeed"] = 0.82,
+                         ["camera.aim.occlusion"] = true, ["mm.pelvisYawTrim"] = 2, ["mm.bodyYawOffset"] = 4, ["mm.minWalkSpeed"] = 0.82,
                          ["camera.body"] = true, ["camera.collision"] = true, ["mm.aimAtCrosshair"] = true, ["perspective.sceneTier"] = 3,
                          ["interactRange.scale"] = 1.0, ["lootRange.scale"] = 1.0, ["lootView.zoom"] = 0.9, ["lootView.radius"] = 1.8,
                          ["vehicle.keepTpp"] = true, ["vehicle.pullOut"] = true, ["vehicle.rideWatchdog"] = true,
@@ -1300,8 +1306,8 @@ if not WRITE then
     local api, nat = natRecorder()
     core.diag.api = api
     local f = io.open(tmpSettings, "wb")
-    f:write("core.diagnosticLogs=until\ncore.log=false\nmm.trace=false\nmm.feedDump=false\ncamera.trace=false\nperspective.log=false\n"
-      .. "mm.debug=false\n")
+    f:write(LEVEL_LINE .. "core.diagnosticLogs=until\ncore.log=false\nmm.trace=false\nmm.feedDump=false\ncamera.trace=false\n"
+      .. "perspective.log=false\nmm.debug=false\n")
     f:close()
     core.Load(tmpSettings)
     check("diagnostic logs stored on: load applies it (core.log held on; no session native before a game session exists)",
@@ -1351,7 +1357,7 @@ if not WRITE then
     local api, nat = natRecorder()
     core.diag.api = api
     local f = io.open(tmpSettings, "wb")
-    f:write("core.diagnosticLogs=off\nmm.trace=true\ncamera.trace=true\ncore.log=false\n")
+    f:write(LEVEL_LINE .. "core.diagnosticLogs=off\nmm.trace=true\ncamera.trace=true\ncore.log=false\n")
     f:close()
     core.Load(tmpSettings)
     hookRegister(core)
@@ -1365,9 +1371,11 @@ end
 
 -- ================================================================ T03 stored values, hidden options, followers, defaults revision
 do
-  local function writeStored(text)
+  -- raw = the text is the whole file (the settings reset tests write files of an earlier level); otherwise the file gets the
+  -- line of the current reset level first
+  local function writeStored(text, raw)
     local f = assert(io.open(tmpSettings, "wb"))
-    f:write(text)
+    f:write(raw and text or (LEVEL_LINE .. text))
     f:close()
   end
   -- the game's order: utpp_core registers its own options and reads the file, the other modules register afterwards; the
@@ -1380,7 +1388,7 @@ do
     for _, key in ipairs(core.settings.order) do wrapApply(core.settings.defs[key]) end
     hookRegister(core)
     if text then
-      writeStored(text)
+      writeStored(text, opts and opts.raw)
       core.Load(tmpSettings)
     end
     local mods = bootModules(core, opts)
@@ -1562,11 +1570,11 @@ do
 
   -- ---------------------------------------------------------------- defaults revision
   do
-    local REV = "core.defaultsRevision=" .. tostring(2)
+    local REV = "core.defaultsRevision=" .. tostring(3)
     local oldFile = bootWithFile("melee.guard=false\nmm.headLead=false\n")
     local onDisk = readFile(tmpSettings) or ""
     check("T03 defaults revision: the moved value is written back at once (with the revision) and the other keys stay in the file",
-      count(onDisk, "core.defaultsRevision=2") == 1 and string.find(onDisk, "melee.guard=true", 1, true) ~= nil
+      count(onDisk, "core.defaultsRevision=3") == 1 and string.find(onDisk, "melee.guard=true", 1, true) ~= nil
       and string.find(onDisk, "mm.headLead=false", 1, true) ~= nil)
     check("T03 defaults revision: the registered default is on", oldFile.settings.defs["melee.guard"].default == true)
     check("T03 defaults revision: a file without a revision with the old default stored (false) moves to the new default (once)",
@@ -1574,7 +1582,7 @@ do
     local logged = ""
     for _, l in ipairs(coreLines) do if string.find(l, "settings defaults revision", 1, true) then logged = l end end
     check("T03 defaults revision: the log line names the revisions and the key",
-      string.find(logged, "0 -> 2", 1, true) ~= nil and string.find(logged, "melee.guard false -> true", 1, true) ~= nil, logged)
+      string.find(logged, "0 -> 3", 1, true) ~= nil and string.find(logged, "melee.guard false -> true", 1, true) ~= nil, logged)
     check("T03 defaults revision: another stored value of the same file is untouched", oldFile.Get("mm.headLead") == false)
     oldFile.Save(tmpSettings)
     local saved = readFile(tmpSettings)
@@ -1629,9 +1637,9 @@ do
       sp0.Get("body.shadowProxy") == false and sp0.settings.defs["body.shadowProxy"].default == false and defaultsLines() == 1,
       tostring(sp0.Get("body.shadowProxy")) .. " lines=" .. defaultsLines())
     check("T03 defaults revision (body.shadowProxy): the log line names the revisions and the key",
-      string.find(sp0Log, "0 -> 2", 1, true) ~= nil and string.find(sp0Log, "body.shadowProxy true -> false", 1, true) ~= nil, sp0Log)
+      string.find(sp0Log, "0 -> 3", 1, true) ~= nil and string.find(sp0Log, "body.shadowProxy true -> false", 1, true) ~= nil, sp0Log)
     check("T03 defaults revision (body.shadowProxy): the moved value is written back at once with the revision; another key stays",
-      count(sp0Disk, "core.defaultsRevision=2") == 1 and string.find(sp0Disk, "body.shadowProxy=false", 1, true) ~= nil
+      count(sp0Disk, "core.defaultsRevision=3") == 1 and string.find(sp0Disk, "body.shadowProxy=false", 1, true) ~= nil
       and string.find(sp0Disk, "body.shadowProxy=true", 1, true) == nil and string.find(sp0Disk, "mm.headLead=false", 1, true) ~= nil
       and sp0.Get("mm.headLead") == false)
     local sp0Again = bootWithFile(sp0Disk)
@@ -1642,10 +1650,10 @@ do
     local sp1Log = loggedLine()
     check("T03 defaults revision (body.shadowProxy): a file of revision 1 with the old default stored moves it once; the revision-1 key is not moved again",
       sp1.Get("body.shadowProxy") == false and sp1.Get("melee.guard") == false and defaultsLines() == 1
-      and string.find(sp1Log, "1 -> 2", 1, true) ~= nil and string.find(sp1Log, "body.shadowProxy true -> false", 1, true) ~= nil
+      and string.find(sp1Log, "1 -> 3", 1, true) ~= nil and string.find(sp1Log, "body.shadowProxy true -> false", 1, true) ~= nil
       and string.find(sp1Log, "melee.guard", 1, true) == nil, sp1Log)
-    check("T03 defaults revision (body.shadowProxy): the file of revision 1 is rewritten with revision 2",
-      count(readFile(tmpSettings) or "", "core.defaultsRevision=2") == 1 and count(readFile(tmpSettings) or "", "core.defaultsRevision=1") == 0)
+    check("T03 defaults revision (body.shadowProxy): the file of revision 1 is rewritten with the current revision",
+      count(readFile(tmpSettings) or "", "core.defaultsRevision=3") == 1 and count(readFile(tmpSettings) or "", "core.defaultsRevision=1") == 0)
 
     local spBoth = bootWithFile("melee.guard=false\nbody.shadowProxy=true\n")
     local spBothLog = loggedLine()
@@ -1653,6 +1661,57 @@ do
       spBoth.Get("melee.guard") == true and spBoth.Get("body.shadowProxy") == false and defaultsLines() == 1
       and string.find(spBothLog, "melee.guard false -> true", 1, true) ~= nil
       and string.find(spBothLog, "body.shadowProxy true -> false", 1, true) ~= nil, spBothLog)
+
+    -- revision 3: the fist strike turn and the Shinobi reload animation on, body yaw offset 8 -> 4, run pelvis yaw trim 5 -> 2.
+    -- A stored old default moves once; any other stored value is a choice; a key of an earlier revision is not moved again.
+    local r3 = bootWithFile("core.defaultsRevision=2\nbodyturn.meleeStrikeTurn=false\nmm.bodyYawOffset=8\nmm.pelvisYawTrim=5\n"
+      .. "mm.shinobiBonusReload=false\nbody.shadowProxy=true\n")
+    local r3Log = loggedLine()
+    local r3Disk = readFile(tmpSettings) or ""
+    check("T03 defaults revision 3: a file of revision 2 with the four old defaults stored moves them once",
+      r3.Get("bodyturn.meleeStrikeTurn") == true and r3.Get("mm.bodyYawOffset") == 4 and r3.Get("mm.pelvisYawTrim") == 2
+      and r3.Get("mm.shinobiBonusReload") == true and defaultsLines() == 1 and string.find(r3Log, "2 -> 3", 1, true) ~= nil, r3Log)
+    check("T03 defaults revision 3: the registered defaults are the new values",
+      r3.settings.defs["bodyturn.meleeStrikeTurn"].default == true and r3.settings.defs["mm.bodyYawOffset"].default == 4
+      and r3.settings.defs["mm.pelvisYawTrim"].default == 2 and r3.settings.defs["mm.shinobiBonusReload"].default == true)
+    check("T03 defaults revision 3: a key of an earlier revision stored in a revision-2 file is a choice and stays",
+      r3.Get("body.shadowProxy") == true and string.find(r3Log, "body.shadowProxy", 1, true) == nil, r3Log)
+    check("T03 defaults revision 3: the file is rewritten with revision 3 and the new values",
+      count(r3Disk, "core.defaultsRevision=3") == 1 and count(r3Disk, "core.defaultsRevision=2") == 0
+      and string.find(r3Disk, "mm.bodyYawOffset=4", 1, true) ~= nil and string.find(r3Disk, "mm.pelvisYawTrim=2", 1, true) ~= nil
+      and string.find(r3Disk, "bodyturn.meleeStrikeTurn=true", 1, true) ~= nil
+      and string.find(r3Disk, "mm.shinobiBonusReload=true", 1, true) ~= nil)
+    local r3Again = bootWithFile(r3Disk)
+    check("T03 defaults revision 3: loading the rewritten file changes nothing and logs nothing",
+      r3Again.Get("mm.bodyYawOffset") == 4 and r3Again.Get("bodyturn.meleeStrikeTurn") == true and defaultsLines() == 0)
+    local r3Chosen = bootWithFile("core.defaultsRevision=2\nmm.bodyYawOffset=6\nmm.pelvisYawTrim=0\nmm.shinobiBonusReload=true\n")
+    check("T03 defaults revision 3: stored values that are not the old defaults are choices and stay",
+      r3Chosen.Get("mm.bodyYawOffset") == 6 and r3Chosen.Get("mm.pelvisYawTrim") == 0 and r3Chosen.Get("mm.shinobiBonusReload") == true
+      and defaultsLines() == 0)
+    local r3Later = bootWithFile("core.defaultsRevision=3\nbodyturn.meleeStrikeTurn=false\nmm.bodyYawOffset=8\n")
+    check("T03 defaults revision 3: a file of revision 3 keeps the old values as choices",
+      r3Later.Get("bodyturn.meleeStrikeTurn") == false and r3Later.Get("mm.bodyYawOffset") == 8 and defaultsLines() == 0)
+    local r3Fresh = bootWithFile(nil)
+    check("T03 defaults revision 3: a fresh install starts on the new defaults",
+      r3Fresh.Get("bodyturn.meleeStrikeTurn") == true and r3Fresh.Get("mm.bodyYawOffset") == 4 and r3Fresh.Get("mm.pelvisYawTrim") == 2
+      and r3Fresh.Get("mm.shinobiBonusReload") == true and defaultsLines() == 0)
+    -- revision 3 also: scenes and dialogues stay in third person (perspective.scene true -> false) and the camera shoulder
+    -- offset is 1 m (camera.side 0.5 -> 1); both options are registered by modules that load after the file is read
+    check("T03 defaults revision 3: a fresh install has third person in scenes and a 1 m shoulder offset",
+      r3Fresh.Get("perspective.scene") == false and r3Fresh.Get("camera.side") == 1
+      and r3Fresh.settings.defs["perspective.scene"].default == false and r3Fresh.settings.defs["camera.side"].default == 1)
+    local r3View = bootWithFile("core.defaultsRevision=2\nperspective.scene=true\ncamera.side=0.5\n")
+    local r3ViewLog = loggedLine()
+    check("T03 defaults revision 3: the stored old scene default and the old shoulder offset move once",
+      r3View.Get("perspective.scene") == false and r3View.Get("camera.side") == 1 and defaultsLines() == 1
+      and string.find(r3ViewLog, "perspective.scene true -> false", 1, true) ~= nil
+      and string.find(r3ViewLog, "camera.side 0.5 -> 1", 1, true) ~= nil, r3ViewLog)
+    local r3ViewChosen = bootWithFile("core.defaultsRevision=2\nperspective.scene=false\ncamera.side=0.7\n")
+    check("T03 defaults revision 3: other stored values of the two options are choices and stay",
+      r3ViewChosen.Get("perspective.scene") == false and r3ViewChosen.Get("camera.side") == 0.7 and defaultsLines() == 0)
+    local r3ViewLater = bootWithFile("core.defaultsRevision=3\nperspective.scene=true\ncamera.side=0.5\n")
+    check("T03 defaults revision 3: a file of revision 3 keeps first person in scenes and 0.5 m as choices",
+      r3ViewLater.Get("perspective.scene") == true and r3ViewLater.Get("camera.side") == 0.5 and defaultsLines() == 0)
 
     local sp2 = bootWithFile(REV .. "\nbody.shadowProxy=true\n")
     check("T03 defaults revision (body.shadowProxy): a file already at revision 2 keeps a stored true (a choice)",

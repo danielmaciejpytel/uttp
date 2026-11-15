@@ -11,11 +11,19 @@ local function near(a, b, eps) return math.abs(a - b) <= (eps or 1e-6) end
 
 local savedPrint, savedRegister = print, registerForEvent
 local quietLines = {}
-local function load()
+-- The settings files written by these tests carry no reset level line. Reset level 0 reads them as files of the current
+-- level, the way every file was read before the one-time settings reset existed; the reset itself has its own section below
+-- (loadWithReset keeps the level the module ships with).
+local function loadWithReset()
   registerForEvent = nil
   local M = dofile(UTPP_CORE_PATH)
   registerForEvent = savedRegister
   M.sink = function(line) quietLines[#quietLines + 1] = line end
+  return M
+end
+local function load()
+  local M = loadWithReset()
+  M.SETTINGS_RESET = 0
   return M
 end
 local tmp = os.tmpname()
@@ -652,21 +660,19 @@ do -- v2 owns its Aim setting regardless of module registration order; core pres
   N.SetupMMSettings(function() end, function() end, {})
   check("weapon upper: missing API does not claim that the native policy was applied", N.Get("mm.weaponUpper") == false and N.mm.weaponUpper == nil)
   os.remove(tmp2)
-  -- mm.shinobiBonusReload "Reload animation during Shinobi bonus": default OFF = the DLL default, so a fresh boot calls nothing
+  -- mm.shinobiBonusReload "Reload animation during Shinobi bonus": default ON (the DLL starts with it off), so a fresh boot
+  -- switches it on with one native call
   local T = load()
   T.SETTINGS_FILE = tmp2
   os.remove(tmp2)
   local tapCalls = {}
   T.SetupMMSettings(function() end, function() end, { setMotionMagTap = function(on) tapCalls[#tapCalls+1] = on end })
   local tdef = T.settings.defs["mm.shinobiBonusReload"]
-  check("shinobi mag tap: registered bool, default OFF, label 'Reload animation during Shinobi bonus'",
-    tdef ~= nil and tdef.type == "bool" and tdef.default == false and tdef.label == "Reload animation during Shinobi bonus"
+  check("shinobi mag tap: registered bool, default ON, label 'Reload animation during Shinobi bonus'",
+    tdef ~= nil and tdef.type == "bool" and tdef.default == true and tdef.label == "Reload animation during Shinobi bonus"
     and tdef.section == "animation")
-  check("shinobi mag tap: default OFF -> no native call at boot", #tapCalls == 0 and T.Get("mm.shinobiBonusReload") == false
-    and T.mm.motionMagTap == false)
-  T.Set("mm.shinobiBonusReload", true)
-  check("shinobi mag tap: ON -> one native call (true), persisted", #tapCalls == 1 and tapCalls[1] == true
-    and T.mm.motionMagTap == true and T.Get("mm.shinobiBonusReload") == true)
+  check("shinobi mag tap: default ON -> one native call (true) at boot", #tapCalls == 1 and tapCalls[1] == true
+    and T.Get("mm.shinobiBonusReload") == true and T.mm.motionMagTap == true)
   T.Set("mm.shinobiBonusReload", true)
   check("shinobi mag tap: same value again -> no second call", #tapCalls == 1)
   T.Set("mm.shinobiBonusReload", false)
@@ -688,6 +694,15 @@ do -- v2 owns its Aim setting regardless of module registration order; core pres
   U.SetupMMSettings(function() end, function() end, { setMotionMagTap = function(on) uCalls[#uCalls+1] = on end })
   check("shinobi mag tap: stored ON -> exactly one native call (true) at boot", #uCalls == 1 and uCalls[1] == true
     and U.mm.motionMagTap == true)
+  -- stored OFF (a player's choice): nothing is sent, the DLL already starts with it off
+  f = assert(io.open(tmp2, "w")); f:write("core.defaultsRevision=3\nmm.shinobiBonusReload=false\n"); f:close()
+  local V = load()
+  V.SETTINGS_FILE = tmp2
+  V.Load()
+  local vCalls = {}
+  V.SetupMMSettings(function() end, function() end, { setMotionMagTap = function(on) vCalls[#vCalls+1] = on end })
+  check("shinobi mag tap: stored OFF -> no native call at boot, the choice is kept", #vCalls == 0
+    and V.Get("mm.shinobiBonusReload") == false and V.mm.motionMagTap == false)
   local P = load()
   os.remove(tmp2)
   P.SETTINGS_FILE = tmp2

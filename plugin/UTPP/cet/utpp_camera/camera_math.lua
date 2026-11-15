@@ -964,7 +964,7 @@ CM.PROFILE_LIMITS = {
 CM.DEFAULT_PROFILES = {
   -- fov in camera component units (the FPP component has 51 while the game setting shows 80: vertical-like units)
   { name = "Close",     distance = 1.25, height = 0.08, side = 0.42, fov = 56, sens = 1.0 },
-  { name = "Medium",    distance = 2.75, height = -0.35, side = 0.50, fov = 55, sens = 1.0 },
+  { name = "Medium",    distance = 2.75, height = -0.35, side = 1.00, fov = 55, sens = 1.0 },
   { name = "Far",       distance = 3.20, height = 0.25, side = 0.32, fov = 58, sens = 1.0 },
   { name = "Centered",  distance = 2.60, height = 0.30, side = 0.00, fov = 55, sens = 1.0 },
   { name = "Cinematic", distance = 3.80, height = 0.35, side = 0.55, fov = 48, sens = 0.8 },

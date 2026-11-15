@@ -32,10 +32,10 @@
 --                  straight (native UTPPSetMotionShoulderNarrow). Male V: no effect (the narrowing is female only).
 --                  Replaces mm.shoulderNarrow (cm per side 0 .. 4): utpp_core converts a stored value on load
 --                  (width = 5 - 2 * narrow) and drops the old key. Console (per side, 0 .. 5): GetMod("utpp_motion").SetShoulderNarrow(cm).
---   mm.pelvisYawTrim float -10 .. 10, default 5 (cancel the ~5 deg right hip bias of the run clips; DLL default 0) - run pelvis yaw trim in degrees (+ = left): turns the
+--   mm.pelvisYawTrim float -10 .. 10, default 2 (against the ~5 deg right hip bias of the run clips; DLL default 0) - run pelvis yaw trim in degrees (+ = left): turns the
 --                  pelvis while V walks / runs / sprints forward (the forward loops carry it ~5 deg to the right; +5 squares it),
 --                  chest, head and feet keep their direction; not while aiming / weapon drawn (native UTPPSetMotionPelvisYawTrim).
---   mm.bodyYawOffset float -20 .. 20, default 8 (in-game look; DLL default 0) - body yaw offset in degrees (+ = left): turns the whole character
+--   mm.bodyYawOffset float -20 .. 20, default 4 (in-game look; DLL default 0) - body yaw offset in degrees (+ = left): turns the whole character
 --                  (hips, torso, head, legs, feet) about its visual root against the over-the-shoulder camera parallax; the movement
 --                  direction is unchanged; off while aiming / during weapon actions (native UTPPSetMotionBodyYawOffset).
 --   mm.aimAtCrosshair bool, default true (DLL default off; in game: muzzle slot +Y = weapon entity +Y, barrel vs shot
@@ -825,17 +825,17 @@ function M.RegisterSettings(core)
       .. "narrower (down to -5), above 0 = wider (+5 = the body's own width). Her hands and weapon stay where the animation puts "
       .. "them; narrower shoulders bend the elbows a little more. No effect on male V.",
     apply = function(v) M.SetShoulderWidth(v) end })
-  core.Register({ key = "mm.pelvisYawTrim", section = "animation", type = "float", default = 5, min = -10, max = 10, step = 0.5,
+  core.Register({ key = "mm.pelvisYawTrim", section = "animation", type = "float", default = 2, min = -10, max = 10, step = 0.5,
     label = "Run pelvis yaw trim (deg)",
     desc = "Turns V's hips around the vertical axis while she walks, runs or sprints forward (+ = to the left, - = to the right); her "
       .. "chest, head and feet keep their direction. The running animations carry the hips about 5 degrees to the right: about +5 "
-      .. "squares them with the direction of travel. 0 (default) = the animations as authored. Not while aiming or with a weapon drawn.",
+      .. "squares them with the direction of travel (default 2). 0 = the animations as authored. Not while aiming or with a weapon drawn.",
     apply = function(v) M.SetPelvisYawTrim(v) end })
-  core.Register({ key = "mm.bodyYawOffset", section = "animation", type = "float", default = 8, min = -20, max = 20, step = 0.5,
+  core.Register({ key = "mm.bodyYawOffset", section = "animation", type = "float", default = 4, min = -20, max = 20, step = 0.5,
     label = "Body yaw offset (deg)",
     desc = "Turns V's whole character around the vertical axis (+ = to the left, - = to the right): hips, chest, head, legs and "
       .. "feet together. With the camera over the right shoulder V can look turned to the right; a few degrees to the left "
-      .. "squares her with the view (default 8). The movement direction is unchanged. 0 = off. Not while aiming or during weapon actions.",
+      .. "squares her with the view (default 4). The movement direction is unchanged. 0 = off. Not while aiming or during weapon actions.",
     apply = function(v) M.SetBodyYawOffset(v) end })
   core.Register({ key = "mm.walkSpeed", section = "animation", type = "float", default = 1.6, min = 0, max = 3.5, step = 0.1,
     label = "Walk speed (m/s)",

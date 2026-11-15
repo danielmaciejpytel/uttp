@@ -110,7 +110,7 @@ M.Engine = P
 
 P.DEFAULTS = {
   auto = true,              -- false: only hard rules + the user's choice
-  scene = true, sceneTier = 3, sceneExit = 1.5, sceneBlend = 0.6,
+  scene = false, sceneTier = 3, sceneExit = 1.5, sceneBlend = 0.6,
   vehicleKeepTpp = true, vehicleKeepMax = 6,
   vehicleUnmountWatch = 0.2, -- s after the unmount before a suppressed TPP switch is issued (third person not active)
   takedown = true,
@@ -949,8 +949,9 @@ M.SETTINGS = {
   -- value is ignored: see M.StartWantsTpp) and stays registered only so old settings files keep loading
   { key = "perspective.defaultTpp", cfg = "defaultTpp", type = "bool", default = true, label = "Start in third person (unused)",
     desc = "Unused: the mod always starts in third person." },
-  { key = "perspective.scene", cfg = "scene", type = "bool", default = true, label = "First person in scenes and dialogues",
-    desc = "Scenes from the selected tier upwards use the game's first-person view; afterwards the view returns." },
+  { key = "perspective.scene", cfg = "scene", type = "bool", default = false, label = "First person in scenes and dialogues",
+    desc = "Scenes from the selected tier upwards use the game's first-person view; afterwards the view returns. "
+      .. "Off by default: scenes and dialogues stay in third person." },
   { key = "perspective.sceneTier", cfg = "sceneTier", type = "int", default = 3, min = 1, max = 5, label = "Scene tier for first person (1-5)",
     desc = "Lowest scene tier (1-5) that switches to first person. 3 = dialogues that block movement." },
   { key = "perspective.combat", cfg = "combat", type = "choice", default = "tpp", label = "Perspective in combat",

@@ -122,7 +122,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.min", "-1.2")
   @runtimeProperty("ModSettings.max", "1.2")
   @runtimeProperty("ModSettings.step", "0.01")
-  public let camera_side: Float = 0.5;
+  public let camera_side: Float = 1.0;
 
   // camera.fov (view camera.edit.fov)
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -292,8 +292,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "3")
   @runtimeProperty("ModSettings.order", "24")
   @runtimeProperty("ModSettings.displayName", "Reload animation during Shinobi bonus")
-  @runtimeProperty("ModSettings.description", "Short left-hand move to the magazine when a slide or air dash refills the magazine (Shinobi bonus). Off by default. No effect with the Game Animations pack.")
-  public let mm_shinobiBonusReload: Bool = false;
+  @runtimeProperty("ModSettings.description", "Short left-hand move to the magazine when a slide or air dash refills the magazine (Shinobi bonus). On by default. No effect with the Game Animations pack.")
+  public let mm_shinobiBonusReload: Bool = true;
 
   // crosshair.impl
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -467,8 +467,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "4")
   @runtimeProperty("ModSettings.order", "42")
   @runtimeProperty("ModSettings.displayName", "First person in scenes and dialogues")
-  @runtimeProperty("ModSettings.description", "Scenes from the selected tier upwards use the game's first-person view; afterwards the view returns.")
-  public let perspective_scene: Bool = true;
+  @runtimeProperty("ModSettings.description", "Scenes from the selected tier upwards use the game's first-person view; afterwards the view returns. Off by default: scenes and dialogues stay in third person.")
+  public let perspective_scene: Bool = false;
 
   // lootView.impl
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")

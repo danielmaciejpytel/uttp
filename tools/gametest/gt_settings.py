@@ -36,10 +36,11 @@ SETTINGS_SHIPPED = 'shipped'
 SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 AUTHOR_VALUES = (('mm.bodyYawOffset', 4), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
                  ('perspective.scene', False), ('perspective.blend', 0.6))
-# registered defaults (the `default =` of each Register call); None = not known to the harness (nothing is applied for it
-# in 'shipped' mode and a difference cannot be named)
-SHIPPED_DEFAULTS = {'mm.bodyYawOffset': 8, 'mm.pelvisYawTrim': 5, 'camera.side': None, 'mm.shinobiBonusReload': False,
-                    'perspective.scene': True, 'perspective.blend': 0.8}
+# registered defaults (the `default =` of each Register call; camera.side = the shoulder offset of the camera's fixed profile);
+# a key without an entry, or with None, is not known to the harness (nothing is applied for it in 'shipped' mode and a
+# difference cannot be named)
+SHIPPED_DEFAULTS = {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+                    'perspective.scene': False, 'perspective.blend': 0.8}
 
 
 def session_plan(mode: str) -> list[tuple[str, object]]:

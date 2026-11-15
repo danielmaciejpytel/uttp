@@ -416,20 +416,27 @@ class SessionSettingsTests(unittest.TestCase):
                          {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
                           'perspective.scene': False, 'perspective.blend': 0.6})
         shipped = dict(gs.session_plan('shipped'))
-        self.assertEqual(shipped, {'mm.bodyYawOffset': 8, 'mm.pelvisYawTrim': 5, 'mm.shinobiBonusReload': False,
-                                   'perspective.scene': True, 'perspective.blend': 0.8})      # camera.side: no known default
+        self.assertEqual(shipped, {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+                                   'perspective.scene': False, 'perspective.blend': 0.8})
 
     def test_difference_from_shipped(self):
         diff = {d['key']: d for d in gs.differs_from_shipped(dict(gs.session_plan('author')))}
-        self.assertEqual(set(diff), {'mm.bodyYawOffset', 'mm.pelvisYawTrim', 'camera.side', 'mm.shinobiBonusReload',
-                                     'perspective.scene', 'perspective.blend'})
-        self.assertEqual((diff['mm.bodyYawOffset']['value'], diff['mm.bodyYawOffset']['shipped']), (4, 8))
-        self.assertIsNone(diff['camera.side']['shipped'])
+        # the body yaw offset, the pelvis trim, the Shinobi reload animation, third person in scenes and the 1 m shoulder offset
+        # are shipped with the author's values; only the hidden transition time differs
+        self.assertEqual(set(diff), {'perspective.blend'})
+        self.assertEqual((diff['perspective.blend']['value'], diff['perspective.blend']['shipped']), (0.6, 0.8))
         self.assertEqual(gs.differs_from_shipped(dict(gs.session_plan('shipped'))), [])
         self.assertEqual(gs.differs_from_shipped({'perspective.blend': 0.8}), [])
+        self.assertEqual(gs.differs_from_shipped({'perspective.scene': False, 'camera.side': 1}), [])
+        self.assertEqual([d['key'] for d in gs.differs_from_shipped({'perspective.scene': True, 'camera.side': 0.5})],
+                         ['perspective.scene', 'camera.side'])
         line = gs.settings_line('author', dict(gs.session_plan('author')))
-        self.assertIn('settings author: differ from the shipped defaults: mm.bodyYawOffset 4 (shipped 8)', line)
-        self.assertIn('camera.side 1 (shipped unknown)', line)
+        self.assertEqual(line, 'settings author: differ from the shipped defaults: perspective.blend 0.6 (shipped 0.8)')
+        self.assertNotIn('mm.bodyYawOffset', line)
+        # a key whose default the harness does not know cannot be called equal: it is listed as unknown
+        unknown = gs.differs_from_shipped({'camera.aim.side': 0.5})
+        self.assertEqual([(d['key'], d['shipped']) for d in unknown], [('camera.aim.side', None)])
+        self.assertIn('camera.aim.side 0.5 (shipped unknown)', gs.settings_line('author', {'camera.aim.side': 0.5}))
         self.assertEqual(gs.settings_line('shipped', dict(gs.session_plan('shipped'))), 'settings shipped: all as shipped')
         self.assertIn('NOT applied: camera.side', gs.settings_line('author', {}, ['camera.side']))
 

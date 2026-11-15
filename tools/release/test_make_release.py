@@ -100,7 +100,9 @@ class ReadmeRequirements(unittest.TestCase):
             self.assertNotIn(old, r)
 
     def test_melee_line_follows_decision(self):
-        self.assertIn("two-handed blunt weapons", mr.gen_readme(True).decode())
+        on = " ".join(mr.gen_readme(True).decode().split())
+        self.assertIn("two-handed blunt weapons", on)
+        self.assertIn("Mantis Blades and Gorilla Arms", on)
         off = mr.gen_readme(False).decode()
         self.assertNotIn("two-handed blunt weapons", off)
         self.assertIn("not part of this version", off)
