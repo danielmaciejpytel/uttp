@@ -411,6 +411,58 @@ void RealData(const char* aDbPath, const char* aOvPath, const char* aStylePath)
                                   static_cast<int>(overlay), s.clip, static_cast<double>(maxL), static_cast<double>(maxR),
                                   static_cast<double>(kMeshArmClavicleRuntimeLimitDeg)));
         }
+    // I) the runtime engages the transient bound (ClavicleTransientBound) on a run stop: Rifle Relaxed, run loop with moving set, then the
+    // straight run stop clip from 0.75 s with moving cleared (the weapon pose crossfades from the moving to the standing pose).
+    {
+        const int run = FindClip(*db, "M_Neutral_Run_Loop_F"), stop = FindClip(*db, "M_Neutral_Run_Stop_F_Lfoot");
+        Check(run >= 0 && stop >= 0, "I: run loop and run stop clips found");
+        auto ev = std::make_unique<motionpose::PoseEvaluator>();
+        if (run >= 0 && stop >= 0 && ev->Init(db.get(), ovf.get(), &style, 2, err))
+        {
+            motionpose::OverlayFrameInputs in;
+            in.machine.overlay = PoseOverlay::Rifle;
+            in.machine.style = Style::Feminine;
+            in.bodyWoman = true;
+            std::vector<BoneTransform> out(n);
+            const float fps = db->Header().fps > 0.0f ? db->Header().fps : 30.0f;
+            const float runLen = static_cast<float>(db->Clip(static_cast<uint32_t>(run)).numFrames - 1) / fps;
+            const float stopLen = static_cast<float>(db->Clip(static_cast<uint32_t>(stop)).numFrames - 1) / fps;
+            motion::MatchResult m;
+            float gateMin = 1.0f, gateEnd = 0.0f, devMax = 0.0f;
+            int engagedAt = -1, appliedFrames = 0, beforeStop = 0;
+            for (int f = 0; f < 60 + 240; ++f)
+            {
+                const bool stopping = f >= 60;
+                in.machine.moving = !stopping;
+                m.clip = stopping ? stop : run;
+                m.clipTime = stopping ? std::min(stopLen, 0.75f + static_cast<float>(f - 60) / 60.0f)
+                                      : std::fmod(static_cast<float>(f) / 60.0f, std::max(runLen, 0.1f));
+                m.jumped = f == 60;
+                motionpose::FrameInfo info;
+                ev->Evaluate(1.0f / 60.0f, m, in, out.data(), n, &info);
+                const ClavicleTransientResult& t = info.clavicleTransient;
+                if (!stopping)
+                    beforeStop += t.gate < 1.0f || t.applied;
+                else
+                {
+                    if (t.gate < 1.0f && engagedAt < 0)
+                        engagedAt = f - 60;
+                    gateMin = std::min(gateMin, t.gate);
+                    appliedFrames += t.applied ? 1 : 0;
+                    devMax = std::max({devMax, t.leftDeg, t.rightDeg});
+                }
+                gateEnd = t.gate;
+            }
+            std::printf("I: stop engaged at frame %d after the stop, gate min %.2f, applied on %d frames, largest excursion against the baseline %.1f deg, gate at the end %.2f\n",
+                        engagedAt, static_cast<double>(gateMin), appliedFrames, static_cast<double>(devMax), static_cast<double>(gateEnd));
+            Check(beforeStop == 0, F("I: running with the moving pose never engages the bound (%d frames did)", beforeStop));
+            Check(engagedAt >= 0 && engagedAt <= 3 && gateMin == 0.0f && appliedFrames > 0,
+                  F("I: the run stop engages the transient bound within 3 frames (frame %d) and bounds the clavicles (%d frames)", engagedAt, appliedFrames));
+            Check(gateEnd >= 1.0f, F("I: the bound is released by the end of the held stop (gate %.2f)", static_cast<double>(gateEnd)));
+        }
+        else
+            Check(false, "I: evaluator init");
+    }
 }
 
 #ifdef UTPP_CLAVLIMIT_SURVEY

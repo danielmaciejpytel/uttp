@@ -116,4 +116,145 @@ inline ClavicleLimitResult LimitMeshArmClavicles(const Skeleton& aSk, const Laye
     }
     return r;
 }
+
+// ---- transient bound: the clavicle held with the chest through a weapon pose crossfade ----------------------------------------------
+// Why: at a run / sprint stop with a two-handed weapon the weapon pose crossfades from the moving pose (Rifle Relaxed: arms in local
+// space, Layering_Arm_X_LS 1, the shoulders follow the chest) to the standing pose (arms in mesh space). While the stop clip still leans
+// and twists the chest, the crossfade puts the chest's deviation from the base pose into the clavicle local rotation (see above), and
+// the shoulder joints swing forward / down and together for about 0.2 - 0.5 s until the chest has settled. The absolute limit above
+// cannot catch it: the excursion stays below it, and a lower absolute bound would also move the steady authored offsets (40 - 60 deg).
+// A free-running slow baseline cannot tell the gait oscillation of a mesh-space run pose from the stop excursion either (it changed
+// settled run loops). The bound therefore acts only around the composition's own transition, like the swing gate of the legs layer:
+//   - engage: on the first frame of a weapon pose crossfade (the caller's aFading; the runtime passes stop crossfades only: moving ->
+//     standing pose of the same weapon pose set) the deviation rel = ref^-1 * q of the frame before (ref = the local-space arm
+//     clavicle, q = the composed clavicle) becomes the baseline, and the gate g drops to 0 (a crossfade that starts while the gate is
+//     still below 1 keeps baseline and gate); a zero time step changes no state;
+//   - bound: while engaged, rel may deviate from the baseline by limitDeg with the C1 tanh knee of SoftLimitAngleDeg (softDeg); the
+//     excess is handed to the children of the clavicle, whose mesh rotations stay exactly as composed (arm direction, weapon aim);
+//   - release: once the crossfade has ended, g rises by dt / releaseSeconds per frame while rel is back within limitDeg of the
+//     baseline (the excursion is over), or after maxHoldSeconds while rel moves slower than settledDegPerSec (the chest has settled
+//     on another offset), or after 2 x maxHoldSeconds in any case; the output is the bounded clavicle blended to the composed one by g
+//     (children compensated the same way), so the release never pops and does not depend on the frame rate beyond the rate itself;
+//   - off: with g = 1 (free) the pose is untouched, bit for bit: steady poses, loops and every frame outside a crossfade and its
+//     release are the composition as before. Engaging needs no step either: at engage rel is within limitDeg of the baseline.
+// Mutation UTPP_CLAVLIMIT_MUTATION 4 = never engages, 5 = released in one frame when the crossfade ends.
+inline constexpr float kClavicleTransientLimitDeg = 4.0f;        // excursion against the baseline passed untouched
+inline constexpr float kClavicleTransientSoftDeg = 4.0f;         // knee width: the excursion stays below limit + soft
+inline constexpr float kClavicleTransientReleaseSeconds = 0.3f;  // gate rise time once released
+inline constexpr float kClavicleTransientSettledDegPerSec = 60.0f; // rel slower than this = the chest has settled
+inline constexpr float kClavicleTransientMaxHoldSeconds = 1.5f;  // after the crossfade: release once settled after this, always after 2x
+
+struct ClavicleTransientResult
+{
+    float leftDeg = 0.0f, rightDeg = 0.0f; // angle of rel against the baseline (0 while free)
+    float gate = 1.0f;                     // smaller of both sides: 1 = free (pose untouched), 0 = fully bounded
+    bool applied = false;                  // the pose was changed this frame
+};
+
+// Sets bone aClav of aPose to aNew and keeps the mesh rotation its direct children had under aOld (the clavicle's rotation before).
+inline void SetClavicleKeepChildren(const Skeleton& aSk, int aClav, const Quat& aOld, const Quat& aNew, Pose& aPose)
+{
+    const Quat carry = math::QuatNormalize(math::QuatMul(math::QuatInv(aNew), aOld));
+    for (int i = aClav + 1; i < aSk.n; ++i)
+        if (aSk.parent[i] == aClav)
+            aPose.b[i].r = math::QuatNormalize(math::QuatMul(carry, aPose.b[i].r));
+    aPose.b[aClav].r = aNew;
+}
+
+struct ClavicleTransientBound
+{
+    float limitDeg = kClavicleTransientLimitDeg;
+    float softDeg = kClavicleTransientSoftDeg;
+    float releaseSeconds = kClavicleTransientReleaseSeconds;
+    float settledDegPerSec = kClavicleTransientSettledDegPerSec;
+    float maxHoldSeconds = kClavicleTransientMaxHoldSeconds;
+    Quat base[2]{}, prevRel[2]{};
+    float g[2] = {1.0f, 1.0f};
+    float held = 0.0f; // seconds since the crossfade ended while engaged
+    bool have[2] = {false, false};
+    bool prevFading = false;
+
+    void Reset()
+    {
+        have[0] = have[1] = false;
+        g[0] = g[1] = 1.0f;
+        held = 0.0f;
+        prevFading = false;
+    }
+
+    // Call after LimitMeshArmClavicles with the same scratch (same preconditions). aFading = a weapon pose crossfade is in progress this
+    // frame; aDt = frame time in seconds.
+    ClavicleTransientResult Apply(const Skeleton& aSk, const LayerScratch& aScratch, int aClavL, int aClavR, bool aFading, float aDt,
+                                  Pose& aPose)
+    {
+        ClavicleTransientResult r;
+        const int clav[2] = {aClavL, aClavR};
+        const Pose* arm[2] = {&aScratch.armL, &aScratch.armR};
+        const float dt = std::isfinite(aDt) && aDt > 0.0f ? aDt : 0.0f;
+        const bool step = dt > 0.0f; // a zero time step re-evaluates the frame: the state stays as it is
+        const bool engage = step && aFading && !prevFading;
+        if (step && !aFading && (g[0] < 1.0f || g[1] < 1.0f))
+            held += dt;
+        if (engage)
+            held = 0.0f;
+        for (int s = 0; s < 2; ++s)
+        {
+            const int c = clav[s];
+            if (c < 0 || c >= aSk.n || !math::IsFinite(aPose.b[c].r) || !math::IsFinite(arm[s]->b[c].r))
+            {
+                have[s] = false;
+                g[s] = 1.0f;
+                continue;
+            }
+            const Quat ref = math::QuatNormalize(arm[s]->b[c].r);
+            const Quat q = math::QuatNormalize(aPose.b[c].r);
+            const Quat rel = math::QuatAbs(math::QuatNormalize(math::QuatMul(math::QuatInv(ref), q)));
+            const float speed = have[s] && dt > 0.0f ? AngleDeg(prevRel[s], rel) / dt : 0.0f;
+            (void)speed;
+            (void)engage;
+#if !(defined(UTPP_CLAVLIMIT_MUTATION) && UTPP_CLAVLIMIT_MUTATION == 4)
+            if (engage && !(g[s] < 1.0f)) // a crossfade that starts while still held keeps its baseline and gate (no step)
+            {
+                base[s] = have[s] ? prevRel[s] : rel; // the last frame before the crossfade (this frame when there is none)
+                g[s] = 0.0f;
+            }
+#endif
+            if (step && !aFading && g[s] < 1.0f)
+            {
+#if defined(UTPP_CLAVLIMIT_MUTATION) && UTPP_CLAVLIMIT_MUTATION == 5
+                g[s] = 1.0f; // mutation 5: released in one frame
+#else
+                const bool back = !(AngleDeg(base[s], rel) > limitDeg); // the excursion is over: the bound no longer acts
+                if (back || (held >= maxHoldSeconds && speed < settledDegPerSec) || held >= 2.0f * maxHoldSeconds)
+                    g[s] = releaseSeconds > 0.0f ? std::min(1.0f, g[s] + dt / releaseSeconds) : 1.0f;
+#endif
+            }
+            if (step || !have[s])
+            {
+                prevRel[s] = rel;
+                have[s] = true;
+            }
+            r.gate = std::min(r.gate, g[s]);
+            if (!(g[s] < 1.0f))
+                continue; // free: untouched
+            // bounded clavicle: rel limited against the baseline
+            const Quat d = math::QuatAbs(math::QuatNormalize(math::QuatMul(math::QuatInv(base[s]), rel)));
+            const float sn = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+            const float angleDeg = 2.0f * std::atan2(sn, d.w) * (180.0f / math::kPi);
+            (s ? r.rightDeg : r.leftDeg) = angleDeg;
+            if (!std::isfinite(angleDeg) || !(angleDeg > limitDeg) || !(sn > 1e-8f))
+                continue; // within the limit: untouched
+            const float outDeg = SoftLimitAngleDeg(angleDeg, limitDeg, softDeg);
+            const float half = 0.5f * outDeg * (math::kPi / 180.0f);
+            const float k = std::sin(half) / sn;
+            const Quat bounded = math::QuatNormalize(math::QuatMul(ref, math::QuatMul(base[s], Quat{d.x * k, d.y * k, d.z * k, std::cos(half)})));
+            const Quat out = g[s] > 0.0f ? Nlerp(bounded, q, g[s]) : bounded;
+            SetClavicleKeepChildren(aSk, c, q, out, aPose);
+            r.applied = true;
+        }
+        if (step)
+            prevFading = aFading;
+        return r;
+    }
+};
 } // namespace utpp::mm::ov

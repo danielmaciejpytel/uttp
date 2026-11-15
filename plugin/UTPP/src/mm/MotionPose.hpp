@@ -221,6 +221,7 @@ struct FrameInfo
         float drift[2] = {}; // socket drift toward the hand per side (m, femshoulder REACH DRIFT; 0 up to the default amount)
     } fem;
     ov::ClavicleLimitResult clavicleLimit; // mesh-space arm clavicle deviation of this frame before the limit
+    ov::ClavicleTransientResult clavicleTransient; // transient bound of the clavicles (gate 1 = free, pose untouched)
     float forearmTwistMovedDeg[2] = {};   // forearm roll moved into the hand on the output (left, right; ForearmTwist.hpp)
     // rifle-hand-fix 2026-11-09: support (left) hand of a 2H pose - hand twist about the forearm -> hand axis before / after the
     // elbow swivel of LimitHandTwistBySwivel and the applied swivel (deg).
@@ -459,6 +460,7 @@ public:
     void Reset()
     {
         m_legSwing.Reset();
+        m_clavTransient.Reset();
         m_inertial.Reset();
         m_stack.Reset();
         m_externalBase = m_usesLiveBase = false;
@@ -601,6 +603,8 @@ private:
         m_machine.Update(aIn.machine, aDt);
         const float w = ov::Clamp01(aIn.overlayWeight);
         bool ok = true;
+        if (!(w > 0.0f))
+            m_clavTransient.Reset(); // no layering this frame: the next one starts free
         if (w > 0.0f)
         {
             ToOv(m_base.data(), *m_L);
@@ -678,8 +682,22 @@ private:
             // landing, slide: 59-84 deg -> shoulder skin balloon). MEASUREMENT ONLY: the runtime limit (180 deg) never engages
             // (MeshArmClavicleLimit.hpp STATUS); the deviation goes to FrameInfo::clavicleLimit and the trace.
             if (li.OP && li.B)
+            {
                 info.clavicleLimit = ov::LimitMeshArmClavicles(sk, *m_scratch, m_shootClavL, m_shootClavR,
                                                                ov::kMeshArmClavicleRuntimeLimitDeg, ov::kMeshArmClavicleSoftDeg, *m_lay);
+                // the shoulders stay with the chest through a weapon pose crossfade (run stop: moving pose with local-space arms ->
+                // standing pose with mesh-space arms) until the chest has settled (ov::ClavicleTransientBound); free = untouched
+                // engaged by a stop crossfade only: the target is a standing pose and a moving pose of the same weapon pose set still
+                // has weight (aim, crouch and weapon class crossfades keep the composition as before)
+                bool stopFade = false;
+                if (m_machine.poses.count > 1 && m_machine.poses.target >= 0 && (m_machine.poses.target & 1) == 0)
+                    for (int i = 0; i < m_machine.poses.count; ++i)
+                        stopFade = stopFade || (m_machine.poses.key[i] != m_machine.poses.target && (m_machine.poses.key[i] & 1) != 0 &&
+                                                m_machine.poses.key[i] / 12 == m_machine.poses.target / 12 && m_machine.poses.w[i] > 0.0f);
+                info.clavicleTransient = m_clavTransient.Apply(sk, *m_scratch, m_shootClavL, m_shootClavR, stopFade, aDt, *m_lay);
+            }
+            else
+                m_clavTransient.Reset();
             if (w < 1.0f)
             {
                 ov::Blend(*m_L, *m_lay, w, *m_tmp);
@@ -1840,6 +1858,7 @@ private:
     uint32_t m_n = 0;
     std::vector<int> m_dbToOv;
     ov::LegSwingGate m_legSwing; // swing gate of the legs layer (ComposeLayers legsShare)
+    ov::ClavicleTransientBound m_clavTransient; // clavicles held with the chest through a weapon pose crossfade
     bool m_legSwingOn = true;
     motionFeet::Warp m_lowerWarp; // OVLEGS: KeepLowerFootHeight
     bool m_lowerReady = false;
