@@ -125,8 +125,8 @@ class DayOfBuild(unittest.TestCase):
         for g, files in want.items():
             have = {p for p, v in data.items() if v[0] == g} | {p for p, v in code.items() if v[0] == g}
             self.assertEqual(have, files)
-        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (29835264,
-                         "05066cc159f6a69d3189dea0924e5eb6b01e0e31f552d4aac7b208415f3e869f"))  # fists + knife, katana, blunt, baton, two-handed blunt, arm blades
+        self.assertEqual(data[mr.P_ARC + "utpp_melee.archive"][1:], (30162944,
+                         "2ef8f80ebfacccc57da9a3228f0d7a33c6f4d6c8a5da7dad05ad69db2f7134b4"))  # fists + knife, katana, blunt, baton, two-handed blunt, arm blades
         # the bike archive was checked in game (2026-11-10) and is pinned in the core DATA list, not in a day-of group
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", [r for r, _ in mr.DATA_PENDING])
         self.assertNotIn(mr.P_ARC + "utpp_vehicle_bike.archive", data)

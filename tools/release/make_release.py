@@ -284,7 +284,10 @@ DAYOF_DATA = [
     # holster, Male V draw); knife, katana, one-handed blunt and baton: the forearm of a number of clips bends on its hinge (the
     # forearm roll moved onto the hand, hand and weapon unchanged); the eight fists / default / StrongArms / two-handed blunt sets
     # are byte-identical to 84cb2a09... (compared unbundled).
-    ("melee", P_ARC + "utpp_melee.archive", 29835264, "05066cc159f6a69d3189dea0924e5eb6b01e0e31f552d4aac7b208415f3e869f"),
+    # Re-pinned 2026-11-15 (was 05066cc1..., 29835264 bytes): knife, katana, one-handed blunt, baton and two-handed blunt sets of
+    # both bodies hold the guard upper body in the crouched pose and its transitions (melee_crouchpose, melee_idle_to_crouch,
+    # melee_crouch_to_idle, melee_crouch_to_sprint added); every other clip of every set is unchanged (compared per clip).
+    ("melee", P_ARC + "utpp_melee.archive", 30162944, "2ef8f80ebfacccc57da9a3228f0d7a33c6f4d6c8a5da7dad05ad69db2f7134b4"),
     # Melee full pose tables (hips, spine and legs of every packed melee clip, one file per body; generated from the clip inputs of
     # the archive above by tools\melee\melee_pose_table.py): fists, knife, katana, one-handed blunt, baton, arm blades and
     # two-handed blunt, 384 clips each (was 882ba64a... / abb21add..., 368 clips: the six other sections are unchanged).
@@ -404,6 +407,12 @@ PARRIED_CLIPS = {
     # the same sets with complete arm blade sets and forearm-corrected knife, katana, one-handed blunt and baton clips (clip names
     # unchanged)
     "05066cc159f6a69d3189dea0924e5eb6b01e0e31f552d4aac7b208415f3e869f": {
+        "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
+        "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike", "w_two_hand_blunt": "per-strike",
+        "mantis_blade": "generic"},
+    # the same sets + crouched guard pose and its transitions in the knife, katana, one-handed blunt, baton and two-handed blunt
+    # sets (parried clips unchanged)
+    "2ef8f80ebfacccc57da9a3228f0d7a33c6f4d6c8a5da7dad05ad69db2f7134b4": {
         "w_melee_fists": "generic", "w_melee_knife": "per-strike", "w_melee_katana": "per-strike",
         "w_melee_one_hand_blunt": "per-strike", "w_melee_baton": "per-strike", "w_two_hand_blunt": "per-strike",
         "mantis_blade": "generic"},
