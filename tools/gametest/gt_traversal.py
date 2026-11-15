@@ -24,11 +24,26 @@ from gt_input import file_size, read_since  # noqa: E402
 ACTION_CLIMB, ACTION_VAULT = 8, 9
 PARTS = ['trav_vault_jump', 'trav_climb_jump']
 SET_NAME = 'traversal'
+
+
+def env_spot(name: str, default: tuple) -> tuple:
+    """A car-frame spot "lon,lat" from the environment (a vehicle of another shape, e.g. a motorcycle, needs another place to
+    stand at); unset or not two numbers = the default."""
+    try:
+        lon, lat = (float(v) for v in os.environ.get(name, '').split(','))
+    except ValueError:
+        return default
+    return (lon, lat)
+
+
 # car-frame spot (lon, lat) to stand at (lat > 0 = driver side, 0.9 .. 1.7 is where the approach stops), the pad part and the label of
-# the pose window. Vault: beside the hood (low edge); climb: beside the cabin (higher than a vault allows).
+# the pose window. Vault: beside the hood (low edge); climb: beside the cabin (higher than a vault allows). The spots can be set
+# from the environment: UTPP_NIGHT_VAULT_SPOT, UTPP_NIGHT_CLIMB_SPOT.
 KINDS = {
-    'vault': {'action': ACTION_VAULT, 'spot': (1.4, 1.3), 'part': 'trav_vault_jump', 'label': 'trav_vault'},
-    'climb': {'action': ACTION_CLIMB, 'spot': (-0.2, 1.3), 'part': 'trav_climb_jump', 'label': 'trav_climb'},
+    'vault': {'action': ACTION_VAULT, 'spot': env_spot('UTPP_NIGHT_VAULT_SPOT', (1.4, 1.3)), 'part': 'trav_vault_jump',
+              'label': 'trav_vault'},
+    'climb': {'action': ACTION_CLIMB, 'spot': env_spot('UTPP_NIGHT_CLIMB_SPOT', (-0.2, 1.3)), 'part': 'trav_climb_jump',
+              'label': 'trav_climb'},
 }
 ATTEMPTS = 2              # per kind
 APPROACH_OK_M = 2.0       # the approach must end within this distance of the spot, else the attempt is not played

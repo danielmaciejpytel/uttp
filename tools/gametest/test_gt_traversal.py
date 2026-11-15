@@ -100,6 +100,21 @@ class TraversalSetTests(unittest.TestCase):
             self.assertGreater(scen[part].duration, 2.0)
             self.assertFalse(any(st.metrics for st in scen[part].steps), part)      # judged from the log, not by limits
 
+    def test_a_spot_can_come_from_the_environment(self):
+        name = 'UTPP_NIGHT_TEST_SPOT'
+        old = os.environ.pop(name, None)
+        try:
+            self.assertEqual(gt.env_spot(name, (1.4, 1.3)), (1.4, 1.3))            # unset: the default
+            os.environ[name] = '0.3,1.1'
+            self.assertEqual(gt.env_spot(name, (1.4, 1.3)), (0.3, 1.1))
+            for bad in ('', '0.3', 'a,b', '1,2,3'):
+                os.environ[name] = bad
+                self.assertEqual(gt.env_spot(name, (1.4, 1.3)), (1.4, 1.3), bad)   # not two numbers: the default
+        finally:
+            os.environ.pop(name, None)
+            if old is not None:
+                os.environ[name] = old
+
     def test_each_part_taps_jump_while_the_stick_pushes_into_the_car(self):
         scen = load_scenarios(os.path.join(HERE, 'scenarios.json'))
         for part in gt.PARTS:
