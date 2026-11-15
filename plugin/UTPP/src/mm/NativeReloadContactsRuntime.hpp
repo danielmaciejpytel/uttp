@@ -1780,6 +1780,156 @@ struct JointLimiter
         n=t;valid=true;rig=rigId;lastTicks=ticks;
     }
 };
+// Final anatomy stage of the support (left) arm of a rifle reload correction. The contact solve places the elbow in the plane of the
+// game's elbow position about V's shoulder -> hand axis; with V's shoulder away from the game's and a strongly folded arm (hand ~15 cm
+// from the shoulder) that plane can put the forearm 120 - 150 deg away from the hand axis or roll the upper arm by up to 180 deg, and
+// the swivel limiter (60 deg cap, 6 deg per frame) cannot reach the anatomical side in time; on some frames no elbow position keeps the
+// hand's orientation within the wrist limit at all. The joint limiter then drags the arm but keeps the solved hand local rotation.
+// This stage runs on the records as finally written (after the replay and the joint limiter) and brings, in this order, the upper-arm
+// twist (rotation of the upper arm about its own bone axis), the pronation (hand about the forearm -> hand axis) and the wrist bend
+// (smallest swing of the hand towards the forearm axis) under their limits. Anatomy first: the hand (and what it holds) leaves the
+// contact instead of bending past a limit. The bound of each value is limit + (1 - weight) * max(0, game's own value - limit): the
+// limit at full weight, never above the game's own value, continuous on the weight ramp. Values under their bound: untouched bit for
+// bit. Mutation 27 drops the stage.
+#if defined(UTPP_RELOAD_CONTACT_MUTATION) && UTPP_RELOAD_CONTACT_MUTATION==27
+inline constexpr bool kLeftArmFinalLimits=false;
+#else
+inline constexpr bool kLeftArmFinalLimits=true;
+#endif
+struct ArmAnatomy
+{
+    bool ok=false;
+    float upperTwistDeg=0.0f,pronationDeg=0.0f,bendDeg=0.0f; // upper twist and pronation signed
+};
+inline ArmAnatomy MeasureArm(const ov::Pose& aPose,const gik::ArmChain& aArm)
+{
+    ArmAnatomy m;
+    if(aArm.upper<0 || aArm.lower<0 || aArm.hand<0 || aArm.upper>=aPose.n || aArm.lower>=aPose.n || aArm.hand>=aPose.n)return m;
+    const math::Vec3 ht=aPose.b[aArm.hand].t;
+    const float hl=std::sqrt(math::Dot(ht,ht));
+    if(!(hl>1e-5f) || !std::isfinite(hl))return m;
+    const math::Vec3 x=ht*(1.0f/hl);
+    const math::Quat qFo=math::QuatNormalize(aPose.b[aArm.lower].r);
+    const math::Quat qHand=math::QuatNormalize(aPose.b[aArm.hand].r);
+    const float d=qFo.x*x.x+qFo.y*x.y+qFo.z*x.z;
+    math::Quat roll{x.x*d,x.y*d,x.z*d,qFo.w};
+    const float rn=std::sqrt(roll.x*roll.x+roll.y*roll.y+roll.z*roll.z+roll.w*roll.w);
+    if(!(rn>1e-6f) || !std::isfinite(rn))return m;
+    roll=math::Quat{roll.x/rn,roll.y/rn,roll.z/rn,roll.w/rn};
+    m.pronationDeg=ov::TwistAngleDeg(math::QuatNormalize(math::QuatMul(roll,qHand)),x);
+    m.bendDeg=WristBendDeg(qHand);
+    m.upperTwistDeg=ov::TwistAngleDeg(math::QuatNormalize(math::QuatMul(math::QuatInv(math::QuatNormalize(kUpperArmRestLocal)),
+                                                                       math::QuatNormalize(aPose.b[aArm.upper].r))),math::Vec3{1.0f,0.0f,0.0f});
+    m.ok=std::isfinite(m.pronationDeg) && std::isfinite(m.bendDeg) && std::isfinite(m.upperTwistDeg);
+    return m;
+}
+inline float FinalBoundDeg(float aLimitDeg,float aOwnAbsDeg,float aWeight)
+{
+    return aLimitDeg+(1.0f-ov::Clamp01(aWeight))*std::fmax(0.0f,aOwnAbsDeg-aLimitDeg);
+}
+// Twist and pronation are angles on a circle: a value that passes 180 deg turns into -180. Clamped to the nearest bound, the output
+// would then jump from +bound to -bound (200 deg) in one frame. FinalLimitSide keeps the side of the last clamp while the value stays
+// outside its bound (the output holds +bound when the input wraps through 180) and takes the value's own side once it is back inside.
+struct FinalLimitSide
+{
+    bool valid=false;
+    uint64_t rig=0;
+    int64_t lastTicks=0;
+    float twist=0.0f,pronation=0.0f; // -1 / 0 / +1
+    void Reset(){valid=false;twist=pronation=0.0f;}
+    void Begin(uint64_t rigId,int64_t ticks,int64_t ticksPerSecond)
+    {
+        if(!valid || rig!=rigId || ticks<=0 || ticksPerSecond<=0 || ticks<lastTicks || (ticks-lastTicks)>ticksPerSecond/4)
+        {valid=true;rig=rigId;twist=pronation=0.0f;}
+        lastTicks=ticks;
+    }
+};
+// Signed change that brings the angle `aValueDeg` to the bound on side `*aSide` (wrapped into [-180, 180)); 0 inside the bound. Updates
+// the side (nullptr: the value's own side).
+inline float FinalCutToBoundDeg(float aValueDeg,float aBoundDeg,float* aSide)
+{
+    if(std::fabs(aValueDeg)<=aBoundDeg+1e-3f)
+    {
+        if(aSide)*aSide=aValueDeg>0.0f ? 1.0f : aValueDeg<0.0f ? -1.0f : 0.0f;
+        return 0.0f;
+    }
+    float side=aValueDeg>=0.0f ? 1.0f : -1.0f;
+    if(aSide)
+    {
+        if(*aSide!=0.0f)side=*aSide;
+        *aSide=side;
+    }
+    float d=side*aBoundDeg-aValueDeg;
+    d=std::fmod(d+180.0f,360.0f);
+    if(d<0.0f)d+=360.0f;
+    return d-180.0f;
+}
+struct FinalLimitResult
+{
+    bool applied=false;
+    float upperTwistCutDeg=0.0f,pronationCutDeg=0.0f,bendCutDeg=0.0f;
+};
+// aOwn: the arm as handed in (the game's own values; !ok = the limits themselves). Edits the upper-arm and hand local rotations only.
+inline FinalLimitResult LimitArmFinal(ov::Pose& aPose,const gik::ArmChain& aArm,const ArmAnatomy& aOwn,float aWeight,
+                                      FinalLimitSide* aSide=nullptr)
+{
+    FinalLimitResult r;
+    const float w=ov::Clamp01(aWeight);
+    if(!(w>ov::kZeroWeight))return r;
+    ArmAnatomy m=MeasureArm(aPose,aArm);
+    if(!m.ok)return r;
+    const float ownTwist=aOwn.ok ? std::fabs(aOwn.upperTwistDeg) : 0.0f;
+    const float ownPron=aOwn.ok ? std::fabs(aOwn.pronationDeg) : 0.0f;
+    const float ownBend=aOwn.ok ? aOwn.bendDeg : 0.0f;
+    const math::Quat upper0=aPose.b[aArm.upper].r,hand0=aPose.b[aArm.hand].r;
+    const float twistBound=FinalBoundDeg(kReloadUpperArmTwistCapDeg,ownTwist,w);
+    {
+        const float delta=FinalCutToBoundDeg(m.upperTwistDeg,twistBound,aSide ? &aSide->twist : nullptr);
+        if(delta!=0.0f)
+        {
+            aPose.b[aArm.upper].r=math::QuatNormalize(math::QuatMul(math::QuatNormalize(aPose.b[aArm.upper].r),
+                                                                    ov::AxisAngleQuat(math::Vec3{1.0f,0.0f,0.0f},delta)));
+            r.upperTwistCutDeg=-delta;
+        }
+    }
+    // pronation, then bend; the bend swing can move the pronation a little, so the pair is repeated (the bend is always last)
+    const float pronBound=FinalBoundDeg(kReloadPronationLimitDeg,ownPron,w);
+    const float bendBound=FinalBoundDeg(kReloadWristBendLimitDeg,ownBend,w);
+    for(int pass=0;pass<3;++pass)
+    {
+        const ArmAnatomy now=MeasureArm(aPose,aArm);
+        if(!now.ok)break;
+        bool changed=false;
+        const float pd=FinalCutToBoundDeg(now.pronationDeg,pronBound,aSide && pass==0 ? &aSide->pronation : nullptr);
+        if(pd!=0.0f)
+        {
+            const math::Vec3 ht=aPose.b[aArm.hand].t;
+            const math::Vec3 x=ht*(1.0f/std::sqrt(math::Dot(ht,ht)));
+            aPose.b[aArm.hand].r=math::QuatNormalize(math::QuatMul(ov::AxisAngleQuat(x,pd),math::QuatNormalize(aPose.b[aArm.hand].r)));
+            r.pronationCutDeg-=pd;changed=true;
+        }
+        const float bend=WristBendDeg(aPose.b[aArm.hand].r);
+        if(bend>bendBound+1e-3f)
+        {
+            const math::Quat qh=math::QuatNormalize(aPose.b[aArm.hand].r);
+            const math::Vec3 hx=math::QuatRotate(qh,math::Vec3{1.0f,0.0f,0.0f});
+            math::Vec3 axis=math::Cross(hx,math::Vec3{1.0f,0.0f,0.0f});
+            float al=std::sqrt(math::Dot(axis,axis));
+            if(!(al>1e-6f)){axis=math::QuatRotate(qh,math::Vec3{0.0f,0.0f,1.0f});axis.x=0.0f;al=std::sqrt(math::Dot(axis,axis));}
+            if(al>1e-6f && std::isfinite(al))
+            {
+                axis=axis*(1.0f/al);
+                aPose.b[aArm.hand].r=math::QuatNormalize(math::QuatMul(ov::AxisAngleQuat(axis,bend-bendBound),qh));
+                r.bendCutDeg+=bend-bendBound;changed=true;
+            }
+        }
+        if(!changed)break;
+    }
+    if(!math::IsFinite(aPose.b[aArm.upper].r) || !math::IsFinite(aPose.b[aArm.hand].r))
+    {aPose.b[aArm.upper].r=upper0;aPose.b[aArm.hand].r=hand0;return FinalLimitResult{};}
+    r.applied=r.upperTwistCutDeg!=0.0f || r.pronationCutDeg!=0.0f || r.bendCutDeg!=0.0f;
+    return r;
+}
 // Everything the FK hook keeps between frames of one reload (single FK thread).
 struct Continuity
 {
@@ -1791,7 +1941,9 @@ struct Continuity
     LeftArmState leftArm,weaponFollow;
     PublishedStart published;
     SwivelState swivel;
-    void Reset(){placement.Reset();divergence.Reset();reject.Reset();joints.Reset();stock.Reset();leftArm.Reset();weaponFollow.Reset();published.Reset();swivel.Reset();}
+    FinalLimitSide finalSide;
+    void Reset(){placement.Reset();divergence.Reset();reject.Reset();joints.Reset();stock.Reset();leftArm.Reset();weaponFollow.Reset();published.Reset();swivel.Reset();
+                 finalSide.Reset();}
     // Last stage of a frame: the final records (after replay / ramp / limiter) become the reference of the next frame's
     // head clearance.
     void NoteOutput(const Prepared& p,const uint8_t* records,uint32_t count)
@@ -2067,6 +2219,35 @@ inline bool FinishCore(const Prepared& p,const integ::PoseSnapshot& s,
     }
     return true;
 }
+// The game's own left arm of this frame (the records as handed in), for LimitArmFinal; !ok where the stage does not run (rifle only).
+inline ArmAnatomy OwnLeftArm(const Prepared& p,const integ::PoseSnapshot& s,const uint8_t* records,uint32_t count,bool eligible)
+{
+    if(!(kLeftArmFinalLimits && eligible) || s.traceOverlay!=static_cast<int32_t>(ov::PoseOverlay::Rifle) ||
+       !JointLimiter::RecordsInBounds(p,records,count))return ArmAnatomy{};
+    ov::Pose own;
+    if(!Read(p,records,own))return ArmAnatomy{};
+    return MeasureArm(own,p.arms.left);
+}
+// Last write of a corrected frame: LimitArmFinal on the left arm of the written records; the joint limiter then remembers the final
+// output. `own.ok` false (not a rifle frame, or the game's arm could not be measured) = nothing happens.
+inline bool ApplyLeftArmFinalLimits(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* records,uint32_t count,const ArmAnatomy& own,
+                                    float weight,JointLimiter& joints,FinalLimitSide& side,int64_t ticks,int64_t ticksPerSecond)
+{
+    if(!(kLeftArmFinalLimits && own.ok) || !JointLimiter::RecordsInBounds(p,records,count))return false;
+    ov::Pose pose;
+    if(!Read(p,records,pose))return false;
+    side.Begin(s.rig,ticks,ticksPerSecond);
+    const FinalLimitResult r=LimitArmFinal(pose,p.arms.left,own,weight,&side);
+    if(!r.applied)return false;
+    for(const int b:{p.arms.left.upper,p.arms.left.hand})
+    {
+        if(uint32_t(b)<s.firstBone || p.gameIndex[b]<0)continue;
+        const float q[4]={pose.b[b].r.x,pose.b[b].r.y,pose.b[b].r.z,pose.b[b].r.w};
+        std::memcpy(records+size_t(p.gameIndex[b])*48+16,q,sizeof(q));
+    }
+    if(joints.valid)joints.Capture(p,records,count,s.rig,ticks);
+    return true;
+}
 // Public entry (signature unchanged for existing callers; the trailing arguments are optional).
 inline bool Finish(const Prepared& p,const integ::PoseSnapshot& s,
                    uint8_t* records,uint32_t count,bool perspectiveAllowed,
@@ -2081,6 +2262,7 @@ inline bool Finish(const Prepared& p,const integ::PoseSnapshot& s,
         correctionWeight<=1 && Valid(p,s,count);
     RejectHold* const rejectHold=continuity ? &continuity->reject : nullptr;
     if(continuity && !perspectiveAllowed)continuity->Reset();
+    const ArmAnatomy leftOwn=OwnLeftArm(p,s,records,count,reachedSolver);
     const bool ok=FinishCore(p,s,records,count,perspectiveAllowed,cycle,result,correctionWeight,authoredMinReach,
                              continuity,nowTicks,ticksPerSecond);
     bool written=ok;
@@ -2088,6 +2270,8 @@ inline bool Finish(const Prepared& p,const integ::PoseSnapshot& s,
     if(continuity && reachedSolver)
     {
         continuity->joints.Apply(p,records,count,s.rig,nowTicks,ticksPerSecond,JointSlewForOverlay(s.traceOverlay,correctionWeight));
+        if(written)ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,correctionWeight,continuity->joints,continuity->finalSide,nowTicks,
+                                           ticksPerSecond);
         continuity->NoteOutput(p,records,count);
     }
     return written;
@@ -2109,8 +2293,10 @@ inline bool HoldOnly(const Prepared& p,const integ::PoseSnapshot& s,uint8_t* rec
     if(!std::isfinite(s.reloadContactsWeight) || s.reloadContactsWeight<=0 || s.weight<1-ov::kZeroWeight)return false;
     if constexpr(kHoldOnlyValidates)
         if(!Valid(p,s,count))return false;
+    const ArmAnatomy leftOwn=OwnLeftArm(p,s,records,count,Valid(p,s,count));
     const bool written=state.reject.OnReject(p,s,records,count,nowTicks,ticksPerSecond,s.reloadContactsWeight);
     state.joints.Apply(p,records,count,s.rig,nowTicks,ticksPerSecond,JointSlewForOverlay(s.traceOverlay,s.reloadContactsWeight));
+    if(written)ApplyLeftArmFinalLimits(p,s,records,count,leftOwn,s.reloadContactsWeight,state.joints,state.finalSide,nowTicks,ticksPerSecond);
     state.NoteOutput(p,records,count);
     return written;
 }

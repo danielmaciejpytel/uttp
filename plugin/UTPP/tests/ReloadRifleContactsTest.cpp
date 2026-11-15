@@ -12,6 +12,7 @@
 // below .15), 15 = no follower reset at weight 0, 16 = no contact catch-up of the left hand.
 // UTPP_RELOAD_CONTACT_MUTATION=25: the reject replay / ramp-in fades towards the records as handed in (the game's girdle), section 10.
 // UTPP_RELOAD_CONTACT_MUTATION=26: the girdle is restored with the weight shrunk by the placement guard (the game's girdle), section 12.
+// UTPP_RELOAD_CONTACT_MUTATION=27: no final anatomy stage of the left arm (LimitArmFinal), sections 12 (13e) and 13.
 // UTPP_RELOAD_GROUND_KEEP_MUTATION=1: no ground keep, 2: no edge latch (a pistol reload begun moving stays uncorrected), 3: no girdle
 // hold after an early episode end (sections 9 and 11).
 // Every mutation build must report an assertion FAIL (ctest PASS_REGULAR_EXPRESSION "FAIL ").
@@ -1024,7 +1025,7 @@ int main(int argc,char** argv)
         const int frames=60;
         const auto angle=[](math::Quat a,math::Quat b){
             return 2.0f*std::acos(std::clamp(std::fabs(math::QuatDot(math::QuatNormalize(a),math::QuatNormalize(b))),0.0f,1.0f))*180.0f/math::kPi;};
-        struct Sample{bool ok;float gate,clavT,armT,clavDeg,socketStep,width,bendL,bendR;};
+        struct Sample{bool ok;float gate,clavT,armT,clavDeg,socketStep,width,bendL,bendR;bool written=false;float pronL=0.0f,twistL=0.0f;};
         const auto run=[&](float leanDeg,std::vector<Sample>& out){
             rt::Continuity state;out.clear();
             math::Vec3 prevSocket{};bool havePrev=false;
@@ -1045,8 +1046,9 @@ int main(int argc,char** argv)
                 integ::BlendIntoRecords(records.data(),uint32_t(sk.n),s,1.0f);
                 native_reload_contacts::Result r;
                 ov::Pose o;
-                m.ok=captured && rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,1.0f,rt::kAuthoredContactMinReach,&state,
-                                            int64_t(k+1)*step,tps) && r.ok;
+                m.written=captured && rt::Finish(prepared,s,records.data(),sk.n,true,cycle,r,1.0f,rt::kAuthoredContactMinReach,&state,
+                                                 int64_t(k+1)*step,tps);
+                m.ok=m.written && r.ok;
                 m.gate=state.placement.value;
                 if(!rt::Read(prepared,records.data(),o)){out.push_back(Sample{false,-1.0f,9.0f,9.0f,180.0f,9.0f,0.0f,180.0f,180.0f});continue;}
                 m.clavT=std::max(gik::Len(o.b[lc].t-base->b[lc].t),gik::Len(o.b[rc].t-base->b[rc].t));
@@ -1058,6 +1060,7 @@ int main(int argc,char** argv)
                 m.socketStep=havePrev ? gik::Len(socket-prevSocket) : 0.0f;prevSocket=socket;havePrev=true;
                 m.width=gik::Len(native_reload::Model(sk,o,rig.left.upper).t-native_reload::Model(sk,o,rig.right.upper).t);
                 m.bendL=rt::WristBendDeg(o.b[rig.left.hand].r);m.bendR=rt::WristBendDeg(o.b[rig.right.hand].r);
+                {const auto an=rt::MeasureArm(o,rig.left);m.pronL=std::fabs(an.pronationDeg);m.twistL=std::fabs(an.upperTwistDeg);}
                 out.push_back(m);
             }
         };
@@ -1102,9 +1105,87 @@ int main(int argc,char** argv)
             std::printf("  placement guard: the game's own wrist bend L %.1f R %.1f deg\n",gameL,gameR);
             Check(bendL<=std::max({rt::kReloadWristBendLimitDeg,bendL0,gameL})+0.5f && bendR<=std::max({rt::kReloadWristBendLimitDeg,bendR0,gameR})+0.5f,
                   "placement guard (rifle): no wrist bends past the limit, the unguarded frames or the game's own wrist");
+            // 13e. the final anatomy stage on every written frame of this run (full weight): the left arm within its limits
+            {
+                const auto own=rt::MeasureArm(*game,rig.left);
+                int written=0;float wB=0,wP=0,wT=0;
+                for(const auto& m:v)if(m.written){++written;wB=std::max(wB,m.bendL);wP=std::max(wP,m.pronL);wT=std::max(wT,m.twistL);}
+                std::printf("  final left arm limits: written %d/%d frames, max bend %.1f pronation %.1f upper twist %.1f deg (game's own %.1f / %.1f / %.1f)\n",
+                            written,frames,wB,wP,wT,own.bendDeg,std::fabs(own.pronationDeg),std::fabs(own.upperTwistDeg));
+                Check(written>=40 && wB<=rt::kReloadWristBendLimitDeg+0.05f && wP<=rt::kReloadPronationLimitDeg+0.5f && wT<=rt::kReloadUpperArmTwistCapDeg+0.05f,
+                      "final left arm limits (rifle): every written frame keeps the left wrist bend, pronation and upper-arm twist within the limits");
+            }
         }
     }
 
+    // 13. Final anatomy stage of the left arm (LimitArmFinal). (a) under the limits: untouched bit for bit; (b) an arm past all three limits at
+    //     full weight: every value at its limit; (c) half weight: bound = limit + .5 * (game's own - limit); (d) a bend sweep 60 -> 150 deg
+    //     (the one-frame flips of the folded support arm): output at most the limit, the output never steps more than the input.
+    //     13e (inside section 12): every written frame of the production run. Mutation 27 drops the stage.
+    {
+        const auto& L=rig.left;
+        ov::Pose a=*base;
+        a.b[L.upper].r=math::QuatNormalize(rt::kUpperArmRestLocal);
+        a.b[L.lower].r=ov::AxisAngleQuat(math::Vec3{0.0f,0.0f,1.0f},60.0f);
+        a.b[L.hand].r=ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},30.0f);
+        const rt::ArmAnatomy m0=rt::MeasureArm(a,L);
+        ov::Pose a0=a;
+        const auto r0=rt::LimitArmFinal(a0,L,m0,1.0f);
+        Check(m0.ok && m0.bendDeg<rt::kReloadWristBendLimitDeg && !r0.applied &&
+              std::memcmp(&a0.b[L.upper].r,&a.b[L.upper].r,sizeof(math::Quat))==0 && std::memcmp(&a0.b[L.hand].r,&a.b[L.hand].r,sizeof(math::Quat))==0,
+              "final left arm limits: an arm under the limits is untouched bit for bit");
+        ov::Pose bad=a;
+        bad.b[L.upper].r=math::QuatNormalize(math::QuatMul(rt::kUpperArmRestLocal,ov::AxisAngleQuat(math::Vec3{1.0f,0.0f,0.0f},170.0f)));
+        bad.b[L.hand].r=math::QuatNormalize(math::QuatMul(ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},147.0f),ov::AxisAngleQuat(math::Vec3{1.0f,0.0f,0.0f},150.0f)));
+        const rt::ArmAnatomy mb=rt::MeasureArm(bad,L);
+        ov::Pose b1=bad;
+        const auto r1=rt::LimitArmFinal(b1,L,m0,1.0f);
+        const rt::ArmAnatomy m1=rt::MeasureArm(b1,L);
+        std::printf("  final left arm limits: before bend %.1f pronation %.1f twist %.1f -> after %.1f / %.1f / %.1f deg\n",
+                    mb.bendDeg,mb.pronationDeg,mb.upperTwistDeg,m1.bendDeg,m1.pronationDeg,m1.upperTwistDeg);
+        Check(mb.bendDeg>140.0f && std::fabs(mb.upperTwistDeg)>160.0f,"fixture: the bad arm is past the wrist and upper-arm limits");
+        Check(r1.applied && m1.bendDeg<=rt::kReloadWristBendLimitDeg+0.05f && std::fabs(m1.pronationDeg)<=rt::kReloadPronationLimitDeg+0.5f &&
+              std::fabs(m1.upperTwistDeg)<=rt::kReloadUpperArmTwistCapDeg+0.05f,
+              "final left arm limits: bend, pronation and upper-arm twist brought to their limits at full weight");
+        // half weight against a game arm bent to 120 deg: bound 75 + .5 * 45 = 97.5
+        ov::Pose g120=a;
+        g120.b[L.hand].r=ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},120.0f);
+        const rt::ArmAnatomy mg=rt::MeasureArm(g120,L);
+        ov::Pose b2=a;b2.b[L.hand].r=ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},147.0f);
+        rt::LimitArmFinal(b2,L,mg,0.5f);
+        const float half=rt::WristBendDeg(b2.b[L.hand].r),expect=rt::kReloadWristBendLimitDeg+0.5f*(mg.bendDeg-rt::kReloadWristBendLimitDeg);
+        std::printf("  final left arm limits: half weight, game's own bend %.1f -> bound %.1f, output %.1f deg\n",mg.bendDeg,expect,half);
+        Check(std::fabs(half-expect)<0.1f,"final left arm limits: on the weight ramp the bound lies between the limit and the game's own value");
+        float prevIn=0,prevOut=0,maxOut=0,maxStepRatio=0;bool first=true;
+        for(float d=60.0f;d<=150.0f;d+=5.0f)
+        {
+            ov::Pose x=a;x.b[L.hand].r=ov::AxisAngleQuat(math::Vec3{0.0f,1.0f,0.0f},d);
+            rt::LimitArmFinal(x,L,m0,1.0f);
+            const float o=rt::WristBendDeg(x.b[L.hand].r);
+            maxOut=std::max(maxOut,o);
+            if(!first)maxStepRatio=std::max(maxStepRatio,std::fabs(o-prevOut)/std::max(1e-3f,std::fabs(d-prevIn)));
+            prevIn=d;prevOut=o;first=false;
+        }
+        Check(maxOut<=rt::kReloadWristBendLimitDeg+0.05f && maxStepRatio<=1.0f+1e-3f,
+              "final left arm limits: a bend sweep to 150 deg stays at the limit, the output never steps more than the input");
+        // the upper arm twist passes 180 deg (160 -> 200 = -160): with the side memory the output holds +100, no 200 deg roll
+        {
+            rt::FinalLimitSide side;
+            float maxJump=0.0f,prevTw=0.0f,minTw=999.0f,maxTw=-999.0f;bool have=false;
+            for(float d=150.0f;d<=210.0f;d+=5.0f)
+            {
+                ov::Pose x=a;
+                x.b[L.upper].r=math::QuatNormalize(math::QuatMul(rt::kUpperArmRestLocal,ov::AxisAngleQuat(math::Vec3{1.0f,0.0f,0.0f},d)));
+                rt::LimitArmFinal(x,L,m0,1.0f,&side);
+                const float tw=rt::MeasureArm(x,L).upperTwistDeg;
+                if(have)maxJump=std::max(maxJump,std::fabs(tw-prevTw));
+                minTw=std::min(minTw,tw);maxTw=std::max(maxTw,tw);prevTw=tw;have=true;
+            }
+            std::printf("  final left arm limits: twist 150 -> 210 deg: output %.1f .. %.1f deg, largest step %.1f deg\n",minTw,maxTw,maxJump);
+            Check(maxJump<=0.1f && minTw>=rt::kReloadUpperArmTwistCapDeg-0.1f && maxTw<=rt::kReloadUpperArmTwistCapDeg+0.1f,
+                  "final left arm limits: a twist that wraps through 180 deg keeps the output on its side (no flip to -100)");
+        }
+    }
     std::printf("%d passed, %d failed\n",g_pass,g_fail);
     return g_fail?1:0;
 }
