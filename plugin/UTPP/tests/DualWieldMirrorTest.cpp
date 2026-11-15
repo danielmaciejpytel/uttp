@@ -10,7 +10,10 @@
 //  4) weight 0 (and a ramp that never turned on, and a single weapon: DualWieldMirrorWanted false) leaves the pose bit-identical;
 //  5) the blend (also a gap in the stepping: kept while wanted, 0 when not): 60 Hz ramp on, hold, off: the left hand moves continuously (largest step <= 3 x the mean step, and <= 2.5 cm),
 //     reaches the full mirror at the end of the rise and the input pose (bit-identical) at the end of the fall;
-//  6) fail closed: a rest pose with a turned left upper arm, or a missing bone, gives no mirror and Apply does nothing.
+//  6) fail closed: a rest pose with a turned left upper arm, or a missing bone, gives no mirror and Apply does nothing;
+//  7) the stance hold: the right arm goes into the aim stance and back: the left hand stays on the mirrored ready pose (<= 1 mm) and
+//     returns without a step above 2.5 cm per frame; weight 0 clears the hold; a stance with nothing held leaves the pose alone and
+//     the mirror fades in afterwards.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -191,6 +194,108 @@ static void TestBlend(const char* aTag, const RigData& aR, const dm::Mirror& aM,
     (void)mean;
 }
 
+// Stance hold: the right arm goes from the ready pose into the aim stance and back; the left arm keeps the mirrored ready pose.
+static void TestHold(const char* aTag, const RigData& aR, const dm::Mirror& aM, const std::vector<BoneTransform>& aReady,
+                     const std::vector<BoneTransform>& aStance)
+{
+    const float dt = 1.0f / 60.0f;
+    const size_t bytes = sizeof(BoneTransform) * aReady.size();
+    auto rightAt = [&](float aU) {
+        std::vector<BoneTransform> p = aReady;
+        for (int k = 0; k < dm::kPairs; ++k)
+        {
+            const int i = aM.right[k];
+            p[i].q = math::QuatNlerpShortest(aReady[i].q, aStance[i].q, aU);
+            p[i].p = math::Lerp(aReady[i].p, aStance[i].p, aU);
+        }
+        return p;
+    };
+    auto leftHand = [&](const std::vector<BoneTransform>& aP) { return Fk(aR.par, aP).p[aM.left[3]]; };
+    dm::Held held;
+    {
+        std::vector<BoneTransform> a = aReady, b = aReady;
+        dm::Apply(aM, a.data(), 1.0f);
+        dm::ApplyOrHold(aM, held, b.data(), 1.0f, false, dt);
+        Check(std::memcmp(a.data(), b.data(), bytes) == 0 && held.valid, std::string(aTag) + ": hold: outside the stance it is the plain mirror");
+    }
+    std::vector<BoneTransform> ready = aReady;
+    dm::Apply(aM, ready.data(), 1.0f);
+    const math::Vec3 readyHand = leftHand(ready);
+    std::vector<BoneTransform> plain = rightAt(1.0f);
+    dm::Apply(aM, plain.data(), 1.0f);
+    const double plainAway = Len(leftHand(plain) - readyHand);
+    double farthest = 0.0, worstStep = 0.0;
+    math::Vec3 prev = readyHand;
+    bool finite = true;
+    for (int f = 0; f < 60; ++f) // into the stance over 0.25 s, then held
+    {
+        std::vector<BoneTransform> p = rightAt(std::fmin(1.0f, static_cast<float>(f + 1) * dt / 0.25f));
+        dm::ApplyOrHold(aM, held, p.data(), 1.0f, true, dt);
+        const math::Vec3 h = leftHand(p);
+        finite &= math::IsFinite(h);
+        farthest = std::fmax(farthest, static_cast<double>(Len(h - readyHand)));
+        worstStep = std::fmax(worstStep, static_cast<double>(Len(h - prev)));
+        prev = h;
+    }
+    double backStep = 0.0;
+    math::Vec3 last = prev;
+    for (int f = 0; f < 60; ++f) // out of the stance: the right arm returns over 0.25 s, the hold lets go over dm::kBlendSeconds
+    {
+        std::vector<BoneTransform> p = rightAt(std::fmax(0.0f, 1.0f - static_cast<float>(f + 1) * dt / 0.25f));
+        dm::ApplyOrHold(aM, held, p.data(), 1.0f, false, dt);
+        last = leftHand(p);
+        finite &= math::IsFinite(last);
+        backStep = std::fmax(backStep, static_cast<double>(Len(last - prev)));
+        prev = last;
+    }
+    std::printf("[%s] hold: plain mirror of the stance is %.1f cm away; held arm at most %.2f cm away, largest step in %.2f cm, out %.2f cm\n",
+                aTag, 100.0 * plainAway, 100.0 * farthest, 100.0 * worstStep, 100.0 * backStep);
+    Check(finite, std::string(aTag) + ": hold finite");
+    Check(plainAway > 0.20, std::string(aTag) + ": hold: the plain mirror of the aim stance moves the left hand far away (the case)");
+    Check(farthest <= 0.001, std::string(aTag) + ": hold: in the stance the left hand stays on the mirrored ready pose (<= 1 mm)");
+    Check(backStep <= 0.025, std::string(aTag) + ": hold: leaving the stance moves the left hand <= 2.5 cm per frame at 60 Hz");
+    Check(Len(last - readyHand) <= 1e-4f && !(held.u > 0.0f), std::string(aTag) + ": hold: after the stance the live mirror is back");
+    {
+        std::vector<BoneTransform> z = rightAt(1.0f);
+        const std::vector<BoneTransform> z0 = z;
+        Check(!dm::ApplyOrHold(aM, held, z.data(), 0.0f, true, dt) && std::memcmp(z.data(), z0.data(), bytes) == 0 && !held.valid,
+              std::string(aTag) + ": hold: weight 0 leaves the pose and clears the hold");
+        dm::Held fresh;
+        Check(!dm::ApplyOrHold(aM, fresh, z.data(), 1.0f, true, dt) && std::memcmp(z.data(), z0.data(), bytes) == 0,
+              std::string(aTag) + ": hold: two weapons drawn inside the stance: nothing held, pose left as it is");
+    }
+    {
+        // Nothing held in the stance (a reload that ended in the stance): the ramp restarts from 0 and the mirror fades in once
+        // the stance is over.
+        dm::Ramp ramp;
+        dm::Held none;
+        for (int f = 0; f < 60; ++f)
+            ramp.Step(true, dt); // the mirror was fully on before
+        std::vector<BoneTransform> p = rightAt(1.0f);
+        const std::vector<BoneTransform> p0 = p;
+        const float r = dm::StepRamp(ramp, none, true, true, dt);
+        const bool touched = dm::ApplyOrHold(aM, none, p.data(), dm::ShownWeight(r, 1.0f, 0.0f), true, dt);
+        Check(r == 0.0f && !(ramp.u > 0.0f) && !touched && std::memcmp(p.data(), p0.data(), bytes) == 0,
+              std::string(aTag) + ": hold: nothing held in the stance: the ramp restarts from 0, pose left as it is");
+        math::Vec3 prevHand = leftHand(aReady);
+        double fadeStep = 0.0;
+        bool full = false;
+        for (int f = 0; f < 60; ++f) // the stance is over, the right arm is in the ready pose again
+        {
+            std::vector<BoneTransform> q = aReady;
+            const float w = dm::ShownWeight(dm::StepRamp(ramp, none, true, false, dt), 1.0f, 0.0f);
+            dm::ApplyOrHold(aM, none, q.data(), w, false, dt);
+            const math::Vec3 h = leftHand(q);
+            fadeStep = std::fmax(fadeStep, static_cast<double>(Len(h - prevHand)));
+            prevHand = h;
+            full |= w >= 1.0f && Len(h - readyHand) <= 1e-4f;
+        }
+        std::printf("[%s] hold: fade in after a stance with nothing held: largest step %.2f cm\n", aTag, 100.0 * fadeStep);
+        Check(fadeStep <= 0.025 && full,
+              std::string(aTag) + ": hold: after such a stance the mirror fades in (<= 2.5 cm per frame) up to the full mirror");
+    }
+}
+
 static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char* aTag)
 {
     auto db = std::make_unique<motion::MotionDatabase>();
@@ -239,7 +344,7 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
     Check(spine >= 0 && spine1 >= 0, std::string(aTag) + ": spine bones");
     double worstCm = 0.0, worstDeg = 0.0;
     int poses = 0;
-    std::vector<BoneTransform> blendPose;
+    std::vector<BoneTransform> blendPose, stancePose;
     for (int pi = 0; pi < ovf->NumPoses(); ++pi)
     {
         const std::string name(ovf->PoseName(pi));
@@ -274,6 +379,8 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
         CheckMirrored(aTag, name + " (chest turned)", r, mir, turned, worstCm, worstDeg);
         if (blendPose.empty() && name.find("Ready") != std::string::npos)
             blendPose = in;
+        if (stancePose.empty() && name.find("Stand_Aim") != std::string::npos)
+            stancePose = in;
         ++poses;
     }
     Check(poses >= 4, std::string(aTag) + ": one-handed weapon poses found (" + std::to_string(poses) + ")");
@@ -289,6 +396,10 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
     // 5) blend
     if (!blendPose.empty())
         TestBlend(aTag, r, mir, blendPose);
+    // 5b) stance hold
+    Check(!blendPose.empty() && !stancePose.empty(), std::string(aTag) + ": ready and standing aim poses found for the hold test");
+    if (!blendPose.empty() && !stancePose.empty())
+        TestHold(aTag, r, mir, blendPose, stancePose);
     // gap in the stepping: still wanted -> no drop (no pop); no longer wanted -> exactly 0, pose bit-identical
     {
         dm::Ramp g;

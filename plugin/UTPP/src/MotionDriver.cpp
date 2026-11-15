@@ -1725,6 +1725,7 @@ float WallP95Locked() { return P95Of(g_wallTimes); } // status / log only, never
 bool DualWieldNow() { return integ::PsmDualOf(g_feedPsmRaw.load(std::memory_order_relaxed)); }
 // Dual wield left arm: ramp of the mirror (DualWieldMirror.hpp) and when it last stepped (the shown weight: g_dualMirrorW).
 dualmirror::Ramp g_dualMirrorRamp;
+dualmirror::Held g_dualMirrorHeld; // the mirrored ready pose kept through the aim / fire stance
 int64_t g_dualMirrorNs = 0;
 
 ov::PoseOverlay OverlayLocked()
@@ -3641,6 +3642,7 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
     motionpose::FrameInfo info;
     g_ovArmsNow = false; // traversal montage frames never claim both hands on the weapon
     g_dualMirrorRamp.Reset(); // dual wield left arm: not on montage frames; fades in again afterwards
+    g_dualMirrorHeld.Reset();
     g_dualMirrorW = 0.0f;
     const bool ok = fromPoses ? b.eval.EvaluateWithPose(dt, mr, b.travRaw.data(), in, b.pose.data(),
                                                         static_cast<uint32_t>(b.pose.size()), &info)
@@ -3879,14 +3881,14 @@ void DualWieldMirrorStepLocked(Bundle& b, const motionpose::FrameInfo& aInfo, fl
     const int64_t now = SteadyNs();
     const bool gap = g_dualMirrorNs == 0 || now - g_dualMirrorNs > 250000000ll;
     g_dualMirrorNs = now;
-    // Not while aiming: the one-handed aim is a side stance, and its mirror image would point the left weapon far away from
-    // the target; the left arm then keeps the pose it has without the mirror.
-    const bool wanted = b.dualMirror.Valid() && ov::DualWieldMirrorWanted(OverlayLocked(), DualWieldNow()) && g_weaponAction != 2 &&
-                        !g_aimingNow;
-    const float ramp = g_dualMirrorRamp.Step(wanted, aDt, gap);
+    const bool wanted = b.dualMirror.Valid() && ov::DualWieldMirrorWanted(OverlayLocked(), DualWieldNow()) && g_weaponAction != 2;
+    // The aim and the hip-fire pose are a side stance: the left arm keeps the mirrored ready pose there (dualmirror::Held)
+    // instead of the mirror of the stance, which would point the left weapon away from the target.
+    const bool stance = g_aimingNow || g_hipFirePoseNow || g_hipFirePoseHold.Active();
+    const float ramp = dualmirror::StepRamp(g_dualMirrorRamp, g_dualMirrorHeld, wanted, stance, aDt, gap);
     const float armR = (aInfo.curves.present & (1u << ov::kArmR)) != 0 ? aInfo.curves[ov::kArmR] : 0.0f;
     g_dualMirrorW = dualmirror::ShownWeight(ramp, armR, g_reloadUpperWeight);
-    dualmirror::Apply(b.dualMirror, b.pose.data(), g_dualMirrorW);
+    dualmirror::ApplyOrHold(b.dualMirror, g_dualMirrorHeld, b.pose.data(), g_dualMirrorW, stance, aDt);
 }
 
 // MM owns the arms in TPP: ApplyLocked publishes the MM upper body at upperScale 1 (weapon overlay drawn, no release, no reload action /

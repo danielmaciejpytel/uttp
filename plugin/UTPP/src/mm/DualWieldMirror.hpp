@@ -250,11 +250,77 @@ inline bool Apply(const Mirror& aM, BoneTransform* aPose, float aW)
     return true;
 }
 
-// Weight of the mirror, stepped once per frame: rises / falls over kBlendSeconds (smoothstep shaped) while the condition holds /
-// is gone. The shown weight multiplies the shaped ramp by the caller's other factors. 0.65 s: the left hand travels up to ~0.6 m
+// Blend time of the mirror weight (see Ramp) and of the return from the stance hold. 0.65 s: the left hand travels up to ~0.6 m
 // between the free arm of the weapon pose and the mirror (ready pose), so the smoothstep peak stays near 1.5 m/s (<= 2.5 cm per
 // frame at 60 Hz).
 inline constexpr float kBlendSeconds = 0.65f;
+
+// Stance hold. The aim / fire pose of the one-handed weapon is a side stance: its mirror image points the left weapon far away
+// from the target. While the right arm is in that stance the left chain therefore keeps the mirrored locals of the last frame
+// outside it (the ready pose) instead of the mirror of the current right arm. Entering the stance is continuous (the held locals
+// are the previous frame's target, so the switch is immediate); leaving it returns to the live mirror over kBlendSeconds, while
+// the right arm blends back to the ready pose; a stance that comes back during that return takes the hold again over
+// kHoldInSeconds.
+inline constexpr float kHoldInSeconds = 0.1f;
+struct Held
+{
+    bool valid = false;
+    float u = 0.0f; // 0 = the live mirror, 1 = the held locals
+    BoneTransform local[kPairs];
+    void Reset() { valid = false; u = 0.0f; }
+};
+
+// Like Apply, with the stance hold (aStance: the right arm is in the aim / fire stance this frame). aW <= 0: the pose is not
+// touched and the hold is cleared. In the stance with nothing held yet (two weapons drawn while aiming) the pose is left as it is.
+inline bool ApplyOrHold(const Mirror& aM, Held& aHeld, BoneTransform* aPose, float aW, bool aStance, float aDt)
+{
+    if (!(aW > 0.0f) || !aM.ok || aPose == nullptr)
+    {
+        aHeld.Reset();
+        return false;
+    }
+    const float dt = std::isfinite(aDt) && aDt > 0.0f ? aDt : 0.0f;
+    if (aStance && aHeld.valid)
+        aHeld.u = aHeld.u > 0.0f ? std::fmin(1.0f, aHeld.u + dt / kHoldInSeconds) : 1.0f;
+    else
+        aHeld.u = std::fmax(0.0f, aHeld.u - dt / kBlendSeconds);
+    BoneTransform target[kPairs];
+    if (!MirroredLeftLocals(aM, aPose, target))
+        return false;
+    if (!aStance && !(aHeld.u > 0.0f))
+    {
+        for (int k = 0; k < kPairs; ++k)
+            aHeld.local[k] = target[k];
+        aHeld.valid = true;
+    }
+    else if (aHeld.valid)
+    {
+        const float s = aHeld.u * aHeld.u * (3.0f - 2.0f * aHeld.u);
+        for (int k = 0; k < kPairs; ++k)
+        {
+            target[k].q = math::QuatNlerpShortest(target[k].q, aHeld.local[k].q, s);
+            target[k].p = math::Lerp(target[k].p, aHeld.local[k].p, s);
+        }
+    }
+    else
+        return false;
+    const float w = aW < 1.0f ? aW : 1.0f;
+    for (int k = 0; k < kPairs; ++k)
+    {
+        BoneTransform& b = aPose[aM.left[k]];
+        if (w >= 1.0f)
+            b = target[k];
+        else
+        {
+            b.q = math::QuatNlerpShortest(b.q, target[k].q, w);
+            b.p = math::Lerp(b.p, target[k].p, w);
+        }
+    }
+    return true;
+}
+
+// Weight of the mirror, stepped once per frame: rises / falls over kBlendSeconds (smoothstep shaped) while the condition holds /
+// is gone. The shown weight multiplies the shaped ramp by the caller's other factors.
 // aGap: the ramp was not stepped for a while (skipped frames, game pause). Still wanted: it keeps its value (no pop of the arm when
 // the frames resume); no longer wanted: it is 0 at once (two weapons were put away during the gap, nothing to fade from).
 struct Ramp
@@ -271,6 +337,19 @@ struct Ramp
     float Shaped() const { return u * u * (3.0f - 2.0f * u); }
     void Reset() { u = 0.0f; }
 };
+
+// Ramp step with the stance rule: in the stance with nothing held (two weapons drawn while aiming, a reload that ended in the
+// stance) the left arm is left alone and the ramp restarts from 0, so the mirror fades in after the stance instead of appearing
+// at full weight.
+inline float StepRamp(Ramp& aRamp, const Held& aHeld, bool aWanted, bool aStance, float aDt, bool aGap = false)
+{
+    if (aStance && !aHeld.valid)
+    {
+        aRamp.Reset();
+        return 0.0f;
+    }
+    return aRamp.Step(aWanted, aDt, aGap);
+}
 
 // Shown weight: ramp x the right arm layer weight of the weapon pose (a right arm that follows locomotion is not copied) x the
 // reload envelope complement (the reload keeps its own behaviour).
