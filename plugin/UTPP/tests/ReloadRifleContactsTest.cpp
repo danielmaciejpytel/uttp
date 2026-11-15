@@ -1143,37 +1143,37 @@ int main(int argc,char** argv)
                 for(size_t k=0;same && k<off.written.size();++k)
                     if(off.written[k].size()!=on.written[k].size() ||
                        std::memcmp(off.written[k].data(),on.written[k].data(),off.written[k].size())!=0)++differing;
-                int exits[16]{},replays=0,holds=0,finalLimited=0,gateMatch=0,gateFrames=0,bendMatch=0,bendFrames=0,elbowFinite=0,accepted=0;
+                int exits[16]{},replays=0,holds=0,finalLimited=0,gateMatch=0,gateFrames=0,bendMatch=0,bendFrames=0,elbowFinite=0,acceptedRecs=0;
                 for(int k=0;k<frames && k<int(on.recs.size());++k)
                 {
-                    const auto& rc=on.recs[size_t(k)];
-                    ++exits[rc.exit&15];
-                    if(rc.flags&reload_trace::kFlagReplayWritten)++replays;
-                    if(rc.path==reload_trace::kPathHold)++holds;
-                    if(rc.flags&reload_trace::kFlagFinalLimit)++finalLimited;
-                    if(std::isfinite(rc.placementGate)){++gateFrames;if(rc.placementGate==vOn[size_t(k)].gate)++gateMatch;}
-                    if(vOn[size_t(k)].written && std::isfinite(rc.anat[reload_trace::kAnatFinal][2]))
-                    {++bendFrames;if(std::fabs(rc.anat[reload_trace::kAnatFinal][2]-vOn[size_t(k)].bendL)<1.0e-3f)++bendMatch;}
-                    if(rc.exit==reload_trace::kExitAccepted)
+                    const auto& rec=on.recs[size_t(k)];
+                    ++exits[rec.exit&15];
+                    if(rec.flags&reload_trace::kFlagReplayWritten)++replays;
+                    if(rec.path==reload_trace::kPathHold)++holds;
+                    if(rec.flags&reload_trace::kFlagFinalLimit)++finalLimited;
+                    if(std::isfinite(rec.placementGate)){++gateFrames;if(rec.placementGate==vOn[size_t(k)].gate)++gateMatch;}
+                    if(vOn[size_t(k)].written && std::isfinite(rec.anat[reload_trace::kAnatFinal][2]))
+                    {++bendFrames;if(std::fabs(rec.anat[reload_trace::kAnatFinal][2]-vOn[size_t(k)].bendL)<1.0e-3f)++bendMatch;}
+                    if(rec.exit==reload_trace::kExitAccepted)
                     {
-                        ++accepted;
+                        ++acceptedRecs;
                         bool fin=true;
-                        for(int i=0;i<3;++i)fin=fin && std::isfinite(rc.elbowSolve[i]) && std::isfinite(rc.elbowSwivel[i]) && std::isfinite(rc.elbowOut[i]) &&
-                                                  std::isfinite(rc.shoulder[i]) && std::isfinite(rc.guide[i]) && std::isfinite(rc.handTarget[i]);
+                        for(int i=0;i<3;++i)fin=fin && std::isfinite(rec.elbowSolve[i]) && std::isfinite(rec.elbowSwivel[i]) && std::isfinite(rec.elbowOut[i]) &&
+                                                  std::isfinite(rec.shoulder[i]) && std::isfinite(rec.guide[i]) && std::isfinite(rec.handTarget[i]);
                         if(fin)++elbowFinite;
                     }
                 }
                 const double msOff=std::chrono::duration<double,std::milli>(t1-t0).count()/(5.0*frames);
                 const double msOn=std::chrono::duration<double,std::milli>(t2-t1).count()/(5.0*frames);
-                std::printf("  record: %d/%d frames differ (record on vs off) | exits: weight0 %d, placement out %d, solve reject %d, accepted %d | "
+                std::printf("  record: %d/%d frames differ (record on vs off) | exits: weight0 %d, placement out %d, solve reject %d, acceptedRecs %d | "
                             "replays %d, hold frames %d, final-limit frames %d | gate %d/%d, final bend %d/%d match | per frame %.3f ms off, %.3f ms on\n",
                             differing,frames,exits[reload_trace::kExitWeightZero],exits[reload_trace::kExitPlacementOut],exits[reload_trace::kExitSolveReject],
-                            accepted,replays,holds,finalLimited,gateMatch,gateFrames,bendMatch,bendFrames,msOff,msOn);
+                            acceptedRecs,replays,holds,finalLimited,gateMatch,gateFrames,bendMatch,bendFrames,msOff,msOn);
                 Check(same && differing==0,"record: the written records are identical with the record on and off on every frame");
-                Check(exits[reload_trace::kExitWeightZero]>=1 && exits[reload_trace::kExitPlacementOut]>=1 && accepted>=20 && holds==1 &&
+                Check(exits[reload_trace::kExitWeightZero]>=1 && exits[reload_trace::kExitPlacementOut]>=1 && acceptedRecs>=20 && holds==1 &&
                       on.recs[45].path==reload_trace::kPathHold && on.recs[0].exit==reload_trace::kExitWeightZero,
-                      "record: the weight-0 frame, the placement guard cut, the accepted frames and the HoldOnly frame are told apart");
-                Check(replays>=1 && gateFrames>=20 && gateMatch==gateFrames && bendFrames>=20 && bendMatch==bendFrames && elbowFinite==accepted,
+                      "record: the weight-0 frame, the placement guard cut, the acceptedRecs frames and the HoldOnly frame are told apart");
+                Check(replays>=1 && gateFrames>=20 && gateMatch==gateFrames && bendFrames>=20 && bendMatch==bendFrames && elbowFinite==acceptedRecs,
                       "record: replays flagged, placement gate and final left wrist bend equal the production values, accepted frames carry the left-arm solve");
             }
         }
