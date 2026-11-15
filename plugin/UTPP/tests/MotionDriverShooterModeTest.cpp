@@ -1431,7 +1431,9 @@ uint64_t RunDigest(const Run& aR)
 // LeftHand local rotations (Build/work/pose-integration-20261109/t1f_compare_result.txt).
 // Re-recorded 2026-11-11 (task C6) as DATA IDENTITY: the woman test database is now the package database; the previous 0x9190a413cb327fb0
 // belongs to the former 800-clip bake and was NOT re-derived on a pre-seam-C build.
-constexpr uint64_t kBarrelLoopOffDigest = 0xbe0d68357f289848ull;
+// Re-recorded 2026-11-15 (shoulder girdle width bound on standing two-handed poses, shared hand shift up to 4 cm): the previous
+// 0xbe0d68357f289848 is reproduced bit for bit (5/5 PASS) by a build with -DUTPP_CLAVLIMIT_MUTATION=6 (the bound never acts).
+constexpr uint64_t kBarrelLoopOffDigest = 0x51231925325c38e5ull;
 void BarrelCase(Rt& rt)
 {
     RestoreDefaults();
