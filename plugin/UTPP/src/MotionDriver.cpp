@@ -3624,6 +3624,12 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
             used += std::snprintf(poseTrace + used, sizeof(poseTrace) - static_cast<size_t>(used), " clavLimit=%.1f/%.1f%s",
                                   static_cast<double>(info.clavicleLimit.leftDeg),
                                   static_cast<double>(info.clavicleLimit.rightDeg), info.clavicleLimit.applied ? " lim" : "");
+        // only while the stop crossfade bound of the clavicles is not free (the other trace lines are unchanged)
+        if (used > 0 && used < static_cast<int>(sizeof(poseTrace)) && info.clavicleTransient.gate < 1.0f)
+            used += std::snprintf(poseTrace + used, sizeof(poseTrace) - static_cast<size_t>(used), " clavHold=%.1f/%.1f/%.2f%s",
+                                  static_cast<double>(info.clavicleTransient.leftDeg),
+                                  static_cast<double>(info.clavicleTransient.rightDeg),
+                                  static_cast<double>(info.clavicleTransient.gate), info.clavicleTransient.applied ? " held" : "");
         g_log(poseTrace);
     }
 }
