@@ -359,14 +359,23 @@ std::atomic<bool> g_selectionGuards{true};
 std::atomic<uint32_t> g_feedPsmRaw{0};
 // Dual wield left arm: the mirror weight shown on the last frame (DualWieldMirrorStepLocked); status " dualMirror=".
 float g_dualMirrorW = 0.0f;
-float g_dualTwinDeg = 0.0f; // twin stance: turn of the right upper arm on the last frame (status " dualTwin=")
+float g_dualTwinDeg = 0.0f; // twin stance: angle between the two barrels shown on the last frame, 0 when not aiming (status " dualTwin=")
+// Dual wield recoil per arm (FeedRecoilShotLeft, DualWieldMirrorStepLocked). Status " dualLeftShot=<accepted>/<dropped>": shot pulses
+// of the left weapon that reached the plugin; " dualLeftKick=": left hand kick of the last frame (cm); " dualPreMirror=1": the mirror
+// was built from the right arm before the right weapon's kick on the last frame.
+uint64_t g_dualLeftShotAccepted = 0, g_dualLeftShotDropped = 0;
+float g_dualLeftKickCm = 0.0f;
+bool g_dualPreMirror = false;
 std::string DualStatusSuffix()
 {
-    char buf[96];
+    char buf[192];
     const int used = integ::PsmDualStatusSuffix(buf, sizeof buf, g_feedPsmRaw.load(std::memory_order_relaxed));
     if (used > 0 && used < static_cast<int>(sizeof buf))
-        std::snprintf(buf + used, sizeof buf - static_cast<size_t>(used), " dualMirror=%.2f dualTwin=%.1f", static_cast<double>(g_dualMirrorW),
-                      static_cast<double>(g_dualTwinDeg));
+        std::snprintf(buf + used, sizeof buf - static_cast<size_t>(used),
+                      " dualMirror=%.2f dualTwin=%.1f dualLeftShot=%llu/%llu dualLeftKick=%.2f dualPreMirror=%d",
+                      static_cast<double>(g_dualMirrorW), static_cast<double>(g_dualTwinDeg),
+                      static_cast<unsigned long long>(g_dualLeftShotAccepted), static_cast<unsigned long long>(g_dualLeftShotDropped),
+                      static_cast<double>(g_dualLeftKickCm), g_dualPreMirror ? 1 : 0);
     return buf;
 }
 std::atomic<bool> g_aimJogOff{true}; // G9: the last UTPPMMAimJogTarget answer was 0 (vanilla aim walk speed; default before any query)
@@ -1742,6 +1751,24 @@ bool DualWieldNow() { return integ::PsmDualOf(g_feedPsmRaw.load(std::memory_orde
 dualmirror::Ramp g_dualMirrorRamp;
 dualmirror::Follow g_dualMirrorFollow; // the shown left chain (speed-limited follower of the mirror target)
 int64_t g_dualMirrorNs = 0;
+// Kick of the left weapon (FeedRecoilShotLeft): the same authored clip player as the right weapon, on its own clock state.
+struct DualLeftRecoil
+{
+    authored_recoil::Player player;
+    bool pending = false, aim = false;
+    uint32_t epoch = 0;
+    int32_t profile = recoil_profile::kNone;
+    int clip = 0;
+    uint64_t serial = 0;
+    double shotTime = 0.0, admitTime = 0.0;
+    void Reset()
+    {
+        player.Reset();
+        pending = false;
+        serial = 0;
+    }
+};
+DualLeftRecoil g_dualLeftRecoil;
 
 ov::PoseOverlay OverlayLocked()
 {
@@ -2437,6 +2464,28 @@ void FeedRecoilShot(uint32_t aEpoch, bool aAiming)
     // A short pending pulse is consumed by the next eligible MAIN frame.
     ++g_recoilSerial; g_recoilShotTime = RecoilClock();
     g_recoilAim = aAiming; g_recoilPending = true; g_recoilPendingSteps = 0;
+}
+
+void FeedRecoilShotLeft(uint32_t aEpoch, int32_t aProfile, bool aAiming)
+{
+    std::lock_guard lock(g_m);
+    DualLeftRecoil& l = g_dualLeftRecoil;
+    // Only with two weapons drawn; a pulse of an unknown profile or without a weapon token fails closed.
+    if (!g_enabled || !g_shootTransferEnabled || g_release || aEpoch == 0 || !recoil_profile::Valid(aProfile) ||
+        aProfile == recoil_profile::kNone || !DualWieldNow())
+    {
+        ++g_dualLeftShotDropped;
+        return;
+    }
+    if (aEpoch != l.epoch || aProfile != l.profile)
+        l.Reset(); // another left weapon: no carry of the old weapon's kick
+    l.epoch = aEpoch;
+    l.profile = aProfile;
+    ++l.serial;
+    l.shotTime = RecoilClock();
+    l.aim = aAiming;
+    l.pending = true;
+    ++g_dualLeftShotAccepted;
 }
 
 bool FeedMagTap()
@@ -3910,9 +3959,100 @@ void MagTapAgePendingLocked()
 // (the reload keeps its own behaviour); no ramp during a weapon action (reload). Weight 0 leaves the pose untouched, so a single
 // weapon is bit-identical. After 0.25 s without a step (skipped frames, pause) the ramp keeps its value while still wanted and is 0
 // at once when not (dualmirror::Ramp aGap).
-// Twin stance: in the aim and the hip-fire pose (the machine's aiming weight) the right upper arm is first turned about the
-// shoulder until its barrel points along the chest mid plane (dualmirror::ApplyTwinRight, weight = aiming weight x shown weight),
-// so the mirror points both weapons the same way. The left chain follows its mirror target at <= 2.4 cm per frame at 60 Hz.
+// Twin stance: in the aim and the hip-fire pose (the machine's aiming weight) the right arm keeps its stance and the left chain's
+// target is dualmirror::TwinTarget (both barrels parallel in model space). The left chain follows its target at <= 2.4 cm per frame
+// at 60 Hz.
+// Recoil per arm, left weapon: its shot pulses (FeedRecoilShotLeft) play the authored clip of its own profile (the same clips and
+// limits as on the right weapon) on their own player. The weapon-local kick is mirrored into the left weapon's frame
+// (dualmirror::MirrorWeaponMotion) and the left arm is solved for it with the arm IK of the shot route (gik::SolveArm, default reach
+// parameters, the same 1 cm contact criterion and the same search for the reachable part of the kick). It is applied after the
+// follower, so the follower's speed limit neither swallows nor stretches it, and blended over the shown left arm with
+// weight = admission (0.05 s) x the clip's tail envelope x the follower's shown weight: it starts and ends with the clip (identity at
+// both ends), fades with the stance and the reload envelope, and is 0 whenever the mirror is not shown. The right arm is not touched.
+void DualLeftKickLocked(Bundle& b)
+{
+    DualLeftRecoil& l = g_dualLeftRecoil;
+    g_dualLeftKickCm = 0.0f;
+    const float shown = g_dualMirrorFollow.w;
+    const bool ready = recoil_profile::Valid(l.profile) && b.recoilOk[static_cast<size_t>(l.profile)];
+    if (!ready || !(shown > 0.0f) || !b.dualMirror.Valid() || !g_enabled || g_release)
+    {
+        l.player.Reset();
+        l.pending = false;
+        return;
+    }
+    const double now = RecoilClock();
+    if (l.pending && now - l.shotTime > 0.5)
+        l.pending = false; // a stale pulse (no frame for 0.5 s) does not start late
+    integ::PoseSnapshot map;
+    const bool mapped = integ::g_gamePoseReadMap.Read(map) && map.rig == g_rig && map.sequence != 0;
+    if (!mapped)
+        return;
+    const authored_recoil::Binding binding{l.epoch, g_rig, map.sequence};
+    auto& clips = b.recoil[static_cast<size_t>(l.profile)];
+    if (l.pending)
+    {
+        if (!l.player.Active())
+            l.admitTime = now;
+        l.clip = l.aim ? 1 : 0;
+        l.player.Trigger(clips[static_cast<size_t>(l.clip)], binding, l.serial, now, recoil_profile::LimitsOf(l.profile));
+        l.pending = false;
+    }
+    ov::Xf delta;
+    if (!l.player.Sample(clips[static_cast<size_t>(l.clip)], binding, now, delta))
+        return;
+    const float u = std::clamp(static_cast<float>((now - l.admitTime) / 0.05), 0.0f, 1.0f);
+    const float weight = std::max(0.001f, u * u * (3.0f - 2.0f * u)) * l.player.TailWeight(now) * std::fmin(1.0f, shown);
+    ov::Xf mirrored;
+    if (!(weight > 0.0f) || !dualmirror::MirrorWeaponMotion(b.dualMirror, delta.r, delta.t, mirrored.r, mirrored.t))
+        return;
+    const ov::Skeleton& sk = b.eval.Skel();
+    const gik::Rig& rig = b.eval.GripRig();
+    if (!rig.Valid(sk) || rig.weaponLeft < 0)
+        return;
+    static ov::Pose s_shown, s_solved;
+    b.eval.ToOv(b.pose.data(), s_shown);
+    ov::Xf weapon, hand;
+    gik::ModelOf(sk, s_shown, rig.weaponLeft, weapon.r, weapon.t);
+    gik::ModelOf(sk, s_shown, rig.left.hand, hand.r, hand.t);
+    ov::Xf target;
+    const auto solve = [&](float aScale) {
+        s_solved = s_shown;
+        target = native_shoot::RightHandTarget(ov::BlendXf(ov::Xf{}, mirrored, aScale), weapon, hand);
+        gik::Result res;
+        if (!gik::SolveArm(sk, s_solved, rig.left, target.t, &target.r, 1.0f, gik::Params{}, res) || !res.ok ||
+            !(res.handErr <= 0.01f))
+            return false;
+        int h = rig.left.hand;
+        ov::MoveForearmTwistToHand(s_solved, rig.left.lower, h, &h, 1); // the evaluator's forearm roll convention
+        return true;
+    };
+    float reachable = 1.0f;
+    bool solved = solve(reachable);
+    if (!solved && solve(0.0f))
+    {
+        float high = 1.0f;
+        reachable = 0.0f;
+        for (int attempt = 0; attempt < 6; ++attempt)
+        {
+            const float middle = (reachable + high) * 0.5f;
+            if (solve(middle)) reachable = middle;
+            else high = middle;
+        }
+        solved = solve(reachable);
+    }
+    if (!solved)
+        return;
+    for (int k = 1; k <= 3; ++k)
+    {
+        const int32_t db = b.dualMirror.left[k];
+        BoneTransform& x = b.pose[static_cast<size_t>(db)];
+        const ov::Xf& s = s_solved.b[b.eval.OvBone(static_cast<uint32_t>(db))];
+        x.q = math::QuatNlerpShortest(x.q, s.r, weight);
+    }
+    g_dualLeftKickCm = 100.0f * weight * gik::Len(target.t - hand.t);
+}
+
 void DualWieldMirrorStepLocked(Bundle& b, const motionpose::FrameInfo& aInfo, float aDt)
 {
     const int64_t now = SteadyNs();
@@ -3923,9 +4063,65 @@ void DualWieldMirrorStepLocked(Bundle& b, const motionpose::FrameInfo& aInfo, fl
     const float armR = (aInfo.curves.present & (1u << ov::kArmR)) != 0 ? aInfo.curves[ov::kArmR] : 0.0f;
     g_dualMirrorW = dualmirror::ShownWeight(ramp, armR, g_reloadUpperWeight);
     const float aim = std::isfinite(aInfo.aoWeight) ? std::fmin(1.0f, std::fmax(0.0f, aInfo.aoWeight)) : 0.0f;
-    g_dualTwinDeg = static_cast<float>(dualmirror::ApplyTwinRight(b.dualMirror, b.pose.data(), g_dualMirrorW * aim));
-    // the twin keeps the left clavicle of the pose (the mirror of an aimed right clavicle narrows the shoulders)
-    dualmirror::ApplyFollow(b.dualMirror, g_dualMirrorFollow, b.pose.data(), g_dualMirrorW, aDt, g_dualMirrorW * aim);
+    // Recoil per arm, right weapon: while its kick is on the right arm (the evaluator's shot route applied it this frame) the mirror
+    // and the twin target are built from a copy of the pose whose right arm is the one before the kick (with the same forearm roll
+    // pass as the shown right arm), so the left arm does not copy the right weapon's kick.
+    const BoneTransform* mirrorSource = nullptr;
+    g_dualPreMirror = false;
+#if !(defined(UTPP_DUALWIELD_RECOIL_MUTATION) && UTPP_DUALWIELD_RECOIL_MUTATION == 1) // mutation 1: the mirror copies the kicked right arm
+    if (aInfo.shootPre != nullptr && (g_dualMirrorW > 0.0f || g_dualMirrorFollow.w > 0.0f) && b.dualMirror.Valid())
+    {
+        static std::vector<BoneTransform> s_source;
+        static ov::Pose s_pre;
+        const gik::Rig& rig = b.eval.GripRig();
+        if (rig.Valid(b.eval.Skel()))
+        {
+            s_source.assign(b.pose.begin(), b.pose.end());
+            s_pre = *aInfo.shootPre;
+            int hand = rig.right.hand;
+            ov::MoveForearmTwistToHand(s_pre, rig.right.lower, hand, &hand, 1); // the evaluator's forearm roll pass, right arm
+            for (int k = 1; k <= 3; ++k) // upper arm, forearm, hand: the bones the shot route solves (clavicles and weapon untouched)
+            {
+                const int32_t db = b.dualMirror.right[k];
+                const ov::Xf& x = s_pre.b[b.eval.OvBone(static_cast<uint32_t>(db))];
+                s_source[static_cast<size_t>(db)].q = x.r;
+                s_source[static_cast<size_t>(db)].p = x.t;
+            }
+            mirrorSource = s_source.data();
+            g_dualPreMirror = true;
+        }
+    }
+#endif
+    // Twin stance (aim / hip fire, weight = aiming weight x shown weight): the right arm keeps the stance's own pose; the left chain's
+    // target is dualmirror::TwinTarget (left barrel parallel to the right one in model space, 25 cm to the left on the line of the right
+    // barrel, slid back into reach, elbow down and out, the pose's own left clavicle), followed with the same speed limit. Weight 0:
+    // the plain mirror target. Nothing is computed while the mirror is not shown (single weapon: the pose is not touched).
+    g_dualTwinDeg = 0.0f;
+    BoneTransform target[dualmirror::kPairs];
+    const BoneTransform* followTarget = nullptr;
+    if ((g_dualMirrorW > 0.0f || g_dualMirrorFollow.w > 0.0f) && b.dualMirror.Valid())
+    {
+        const BoneTransform* src = mirrorSource ? mirrorSource : b.pose.data();
+        const dualmirror::M3 chest = dualmirror::ChestModelRotation(b.dualMirror, src, [&](uint32_t i) { return b.db.BoneParent(i); });
+        if (dualmirror::TwinTarget(b.dualMirror, src, chest, g_dualMirrorW * aim, target))
+            followTarget = target;
+    }
+    dualmirror::ApplyFollow(b.dualMirror, g_dualMirrorFollow, b.pose.data(), g_dualMirrorW, aDt, g_dualMirrorW * aim, mirrorSource,
+                            followTarget);
+    if (g_dualMirrorFollow.w > 0.0f && aim > 0.0f)
+    {
+        // status " dualTwin=": angle between the two barrels shown (deg)
+        dualmirror::Xd r = {}, l = {};
+        for (int k = 0; k < dualmirror::kPairs; ++k)
+        {
+            r = dualmirror::Compose(r, dualmirror::FromBone(b.pose[static_cast<size_t>(b.dualMirror.right[k])]));
+            l = dualmirror::Compose(l, dualmirror::FromBone(b.pose[static_cast<size_t>(b.dualMirror.left[k])]));
+        }
+        const int ax = dualmirror::kBarrelAxis;
+        const double c = r.r.m[0][ax] * l.r.m[0][ax] + r.r.m[1][ax] * l.r.m[1][ax] + r.r.m[2][ax] * l.r.m[2][ax];
+        g_dualTwinDeg = static_cast<float>(std::acos(std::fmax(-1.0, std::fmin(1.0, c))) * 180.0 / 3.14159265358979323846);
+    }
+    DualLeftKickLocked(b);
 }
 
 // MM owns the arms in TPP: ApplyLocked publishes the MM upper body at upperScale 1 (weapon overlay drawn, no release, no reload action /

@@ -92,6 +92,12 @@ void Native_FeedMMRecoilShot(RED4ext::IScriptable*, RED4ext::CStackFrame* frame,
     RED4ext::GetParameter(frame, &epoch); RED4ext::GetParameter(frame, &aiming);
     frame->code++; FeedRecoilShot(epoch, aiming);
 }
+void Native_FeedMMRecoilShotLeft(RED4ext::IScriptable*, RED4ext::CStackFrame* frame, void*, int64_t)
+{
+    uint32_t epoch = 0; int32_t profile = 0; bool aiming = false;
+    RED4ext::GetParameter(frame, &epoch); RED4ext::GetParameter(frame, &profile); RED4ext::GetParameter(frame, &aiming);
+    frame->code++; FeedRecoilShotLeft(epoch, profile, aiming);
+}
 
 void Native_GetMotionStatus(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
 {
@@ -503,6 +509,9 @@ void RegisterNatives()
     auto* rs = RED4ext::CGlobalFunction::Create("UTPPFeedMMRecoilShot", "UTPPFeedMMRecoilShot", &Native_FeedMMRecoilShot);
     rs->flags = flags; rs->AddParam("Uint32", "weaponEpoch"); rs->AddParam("Bool", "aiming");
     rtti->RegisterFunction(rs);
+    auto* rsl = RED4ext::CGlobalFunction::Create("UTPPFeedMMRecoilShotLeft", "UTPPFeedMMRecoilShotLeft", &Native_FeedMMRecoilShotLeft);
+    rsl->flags = flags; rsl->AddParam("Uint32", "weaponEpoch"); rsl->AddParam("Int32", "recoilProfile"); rsl->AddParam("Bool", "aiming");
+    rtti->RegisterFunction(rsl);
     auto* ra = RED4ext::CGlobalFunction::Create("UTPPSetMMAuthoredReload", "UTPPSetMMAuthoredReload", &Native_SetMMAuthoredReload);
     ra->flags = flags; ra->AddParam("Bool", "on"); rtti->RegisterFunction(ra);
 

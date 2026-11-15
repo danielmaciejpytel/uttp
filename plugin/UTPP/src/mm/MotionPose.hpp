@@ -183,6 +183,9 @@ struct FrameInfo
     bool gripFromOverlay = false;
     bool shootApplied = false;            // opt-in Shoot delta accepted by the selected 1H/2H IK route
     float shootScale = 0.0f;              // 0..1 reachable fraction of the requested weapon motion
+    // Read-only: when shootApplied, the layered pose of this frame before the shot motion (same aim offset and grip pass, before the
+    // forearm roll pass). Valid until the next Evaluate; nullptr otherwise.
+    const ov::Pose* shootPre = nullptr;
     idlebreak::Output idle;
     ov::Curves curves;
     float evalUs = 0.0f;
@@ -1010,6 +1013,7 @@ private:
                         std::memcpy(m_lay->b, m_tmp->b, sizeof(ov::Xf) * static_cast<size_t>(sk.n));
                         info.grip = candidate;
                         info.shootApplied = true;
+                        info.shootPre = m_shootFallback.get();
                         info.shootScale = reachable;
                         actionApplied = true;
                     }

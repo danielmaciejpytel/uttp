@@ -422,8 +422,12 @@ inline V3d LeftHandInChest(const BoneTransform (&aL)[kPairs])
 inline double Norm(V3d v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
 
 // Like Apply, with the follower. aW: the wanted shown weight; aOwnClavicle: see MirroredLeftLocals (the twin stance passes its
-// weight). Returns true when the pose was edited.
-inline bool ApplyFollow(const Mirror& aM, Follow& aF, BoneTransform* aPose, float aW, float aDt, float aOwnClavicle = 0.0f)
+// weight). aMirrorSource: the pose the mirror target is built from (nullptr = aPose). Recoil per arm: while the right weapon's kick
+// is on the right arm the caller passes a copy of the pose with the right arm as it was before that kick, so the left arm does not
+// copy it. The shown left chain is always blended over aPose. Returns true when the pose was edited.
+// aTarget: a ready target of the left chain (kPairs locals, e.g. TwinTarget) instead of the mirror; nullptr = the mirror.
+inline bool ApplyFollow(const Mirror& aM, Follow& aF, BoneTransform* aPose, float aW, float aDt, float aOwnClavicle = 0.0f,
+                        const BoneTransform* aMirrorSource = nullptr, const BoneTransform* aTarget = nullptr)
 {
     const float want = std::isfinite(aW) ? (aW < 0.0f ? 0.0f : (aW > 1.0f ? 1.0f : aW)) : 0.0f;
     if (!aM.ok || aPose == nullptr || (!(want > 0.0f) && !(aF.w > 0.0f)))
@@ -432,7 +436,12 @@ inline bool ApplyFollow(const Mirror& aM, Follow& aF, BoneTransform* aPose, floa
         return false;
     }
     BoneTransform target[kPairs];
-    if (!MirroredLeftLocals(aM, aPose, target, aOwnClavicle))
+    if (aTarget != nullptr)
+    {
+        for (int k = 0; k < kPairs; ++k)
+            target[k] = aTarget[k];
+    }
+    else if (!MirroredLeftLocals(aM, aMirrorSource ? aMirrorSource : aPose, target, aOwnClavicle))
     {
         aF.Reset();
         return false;
@@ -517,6 +526,218 @@ inline bool ApplyFollow(const Mirror& aM, Follow& aF, BoneTransform* aPose, floa
         }
     }
     return true;
+}
+
+// Twin stance in model space. The one-handed aim / fire stance is bladed (the chest turned ~45 deg to the left), so a mirror across the
+// chest mid plane points the left weapon far to the left of the right one. In the stance the right arm keeps its own pose and the left
+// chain gets its own target:
+//  - orientation: the right weapon reflected across the VERTICAL plane that contains the right barrel (model up = +z), then the pair
+//    constant N (S_v R_R N): the left barrel is parallel to the right barrel;
+//  - position: kTwinGap to the left of the right weapon (horizontal, perpendicular to the barrel), at its height; when the left hand
+//    would be out of reach of the left shoulder it slides back along the barrel until it is kTwinReach of the arm length from the
+//    shoulder joint (the bladed chest puts the left shoulder ~26 cm behind the right one), so the left weapon stays on the line
+//    parallel to the right barrel (level aim: same height; aiming up / down it sits lower / higher on that line); when even that line
+//    never comes into reach the hand is pulled toward the shoulder (TwinInfo::pulled);
+//  - the left arm is solved for that hand with a two-bone IK, elbow pole down and out; clavicle, bone offsets and WeaponLeft local are
+//    the ones of the mirror target passed in (the twin passes the pose's own left clavicle).
+// A barrel near vertical has no reliable heading: the result carries a fade (full at a horizontal barrel component >= kTwinHeadingFade).
+inline constexpr double kTwinGap = 0.25;   // m between the weapons, sideways
+inline constexpr double kTwinReach = 0.90; // fraction of upper arm + forearm (the arm IK's soft reach starts at 0.95)
+struct TwinInfo
+{
+    double fade = 0.0;        // 0..1 heading fade
+    double slideBack = 0.0;   // m the left weapon slid back along the barrel to be in reach
+    double barrelDeg = 0.0;   // angle between the left target barrel and the right barrel
+    bool pulled = false;      // the barrel line never came into reach: the hand was pulled toward the shoulder (height / gap not kept)
+};
+inline V3d Cross(V3d a, V3d b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+inline double Dot(V3d a, V3d b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline V3d Scale(V3d a, double s) { return {a.x * s, a.y * s, a.z * s}; }
+inline bool Unit(V3d& a)
+{
+    const double l = std::sqrt(Dot(a, a));
+    if (!(l > 1e-9) || !std::isfinite(l))
+        return false;
+    a = Scale(a, 1.0 / l);
+    return true;
+}
+// Rotation that takes the frame (aFrom, side aFromSide) to (aTo, aToSide): x = bone direction, y = side without its x part.
+inline bool FrameRotation(V3d aFrom, V3d aFromSide, V3d aTo, V3d aToSide, M3& aOut)
+{
+    V3d x0 = aFrom, x1 = aTo;
+    if (!Unit(x0) || !Unit(x1))
+        return false;
+    V3d y0 = Sub(aFromSide, Scale(x0, Dot(aFromSide, x0))), y1 = Sub(aToSide, Scale(x1, Dot(aToSide, x1)));
+    if (!Unit(y0) || !Unit(y1))
+        return false;
+    const V3d z0 = Cross(x0, y0), z1 = Cross(x1, y1);
+    M3 f0, f1;
+    const V3d c0[3] = {x0, y0, z0}, c1[3] = {x1, y1, z1};
+    for (int j = 0; j < 3; ++j)
+    {
+        f0.m[0][j] = c0[j].x, f0.m[1][j] = c0[j].y, f0.m[2][j] = c0[j].z;
+        f1.m[0][j] = c1[j].x, f1.m[1][j] = c1[j].y, f1.m[2][j] = c1[j].z;
+    }
+    aOut = Mul(f1, Transpose(f0));
+    return true;
+}
+// aSrc: the pose the right arm is read from (game-local, bone order); aChestModel: model rotation of the chest bone; aMirror: the
+// mirror target of the left chain (MirroredLeftLocals). aOut: the twin left chain (locals). false: no twin (keep the mirror).
+inline bool TwinLeftChain(const Mirror& aM, const BoneTransform* aSrc, const M3& aChestModel, const BoneTransform (&aMirror)[kPairs],
+                          BoneTransform (&aOut)[kPairs], TwinInfo* aInfo = nullptr)
+{
+    if (aInfo)
+        *aInfo = TwinInfo{};
+    if (!aM.ok || aSrc == nullptr)
+        return false;
+    Xd wr = {};
+    for (int k = 0; k < kPairs; ++k)
+        wr = Compose(wr, FromBone(aSrc[aM.right[k]]));
+    V3d up = Apply3(Transpose(aChestModel), V3d{0.0, 0.0, 1.0}); // model up in the chest frame
+    if (!Unit(up))
+        return false;
+    const V3d d = {wr.r.m[0][kBarrelAxis], wr.r.m[1][kBarrelAxis], wr.r.m[2][kBarrelAxis]};
+    V3d u = Sub(d, Scale(up, Dot(d, up))); // horizontal barrel direction
+    const double hl = std::sqrt(Dot(u, u));
+    if (!(hl > 0.05) || !Unit(u))
+        return false;
+    V3d left = Cross(up, u);
+    if (!Unit(left))
+        return false;
+    if (Dot(left, aM.lateral) < 0.0)
+        left = Scale(left, -1.0);
+    // reflection across the vertical plane through the barrel: its normal is the horizontal sideways axis
+    M3 sv;
+    const double nv[3] = {left.x, left.y, left.z};
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            sv.m[i][j] = (i == j ? 1.0 : 0.0) - 2.0 * nv[i] * nv[j];
+    const M3 rwl = Mul(Mul(sv, wr.r), aM.n[kPairs - 1]);
+    const V3d dl = {rwl.m[0][kBarrelAxis], rwl.m[1][kBarrelAxis], rwl.m[2][kBarrelAxis]};
+    if (!(Dot(dl, d) > 0.99)) // the pair constant must keep the barrel axis (else the left gun would point back)
+        return false;
+    // left chain of the mirror target in the chest frame
+    const Xd clav = FromBone(aMirror[0]);
+    const Xd up0 = Compose(clav, FromBone(aMirror[1]));
+    const Xd fo0 = Compose(up0, FromBone(aMirror[2]));
+    const Xd ha0 = Compose(fo0, FromBone(aMirror[3]));
+    const Xd wl = FromBone(aMirror[4]); // weapon in the hand
+    const V3d a = up0.t;
+    const double la = Norm(ToD(aMirror[2].p)), lb = Norm(ToD(aMirror[3].p));
+    if (!(la > 1e-3) || !(lb > 1e-3))
+        return false;
+    // hand target
+    const M3 rh = Mul(rwl, Transpose(wl.r));
+    V3d pw = Add(wr.t, Scale(left, kTwinGap));
+    V3d hand = Sub(pw, Apply3(rh, wl.t));
+    const double reach = kTwinReach * (la + lb);
+    const V3d v = Sub(hand, a);
+    double slide = 0.0;
+    bool pulled = false;
+    V3d along = d; // slide along the barrel itself: the left weapon stays on the line parallel to the right barrel
+    if (!Unit(along))
+        return false;
+    if (Norm(v) > reach)
+    {
+        const double vu = Dot(v, along), disc = vu * vu - Dot(v, v) + reach * reach;
+        slide = disc >= 0.0 ? vu - std::sqrt(disc) : vu;
+        V3d moved = Sub(v, Scale(along, slide));
+        if (Norm(moved) > reach * (1.0 + 1e-6)) // the barrel line never comes into reach: pull the hand in toward the shoulder
+        {
+            V3d dir = moved;
+            if (!Unit(dir))
+                return false;
+            moved = Scale(dir, reach);
+            pulled = true;
+        }
+        const V3d shift = Sub(Add(a, moved), hand);
+        hand = Add(hand, shift);
+        pw = Add(pw, shift);
+    }
+    // two-bone IK, pole down and out
+    const V3d toT = Sub(hand, a);
+    const double dist = Norm(toT);
+    const double dmin = std::fabs(la - lb) + 1e-3;
+    const double dd = std::fmin(std::fmax(dist, dmin), la + lb - 1e-4);
+    V3d dir = toT;
+    if (!Unit(dir))
+        return false;
+    V3d pole = Add(Scale(up, -1.0), Scale(left, 0.6));
+    pole = Sub(pole, Scale(dir, Dot(pole, dir)));
+    if (!Unit(pole))
+        return false;
+    const double x = (la * la - lb * lb + dd * dd) / (2.0 * dd);
+    const double h = std::sqrt(std::fmax(la * la - x * x, 0.0));
+    const V3d e = Add(a, Add(Scale(dir, x), Scale(pole, h)));
+    const V3d hNew = Add(a, Scale(dir, dd));
+    M3 qUp, qLo;
+    if (!FrameRotation(Sub(fo0.t, a), Sub(ha0.t, a), Sub(e, a), Sub(hNew, a), qUp) ||
+        !FrameRotation(Sub(ha0.t, fo0.t), Sub(a, fo0.t), Sub(hNew, e), Sub(a, e), qLo))
+        return false;
+    const M3 upN = Mul(qUp, up0.r), foN = Mul(qLo, fo0.r);
+    for (int k = 0; k < kPairs; ++k)
+        aOut[k] = aMirror[k];
+    aOut[1].q = ToQuat(Mul(Transpose(clav.r), upN));
+    aOut[2].q = ToQuat(Mul(Transpose(upN), foN));
+    aOut[3].q = ToQuat(Mul(Transpose(foN), rh));
+    for (int k = 1; k <= 3; ++k)
+        if (!math::IsFinite(aOut[k].q))
+            return false;
+    if (aInfo)
+    {
+        const double f = std::fmin(1.0, hl / kTwinHeadingFade);
+        aInfo->fade = f * f * (3.0 - 2.0 * f);
+        aInfo->slideBack = slide;
+        aInfo->pulled = pulled;
+        aInfo->barrelDeg = std::acos(std::fmax(-1.0, std::fmin(1.0, Dot(dl, d)))) * 180.0 / 3.14159265358979323846;
+    }
+    return true;
+}
+// Model rotation of the chest: walks the parents of the chest bone (aParent(i) -> parent index, -1 root).
+template<class ParentFn>
+inline M3 ChestModelRotation(const Mirror& aM, const BoneTransform* aPose, ParentFn aParent)
+{
+    M3 r = Identity3();
+    for (int32_t i = aM.chest, guard = 0; i >= 0 && guard < 256; i = static_cast<int32_t>(aParent(static_cast<uint32_t>(i))), ++guard)
+        r = Mul(FromQuat(aPose[i].q), r);
+    return r;
+}
+// Twin target of the left chain: the mirror target (own clavicle by aWeight) blended toward TwinLeftChain by aWeight x heading fade.
+// aWeight <= 0: the plain mirror target. Returns false when no target exists (no mirror).
+inline bool TwinTarget(const Mirror& aM, const BoneTransform* aSrc, const M3& aChestModel, float aWeight, BoneTransform (&aOut)[kPairs],
+                       TwinInfo* aInfo = nullptr)
+{
+    if (aInfo)
+        *aInfo = TwinInfo{};
+    const float w = std::isfinite(aWeight) ? (aWeight < 0.0f ? 0.0f : (aWeight > 1.0f ? 1.0f : aWeight)) : 0.0f;
+    if (!MirroredLeftLocals(aM, aSrc, aOut, w))
+        return false;
+    if (!(w > 0.0f))
+        return true;
+    BoneTransform twin[kPairs];
+    TwinInfo info;
+    if (!TwinLeftChain(aM, aSrc, aChestModel, aOut, twin, &info))
+        return true;
+    const float tw = static_cast<float>(w * info.fade);
+    for (int k = 1; k <= 3; ++k)
+        aOut[k].q = math::QuatNlerpShortest(aOut[k].q, twin[k].q, tw);
+    if (aInfo)
+        *aInfo = info;
+    return true;
+}
+
+// Recoil per arm. A recoil clip is a motion of the weapon in its own frame (rotation aR, translation aT). The left weapon of the
+// mirror is L = S R N (N = the weapon pair's constant), so the mirror image of the right weapon moved by D is
+// S (R D) N = L (N^T D N): the same kick, mirrored, in the left weapon's own frame. Position: N^T t.
+inline bool MirrorWeaponMotion(const Mirror& aM, const math::Quat& aR, math::Vec3 aT, math::Quat& aOutR, math::Vec3& aOutT)
+{
+    if (!aM.ok)
+        return false;
+    const M3& n = aM.n[kPairs - 1];
+    const M3 nt = Transpose(n);
+    aOutR = ToQuat(Mul(Mul(nt, FromQuat(aR)), n));
+    aOutT = ToF(Apply3(nt, ToD(aT)));
+    return math::IsFinite(aOutR) && math::IsFinite(aOutT);
 }
 
 // Weight of the mirror, stepped once per frame: rises / falls over kBlendSeconds (smoothstep shaped) while the condition holds /

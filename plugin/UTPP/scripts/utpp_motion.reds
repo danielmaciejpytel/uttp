@@ -33,6 +33,8 @@ public native func UTPPSetMMWeaponAction(action: Int32) -> Void
 // recoilProfile: authored recoil profile id of the equipped weapon (plugin\UTPP\src\mm\RecoilProfiles.hpp, ids below), 0 = none.
 public native func UTPPSetMMRecoilWeapon(weaponEpoch: Uint32, recoilProfile: Int32) -> Void
 public native func UTPPFeedMMRecoilShot(weaponEpoch: Uint32, aiming: Bool) -> Void
+// Dual wield: one shot of the weapon in the left hand slot (its own token and recoil profile id); the kick goes to the left arm.
+public native func UTPPFeedMMRecoilShotLeft(weaponEpoch: Uint32, recoilProfile: Int32, aiming: Bool) -> Void
 // One line: enabled, body, db loaded, fallback reason, last pick, feed p95 us.
 public native func UTPPGetMotionStatus() -> String
 // the motion set-motionfix item 2: while aiming with a weapon overlay, hand the upper body back to the game + aim offset
@@ -265,6 +267,10 @@ public class UTPPMotionGlue extends ScriptableSystem {
   private let m_recoilEpoch: Uint32;
   private let m_recoilSupported: Bool;
   private let m_recoilProfile: Int32;
+  // dual wield: the weapon in the left hand slot, its own token and recoil profile (resolved once per object)
+  private let m_recoilWeaponLeft: wref<WeaponObject>;
+  private let m_recoilEpochLeft: Uint32;
+  private let m_recoilProfileLeft: Int32;
   private let m_cbUpper: ref<CallbackHandle>;
   private let m_cbWeapon: ref<CallbackHandle>;
   private let m_cbWeaponLeft: ref<CallbackHandle>;
@@ -1310,6 +1316,9 @@ public class UTPPMotionGlue extends ScriptableSystem {
   // Re-read the slot here: UI record notifications alone cannot identify a shot.
   public final func FeedRecoilShot(weapon: ref<WeaponObject>) -> Void {
     this.RefreshRecoilWeapon();
+    if this.FeedRecoilShotLeft(weapon) {
+      return;
+    }
     let current: wref<WeaponObject> = this.m_recoilWeapon;
     if !this.m_enabled || !this.m_recoilSupported || !IsDefined(current) || !IsDefined(weapon) || !IsDefined(this.m_psm) {
       return;
@@ -1318,6 +1327,38 @@ public class UTPPMotionGlue extends ScriptableSystem {
       return;
     }
     UTPPFeedMMRecoilShot(this.m_recoilEpoch, this.m_psm.GetInt(GetAllBlackboardDefs().PlayerStateMachine.UpperBody) == 6);
+  }
+
+  // Dual wield: a shot of the weapon in the left hand slot gets its own pulse with that weapon's token and recoil profile (the right
+  // weapon's checks above do not apply: it may have no profile). Returns true when the shot was the left weapon's, fed or not.
+  // A single weapon never gets here past the dual check.
+  private final func FeedRecoilShotLeft(weapon: ref<WeaponObject>) -> Bool {
+    let player: ref<PlayerPuppet> = this.m_player;
+    let psm: ref<IBlackboard> = this.m_psm;
+    if !this.m_enabled || !IsDefined(weapon) || !IsDefined(player) || !IsDefined(psm) {
+      return false;
+    }
+    let psmDef: ref<PlayerStateMachineDef> = GetAllBlackboardDefs().PlayerStateMachine;
+    if !this.IsDualWielding(psm, psm.GetInt(psmDef.UpperBody)) {
+      return false;
+    }
+    let left: ref<WeaponObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(player, t"AttachmentSlots.WeaponLeft") as WeaponObject;
+    if !IsDefined(left) || NotEquals(left.GetEntityID(), weapon.GetEntityID()) {
+      return false;
+    }
+    let previous: wref<WeaponObject> = this.m_recoilWeaponLeft;
+    if !IsDefined(previous) || NotEquals(previous.GetEntityID(), left.GetEntityID()) {
+      if this.m_recoilEpochLeft >= Cast<Uint32>(2147483647) {
+        this.m_recoilEpochLeft = Cast<Uint32>(0);
+      }
+      this.m_recoilEpochLeft += Cast<Uint32>(1);
+      this.m_recoilWeaponLeft = left;
+      this.m_recoilProfileLeft = this.ResolveRecoilProfile(left);
+    }
+    if this.m_recoilProfileLeft != 0 {
+      UTPPFeedMMRecoilShotLeft(this.m_recoilEpochLeft, this.m_recoilProfileLeft, psm.GetInt(psmDef.UpperBody) == 6);
+    }
+    return true;
   }
 
   // ---- CET API (cet\utpp_motion) ----

@@ -103,6 +103,9 @@ void SetRecoilProfile(uint32_t aEpoch, int32_t aProfile);
 void SetRecoilWeapon(uint32_t aEpoch, bool aSupportedNue); // = SetRecoilProfile(aEpoch, aSupportedNue ? Nue : none)
 void SetAuthoredReload(bool aOn);
 void FeedRecoilShot(uint32_t aEpoch, bool aAiming);
+// Dual wield: one shot of the weapon in the left hand slot. aEpoch: token of that weapon object (0 = none), aProfile: its authored recoil
+// profile id. Ignored unless two weapons are drawn; the kick goes to the left arm only.
+void FeedRecoilShotLeft(uint32_t aEpoch, int32_t aProfile, bool aAiming);
 // Magazine top-up gesture (mm/MagTap.hpp; Main.cpp UTPPFeedMotionMagTap, scripts/utpp_motion.reds OnMagazineAmmo): the magazine of the
 // equipped weapon was refilled without a reload state (game Shinobi slide / air dash bonus). Queues one short left-hand gesture to
 // the magazine for the next v2 Step; that Step plays it only while v2 owns the arms in TPP (weapon overlay drawn, no reload /

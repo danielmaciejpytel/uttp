@@ -471,6 +471,121 @@ static void TestTwinTransitions(const char* aTag, const RigData& aR, const dm::M
     }
 }
 
+// 8) twin stance in MODEL space (dm::TwinTarget): the right arm keeps its stance; the left barrel is parallel to the right barrel within
+//    5 deg (heading frames), the weapons 20..30 cm apart sideways at the same height (<= 2 cm), the left hand in reach of its shoulder,
+//    the elbow below the shoulder -> hand line, the shoulders not narrower than the pose; weight 0 = the plain mirror target bit for bit.
+struct TwinModelStats
+{
+    int poses = 0, heading = 0;
+    double worstBarrelDeg = 0.0, minGapCm = 1e9, maxGapCm = 0.0, worstHeightCm = 0.0, worstReach = 0.0, maxSlideCm = 0.0;
+    double minElbowDropCm = 1e9, worstElbowDeg = 0.0, worstPulledHeightCm = 0.0;
+    int pulled = 0;
+};
+static math::Vec3 ModelBarrel(const Model& aM, int aBone) { return math::QuatRotate(aM.r[aBone], math::Vec3{0.0f, 1.0f, 0.0f}); }
+static void CheckTwinModel(const char* aTag, const std::string& aName, const RigData& aR, const dm::Mirror& aM,
+                           const std::vector<BoneTransform>& aIn, TwinModelStats& aS)
+{
+    const std::string t = std::string(aTag) + " " + aName;
+    const dm::M3 chest = dm::ChestModelRotation(aM, aIn.data(), [&](uint32_t i) { return aR.par[i]; });
+    // weight 0: the plain mirror target, bit for bit
+    {
+        BoneTransform plain[dm::kPairs], zero[dm::kPairs];
+        const bool a = dm::MirroredLeftLocals(aM, aIn.data(), plain);
+        const bool b = dm::TwinTarget(aM, aIn.data(), chest, 0.0f, zero);
+        Check(a && b && std::memcmp(plain, zero, sizeof plain) == 0, t + ": twin weight 0 = plain mirror target (bit-identical)");
+    }
+    BoneTransform target[dm::kPairs];
+    dm::TwinInfo info;
+    Check(dm::TwinTarget(aM, aIn.data(), chest, 1.0f, target, &info), t + ": twin target");
+    std::vector<BoneTransform> p = aIn;
+    for (int k = 0; k < dm::kPairs; ++k)
+        p[aM.left[k]] = target[k];
+    const Model m0 = Fk(aR.par, aIn), m = Fk(aR.par, p);
+    const int wr = aM.right[4], wl = aM.left[4], sl = aM.left[1], sr = aM.right[1], el = aM.left[2], hl = aM.left[3];
+    const math::Vec3 br = ModelBarrel(m, wr), bl = ModelBarrel(m, wl), br0 = ModelBarrel(m0, wr);
+    Check(Len(br - br0) < 1e-6f && Len(m.p[wr] - m0.p[wr]) < 1e-6f, t + ": right weapon unchanged");
+    const double barrel = AngleDeg(br, bl);
+    ++aS.poses;
+    const math::Vec3 hz = {br.x, br.y, 0.0f};
+    const bool heading = info.fade >= 1.0;
+    if (heading)
+    {
+        ++aS.heading;
+        aS.worstBarrelDeg = std::fmax(aS.worstBarrelDeg, barrel);
+        Check(barrel <= 5.0, t + ": barrels parallel in model space (" + std::to_string(barrel) + " deg)");
+        // sideways gap (horizontal, perpendicular to the barrel) and height
+        const float hzl = Len(hz);
+        const math::Vec3 side = {-hz.y / hzl, hz.x / hzl, 0.0f};
+        const math::Vec3 dw = m.p[wl] - m.p[wr];
+        const double gap = 100.0 * std::fabs(math::Dot(dw, side));
+        // off the line parallel to the right barrel through the point gap to the left of the right weapon (level aim: the height)
+        const math::Vec3 rel = dw - side * math::Dot(dw, side);
+        const math::Vec3 bru = br * (1.0f / Len(br));
+        const double height = 100.0 * Len(rel - bru * math::Dot(rel, bru));
+        aS.minGapCm = std::fmin(aS.minGapCm, gap);
+        aS.maxGapCm = std::fmax(aS.maxGapCm, gap);
+        if (info.pulled)
+        {
+            ++aS.pulled;
+            aS.worstPulledHeightCm = std::fmax(aS.worstPulledHeightCm, height);
+        }
+        else
+        {
+            aS.worstHeightCm = std::fmax(aS.worstHeightCm, height);
+            Check(gap >= 20.0 && gap <= 30.0, t + ": weapons 20..30 cm apart sideways (" + std::to_string(gap) + " cm)");
+            Check(height <= 2.0, t + ": left weapon on the line parallel to the right barrel (" + std::to_string(height) + " cm off)");
+        }
+        const double armLen = Len(p[el].p) + Len(p[hl].p);
+        const double reach = Len(m.p[hl] - m.p[sl]) / armLen;
+        aS.worstReach = std::fmax(aS.worstReach, reach);
+        Check(reach <= 0.9 + 1e-3, t + ": left hand in reach (" + std::to_string(reach) + " of the arm length)");
+        // natural elbow: its offset from the shoulder -> hand line within 60 deg of the down-and-out direction
+        const math::Vec3 sh = m.p[sl], hd = m.p[hl], eb = m.p[el];
+        const math::Vec3 line = hd - sh;
+        const float s = math::Dot(eb - sh, line) / math::Dot(line, line);
+        const math::Vec3 off = eb - (sh + line * s);
+        const math::Vec3 outward = side * (math::Dot(dw, side) >= 0.0f ? 1.0f : -1.0f); // horizontal, from the right gun to the left one
+        math::Vec3 pole = math::Vec3{0.0f, 0.0f, -1.0f} + outward * 0.6f;
+        pole = pole - line * (math::Dot(pole, line) / math::Dot(line, line));
+        const double elbowDeg = AngleDeg(off, pole);
+        aS.minElbowDropCm = std::fmin(aS.minElbowDropCm, 100.0 * -off.z);
+        aS.worstElbowDeg = std::fmax(aS.worstElbowDeg, elbowDeg);
+        Check(elbowDeg <= 60.0, t + ": left elbow down and out (" + std::to_string(elbowDeg) + " deg from that direction)");
+    }
+    aS.maxSlideCm = std::fmax(aS.maxSlideCm, 100.0 * info.slideBack);
+    const double width0 = Len(m0.p[sl] - m0.p[sr]), width = Len(m.p[sl] - m.p[sr]);
+    Check(width >= width0 - 0.001, t + ": shoulders not narrower than the pose");
+}
+
+// Recoil per arm: the mirror of the right weapon moved by a weapon-local motion D equals the left weapon of the plain mirror moved by
+// dm::MirrorWeaponMotion(D) (pure geometry, no IK).
+static void CheckMirrorWeaponMotion(const char* aTag, const dm::Mirror& aM, const std::vector<BoneTransform>& aIn)
+{
+    const math::Quat dr = math::QuatNormalize(math::QuatMul(AxisAngle({1.0f, 0.0f, 0.0f}, 6.0f), AxisAngle({0.0f, 0.0f, 1.0f}, 2.0f)));
+    const math::Vec3 dt = {0.004f, -0.03f, 0.012f};
+    std::vector<BoneTransform> moved = aIn;
+    BoneTransform& w = moved[aM.right[4]];
+    w.p = w.p + math::QuatRotate(w.q, dt);
+    w.q = math::QuatNormalize(math::QuatMul(w.q, dr));
+    BoneTransform a[dm::kPairs], b[dm::kPairs];
+    const bool ok = dm::MirroredLeftLocals(aM, aIn.data(), a) && dm::MirroredLeftLocals(aM, moved.data(), b);
+    math::Quat mr;
+    math::Vec3 mt;
+    Check(ok && dm::MirrorWeaponMotion(aM, dr, dt, mr, mt), std::string(aTag) + ": mirrored weapon motion");
+    // left weapon local of the plain mirror moved by the mirrored motion
+    const math::Vec3 p = a[4].p + math::QuatRotate(a[4].q, mt);
+    const math::Quat q = math::QuatNormalize(math::QuatMul(a[4].q, mr));
+    const double posMm = 1000.0 * Len(p - b[4].p);
+    const double rotDeg = MatAngleDeg(dm::FromQuat(q), dm::FromQuat(b[4].q));
+    std::printf("[%s] mirrored weapon motion: %.4f mm, %.4f deg from the mirror of the moved right weapon\n", aTag, posMm, rotDeg);
+    Check(posMm <= 0.1 && rotDeg <= 0.05, std::string(aTag) + ": mirrored weapon motion = mirror of the moved right weapon");
+    // the other left bones do not move with the weapon
+    bool same = true;
+    for (int k = 0; k < 4; ++k)
+        same = same && std::memcmp(&a[k], &b[k], sizeof(BoneTransform)) == 0;
+    Check(same, std::string(aTag) + ": a weapon-only motion leaves the left arm of the mirror");
+}
+
 static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char* aTag, std::FILE* aDump)
 {
     auto db = std::make_unique<motion::MotionDatabase>();
@@ -562,6 +677,7 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
     // 7) twin stance over the aim poses x the aim offset sweep (mesh-space additive, as the aim offset applies it) x a turned chest
     {
         TwinStats ts;
+        TwinModelStats tms;
         for (const char* aimName : {"Pose_Pistol1H_Stand_Aim_Idle", "Pose_Pistol1H_Crouch_Aim"})
         {
             const int pi = ovf->FindPose(aimName);
@@ -589,12 +705,16 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
                         in[i] = BoneTransform{p->b[ovOf[i]].t, p->b[ovOf[i]].r};
                 const std::string tag = std::string(aimName) + " sweep " + std::to_string(fr) + "/" + std::to_string(frames - 1);
                 CheckTwin(aTag, tag, r, mir, in, ts, aDump);
+                CheckTwinModel(aTag, tag, r, mir, in, tms);
+                if (k == 4)
+                    CheckMirrorWeaponMotion(aTag, mir, in);
                 if (k % 4 == 0)
                     for (float yaw : {-35.0f, 35.0f})
                     {
                         std::vector<BoneTransform> turned = in;
                         turned[spine].q = math::QuatNormalize(math::QuatMul(turned[spine].q, AxisAngle({0.0f, 0.0f, 1.0f}, yaw)));
                         CheckTwin(aTag, tag + " chest " + std::to_string(static_cast<int>(yaw)), r, mir, turned, ts, aDump);
+                        CheckTwinModel(aTag, tag + " chest " + std::to_string(static_cast<int>(yaw)), r, mir, turned, tms);
                     }
             }
         }
@@ -602,6 +722,12 @@ static void TestRig(const char* aDb, const char* aOv, uint64_t aHash, const char
                     "hands %.1f..%.1f cm, weapons >= %.1f cm\n", aTag, ts.poses, ts.maxTurnDeg, ts.worstPlaneDeg, ts.worstParallelDeg,
                     ts.worstElev, ts.minHands, ts.maxHands, ts.minGuns);
         Check(ts.poses >= 20, std::string(aTag) + ": twin stance poses measured");
+        std::printf("[%s] twin model space: %d poses (%d heading), barrels <= %.2f deg apart, weapons %.1f..%.1f cm apart sideways, "
+                    "height <= %.2f cm, reach <= %.3f, slide back <= %.1f cm, elbow drop >= %.1f cm, elbow <= %.1f deg from down-out; "
+                    "%d heading poses out of reach (hand pulled in): height <= %.1f cm\n", aTag, tms.poses, tms.heading,
+                    tms.worstBarrelDeg, tms.minGapCm, tms.maxGapCm, tms.worstHeightCm, tms.worstReach, tms.maxSlideCm, tms.minElbowDropCm,
+                    tms.worstElbowDeg, tms.pulled, tms.worstPulledHeightCm);
+        Check(tms.heading >= 20, std::string(aTag) + ": twin model-space heading poses measured");
     }
     std::printf("[%s] %d poses: worst mirror error %.5f cm, %.5f deg\n", aTag, poses, worstCm, worstDeg);
     // 4b) the gate never asks for the mirror with a single weapon, whatever the overlay
