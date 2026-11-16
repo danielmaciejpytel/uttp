@@ -13,10 +13,6 @@ For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscri
 - **Feminine figure for female V:** while V stands and moves without a weapon her shoulders slope down and sit further back, her arms hang closer to the body and her head sits about 2 cm lower, so the neck looks shorter and the shoulder line softer. Hips, chest and legs are not changed.
 - New option **"Feminine figure (female V)"** in the Camera section of the mod menu (next to "Shoulder width"), on by default. Switch it off to get the figure of 0.1.1 back.
 
-### Changed
-
-- The UTPP scripts compile without warnings with redscript 1.0.1 as well as with 0.5.32. redscript 1.0 is still not supported, because the frameworks UTPP needs were not ready for it when this version was built: keep using redscript 0.5.32.
-
 ### Notes
 
 - The figure is applied to the poses the mod sets for unarmed standing and movement. With a weapon drawn, while climbing or vaulting and in the animations the game plays itself (scenes, vehicles, finishers) the figure of 0.1.1 is used. The change between the two takes a quarter of a second.
@@ -66,7 +62,6 @@ For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscri
 - "Hide first-person shadow proxy" is off by default (it removed part of the shadow with ray-traced shadows).
 - **All settings of the mod are reset to their defaults once**, at the first start of 0.1.1, because the defaults and the way several options work changed. A message on the screen tells you when it happened. The two "Swap shoulder" controls (keyboard key and controller button) are not changed. This happens once: afterwards your settings are kept as before.
 - Three options that had no effect are no longer shown in the menu: "Head follows turns", "Transition time (s)" and "Start in the last used view". No option was renamed.
-- The UTPP scripts compile with redscript 1.0.0. redscript 1.0.0 is still not supported, because the frameworks UTPP needs were not ready for it when this version was built: keep using redscript 0.5.32.
 
 ### Known issues
 

@@ -512,8 +512,7 @@ Requires RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL and Input 
 shoulder-switch key). Tested with RED4ext 1.31.1, redscript 0.5.32, Cyber Engine Tweaks 1.38.1, Codeware 1.21.4,
 ArchiveXL 1.28.8, Input Loader 0.2.6 and Mod Settings 0.2.30 (versions installed in the test game, 2.50).
 Older versions will not work with game version 2.5.
-Use redscript 0.5.32. The scripts of UTPP compile with redscript 1.0.0 and 1.0.1, but the frameworks UTPP
-needs were not ready for redscript 1.0 when this version was built (2026-11-16), so it is not supported yet.
+redscript 0.5.32 is the recommended version.
 Mod Settings is recommended (the Ultimate Third Person page of the game's Mod Settings screen); without it
 Native Settings UI 1.96 provides the in-game settings tab. The Microsoft Visual C++ 2015-2022 x64 runtime is required.
 Requires the Phantom Liberty expansion (the weapon magazine fix archive uses its weapon resources). Tested with the
