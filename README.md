@@ -20,6 +20,7 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 </p>
 
 <p align="center">
+  <a href="README.pl.md">Polski</a> · <b>English</b> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#see-the-difference">See the difference</a> ·
   <a href="#features">Features</a> ·
@@ -330,7 +331,7 @@ UTPP is designed, directed and tested in game by its author. Generative AI was u
 - Code: most of the plugin, scripts and tools were written with AI coding agents under the author's direction
 - Animation: some transition, vehicle-exit and melee clips were generated locally with NVIDIA Kimodo and MotionBricks
 - Mod page: the logo, the trailer and the mod page description were made with the help of AI
-- Not used: AI voices, AI textures or AI translations
+- Not used in the mod: AI voices, AI textures or AI translations. The Polish README was translated with AI assistance.
 - Nothing in the download is taken or derived from other mods without permission or a license
 
 </details>
