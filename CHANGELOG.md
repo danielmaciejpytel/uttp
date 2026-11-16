@@ -13,6 +13,10 @@ For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscri
 - **Feminine figure for female V:** while V stands and moves without a weapon her shoulders slope down and sit further back, her arms hang closer to the body and her head sits about 2 cm lower, so the neck looks shorter and the shoulder line softer. Hips, chest and legs are not changed.
 - New option **"Feminine figure (female V)"** in the Camera section of the mod menu (next to "Shoulder width"), on by default. Switch it off to get the figure of 0.1.1 back.
 
+### Changed
+
+- The UTPP scripts compile without warnings with redscript 1.0.1 as well as with 0.5.32. redscript 1.0 is still not supported, because the frameworks UTPP needs were not ready for it when this version was built: keep using redscript 0.5.32.
+
 ### Notes
 
 - The figure is applied to the poses the mod sets for unarmed standing and movement. With a weapon drawn, while climbing or vaulting and in the animations the game plays itself (scenes, vehicles, finishers) the figure of 0.1.1 is used. The change between the two takes a quarter of a second.

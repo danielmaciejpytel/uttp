@@ -126,7 +126,7 @@ The following requirements are needed for UTPP to work correctly.
 **Required frameworks and supporting mods**
 
 - **RED4ext 1.31.1** - loads the main UTPP plugin.
-- **redscript 0.5.32** - required for UTPP scripts. Do not use redscript 1.0.0 yet: the UTPP scripts compile with it since 0.1.1, but the frameworks UTPP needs were not ready for it when this version was built, so it is not supported.
+- **redscript 0.5.32** - required for UTPP scripts. Do not use redscript 1.0.0 or 1.0.1 yet: the UTPP scripts compile with both, but the frameworks UTPP needs were not ready for redscript 1.0 when this version was built, so it is not supported.
 - **Cyber Engine Tweaks 1.38.1** - provides settings, camera, body and vehicle logic used by UTPP.
 - **Codeware 1.21.4** - provides API extensions used by UTPP scripts.
 - **ArchiveXL 1.28.8** - provides additional animation and archive support used by UTPP.
@@ -278,7 +278,7 @@ The project is being developed in stages, with continued focus on movement quali
 
 These problems are known in version 0.1.2 and are planned to be fixed in the next updates. You do not need to report them. What was fixed since 0.1.0 is listed in the [changelog](CHANGELOG.md).
 
-- redscript 1.0.0 is not supported yet: use redscript 0.5.32
+- redscript 1.0.0 and 1.0.1 are not supported yet: use redscript 0.5.32
 - Rare game crash a few seconds after loading a save in which V sits on a vehicle; loading again works
 - Knife: when the next strike of a combo starts late while V walks, the arms can snap between the two strikes
 - Mantis Blades and Gorilla Arms: drawing them plays the game's own animation

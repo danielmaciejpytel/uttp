@@ -655,7 +655,7 @@ public func UTPPVehVaultFacts(info: ref<PlayerClimbInfo>, top: Float, behind: Fl
 }
 
 // A dodge / dash input is held: the dash vault (Reflexes perk) is vanilla's own path, never assisted.
-public func UTPPVehVaultDodgeHeld(si: ref<StateGameScriptInterface>) -> Bool {
+public func UTPPVehVaultDodgeHeld(const si: ref<StateGameScriptInterface>) -> Bool {
   return si.GetActionValue(n"Dodge") > 0.00 || si.GetActionValue(n"DodgeDirection") > 0.00 || si.GetActionValue(n"DodgeForward") > 0.00
     || si.GetActionValue(n"DodgeRight") > 0.00 || si.GetActionValue(n"DodgeLeft") > 0.00 || si.GetActionValue(n"DodgeBack") > 0.00;
 }
@@ -673,7 +673,8 @@ protected const func EnterCondition(const stateContext: ref<StateContext>, const
   if !IsDefined(state) || (result && !state.IsLog()) || (!result && !state.IsAssist() && !state.IsLog()) {
     return result; // nothing to assist and nothing to log: no extra work
   }
-  let info: ref<PlayerClimbInfo> = scriptInterface.GetSpatialQueriesSystem().GetPlayerObstacleSystem().GetCurrentClimbInfo(scriptInterface.owner);
+  let owner: ref<GameObject> = scriptInterface.owner;
+  let info: ref<PlayerClimbInfo> = scriptInterface.GetSpatialQueriesSystem().GetPlayerObstacleSystem().GetCurrentClimbInfo(owner);
   let car: ref<VehicleObject> = UTPPVehVaultCar(info);
   if !IsDefined(car) {
     return result; // not a car: vanilla only, no log
