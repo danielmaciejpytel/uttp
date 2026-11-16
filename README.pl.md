@@ -8,7 +8,7 @@ Lokomocja oparta na Motion Matching, naturalne obroty ciała oraz precyzyjne cel
 <p align="center">
   <img src="https://img.shields.io/badge/Cyberpunk_2077-2.5-FCEE0A?style=for-the-badge&labelColor=1a1a1a" alt="Cyberpunk 2077 2.5">
   <img src="https://img.shields.io/badge/Phantom_Liberty-required-FF2A6D?style=for-the-badge&labelColor=1a1a1a" alt="Wymagane Phantom Liberty">
-  <img src="https://img.shields.io/badge/version-0.1.1-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Wersja 0.1.1">
+  <img src="https://img.shields.io/badge/version-0.1.2-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Wersja 0.1.2">
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/RED4ext-1.31.1-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="RED4ext 1.31.1">
@@ -35,7 +35,7 @@ Lokomocja oparta na Motion Matching, naturalne obroty ciała oraz precyzyjne cel
 ## Szybki start
 
 > [!NOTE]
-> Wersja 0.1.1 dodaje broń do walki wręcz, pierwszą wersję walki dwiema broniami, płynniejszy ruch na klawiaturze oraz liczne poprawki ciała i cieni. To nadal wczesna wersja; zobacz [listę zmian](CHANGELOG.md). Uwagi są bardzo mile widziane.
+> Wersja 0.1.2 nadaje V z kobiecym ciałem bardziej kobiecą sylwetkę, gdy stoi i porusza się bez broni. Wersja 0.1.1 dodała broń do walki wręcz, pierwszą wersję walki dwiema broniami, płynniejszy ruch na klawiaturze oraz liczne poprawki ciała i cieni. To nadal wczesna wersja; zobacz [listę zmian](CHANGELOG.md). Uwagi są bardzo mile widziane.
 
 1. Zainstaluj [wymagane komponenty](#wymagania): RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL i Input Loader.
 2. Zainstaluj UTPP przez Vortex (**Mod manager download**) albo rozpakuj archiwum do folderu gry.
@@ -80,6 +80,7 @@ Po lewej: oryginalne animacje gry. Po prawej: Ultimate Third Person Project. Nag
 - Klawisz zmiany ramienia kamery (klawiatura i pad, przypisywany w Mod Settings)
 - Ruch głowy: V obraca głowę i oczy w kierunku, w którym patrzy kamera, podczas stania lub chodzenia
 - Skóra obu wariantów ciała V przeliczana pod pozy moda, aby ograniczyć deformacje
+- Bardziej kobieca sylwetka V z kobiecym ciałem, gdy nie trzyma broni: opadające, cofnięte barki i ręce bliżej ciała (można wyłączyć)
 - Cień V podąża za ciałem w trzeciej osobie, także przy cieniach ray tracing
 - Ukierunkowane korekty deformacji ramion i przedramion
 - Ograniczone nagłe przeskoki między animacjami
@@ -126,7 +127,7 @@ Poniższe wymagania są potrzebne do poprawnego działania UTPP.
 **Wymagane frameworki i mody pomocnicze**
 
 - **RED4ext 1.31.1** — ładuje główny plugin UTPP.
-- **redscript 0.5.32** — wymagany przez skrypty UTPP. Na razie nie używaj redscript 1.0.0: skrypty UTPP kompilują się z nim od wersji 0.1.1, ale frameworki potrzebne UTPP nie były gotowe w chwili przygotowania tego wydania, dlatego ta wersja nie jest obsługiwana.
+- **redscript 0.5.32** — wymagany przez skrypty UTPP.
 - **Cyber Engine Tweaks 1.38.1** — udostępnia logikę ustawień, kamery, ciała i pojazdów wykorzystywaną przez UTPP.
 - **Codeware 1.21.4** — udostępnia rozszerzenia API używane przez skrypty UTPP.
 - **ArchiveXL 1.28.8** — zapewnia dodatkową obsługę animacji i archiwów wykorzystywaną przez UTPP.
@@ -170,7 +171,7 @@ Nie używaj przestarzałych, zdublowanych ani wymieszanych wersji wymaganych fra
 > [!CAUTION]
 > Przy aktualizacji UTPP usuwaj stare pliki wyłącznie wtedy, gdy nakazuje to opis wydania. Nie mieszaj plików z różnych wersji UTPP.
 
-**Aktualizacja z 0.1.0 do 0.1.1:** zainstaluj 0.1.1 na 0.1.0 i pozwól zastąpić wszystkie pliki. Nie trzeba usuwać żadnego pliku z 0.1.0. Przy pierwszym uruchomieniu 0.1.1 ustawienia moda zostaną jednorazowo przywrócone do domyślnych, ponieważ zmieniły się wartości domyślne i działanie kilku opcji; poinformuje o tym komunikat na ekranie. Dwa przypisania „Swap shoulder” pozostaną bez zmian. Dzieje się to tylko raz — później ustawienia są zachowywane jak wcześniej.
+**Aktualizacja do 0.1.2:** zainstaluj 0.1.2 na posiadaną wersję i pozwól zastąpić wszystkie pliki. Nie trzeba usuwać żadnego pliku ze starszej wersji. Przy przejściu z 0.1.1 ustawienia zostają zachowane. Przy przejściu z 0.1.0 ustawienia moda zostaną przy pierwszym uruchomieniu jednorazowo przywrócone do domyślnych, ponieważ w 0.1.1 zmieniły się wartości domyślne i działanie kilku opcji; poinformuje o tym komunikat na ekranie. Dwa przypisania „Swap shoulder” pozostaną bez zmian. Dzieje się to tylko raz — później ustawienia są zachowywane jak wcześniej.
 
 Przed instalacją lub aktualizacją UTPP zawsze zachowaj kopię swojej konfiguracji modów.
 
@@ -250,7 +251,7 @@ Na potrzeby diagnozy sprawdzaj UTPP z wymaganymi zależnościami, bez dodatkowyc
 <details>
 <summary><b>Szczegóły</b></summary>
 
-Wersja 0.1.1 to drugie publiczne wydanie UTPP i nadal wczesny etap projektu.
+Wersja 0.1.2 to trzecie publiczne wydanie UTPP i nadal wczesny etap projektu.
 
 Niektóre pozy, rodzaje broni, stany ciała, animacje fabularne i przejścia wymagają dalszego dopracowania. Efekt może też zależeć od konfiguracji postaci, broni i animacji.
 
@@ -271,19 +272,19 @@ Projekt rozwija się etapami, ze stałym naciskiem na jakość ruchu, ciągłoś
 
 </details>
 
-## Znane problemy w 0.1.1
+## Znane problemy w 0.1.2
 
 <details>
 <summary><b>Szczegóły</b></summary>
 
-Te problemy są znane w wersji 0.1.1 i planowane do poprawy w kolejnych aktualizacjach. Nie musisz ich zgłaszać. Poprawki od wersji 0.1.0 opisano na [liście zmian](CHANGELOG.md).
+Te problemy są znane w wersji 0.1.2 i planowane do poprawy w kolejnych aktualizacjach. Nie musisz ich zgłaszać. Poprawki od wersji 0.1.0 opisano na [liście zmian](CHANGELOG.md).
 
-- redscript 1.0.0 nie jest jeszcze obsługiwany: używaj redscript 0.5.32
 - Rzadki crash kilka sekund po wczytaniu zapisu, w którym V siedzi w pojeździe; ponowne wczytanie działa
 - Nóż: gdy kolejny cios kombinacji zaczyna się późno podczas chodzenia, ramiona mogą gwałtownie przeskoczyć między ciosami
 - Ostrza Modliszkowe i Ręce Goryla: wyjęcie odtwarza oryginalną animację gry
 - Młoty, monostruna, finiszery i obalenia zachowują oryginalne animacje gry
 - Walka dwiema broniami jest w pierwszej wersji: przeładowanie korzysta z podstawowej animacji, a postawa wymaga dopracowania
+- Kobieca sylwetka: widać ją, gdy V z kobiecym ciałem stoi i porusza się bez broni. Z wyjętą bronią, podczas wspinania i przeskoków oraz w animacjach odtwarzanych przez samą grę używana jest poprzednia sylwetka; przejście między nimi trwa ćwierć sekundy
 - Karabiny snajperskie: celowanie przez lunetę korzysta z widoku pierwszoosobowego; po zakończeniu celowania ten widok utrzymuje się jeszcze przez około sekundę, a kamera wraca do trzeciej osoby przez ciało V
 - Broń dwuręczna: V mocno pochyla się do przodu w ruchu, a kolby niektórych karabinów nie sięgają ramienia
 - Strzelby, karabiny snajperskie i precyzyjne oraz ciężkie karabiny maszynowe nie mają jeszcze animacji odrzutu UTPP
