@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/logo.gif" alt="Ultimate Third Person Project" width="820">
+  <img src="docs/media/logo.png" alt="Ultimate Third Person Project" width="820">
 </p>
 
 <p align="center"><b>Smoothest. Most responsive. Most immersive.</b><br>
