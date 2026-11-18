@@ -312,4 +312,102 @@ class Warp
     std::vector<BoneTransform> m_work;
     motionPose::Warp m_poseMapper;
 };
+
+// Continuity of the applied relative correction. The mixed correction of the
+// blend stack can change by several centimetres in one update when a layer
+// whose correction differs strongly from the others (for example a stride-warped
+// loop fading out under a short leg blend) reaches its final leg weight; the
+// leg IK then follows that step and the knee and foot pop. The filter lets each
+// foot's correction move by at most maxSpeed * dt (position) and
+// maxAngularSpeed * dt (rotation) per update. Any change within those bounds is
+// passed through bit for bit, so only the stepping updates differ. Disabled
+// (maxSpeed <= 0, the default) = exact pass-through.
+class CorrectionFilter
+{
+  public:
+    void SetLimits(float maxSpeed, float maxAngularSpeed) noexcept
+    {
+        m_maxSpeed = std::isfinite(maxSpeed) && maxSpeed > 0.0f ? maxSpeed : 0.0f;
+        m_maxAngular = std::isfinite(maxAngularSpeed) && maxAngularSpeed > 0.0f ? maxAngularSpeed : 0.0f;
+        if (!Enabled())
+            m_valid = false;
+    }
+    bool Enabled() const noexcept
+    {
+        return m_maxSpeed > 0.0f;
+    }
+    void Reset() noexcept
+    {
+        m_valid = false;
+    }
+    // Number of updates in which a bound changed the correction (diagnostics).
+    uint64_t Limited() const noexcept
+    {
+        return m_limited;
+    }
+
+    Targets Step(const Targets &in, float dt) noexcept
+    {
+        if (!Enabled() || !in.valid || !in.relative || !std::isfinite(in.warpWeight))
+        {
+            m_valid = false;
+            return in;
+        }
+        std::array<FootTarget, 2> desired{};
+        if (in.warpWeight > 0.0f)
+            desired = in.feet;
+        for (const auto &f : desired)
+            if (!math::IsFinite(f.p) || !math::IsFinite(f.q))
+            {
+                m_valid = false;
+                return in;
+            }
+        if (!m_valid || !std::isfinite(dt) || dt <= 0.0f)
+        {
+            m_prev = desired;
+            m_valid = true;
+            return in;
+        }
+        bool limited = false;
+        for (size_t side = 0; side < 2; ++side)
+        {
+            FootTarget &prev = m_prev[side];
+            const FootTarget &want = desired[side];
+            const math::Vec3 dp = want.p - prev.p;
+            const float dist = std::sqrt(math::Dot(dp, dp));
+            const float maxStep = m_maxSpeed * dt;
+            if (dist > maxStep)
+            {
+                prev.p = prev.p + dp * (maxStep / dist);
+                limited = true;
+            }
+            else
+                prev.p = want.p;
+            const float dot = std::fmin(1.0f, std::fabs(math::QuatDot(prev.q, want.q)));
+            const float angle = 2.0f * std::acos(dot);
+            const float maxAngle = m_maxAngular * dt;
+            if (m_maxAngular > 0.0f && angle > maxAngle)
+            {
+                prev.q = math::QuatNlerpShortest(prev.q, want.q, maxAngle / angle);
+                limited = true;
+            }
+            else
+                prev.q = want.q;
+        }
+        if (!limited)
+            return in;
+        ++m_limited;
+        Targets out = in;
+        out.feet = m_prev;
+        out.warpWeight = 1.0f;
+        return out;
+    }
+
+  private:
+    float m_maxSpeed = 0.0f;
+    float m_maxAngular = 0.0f;
+    bool m_valid = false;
+    uint64_t m_limited = 0;
+    std::array<FootTarget, 2> m_prev{};
+};
 } // namespace utpp::mm::motionFeet
