@@ -78,12 +78,13 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 -- wanted state (settings) and what the glue reported last
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = false, orientWarp = false,
   lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
-  feminineFigure = true, bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true }
+  feminineFigure = true, bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true,
+  aimWorldSmooth = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard" }
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
   leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
   feminineFigureApplied = true, bodyYawOffsetApplied = 0, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, stickSpeedApplied = "analog", aimPointApplied = nil,
-  pistolAutoApplied = nil, selectionGuardsApplied = true, errors = 0 }
+  pistolAutoApplied = nil, selectionGuardsApplied = true, optionsApplied = {}, errors = 0 }
 
 -- no file system paths in the log: a Lua error text names the script file with its full path (user name included); a path in
 -- the CET mods folder is cut to "mods\...", the game folder prefix is dropped, a user profile path becomes "~" (same rules as
@@ -214,6 +215,8 @@ function M.Sync(api)
     M.ApplyStickSpeed(api)
     M.ApplyBarrelLoop(api)
     M.ApplyLean(api)
+    M.rt.optionsApplied = {}
+    M.ApplyOptions(api)
     local ok = callGlue(api, "SetEnabled", true)
     if not ok then return "enable-failed" end
     M.rt.applied = true
@@ -259,6 +262,7 @@ function M.Sync(api)
   M.ApplyStickSpeed(api)
   M.ApplyBarrelLoop(api)
   M.ApplyLean(api)
+  M.ApplyOptions(api)
   return "same"
 end
 
@@ -865,6 +869,49 @@ function M.SetLeanHeadScale(v, api)
   return M.want.leanHeadScale
 end
 
+-- Optional motion behaviours, all off by default: setting key -> want field, native, argument conversion. Sent again whenever the
+-- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
+M.OPTIONS = {
+  { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 0 },
+  { want = "pelvisPlacement", field = "setPelvisPlacement", native = "UTPPSetMMPelvisPlacement" },
+  { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
+  { want = "stepDownReach", field = "setStepDownReach", native = "UTPPSetMMStepDownReach" },
+  { want = "farJumpGravity", field = "setFarJumpGravity", native = "UTPPSetMMFarJumpGravity" },
+  { want = "leanCoverage", field = "setLeanCoverage", native = "UTPPSetMotionLeanCoverage",
+    arg = function(v) return v == "wide" and 1 or 0 end },
+}
+function M.ApplyOptions(api)
+  if not M.want.enabled then return false end
+  api = api or M.api
+  local all = true
+  for _, o in ipairs(M.OPTIONS) do
+    local v = M.want[o.want]
+    if M.rt.optionsApplied[o.want] ~= v then
+      local a = o.arg and o.arg(v) or (v == true)
+      local ok, accepted
+      if api and api[o.field] then
+        ok, accepted = pcall(api[o.field], a, o.hz)
+      elseif Game == nil then
+        ok, accepted = false, nil -- offline harness without the native: nothing to send
+      else
+        ok, accepted = pcall(function() if o.hz then return Game[o.native](a, o.hz) end return Game[o.native](a) end)
+      end
+      if ok and accepted ~= false then
+        M.rt.optionsApplied[o.want] = v
+        log("mm." .. o.want .. " -> " .. tostring(v))
+      else
+        all = false
+      end
+    end
+  end
+  return all
+end
+function M.SetOption(name, v, api)
+  M.want[name] = v
+  M.ApplyOptions(api)
+  return M.want[name]
+end
+
 function M.Status(api)
   api = api or M.api or defaultApi()
   local ok, s = callGlue(api, "Status")
@@ -967,6 +1014,31 @@ function M.RegisterSettings(core)
     label = "motion: lean head amount",
     desc = "Amount of the head lean (1 = full strength, applies to the head layer only; lean amount scales the torso).",
     apply = function(v) M.SetLeanHeadScale(v) end })
+  core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = false,
+    label = "motion: steady aim while turning (experimental)",
+    desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns. Off (default) = the earlier aim.",
+    apply = function(v) M.SetOption("aimWorldSmooth", v == true) end })
+  core.Register({ key = "mm.pelvisPlacement", section = "motion", type = "bool", default = false,
+    label = "motion: pelvis follows the feet (experimental)",
+    desc = "Lowers or shifts V's hips a little so that both feet can reach the ground on steps and slopes. Off (default) = the feet are placed without moving the hips.",
+    apply = function(v) M.SetOption("pelvisPlacement", v == true) end })
+  core.Register({ key = "mm.handBackBlend", section = "motion", type = "bool", default = false,
+    label = "motion: smooth hand-back (experimental)",
+    desc = "When an animation of the game (a climb, a vault, a scene) hands V back to the motion animations, the body carries its last motion into the blend instead of starting from a still pose. Off (default) = the earlier blend.",
+    apply = function(v) M.SetOption("handBackBlend", v == true) end })
+  core.Register({ key = "mm.stepDownReach", section = "motion", type = "bool", default = false,
+    label = "motion: walk down deeper steps (experimental)",
+    desc = "V walks or runs down steps and small ledges up to about knee height without a fall and landing animation. Off (default) = only low steps; deeper ones play a short fall.",
+    apply = function(v) M.SetOption("stepDownReach", v == true) end })
+  core.Register({ key = "mm.farJumpGravity", section = "motion", type = "bool", default = false,
+    label = "motion: jump timing for the game gravity (experimental)",
+    desc = "Picks the jump and fall animations by the time left until landing as if under the gravity the animations were made for, so landings start on time. Takes effect after the next load of a save. Off (default) = the earlier timing.",
+    apply = function(v) M.SetOption("farJumpGravity", v == true) end })
+  core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
+    choices = { { "standard", "Standard" }, { "wide", "Wide" } },
+    label = "motion: lean coverage",
+    desc = "Standard (default) = V leans into turns only while running unarmed. Wide = also with a weapon drawn, while aiming (body only) and when moving crouched.",
+    apply = function(v) M.SetOption("leanCoverage", v == "wide" and "wide" or "standard") end })
   core.Register({ key = "mm.selectionGuards", section = "motion", type = "bool", default = true,
     label = "motion: clip selection guards",
     desc = "Keeps the motion matcher from switching animation clips back and forth on tiny differences (loops, young starts, dodges, short stick dips). Off = every such guard off, for comparison tests.",

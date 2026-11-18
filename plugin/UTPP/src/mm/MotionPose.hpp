@@ -461,6 +461,8 @@ public:
     // Feminine figure (FeminineFigure.hpp): sloping set-back shoulders, free arms closer to the body, a lower head. On by default.
     void SetFeminineFigure(bool aOn) { m_figureOn = aOn; }
     bool FeminineFigure() const { return m_figureOn; }
+    // Hand-back blend from an external pose (blend stack switch; the runtime option of the driver)
+    void SetHandBackBlend(bool aOn) { m_stack.SetHandBackBlend(aOn); }
     void SetGraphInputs(const motionstack::GraphInputs &input)
     {
         m_stack.SetGraphInputs(input);

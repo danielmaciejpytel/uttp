@@ -95,6 +95,16 @@ public native func UTPPSetMotionSelectionGuards(on: Bool) -> Bool
 public native func UTPPSetMotionLean(on: Bool) -> Bool
 public native func UTPPSetMotionLeanHead(on: Bool) -> Bool
 public native func UTPPSetMotionLeanParams(scale: Float, headScale: Float) -> Bool
+// Optional motion behaviours, all off by default (CET utpp_motion): pelvis placement of the foot stage, hand-back blend from an
+// external pose, deeper step-down reach, jump flight time under the game gravity (read when the motion database loads) and
+// the lean coverage (0 = unarmed running only, 1 = also with a weapon drawn, while aiming and crouched; false = out of range).
+public native func UTPPSetMMPelvisPlacement(on: Bool) -> Void
+public native func UTPPSetMMHandBackBlend(on: Bool) -> Void
+public native func UTPPSetMMStepDownReach(on: Bool) -> Void
+public native func UTPPSetMMFarJumpGravity(on: Bool) -> Void
+public native func UTPPSetMotionLeanCoverage(coverage: Int32) -> Bool
+// Aim offset on a filtered world direction of the target (hz = smoothing rate, 0 = exact tracking with the catch-up limit).
+public native func UTPPSetMMAimWorldSmoothing(on: Bool, hz: Float) -> Bool
 // the motion set-trav (MotionTraversal): obstacle of a game climb (action 8) / vault (action 9) start, sent once from the
 // ClimbEvents / VaultEvents OnEnter wraps below (only while motion is on). The DLL plans one motion set traversal montage from it
 // (MotionDriver.hpp FeedTraversal); false = rejected input (invalid action / non-finite value).
