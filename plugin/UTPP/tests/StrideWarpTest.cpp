@@ -136,7 +136,7 @@ static void Model(const motion::MotionDatabase &db, const BoneTransform *local, 
     }
 }
 
-static motion::MatchResult Pick(int clip, float t, bool jump, bool ground)
+static motion::MatchResult Pick(int clip, float t, bool jump, bool ground, float blend = 0.2f)
 {
     motion::MatchResult m;
     m.clip = clip;
@@ -144,7 +144,7 @@ static motion::MatchResult Pick(int clip, float t, bool jump, bool ground)
     m.playRate = 1;
     m.jumped = jump;
     m.blend.valid = jump;
-    m.blend.blendTime = 0.2f;
+    m.blend.blendTime = blend;
     m.blend.toGround = ground;
     return m;
 }
@@ -229,6 +229,101 @@ static void Stack(const motion::MotionDatabase &db, int clip, int hz)
     Check(Run(db, clip, hz, 0.8f, true, false).identical, "warp switched off: pose bit for bit unchanged", hz);
 }
 
+// A warped loop layer replaced by an unwarped pick of the same pose: its shortening fades out no faster than the whole-layer weight of
+// the new pick (smoothstep over the blend time) and never drops by more than the scale interpolation rate allows in one update, also
+// under a short blend. It used to be cut on the faster leg weight (or by pruning the warped layer) within a few updates and snap the knee.
+// Three stacks run the same picks: `off` never warps, `cont` keeps warping through the new pick, `on` switches to an unwarped pick.
+static void StackFadeOut(const motion::MotionDatabase &db, int clip, int hz, float blend)
+{
+    const float dt = 1.0f / float(hz), fps = db.Header().fps, release = 1.0f - std::exp(-stridewarp::kInterpSpeed * dt);
+    motionstack::BlendStack off, cont, on;
+    bool ok = off.Init(db) && cont.Init(db) && on.Init(db);
+    off.SetStrideWarp(false);
+    cont.SetStrideWarp(true);
+    on.SetStrideWarp(true);
+    const int foot[2]{Bone(db, "LeftFoot"), Bone(db, "RightFoot")};
+    const auto &c = db.Clip(uint32_t(clip));
+    std::vector<BoneTransform> mOff, mCont, mOn;
+    const int switchAt = int(0.4f * float(hz));
+    float t = 0.5f, fadeDeficit = 0, overshoot = 0, dropExcess = 0, shortening = 0, lastFade[2]{}, lastWarp[2]{};
+    int compared = 0;
+    for (int k = 0; k < switchAt + int(0.3f * float(hz)) && ok; ++k, t += dt)
+    {
+        const auto &root = db.Root(c.firstFrame + uint32_t(t * fps));
+        motionstack::GraphInputs g;
+        g.enabled = true;
+        g.velocityWorldX = root.dx * fps * 0.8f;
+        g.velocityWorldY = root.dy * fps * 0.8f;
+        off.SetGraphInputs(g);
+        cont.SetGraphInputs(g);
+        on.SetGraphInputs(g);
+        const bool jump = k == 0 || k == switchAt;
+        ok = off.Step(Pick(clip, t, jump, true, blend), dt) && cont.Step(Pick(clip, t, jump, true, blend), dt) &&
+             on.Step(Pick(clip, t, jump, k < switchAt, blend), dt);
+        if (!ok || k < switchAt - 1)
+            continue;
+        Model(db, off.Output(), mOff);
+        Model(db, cont.Output(), mCont);
+        Model(db, on.Output(), mOn);
+        const float x = std::clamp(float(k - switchAt + 1) * dt / blend, 0.0f, 1.0f);
+        const float keep = k < switchAt ? 1.0f : 1.0f - x * x * (3 - 2 * x); // remaining whole-layer weight of the warped layer
+        for (int s = 0; s < 2; ++s)
+        {
+            const math::Vec3 warp = mCont[size_t(foot[s])].p - mOff[size_t(foot[s])].p;
+            const math::Vec3 fade = mOn[size_t(foot[s])].p - mOff[size_t(foot[s])].p;
+            const float w = std::sqrt(math::Dot(warp, warp)), f = std::sqrt(math::Dot(fade, fade));
+            shortening = std::fmax(shortening, w);
+            if (w > 0.01f)
+            {
+                fadeDeficit = std::fmax(fadeDeficit, keep - f / w);
+                overshoot = std::fmax(overshoot, f / w - 1.0f);
+                ++compared;
+            }
+            // one update releases at most the interpolation share of the held shortening (2 mm for the pose difference of the fading blend)
+            if (k >= switchAt)
+                dropExcess = std::fmax(dropExcess, (lastFade[s] - f) - (release * lastFade[s] + std::fabs(w - lastWarp[s]) + 0.002f));
+            lastFade[s] = f;
+            lastWarp[s] = w;
+        }
+    }
+    std::printf("INFO fade-out after an unwarped pick, blend %.2f s: shortening up to %.2f cm, fade deficit %.3f, overshoot %.3f over %d "
+                "samples, drop excess %.2f mm @Hz=%d\n",
+                blend, shortening * 100.0f, fadeDeficit, overshoot, compared, dropExcess * 1e3f, hz);
+    Check(ok && shortening > 0.02f && compared > 0, "fade-out fixture: warped loop with a shortening above 2 cm", hz);
+    Check(fadeDeficit < 0.05f, "an unwarped pick fades the shortening out no faster than its whole-layer weight", hz);
+    Check(overshoot < 0.05f, "the fading shortening never exceeds the continuing one", hz);
+    Check(dropExcess <= 0.0f, "the shortening never drops faster than the interpolation rate in one update (no knee snap)", hz);
+}
+
+// Yaw fade: the warp weight of a smoothed visual yaw rate, the smoothing itself and its effect on the scale.
+static void YawFadeSolver(int hz)
+{
+    const float dt = 1.0f / float(hz);
+    const float mid = 0.5f * (stridewarp::kYawFadeStart + stridewarp::kYawFadeEnd);
+    Check(stridewarp::YawFade(0.0f) == 1.0f && stridewarp::YawFade(stridewarp::kYawFadeStart) == 1.0f &&
+              stridewarp::YawFade(stridewarp::kYawFadeEnd) == 0.0f && stridewarp::YawFade(4.0f) == 0.0f,
+          "yaw fade: full warp up to the start rate, none from the end rate", hz);
+    Check(std::fabs(stridewarp::YawFade(mid) - 0.5f) < 1e-5f && stridewarp::YawFade(-mid) == stridewarp::YawFade(mid),
+          "yaw fade: linear between the rates, symmetric in the turn direction", hz);
+    float r = 0, w = 0;
+    for (int k = 0; k < 3 * hz; ++k)
+    {
+        r = stridewarp::SmoothYawRate(r, 1.0f * dt, dt);
+        w = stridewarp::SmoothYawRate(w, -1.0f * dt + 6.28318531f, dt); // the same turn the other way, across the winding
+    }
+    Check(std::fabs(r - 1.0f) < 1e-3f && std::fabs(w - 1.0f) < 1e-3f, "smoothed yaw rate settles on |rate|, across the yaw winding", hz);
+    Check(stridewarp::SmoothYawRate(0.7f, 1.0f, 0.0f) == 0.7f, "smoothed yaw rate holds at dt 0", hz);
+    stridewarp::State a, b, c;
+    stridewarp::Inputs in = In(dt, 2.4f, 3.0f);
+    const float full = stridewarp::Step(a, in);
+    in.yawFade = 0.0f;
+    const float none = stridewarp::Step(b, in);
+    in.yawFade = 0.5f;
+    const float half = stridewarp::Step(c, in);
+    Check(full < 1.0f && none == 1.0f && std::fabs(half - (1.0f - 0.5f * (1.0f - full))) < 1e-6f,
+          "yaw fade 0 is the identity, 0.5 halves the shortening", hz);
+}
+
 static void ClipFactorSolver(int hz)
 {
     const float dt = 1.0f / float(hz);
@@ -272,6 +367,8 @@ int main(int argc, char **argv)
         Solver(hz);
     for (int hz : {30, 60, 144})
         ClipFactorSolver(hz);
+    for (int hz : {30, 60, 144})
+        YawFadeSolver(hz);
     motion::MotionDatabase db;
     std::string error;
     if (!db.LoadFromFile(argv[1], motion::kRigIdentityWoman, error))
@@ -283,7 +380,11 @@ int main(int argc, char **argv)
     Check(clip >= 0, "run loop fixture clip found by name");
     if (clip >= 0)
         for (int hz : {30, 60, 144})
+        {
             Stack(db, clip, hz);
+            StackFadeOut(db, clip, hz, 0.2f);
+            StackFadeOut(db, clip, hz, 0.05f);
+        }
     for (int hz : {30, 60, 144})
         StackClipFactor(db, hz);
     std::printf("%d passed, %d failed\n", passed, failed);
