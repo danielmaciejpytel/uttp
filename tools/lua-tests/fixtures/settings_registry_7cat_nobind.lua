@@ -130,6 +130,7 @@ return {
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
+    ["mm.neutralAim"] = "false",
     ["mm.orientWarp"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
@@ -292,12 +293,14 @@ return {
     "v2 setLeanParams(0.84999999999999998,0.90000000000000002)",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "native UTPPSetMMAimWorldSmoothing(false,0)",
+    "native UTPPSetMMNeutralAimOffset(false)",
     "native UTPPSetMMPelvisPlacement(false)",
     "native UTPPSetMMHandBackBlend(false)",
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
     "native UTPPSetMotionLeanCoverage(0)",
     "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
@@ -495,6 +498,7 @@ return {
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
@@ -1750,6 +1754,14 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
+    ["mm.neutralAim"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.orientWarp"] = {
       ["default"] = "true",
       ["hasApply"] = true,
@@ -2358,6 +2370,7 @@ return {
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
+    ["mm.neutralAim"] = "false",
     ["mm.orientWarp"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
@@ -2532,6 +2545,7 @@ return {
     "mm.leanScale",
     "mm.leanHeadScale",
     "mm.aimWorldSmooth",
+    "mm.neutralAim",
     "mm.pelvisPlacement",
     "mm.handBackBlend",
     "mm.stepDownReach",
@@ -2717,6 +2731,7 @@ return {
     "mm.leanScale",
     "mm.leanHeadScale",
     "mm.aimWorldSmooth",
+    "mm.neutralAim",
     "mm.pelvisPlacement",
     "mm.handBackBlend",
     "mm.stepDownReach",
@@ -2892,6 +2907,7 @@ return {
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
@@ -3077,6 +3093,7 @@ mm.leanHead=true\r\
 mm.leanScale=0.85\r\
 mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=false\r\
+mm.neutralAim=false\r\
 mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
@@ -3337,6 +3354,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.leanScale",
       "mm.leanHeadScale",
       "mm.aimWorldSmooth",
+      "mm.neutralAim",
       "mm.pelvisPlacement",
       "mm.handBackBlend",
       "mm.stepDownReach",
@@ -3537,6 +3555,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.leanScale"] = "1.1000000000000001",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "false",
+    ["mm.neutralAim"] = "false",
     ["mm.orientWarp"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
@@ -3680,6 +3699,7 @@ mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=false\r\
+mm.neutralAim=false\r\
 mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
@@ -3860,6 +3880,7 @@ other.module=42\r\
     "/utpp/motion|float|mm.leanScale",
     "/utpp/motion|float|mm.leanHeadScale",
     "/utpp/motion|switch|mm.aimWorldSmooth",
+    "/utpp/motion|switch|mm.neutralAim",
     "/utpp/motion|switch|mm.pelvisPlacement",
     "/utpp/motion|switch|mm.handBackBlend",
     "/utpp/motion|switch|mm.stepDownReach",
