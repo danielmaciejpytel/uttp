@@ -56,6 +56,12 @@
 #include <cmath>
 #include <cstdint>
 #include <string_view>
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+#include <cstdio>
+#include <cstdlib>
+#include <process.h>
+#include <string>
+#endif
 
 #include "HeadLead.hpp"
 
@@ -317,6 +323,9 @@ public:
         m_tel.shouldersVsPath = m_s2;
         m_tel.rootDeg = m_dp;
         m_tel.torsoDeg = m_tau;
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        TestTelemetryLine();
+#endif
         return m_dp;
     }
 
@@ -386,6 +395,26 @@ public:
         return tau;
     }
 
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    // Replay tools only: UTPP_TEST_ORIENT_WARP_LOG = file prefix; one line per measured update (weight, turn rate, pelvis / shoulders
+    // vs path before this layer, applied root yaw / torso twist) to <prefix>_<process id>.csv. Unset = nothing is written.
+    void TestTelemetryLine() const
+    {
+        static FILE* f = [] {
+            const char* e = std::getenv("UTPP_TEST_ORIENT_WARP_LOG");
+            if (!e || !*e)
+                return static_cast<FILE*>(nullptr);
+            const std::string path = std::string(e) + "_" + std::to_string(_getpid()) + ".csv";
+            FILE* out = std::fopen(path.c_str(), "w");
+            if (out)
+                std::fputs("w,rate,pelvis,shoulders,root,torso\n", out);
+            return out;
+        }();
+        if (f)
+            std::fprintf(f, "%.3f,%.1f,%.2f,%.2f,%.2f,%.2f\n", static_cast<double>(m_w), static_cast<double>(m_rate),
+                         static_cast<double>(m_p2), static_cast<double>(m_s2), static_cast<double>(m_dp), static_cast<double>(m_tau));
+    }
+#endif
     const Telemetry& Tel() const { return m_tel; }
     float Weight() const { return m_w; }
     float RootDeg() const { return m_dp; }
