@@ -17,6 +17,9 @@ Samples, locks, trimming and the per-class pooling are the world_slide.py code.
 --game also measures the recorded game session of the same run (world_slide.py: pose recording + feed + log) and reports both on the
 common feed rows (the rows the game recording is aligned to, outside its rejected step / scenario windows), plus per-row agreement of
 the clip and of the planted state. Without --game only the replay is measured (all rows).
+--stages-args "--capsule-stats 1" replays the capsule Acceleration / Deceleration stats the game reports after every feed (the stop
+and start forecasts use them in the game; without them the replay picks other stop clips). A replay tool that ignores the option is
+refused (no CAPSTAT line).
 Read-only on every input; the .bin files of the replay are written to --work and deleted afterwards unless --keep-bin.
 """
 from __future__ import annotations
@@ -54,7 +57,15 @@ def run_stages(exe_dir, root, feed, log, body, prefix, extra=''):
     p = subprocess.run(cmd, capture_output=True, text=True, errors='replace')
     if p.returncode != 0:
         raise RuntimeError('replay failed rc=%d: %s' % (p.returncode, (p.stdout + p.stderr)[-400:]))
+    if capsule_stats_requested(extra) and 'CAPSTAT ' not in p.stdout:
+        raise RuntimeError('--capsule-stats 1 requested but %s printed no CAPSTAT line (the tool does not know the option)' % cmd[0])
     return p.stdout
+
+
+def capsule_stats_requested(extra):
+    """True when the replay arguments ask for the capsule stat replay (--capsule-stats with a non-zero value)."""
+    a = shlex.split(extra or '', posix=False)
+    return any(x == '--capsule-stats' and i + 1 < len(a) and a[i + 1] not in ('0', '') for i, x in enumerate(a))
 
 
 def _qrot(q, v):
@@ -178,6 +189,48 @@ def _pct(v, q):
     return round(float(np.percentile(v, q)), 2) if len(v) else None
 
 
+_GAITS = ('Walk', 'Run', 'Sprint', 'Crouch')
+
+
+def _gait(name):
+    return next((g for g in _GAITS if '_%s_' % g in name), '-')
+
+
+def stop_pair_kind(game_clip, replay_clip):
+    """Kind of a game -> replay clip disagreement on a stop row: foot (the same stop on the other foot), gait (a stop of another
+    gait), direction (a stop of the same gait and foot, other direction), timing (one side not in a stop clip: the stop starts
+    earlier or later), other."""
+    gs, rs = '_Stop' in game_clip, '_Stop' in replay_clip
+    if gs != rs:
+        return 'timing'
+    if not gs:
+        return 'other'
+    if _gait(game_clip) != _gait(replay_clip):
+        return 'gait'
+    swap = game_clip.replace('Lfoot', '#').replace('Rfoot', 'Lfoot').replace('#', 'Rfoot')
+    if swap == replay_clip:
+        return 'foot'
+    gf, rf = 'Lfoot' in game_clip, 'Lfoot' in replay_clip
+    return 'foot' if gf != rf else 'direction'
+
+
+def stop_pairs(gses, gkeep, oses):
+    """{kind: rows} and the most frequent game -> replay pairs of the stop rows (game class) whose clips disagree."""
+    import collections
+    f = np.nonzero(gkeep & (gses.rows >= 0) & (gses.rows < len(oses.fsec)) & (gses.cls == 'stop'))[0]
+    r = gses.rows[f]
+    names = gses.clip_names
+    known = np.isin(gses.state[f], (ws.ST_OK, ws.ST_BLEND)) & (oses.state[r] == ws.ST_OK)
+    kinds, pairs = collections.Counter(), collections.Counter()
+    for gi, oi in zip(gses.clip_of[f][known], oses.clip_of[r][known]):
+        g = names[gi] if 0 <= gi < len(names) else '-'
+        o = names[oi] if 0 <= oi < len(names) else '-'
+        if g != o:
+            kinds[stop_pair_kind(g, o)] += 1
+            pairs[(g, o)] += 1
+    return dict(rows=int(known.sum()), kinds=dict(kinds), top=[[g, o, n] for (g, o), n in pairs.most_common(5)])
+
+
 def agreement(gses, gkeep, oses):
     """Per-row agreement on the game frames kept: same clip, same planted state (contact >= 0.5) per foot, by game class."""
     f = np.nonzero(gkeep & (gses.rows >= 0) & (gses.rows < len(oses.fsec)))[0]
@@ -221,7 +274,7 @@ def measure(spec, a):
                 except OSError:
                     pass
     res = dict(run=rid, body=BODY_NAME.get(body, body), shift_scores=oses.shift_scores, shift_flag=oses.shift_flag,
-               runtime=[ln for ln in stdout.splitlines() if ln.startswith(('RUNTIME', 'PICKS'))])
+               runtime=[ln for ln in stdout.splitlines() if ln.startswith(('RUNTIME', 'PICKS', 'CAPSTAT'))])
     allrows = np.ones(len(oses.fsec), dtype=bool)
     parts = dict(replay_all=pool(oses, allrows))
     if a.game:
@@ -237,6 +290,7 @@ def measure(spec, a):
         mixed.choose_shift(ws.FEED_SHIFT)
         parts['replay_pose_game_contact'] = pool(mixed, common)
         res['agreement'] = agreement(gses, gframe, oses)
+        res['stop_pairs'] = stop_pairs(gses, gframe, oses)
     return res, parts
 
 
@@ -287,6 +341,11 @@ def write_md(doc, path):
             lines.append('- %s %s: ' % (r['body'], r['run']) + '; '.join(
                 '%s %d rows clip %.2f planted %.2f (%.2f / %.2f)' % (c, v['rows'], v['same_clip'], v['same_planted'], v['game_planted'],
                                                                     v['replay_planted']) for c, v in ag.items()))
+        lines.append('')
+        lines += ['## Stop rows: game -> replay clip disagreements by kind (foot / gait / direction / timing / other)', '']
+        for r in doc['runs']:
+            sp = r.get('stop_pairs') or {}
+            lines.append('- %s %s: %s of %s rows; top %s' % (r['body'], r['run'], sp.get('kinds'), sp.get('rows'), sp.get('top')))
         lines.append('')
     lines += ['## Shift scores of the replay (mean planted cm/s of moving clips, samples)', '']
     for r in doc['runs']:

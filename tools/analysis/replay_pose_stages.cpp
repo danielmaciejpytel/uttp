@@ -22,6 +22,9 @@
 //   --velocity-predicates 1  moving / pivot predicates from the current velocity and the input acceleration
 //   --tip-deg D         turn-in-place angle of the chooser (deg)
 //   --pick-dump 1       one PICKDUMP line per stop / start pick (inspection)
+//   --capsule-stats 1   after every feed, report the capsule Acceleration / Deceleration stats and keep the script's stat multipliers
+//                       as the game does after each locomotion feed (AccelTarget / DecelTarget, see CapsuleStatReplay below); the
+//                       stats are the per-state values of the recorded sessions (default off: no stat reported, motion fallback)
 // <feed dump> = --clips [name part] writes the stored frames of the woman database clips whose name contains the part (all without it)
 // instead (same layout, see the clip mode below).
 // <out prefix> = - writes no files (summary only).
@@ -179,6 +182,101 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
 }
 } // namespace
 
+// The locomotion script queries the capsule stats right after every feed (UTPPUpdateAccel, then UTPPUpdateDecel): it reports the
+// stat without its own multiplier and the multiplier it applies, then keeps, replaces or removes that multiplier from the returned
+// target. The stats come from the session's log when it has the stat samples (CAPSTAT lines, logged while the feed dump is on: the
+// latest sample before the next feed row); a log without them falls back to the values that were constant per locomotion state in the
+// recorded sessions (trace lines: Acceleration 24 in every state, Deceleration 24 while moving and 48 standing still).
+struct CapsuleStatReplay
+{
+    float accelBase = 24.0f, decelMoving = 24.0f, decelIdle = 48.0f;
+    float accelMul = 1.0f, decelMul = 1.0f;
+    bool accelMod = false, decelMod = false;
+    uint64_t accelQueries = 0, decelQueries = 0, accelKept = 0, decelKept = 0, logged = 0, segments = 0;
+    struct Sample
+    {
+        double t;
+        float base;
+    };
+    std::vector<Sample> samples[2]; // accel, decel; sorted by dump time
+    size_t next[2] = {0, 0};
+    float current[2] = {-1.0f, -1.0f};
+
+    void ReadLog(const std::string& aPath)
+    {
+        // every feed dump restarts its time: a sample earlier than the one before it starts the samples of a new dump; only the
+        // last dump's samples are kept (the replayed feed file is the newest dump of the session)
+        std::ifstream in(aPath);
+        std::string line;
+        double last = -1.0;
+        while (std::getline(in, line))
+        {
+            const size_t at = line.find("UTPP CAPSTAT t=");
+            if (at == std::string::npos)
+                continue;
+            double t = 0;
+            char stat[16] = {};
+            float base = 0, mul = 0;
+            if (std::sscanf(line.c_str() + at, "UTPP CAPSTAT t=%lf stat=%15s base=%f mul=%f", &t, stat, &base, &mul) != 4)
+                continue;
+            const int k = std::strcmp(stat, "accel") == 0 ? 0 : (std::strcmp(stat, "decel") == 0 ? 1 : -1);
+            if (k < 0)
+                continue;
+            if (segments == 0 || t < last)
+            {
+                ++segments;
+                samples[0].clear();
+                samples[1].clear();
+                logged = 0;
+            }
+            last = t;
+            samples[k].push_back({t, base});
+            ++logged;
+        }
+        for (auto& v : samples)
+            std::stable_sort(v.begin(), v.end(), [](const Sample& a, const Sample& b) { return a.t < b.t; });
+    }
+    // logged stat k for the query after a feed whose next row starts at aNextT; aFallback without samples
+    float Base(int k, double aNextT, float aFallback)
+    {
+        if (samples[k].empty())
+            return aFallback;
+        while (next[k] < samples[k].size() && samples[k][next[k]].t < aNextT)
+            current[k] = samples[k][next[k]++].base;
+        return current[k] >= 0.0f ? current[k] : aFallback;
+    }
+
+    static void Keep(float aTarget, float aBase, float aMin, float& aMul, bool& aMod, uint64_t& aKept)
+    {
+        const float applied = aMod && aMul > 0.0001f ? aMul : 1.0f;
+        float want = 1.0f;
+        if (aTarget > 0.0f && aBase > aTarget)
+            want = std::clamp(aTarget / aBase, aMin, 1.0f);
+        if (want >= 0.999f)
+        {
+            aMod = false;
+            aMul = 1.0f;
+            return;
+        }
+        if (aMod && std::fabs(want - applied) < 0.02f)
+            return;
+        aMod = true;
+        aMul = want;
+        ++aKept;
+    }
+    void AfterFeed(int32_t aLoco, double aNextT)
+    {
+        const float accelApplied = accelMod && accelMul > 0.0001f ? accelMul : 1.0f;
+        const float aBase = Base(0, aNextT, accelBase);
+        Keep(motionhost::AccelTarget(aBase, accelApplied), aBase, 0.05f, accelMul, accelMod, accelKept);
+        ++accelQueries;
+        const float decelBase = Base(1, aNextT, aLoco >= 1 && aLoco <= 3 ? decelMoving : decelIdle);
+        const float decelApplied = decelMod && decelMul > 0.0001f ? decelMul : 1.0f;
+        Keep(motionhost::DecelTarget(decelBase, decelApplied), decelBase, 0.1f, decelMul, decelMod, decelKept);
+        ++decelQueries;
+    }
+};
+
 int main(int argc, char** argv)
 {
     if (argc < 5)
@@ -191,6 +289,7 @@ int main(int argc, char** argv)
     std::string settingsLog;
     bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int32_t capsuleQuery = -1, velocityPredicates = -1;
+    bool capsuleStats = false;
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
     auto& stackOverrides = mm::motionstack::g_testStackOverrides;
     for (int i = 5; i + 1 < argc; i += 2)
@@ -225,6 +324,8 @@ int main(int argc, char** argv)
             tipDeg = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--pick-dump") == 0)
             pickDump = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--capsule-stats") == 0)
+            capsuleStats = std::atoi(argv[i + 1]) != 0;
     }
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
@@ -273,6 +374,7 @@ int main(int argc, char** argv)
         std::printf("clips=%u frames=%zu fps=%g\n", db->NumClips(), frames, double(fps));
         return 0;
     }
+    CapsuleStatReplay capsuleStatReplay;
     std::vector<motionhost::FeedInput> inputs;
     std::vector<Frame> rows;
     {
@@ -342,6 +444,8 @@ int main(int argc, char** argv)
     int applied = 0, unknown = 0;
     if (!settingsLog.empty())
         ApplyLoggedSettings(settingsLog, applied, unknown);
+    if (capsuleStats && !settingsLog.empty())
+        capsuleStatReplay.ReadLog(settingsLog);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
@@ -400,6 +504,8 @@ int main(int argc, char** argv)
         const auto feed0 = std::chrono::steady_clock::now();
         motionhost::Feed(inputs[i]);
         feedUs.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - feed0).count());
+        if (capsuleStats)
+            capsuleStatReplay.AfterFeed(rows[i].loco, i + 1 < rows.size() ? double(rows[i + 1].t) : 1e30);
         const bool published = ReadPublished();
         if (rows[i].t < from || rows[i].t > to)
             continue;
@@ -666,6 +772,14 @@ int main(int argc, char** argv)
                     name.c_str(), secs, clipChanges / std::max(1e-6, secs), ikCorrMax, pct(corrCm, 0.95), turns,
                     turns ? procTurnsSum / turns : 0.0, capSum > 0 ? procSum / capSum : 0.0, pct(feedUs, 0.5), pct(feedUs, 0.95),
                     static_cast<unsigned long long>(liveHistorySearches));
+        if (capsuleStats)
+            std::printf("CAPSTAT run=%s loggedSamples=%llu logSegments=%llu accelQueries=%llu accelModifierChanges=%llu decelQueries=%llu decelModifierChanges=%llu\n",
+                        name.c_str(), static_cast<unsigned long long>(capsuleStatReplay.logged),
+                        static_cast<unsigned long long>(capsuleStatReplay.segments),
+                        static_cast<unsigned long long>(capsuleStatReplay.accelQueries),
+                        static_cast<unsigned long long>(capsuleStatReplay.accelKept),
+                        static_cast<unsigned long long>(capsuleStatReplay.decelQueries),
+                        static_cast<unsigned long long>(capsuleStatReplay.decelKept));
         // PICKS line: per class (stop, start) picks, wrong-foot picks (first-frame foot offset > 10 cm), offset p50 / p95 (cm), planted
         // drift in the first 0.3 s mean / p95 (cm)
         const auto mean = [](const std::vector<double>& v) {
