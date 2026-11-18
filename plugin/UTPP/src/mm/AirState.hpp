@@ -68,11 +68,14 @@ inline constexpr float kStepDownFallM = 0.2f;
 // --- Step-down reach for deeper steps (AirConfig::stepDownReach, default off; = adapter MapConfig::stepDownReach, same build switch) ---
 // With it on, a reach configured by stepDownDepthM > 0 covers a known floor up to kStepDownReachDepthM below the drop start for
 // kStepDownReachMaxSeconds, and a descending PSM Fall run keeps it while the floor is reached within kStepDownReachPsmFallSeconds.
+// Depth bound from recorded drops: the floors that stay ground were 0.29-0.31 m below the drop start, the shallowest recorded ledge
+// falls that must keep their air clips 0.33 m (a run off a ledge, first probe) and 0.334-0.351 m (a run off a 35 cm ledge, PSM Fall on
+// the last two airborne feeds); the same drop time (0.17-0.20 s) and PSM timing cannot tell them apart. = adapter::kStepDownReachM.
 #ifndef UTPP_STEP_DOWN_REACH_DEFAULT
 #define UTPP_STEP_DOWN_REACH_DEFAULT 0
 #endif
 inline constexpr bool kStepDownReachDefault = UTPP_STEP_DOWN_REACH_DEFAULT != 0;
-inline constexpr float kStepDownReachDepthM = 0.45f;
+inline constexpr float kStepDownReachDepthM = 0.32f;
 inline constexpr float kStepDownReachMaxSeconds = 0.25f;
 inline constexpr float kStepDownReachPsmFallSeconds = 0.04f;
 // --- end step-down reach ---
