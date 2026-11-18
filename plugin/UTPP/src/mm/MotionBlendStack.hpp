@@ -6,12 +6,18 @@
 #include "MotionOrientationWarp.hpp"
 #include "MotionSteering.hpp"
 #include "MotionRootTrack.hpp"
+#include "StrideWarp.hpp"
 #include <array>
 #include <span>
 #ifndef UTPP_BLEND_SIGNAL_MODE
 // Default of BlendStack::SetPerBoneSignals: bit 0 = root delta / yaw on the Root bone's weight, bit 1 = contacts on the leg weights,
 // 0 = every signal on the whole-layer weight (default until the per-bone blend factors are settled; a build may override it).
 #define UTPP_BLEND_SIGNAL_MODE 0
+#endif
+#ifndef UTPP_STRIDE_WARP
+// Default of BlendStack::SetStrideWarp: 1 = shrink-only stride warping of the leg targets (StrideWarp.hpp) on ground locomotion picks,
+// 0 = off (the pose is bit for bit the one without it). A build may override it.
+#define UTPP_STRIDE_WARP 0
 #endif
 #ifndef UTPP_FOOTSINK_MUTATION
 #define UTPP_FOOTSINK_MUTATION 0
@@ -58,6 +64,8 @@ struct Player
     bool groundFade = false; // this layer's fade-in is a ground locomotion -> ground locomotion fade (BlendRequest::groundFade), see KeepFootHeight
     bool airFade = false;    // this layer was picked in the air movement mode (BlendRequest::toAir), see KeepAnklesAboveLayers
     bool fullLegFade = false; // the leg bones of this layer fade over the whole blend time (BlendRequest::fullLegFade), see Alpha
+    bool strideGround = false; // this layer was picked as ground locomotion in a ground movement mode (BlendRequest::toGround), see WarpStride
+    stridewarp::State stride;  // stride scale of this layer, see WarpStride
 };
 struct GraphInputs
 {
@@ -113,9 +121,17 @@ class BlendStack
         m_hipsChain.clear();
         for (int32_t b = m_hipsBone; b >= 0; b = db.BoneParent(uint32_t(b)))
             m_hipsChain.insert(m_hipsChain.begin(), b);
+        m_warpCurve = -1;
         for (uint32_t k = 0; k < db.NumCurves(); ++k)
+        {
             if (db.CurveName(k) == "Enable_OrientationWarping")
                 m_orientationCurve = int32_t(k);
+            if (db.CurveName(k) == "Enable_Warping")
+                m_warpCurve = int32_t(k);
+        }
+        // Stride warping reads the clip's warping curve; data that names it after orientation warping carries the same curve.
+        if (m_warpCurve < 0)
+            m_warpCurve = m_orientationCurve;
         for (uint32_t side = 0; side < 2; ++side)
         {
             m_ankleChain[side].clear();
@@ -130,6 +146,8 @@ class BlendStack
             for (size_t k = 0; k + 1 < m_ankleChain[side].size(); ++k)
                 if (m_ankleChain[side][k] == m_hipsBone)
                     thigh[side] = m_ankleChain[side][k + 1];
+        m_thighBones[0] = thigh[0];
+        m_thighBones[1] = thigh[1];
         for (uint32_t k = 0; k < m_n; ++k)
             for (int32_t b = int32_t(k); b >= 0; b = db.BoneParent(uint32_t(b)))
                 if (b == thigh[0] || b == thigh[1])
@@ -181,6 +199,20 @@ class BlendStack
     float SteeringTargetTime() const
     {
         return m_steeringTargetTime;
+    }
+    // Shrink-only stride warping of the leg targets (see WarpStride). Default UTPP_STRIDE_WARP (off); off reproduces the pose bit for bit.
+    void SetStrideWarp(bool enabled)
+    {
+        m_strideWarp = enabled;
+    }
+    bool StrideWarp() const
+    {
+        return m_strideWarp;
+    }
+    // Effective stride scale of the head layer in the last Step (1 = no warp).
+    float StrideScale() const
+    {
+        return m_strideScale;
     }
     // Foot height keeping (see KeepFootHeight). Default on; off reproduces the plain crossfade bit for bit.
     void SetFootHeightKeep(bool enabled)
@@ -389,6 +421,7 @@ class BlendStack
 #if UTPP_FOOTSINK_MUTATION != 12 // mutation 12: the leg bones keep their shorter fade on a flagged pick
             p.fullLegFade = selected.blend.fullLegFade;
 #endif
+            p.strideGround = selected.blend.toGround;
             m_players[0] = p;
         }
         if (!selected.cancelledStartSupportAllowed) m_players[0].cancelStartSupport = -1;
@@ -401,6 +434,7 @@ class BlendStack
                 IsLoop(head.clip) ? head.rate : std::fmax(0.f, Advance(head.clip, head.time) - previousHeadTime) / dt;
             head.rootApproximate = false;
         }
+        m_strideScale = 1.0f;
         for (uint32_t i = 0; i < m_count; ++i)
         {
             auto &p = m_players[i];
@@ -415,10 +449,14 @@ class BlendStack
                     // Virtual foot markers are sampled before the Hips/spine warp, then
                     // blended with the same leg profile and solved once after pose
                     // blending.
+                    const float rootSpeed = std::hypot(m_samples[i].rootX, m_samples[i].rootY); // clip root at its rate
                     if (!m_feetReady || !ProcessGraph(p, m_samples[i], dt) ||
                         !m_feetWarp.Sample(m_pose[i], p.lastOrientationHalfAngle, m_targets[i]) ||
-                        !m_poseWarp.Apply(m_pose[i], p.lastOrientationHalfAngle) ||
-                        !m_feetWarp.MakeRelative(m_pose[i], m_targets[i]))
+                        !m_poseWarp.Apply(m_pose[i], p.lastOrientationHalfAngle))
+                        return false;
+                    if (m_strideWarp)
+                        WarpStride(p, i, rootSpeed, dt);
+                    if (!m_feetWarp.MakeRelative(m_pose[i], m_targets[i]))
                         return false;
                 }
                 CacheAnkleZ(i);
@@ -715,6 +753,44 @@ class BlendStack
         }
         return out;
     }
+    // Shrink-only stride warping (StrideWarp.hpp) of layer i: its absolute ankle targets (after orientation warping, before they become
+    // corrections) are pulled towards the thighs of its warped pose along its warped root direction, by capsule speed / clip root speed,
+    // gated by the clip's warping curve and allowed on ground locomotion loops only (an air or slide pick, a traversal montage and a
+    // disabled graph never warp). Starts, stops, pivots and transitions are left alone: on recorded sessions warping them made start
+    // and pivot slide worse (their warping curve does not mark the parts where the capsule lags the clip). An identity scale leaves the
+    // targets untouched.
+    void WarpStride(Player &p, uint32_t i, float rootSpeed, float dt)
+    {
+        stridewarp::Inputs in;
+        in.dt = dt;
+        in.capsuleSpeed = std::hypot(m_graph.velocityWorldX, m_graph.velocityWorldY);
+        in.rootSpeed = rootSpeed;
+        in.alpha = m_warpCurve >= 0 ? Curve(p, m_warpCurve) : 1.0f;
+        in.allowed = p.strideGround && !p.airFade && IsLoop(p.clip);
+        const float scale = stridewarp::Step(p.stride, in);
+        if (i == 0)
+            m_strideScale = scale;
+        math::Vec3 direction;
+        if (stridewarp::IsIdentity(scale) || !m_targets[i].valid || m_thighBones[0] < 0 || m_thighBones[1] < 0 ||
+            !stridewarp::Direction(m_samples[i].rootX, m_samples[i].rootY, direction))
+            return;
+        for (uint32_t side = 0; side < 2; ++side)
+        {
+            // Model-space thigh of the warped pose: FK along the ankle chain down to the thigh.
+            math::Quat q{0, 0, 0, 1};
+            math::Vec3 origin{0, 0, 0};
+            for (const int32_t b : m_ankleChain[side])
+            {
+                origin = origin + math::QuatRotate(q, m_pose[i][b].p);
+                if (b == m_thighBones[side])
+                    break;
+                q = math::QuatNormalize(math::QuatMul(q, m_pose[i][b].q));
+            }
+            auto &foot = m_targets[i].feet[side].p;
+            foot = stridewarp::WarpPoint(foot, origin, direction, scale);
+        }
+        m_targets[i].warpWeight = 1.0f;
+    }
     bool ProcessGraph(Player &p, Signals &signal, float dt)
     {
         if (dt <= 0)
@@ -963,6 +1039,10 @@ class BlendStack
     GraphInputs m_graph{};
     float m_steeringHalfLife = kSteeringHalfLifePrevious, m_steeringTargetTime = kSteeringTargetTimePrevious;
     int32_t m_orientationCurve = -1;
+    int32_t m_warpCurve = -1; // clip warping curve that gates stride warping (see Init)
+    int32_t m_thighBones[2]{-1, -1};
+    bool m_strideWarp = UTPP_STRIDE_WARP != 0; // SetStrideWarp
+    float m_strideScale = 1.0f;                // StrideScale
     motionPose::Warp m_poseWarp;
     motionFeet::Warp m_feetWarp;
     bool m_feetReady = false;
