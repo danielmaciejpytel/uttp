@@ -4,6 +4,7 @@
          [--runs body:run ...] [--root ROOT] [--mesh-root ROOT] [--stages-args ".."] [--before-stages-args ".."]
          [--after-stages-args ".."] [--stage final|raw] [--step 4] [--worst 6] [--window 4] [--jobs 8]
          [--work DIR] [--keep-bin] [--dump DIR --dump-rows body:run:row,...]
+         [--before-stages-dir DIR] [--after-stages-dir DIR]   (existing replay outputs <DIR>/<run>.txt / .bin instead of a replay)
 
 Pipeline: every session's recorded feed goes through utpp_replay_pose_stages of each exe dir (tools/replay/runtime_world_slide.py
 run_stages: the same feed / settings log discovery, --ahead recorded, plus the stage arguments). The pose of a feed row (final stage by
@@ -23,7 +24,9 @@ Classes: world_slide.clip_class of the row's clip on that side (start, stop, piv
 Output JSON: sides.{before,after}.{body}.{class}.{region} = n, p50 / p99 / p999 / max of sev_p999, sev_max, area_min,
 stretch_cm_max; worst.{side}.{body}.{region} = the worst frames (run, row, t, clip, clip_time, value, other side value);
 delta.{body}.{class}.{region} = after - before of each stat plus the paired row deltas (max, min, share of rows worse by more than
-1e-4); worst_increase.{body}.{region} = the rows with the largest after - before increase. --dump writes one npz per listed row and side (vertices in Z-up metres, faces, per-vertex stretch, region masks).
+1e-4); worst_increase.{body}.{region} = the rows with the largest after - before increase; flexion_matched.{body}.{class} = the knee
+region binned by each side's knee flexion (knee_flexion: the more flexed leg, 0 = straight), so a change of the flexion amount is
+separated from a change of the skinning at equal flexion (see flexion_matched). --dump writes one npz per listed row and side (vertices in Z-up metres, faces, per-vertex stretch, region masks).
 Read-only on every input; the replay output goes to --work and is deleted afterwards unless --keep-bin.
 """
 from __future__ import annotations
@@ -198,6 +201,98 @@ def stat_delta(before, after):
     return out
 
 
+LEG_CHAINS = (('LeftUpLeg', 'LeftLeg', 'LeftFoot'), ('RightUpLeg', 'RightLeg', 'RightFoot'))
+
+
+def _qrot(q, v):
+    """Rotates v [n, 3] by unit quaternions q [n, 4] (x y z w)."""
+    u, w = q[:, :3], q[:, 3:4]
+    t = 2.0 * np.cross(u, v)
+    return v + w * t + np.cross(u, t)
+
+
+def _qmul(a, b):
+    ax, ay, az, aw = a[:, 0], a[:, 1], a[:, 2], a[:, 3]
+    bx, by, bz, bw = b[:, 0], b[:, 1], b[:, 2], b[:, 3]
+    q = np.stack([aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+                  aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz], 1)
+    return q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+
+
+def knee_flexion(sf, rows, stage='final'):
+    """[len(rows)] knee flexion in degrees (angle between thigh and shin, 0 = straight) of the more flexed leg of each row; NaN when the
+    stage file has no leg chain."""
+    rows = np.asarray(rows, dtype=np.int64)
+    out = np.full(len(rows), np.nan)
+    if not len(rows):
+        return out
+    k = len(sf.meta_names) + (sf.nb * 7 if stage == 'final' else 0)
+    poses = np.asarray(sf.raw[rows, k:k + sf.nb * 7], dtype=np.float64).reshape(len(rows), sf.nb, 7)
+    for chain in LEG_CHAINS:
+        if any(b not in sf.names for b in chain):
+            continue
+        idx = [sf.names.index(b) for b in chain]
+        path, b = [], idx[2]
+        while b >= 0:
+            path.insert(0, b)
+            b = sf.parents[b]
+        if idx[0] not in path or idx[1] not in path:
+            continue
+        q = np.tile([0.0, 0.0, 0.0, 1.0], (len(rows), 1))
+        p = np.zeros((len(rows), 3))
+        pos = {}
+        for b in path:
+            p = p + _qrot(q, poses[:, b, 0:3])
+            pos[b] = p
+            q = _qmul(q, poses[:, b, 3:7])
+        u, v = pos[idx[1]] - pos[idx[0]], pos[idx[2]] - pos[idx[1]]
+        c = np.sum(u * v, 1) / np.maximum(np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1), 1e-12)
+        out = np.fmax(out, np.degrees(np.arccos(np.clip(c, -1.0, 1.0))))
+    return out
+
+
+def flexion_matched(before, after, flex_before, flex_after, cls, width=15.0, min_rows=20):
+    """Knee sev_p999 at matched knee flexion: {class: bins + summary}. Rows of each side are binned by their own knee flexion (width
+    degrees); per bin p50 / p99 of each side. matched_delta_p50 / _p99 = the after - before change averaged over the bins with at least
+    min_rows rows on both sides (weight = the smaller count): the skinning change at equal flexion. raw_delta_p50 = the change of the
+    pooled medians; flexion_part_p50 = raw - matched, the part that comes from the flexion distribution itself."""
+    k = REGIONS.index('knee')
+    edges = np.arange(0.0, 180.0 + width, width)
+    out = {}
+    for c in CLASSES + ('all',):
+        m = np.ones(len(before), bool) if c == 'all' else (np.asarray(cls) == c)
+        vb, va = before[m, k, 0], after[m, k, 0]
+        fb, fa = np.asarray(flex_before)[m], np.asarray(flex_after)[m]
+        okb, oka = np.isfinite(vb) & np.isfinite(fb), np.isfinite(va) & np.isfinite(fa)
+        if not okb.any() or not oka.any():
+            continue
+        bins, acc = [], {50: [0.0, 0.0], 99: [0.0, 0.0]}
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            sb = vb[okb & (fb >= lo) & (fb < hi)]
+            sa = va[oka & (fa >= lo) & (fa < hi)]
+            if not len(sb) and not len(sa):
+                continue
+            row = dict(lo=float(lo), hi=float(hi), n_before=int(len(sb)), n_after=int(len(sa)))
+            for q in (50, 99):
+                row['p%d_before' % q], row['p%d_after' % q] = _pct(sb, q), _pct(sa, q)
+            w = min(len(sb), len(sa))
+            if w >= min_rows:
+                for q in (50, 99):
+                    d = row['p%d_after' % q] - row['p%d_before' % q]
+                    row['delta_p%d' % q] = round(d, 4)
+                    acc[q][0] += w * d
+                    acc[q][1] += w
+            bins.append(row)
+        res = dict(bins=bins, rows_matched=int(acc[50][1]), flex_p50_before=_pct(fb[okb], 50), flex_p50_after=_pct(fa[oka], 50),
+                   flex_p99_before=_pct(fb[okb], 99), flex_p99_after=_pct(fa[oka], 99),
+                   raw_delta_p50=round(_pct(va[oka], 50) - _pct(vb[okb], 50), 4))
+        for q in (50, 99):
+            res['matched_delta_p%d' % q] = round(acc[q][0] / acc[q][1], 4) if acc[q][1] else None
+        res['flexion_part_p50'] = round(res['raw_delta_p50'] - res['matched_delta_p50'], 4) if res['matched_delta_p50'] is not None else None
+        out[c] = res
+    return out
+
+
 # ------------------------------------------------------------------------------------------------------------------------ skinning
 _RIGS = {}
 
@@ -326,7 +421,8 @@ def evaluate(a, sides, prefixes):
 
 def build_report(a, sides, prefixes, info):
     doc = dict(args=dict(step=a.step, worst=a.worst, window=a.window, stage=a.stage, runs=a.runs,
-                         stages_args={s: getattr(a, s + '_stages_args') for s in sides}),
+                         stages_args={s: getattr(a, s + '_stages_args') for s in sides},
+                         stages_dir={s: bool(getattr(a, s + '_stages_dir', None)) for s in sides}),
                sides={}, worst={}, delta={}, paired={}, sessions={})
     per_body = {}
     for spec, v in info.items():
@@ -339,7 +435,9 @@ def build_report(a, sides, prefixes, info):
             names = [f.clip_name(c) for c in clip]
             cls.append(np.array([clip_class(nm) for nm in names]))
             meta.append(dict(names=names, t=f.meta('t')[rows], ct=f.meta('clipTime')[rows]))
-        per_body.setdefault(body, []).append(dict(spec=spec, rows=rows, is_sample=v['is_sample'], values=v['values'], cls=cls, meta=meta))
+        flex = [knee_flexion(f, rows, a.stage) for f in files]
+        per_body.setdefault(body, []).append(dict(spec=spec, rows=rows, is_sample=v['is_sample'], values=v['values'], cls=cls, meta=meta,
+                                                  flex=flex))
         doc['sessions'][spec] = dict(rows=int(len(v['valid'])), published=int(v['valid'].sum()), sampled=int(v['is_sample'].sum()),
                                      window_rows=int((~v['is_sample']).sum()))
     for si, s in enumerate(sides):
@@ -373,6 +471,9 @@ def build_report(a, sides, prefixes, info):
             af = np.concatenate([p['values'][1][p['is_sample']] for p in parts])
             cls = np.concatenate([p['cls'][0][p['is_sample']] for p in parts])
             doc['paired'][bn] = paired_delta(b, af, cls)
+            doc.setdefault('flexion_matched', {})[bn] = flexion_matched(
+                b, af, np.concatenate([p['flex'][0][p['is_sample']] for p in parts]),
+                np.concatenate([p['flex'][1][p['is_sample']] for p in parts]), cls)
             inc = {}
             for k, reg in enumerate(REGIONS):
                 cand = []
@@ -417,6 +518,18 @@ def write_md(doc, path):
                     cells.append('%s / %s' % (pd.get('worse_share'), pd.get('better_share')))
                 lines.append('| %s | %s | %s |' % (c, r, ' | '.join(cells)))
         lines.append('')
+        fm = doc.get('flexion_matched', {}).get(body)
+        if fm:
+            lines += ['Knee at matched flexion (sev_p999 after - before; flexion in degrees, p50 / p99 before -> after):', '',
+                      '| class | flexion | raw delta p50 | matched delta p50 / p99 | flexion part p50 | rows matched |',
+                      '|---|---|---|---|---|---|']
+            for c in CLASSES + ('all',):
+                x = fm.get(c)
+                if x:
+                    lines.append('| %s | %s / %s -> %s / %s | %s | %s / %s | %s | %s |' % (
+                        c, x['flex_p50_before'], x['flex_p99_before'], x['flex_p50_after'], x['flex_p99_after'], x['raw_delta_p50'],
+                        x['matched_delta_p50'], x['matched_delta_p99'], x['flexion_part_p50'], x['rows_matched']))
+            lines.append('')
     with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
 
@@ -424,8 +537,10 @@ def write_md(doc, path):
 def main(argv=None):
     import runtime_world_slide as rws
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--after-dir', required=True)
+    ap.add_argument('--after-dir')
     ap.add_argument('--before-dir')
+    ap.add_argument('--after-stages-dir', help='existing replay outputs (<dir>/<run>.txt / .bin) used instead of running --after-dir')
+    ap.add_argument('--before-stages-dir', help='the same for the before side')
     ap.add_argument('--out', required=True)
     ap.add_argument('--md')
     ap.add_argument('--runs', nargs='+', default=rws.DEFAULT_RUNS)
@@ -446,18 +561,26 @@ def main(argv=None):
     ap.add_argument('--dump', help='folder for npz dumps of --dump-rows')
     ap.add_argument('--dump-rows', default='', help='body:run:row,... (one npz per side)')
     a = ap.parse_args(argv)
+    if not (a.after_dir or a.after_stages_dir):
+        ap.error('--after-dir or --after-stages-dir is required')
     a.before_stages_args = a.stages_args if a.before_stages_args is None else a.before_stages_args
     a.after_stages_args = a.stages_args if a.after_stages_args is None else a.after_stages_args
     a.work = a.work or os.path.join(a.root, 'Build', 'work', '_tmp', 'replay_deformation')
     a.mesh_root = a.mesh_root or _mesh_root(a.root)
-    sides = ['before', 'after'] if a.before_dir else ['after']
+    sides = ['before', 'after'] if (a.before_dir or a.before_stages_dir) else ['after']
     dirs = dict(before=a.before_dir, after=a.after_dir)
-    jobs = [(s, spec) for s in sides for spec in a.runs]
-    with ThreadPoolExecutor(max_workers=min(6, len(jobs))) as ex:
-        out = list(ex.map(lambda j: replay(j[0], dirs[j[0]], getattr(a, j[0] + '_stages_args'), j[1], a), jobs))
+    given = {s: getattr(a, s + '_stages_dir') for s in sides if getattr(a, s + '_stages_dir')}  # read-only, never deleted
+    jobs = [(s, spec) for s in sides if s not in given for spec in a.runs]
+    out = []
+    if jobs:
+        with ThreadPoolExecutor(max_workers=min(6, len(jobs))) as ex:
+            out = list(ex.map(lambda j: replay(j[0], dirs[j[0]], getattr(a, j[0] + '_stages_args'), j[1], a), jobs))
     prefixes = {s: {} for s in sides}
     for (s, spec), p in zip(jobs, out):
         prefixes[s][spec] = p
+    for s, d in given.items():
+        for spec in a.runs:
+            prefixes[s][spec] = os.path.join(d, spec.split(':', 1)[1])
     try:
         if a.dump:
             os.makedirs(a.dump, exist_ok=True)
@@ -474,6 +597,8 @@ def main(argv=None):
     finally:
         if not a.keep_bin:
             for s in sides:
+                if s in given:
+                    continue
                 for p in prefixes[s].values():
                     for ext in ('.bin', '.txt', '.motion.log'):
                         try:

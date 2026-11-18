@@ -7,6 +7,8 @@
 // speed, a non-ground pick, a clip that is not a loop or the warp switched off leave the pose bit for bit unchanged.
 // Clip factor: the scale divides by the clip's planted-foot speed over its root speed (measured per loop clip at Init, clamped, 1 for a
 // clip that is not a loop or has too few planted samples), so a crouch loop whose planted feet travel slower than its root shortens less.
+// Knee limit (BlendStack::SetStrideKneeLimit, stridewarp::KneeLimitedScale): a leg is shortened by at least its scale's limit but never
+// so far that its knee folds beyond max(flexion before + margin, free flexion); with the limit off every leg takes the layer's scale.
 #include "../src/mm/MotionBlendStack.hpp"
 #include "../src/mm/StrideWarp.hpp"
 
@@ -154,9 +156,20 @@ struct RunStats
 {
     bool ok = true, identical = true;
     float scale = 1, minScale = 1, alongError = 0, lengthened = 0, heightError = 0, jumpOff = 0, jumpOn = 0;
+    float overShrink = 0;   // m, largest shortening along the root direction beyond the layer's scale
+    float kneeExcess = -1e9f; // rad, largest knee flexion above max(flexion unwarped + margin, free flexion)
+    float kneeGain = 0;     // rad, largest knee flexion gain over the unwarped pose
 };
+static float KneeFlex(const std::vector<BoneTransform> &m, int thigh, int knee, int ankle)
+{
+    const math::Vec3 u = m[size_t(knee)].p - m[size_t(thigh)].p, v = m[size_t(ankle)].p - m[size_t(knee)].p;
+    const float c = math::Dot(u, v) / std::fmax(std::sqrt(math::Dot(u, u) * math::Dot(v, v)), 1e-12f);
+    return std::acos(std::clamp(c, -1.0f, 1.0f));
+}
 // crouchMode >= 0 sets the crouched loop mode of the warped stack (SetStrideOptions, no yaw fade, whole-layer fade); -1 keeps the default.
-static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ratio, bool ground, bool enabled, int crouchMode = -1)
+// kneeLimit: 1 / 0 switches the knee limit of the warped stack on / off (default margin and free flexion); -1 keeps the default.
+static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ratio, bool ground, bool enabled, int crouchMode = -1,
+                    int kneeLimit = -1)
 {
     RunStats r;
     const float dt = 1.0f / float(hz), fps = db.Header().fps;
@@ -166,7 +179,10 @@ static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ra
     on.SetStrideWarp(enabled);
     if (crouchMode >= 0)
         on.SetStrideOptions(false, crouchMode, true);
+    if (kneeLimit >= 0)
+        on.SetStrideKneeLimit(kneeLimit != 0);
     const int foot[2]{Bone(db, "LeftFoot"), Bone(db, "RightFoot")}, thigh[2]{Bone(db, "LeftUpLeg"), Bone(db, "RightUpLeg")};
+    const int knee[2]{Bone(db, "LeftLeg"), Bone(db, "RightLeg")};
     const auto &c = db.Clip(uint32_t(clip));
     std::vector<BoneTransform> mOff, mOn;
     math::Vec3 lastOff[2]{}, lastOn[2]{};
@@ -196,6 +212,13 @@ static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ra
             const float alongOff = math::Dot(aOff - mOff[size_t(thigh[s])].p, dir);
             const float alongOn = math::Dot(aOn - mOn[size_t(thigh[s])].p, dir);
             r.alongError = std::fmax(r.alongError, std::fabs(alongOn - r.scale * alongOff));
+            r.overShrink = std::fmax(r.overShrink, r.scale * std::fabs(alongOff) - std::fabs(alongOn));
+            if (knee[s] >= 0)
+            {
+                const float fOff = KneeFlex(mOff, thigh[s], knee[s], foot[s]), fOn = KneeFlex(mOn, thigh[s], knee[s], foot[s]);
+                r.kneeGain = std::fmax(r.kneeGain, fOn - fOff);
+                r.kneeExcess = std::fmax(r.kneeExcess, fOn - std::fmax(fOff + stridewarp::kKneeMargin, stridewarp::kKneeFreeFlexion));
+            }
             r.lengthened = std::fmax(r.lengthened, std::fabs(alongOn) - std::fabs(alongOff));
             r.heightError = std::fmax(r.heightError, std::fabs(aOn.z - aOff.z));
             if (k > 0)
@@ -213,7 +236,8 @@ static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ra
 
 static void Stack(const motion::MotionDatabase &db, int clip, int hz)
 {
-    const RunStats warped = Run(db, clip, hz, 0.8f, true, true);
+    // The exact scaling of every leg, with the knee limit off; the default (limit on) is checked below.
+    const RunStats warped = Run(db, clip, hz, 0.8f, true, true, -1, 0);
     std::printf("INFO run loop capsule 0.8: scale %.4f min %.4f along error %.2f mm lengthened %.2f mm height %.2f mm "
                 "frame jump off %.2f on %.2f mm @Hz=%d\n",
                 warped.scale, warped.minScale, warped.alongError * 1e3f, warped.lengthened * 1e3f, warped.heightError * 1e3f,
@@ -225,6 +249,19 @@ static void Stack(const motion::MotionDatabase &db, int clip, int hz)
     Check(warped.lengthened < 0.001f, "no ankle moves farther from its thigh along the root direction (no lengthening)", hz);
     Check(warped.heightError < 0.005f, "ankle height kept (within 5 mm)", hz);
     Check(warped.jumpOn <= warped.jumpOff + 0.002f, "ankle motion stays continuous (largest frame step not above the unwarped one)", hz);
+    const RunStats limited = Run(db, clip, hz, 0.8f, true, true, -1, 1);
+    std::printf("INFO knee limit: largest knee flexion gain off %.2f deg, on %.2f deg, above the limit %.3f deg, shrink beyond the scale "
+                "%.2f mm, lengthened %.2f mm, height %.2f mm, frame jump off %.2f on %.2f mm @Hz=%d\n",
+                warped.kneeGain * 57.2957795f, limited.kneeGain * 57.2957795f, limited.kneeExcess * 57.2957795f, limited.overShrink * 1e3f,
+                limited.lengthened * 1e3f, limited.heightError * 1e3f, limited.jumpOff * 1e3f, limited.jumpOn * 1e3f, hz);
+    Check(warped.kneeGain > 0.0873f, "knee limit fixture: the unlimited warp folds a run loop knee by more than 5 degrees", hz);
+    Check(limited.ok && limited.kneeExcess < 0.0087f,
+          "knee limit on: no knee folds above max(unwarped + margin, free flexion) (within 0.5 deg)", hz);
+    Check(limited.overShrink < 0.001f, "knee limit on: no leg is shortened beyond the layer's scale", hz);
+    // The limit releases the trailing leg's shortening while that knee folds: at its fastest (mid swing) the ankle step grows by a few
+    // percent over the unwarped one (2.7 mm of 44.5 mm at 144 Hz), the planted leg is not involved.
+    Check(limited.lengthened < 0.001f && limited.heightError < 0.005f && limited.jumpOn <= 1.08f * limited.jumpOff,
+          "knee limit on: no lengthening, ankle height kept, largest ankle frame step within 8 % of the unwarped one", hz);
     Check(Run(db, clip, hz, 1.2f, true, true).identical, "capsule faster than the clip: pose bit for bit unchanged", hz);
     Check(Run(db, clip, hz, 0.8f, false, true).identical, "non-ground pick: pose bit for bit unchanged", hz);
     const int start = ClipIndex(db, "M_Neutral_Run_Start_F_Lfoot");
@@ -357,7 +394,7 @@ static void StackClipFactor(const motion::MotionDatabase &db, int hz)
     std::printf("INFO crouch loop clip factor %.4f @Hz=%d\n", k, hz);
     Check(k >= stridewarp::kClipFactorMin && k < 0.995f, "crouch loop: planted feet slower than the root (clip factor below 1)", hz);
     Check(probe.StrideClipFactor(start) == 1.0f && probe.StrideClipFactor(-1) == 1.0f, "a clip that is not a loop keeps clip factor 1", hz);
-    const RunStats r = Run(db, crouch, hz, 0.8f, true, true, 0); // crouched loops warped like the others
+    const RunStats r = Run(db, crouch, hz, 0.8f, true, true, 0, 0); // crouched loops warped like the others (exact scale: knee limit off)
     Check(r.ok && std::fabs(r.scale - std::fmin(1.0f, 0.8f / k)) < 0.02f, "crouch loop, capsule at 0.8 of the root speed: scale 0.8 / clip factor", hz);
     Check(r.alongError < 0.005f && r.lengthened < 0.001f, "crouch loop: offset along the root direction shrinks by the scale, never lengthens", hz);
 }
@@ -501,6 +538,36 @@ static void StackDirectionSwing(const motion::MotionDatabase &db, int clip, int 
     Check(warpStepAfter <= warpStepBefore + 0.03f, "a 90 degree capsule swing: the warp part of the ankle step stays within 3 cm of the gait", hz);
 }
 
+// KneeLimitedScale on a 45 / 45 cm leg: the warped hip-to-ankle distance (d^2 - along^2 (1 - s^2)) keeps the flexion within the limit,
+// a leg below the free flexion takes the layer's scale, the result never lowers the scale and never exceeds 1.
+static void KneeSolver(int hz)
+{
+    const float a = 0.45f, b = 0.45f;
+    bool bounded = true, within = true, free = true;
+    for (float flexDeg = 0; flexDeg <= 160; flexDeg += 5)
+        for (float along = -0.4f; along <= 0.4f; along += 0.05f)
+            for (float scale : {0.75f, 0.85f, 0.95f})
+            {
+                const float flex = flexDeg * 0.017453293f;
+                const float d = std::sqrt(a * a + b * b + 2 * a * b * std::cos(flex));
+                if (std::fabs(along) > d)
+                    continue;
+                const float s = stridewarp::KneeLimitedScale(scale, along, d, a, b);
+                bounded = bounded && s >= scale && s <= 1.0f;
+                const float d1 = std::sqrt(std::fmax(d * d - along * along * (1 - s * s), 0.0f));
+                const float f1 = stridewarp::KneeFlexion(d1, a, b);
+                within = within && f1 <= std::fmax(flex + stridewarp::kKneeMargin, stridewarp::kKneeFreeFlexion) + 1e-3f;
+                const float fFull = stridewarp::KneeFlexion(std::sqrt(std::fmax(d * d - along * along * (1 - scale * scale), 0.0f)), a, b);
+                if (fFull <= stridewarp::kKneeFreeFlexion - 1e-3f)
+                    free = free && s == scale;
+            }
+    Check(bounded, "knee limit: scale stays within [layer scale, 1]", hz);
+    Check(within, "knee limit: warped flexion within max(flexion + margin, free flexion)", hz);
+    Check(free, "knee limit: a leg that stays below the free flexion takes the layer's scale", hz);
+    Check(stridewarp::KneeLimitedScale(0.8f, 0.0f, 0.5f, a, b) == 0.8f && stridewarp::KneeLimitedScale(1.0f, 0.3f, 0.5f, a, b) == 1.0f,
+          "knee limit: no stride offset or no warp returns the scale unchanged", hz);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2)
@@ -511,6 +578,7 @@ int main(int argc, char **argv)
         ClipFactorSolver(hz);
     for (int hz : {30, 60, 144})
         YawFadeSolver(hz);
+    KneeSolver(0);
     motion::MotionDatabase db;
     std::string error;
     if (!db.LoadFromFile(argv[1], motion::kRigIdentityWoman, error))

@@ -117,6 +117,43 @@ inline float SmoothYawRate(float smoothed, float yawDelta, float dt) noexcept
     return smoothed + (std::fabs(wrapped) / dt - smoothed) * (1.0f - std::exp(-kYawSmoothing * dt));
 }
 
+// Knee limit: shortening a step moves the ankle towards the thigh, the hip-to-ankle distance shrinks and the two-bone leg folds further.
+// A leg folded deep (the trailing leg of a run, heel up behind the hips) folds by up to 30 degrees more under a 0.9 scale, past what
+// the knee skin helpers carry. Per leg, the scale is raised so the knee flexion (0 = straight) after the warp stays at or below
+// max(flexion before + margin, free flexion): a leg that stays below the free flexion warps fully, a deeper one gains at most the margin.
+// On recorded sessions a free flexion of 60 degrees kept most of the planted-foot gain with knee skinning close to the unwarped pose;
+// 70 degrees and more left the loop knees visibly more folded.
+inline constexpr float kKneeMargin = 0.0052360f;    // rad (0.3 deg), largest added flexion above the free flexion
+inline constexpr float kKneeFreeFlexion = 1.0472f;  // rad (60 deg), flexion up to which the warp is not limited
+
+// Knee flexion (rad, 0 = straight) of a two-bone leg with thigh / shin lengths whose hip-to-ankle distance is d.
+inline float KneeFlexion(float d, float thigh, float shin) noexcept
+{
+    const float c = (d * d - thigh * thigh - shin * shin) / (2.0f * thigh * shin);
+    return std::acos(std::clamp(c, -1.0f, 1.0f));
+}
+
+// Smallest scale of one leg that keeps its knee flexion within the limit (see kKneeMargin); returns max(scale, that). hipAnkle = distance
+// from the thigh to the ankle target before the warp, along = the ankle's offset from the thigh along the stride direction (the warp
+// changes the squared distance by along^2 (scale^2 - 1)). Degenerate inputs return the scale unchanged.
+inline float KneeLimitedScale(float scale, float along, float hipAnkle, float thigh, float shin, float margin = kKneeMargin,
+                              float freeFlexion = kKneeFreeFlexion) noexcept
+{
+    if (!(scale < 1.0f) || !std::isfinite(along) || !std::isfinite(hipAnkle) || !(thigh > 1.0e-4f) || !(shin > 1.0e-4f) ||
+        !std::isfinite(thigh) || !std::isfinite(shin) || !(along * along > 1.0e-8f))
+        return scale;
+    const float before = KneeFlexion(hipAnkle, thigh, shin);
+    const float limit = std::fmax(before + std::fmax(margin, 0.0f), freeFlexion);
+    if (!(limit < 3.14159265f))
+        return scale;
+    const float minSq = thigh * thigh + shin * shin + 2.0f * thigh * shin * std::cos(limit);
+    const float room = hipAnkle * hipAnkle - minSq; // squared distance the warp may take
+    if (!(room > 0.0f))
+        return 1.0f;
+    const float sq = 1.0f - room / (along * along);
+    return sq > 0.0f ? std::fmax(scale, std::sqrt(sq)) : scale;
+}
+
 inline bool IsIdentity(float scale) noexcept
 {
     return !(std::fabs(1.0f - scale) > kIdentityEps);

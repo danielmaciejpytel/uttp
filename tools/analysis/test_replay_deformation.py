@@ -14,7 +14,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import replay_deformation as rd  # noqa: E402
 
-BONES = [('Root', -1), ('Trajectory', 0), ('Hips', 0), ('LeftUpLeg', 2), ('LeftLeg', 3), ('RightUpLeg', 2), ('RightLeg', 5)]
+BONES = [('Root', -1), ('Trajectory', 0), ('Hips', 0), ('LeftUpLeg', 2), ('LeftLeg', 3), ('RightUpLeg', 2), ('RightLeg', 5),
+         ('LeftFoot', 4), ('RightFoot', 6)]
 META = ['t', 'dt', 'published', 'tailed', 'clip', 'clipTime']
 N = 40
 CLIPS = {0: 'M_Neutral_Walk_Loop_F', 1: 'M_Neutral_Walk_Stop_F_Lfoot'}
@@ -170,6 +171,32 @@ class ReplayDeformationTest(unittest.TestCase):
         self.assertEqual(st['all']['knee']['p999'], 1.0)
         self.assertEqual(st['all']['knee']['max'], 9.0)
         self.assertEqual(st['all']['knee']['n'], 10)
+
+
+    def test_knee_flexion_follows_the_knee_rotation(self):
+        knee = np.linspace(0, 120, N)
+        sf = rd.StageFile(self.write('a', knee))
+        rows = np.arange(N)
+        np.testing.assert_allclose(rd.knee_flexion(sf, rows, 'final'), knee, atol=1e-3)
+        np.testing.assert_allclose(rd.knee_flexion(sf, rows, 'raw'), np.zeros(N), atol=1e-3)
+
+    def test_flexion_matched_separates_flexion_from_skinning(self):
+        rng = np.random.default_rng(1)
+        flex_b = rng.uniform(0, 90, 2000)
+        flex_a = flex_b + 30.0  # more flexion, the same skinning per degree
+        val = lambda f: 1.0 + f / 100.0
+        b = np.ones((2000, len(rd.REGIONS), len(rd.STATS)))
+        a = b.copy()
+        k = rd.REGIONS.index('knee')
+        b[:, k, 0], a[:, k, 0] = val(flex_b), val(flex_a)
+        cls = np.array(['loop'] * 2000)
+        fm = rd.flexion_matched(b, a, flex_b, flex_a, cls)['loop']
+        self.assertGreater(fm['raw_delta_p50'], 0.25)
+        self.assertLess(abs(fm['matched_delta_p50']), 0.02)
+        self.assertAlmostEqual(fm['flexion_part_p50'], fm['raw_delta_p50'] - fm['matched_delta_p50'], places=3)
+        a[:, k, 0] = val(flex_a) + 0.1  # worse skinning at equal flexion
+        fm = rd.flexion_matched(b, a, flex_b, flex_a, cls)['all']
+        self.assertAlmostEqual(fm['matched_delta_p50'], 0.1, delta=0.02)
 
 
 if __name__ == '__main__':

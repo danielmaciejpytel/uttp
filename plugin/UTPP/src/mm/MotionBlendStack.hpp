@@ -30,6 +30,11 @@
 // fades the walk / run gait sway of the male V and loses its loop gain. A build may override it.
 #define UTPP_STRIDE_CROUCH 2
 #endif
+#ifndef UTPP_STRIDE_KNEE_LIMIT
+// 1 = stride warping raises the scale per leg so the knee folds at most a little further than the clip's own pose
+// (stridewarp::KneeLimitedScale); 0 = both legs take the layer's scale. A build may override it.
+#define UTPP_STRIDE_KNEE_LIMIT 1
+#endif
 #ifndef UTPP_STRIDE_WARP
 // Default of BlendStack::SetStrideWarp: 1 = shrink-only stride warping of the leg targets (StrideWarp.hpp) on ground locomotion picks,
 // 0 = off (the pose is bit for bit the one without it). A build may override it.
@@ -214,6 +219,18 @@ class BlendStack
                 m_strideCrouchYawEnd = b * 0.017453293f;
             }
         }
+        // UTPP_TEST_STRIDE_KNEE = "margin free" in degrees (see stridewarp::KneeLimitedScale); a negative margin turns the knee limit off
+        if (const char *e = std::getenv("UTPP_TEST_STRIDE_KNEE"))
+        {
+            char *rest = nullptr;
+            const float a = std::strtof(e, &rest), b = std::strtof(rest, nullptr);
+            if (std::isfinite(a) && std::isfinite(b) && b >= 0)
+            {
+                m_strideKneeLimit = a >= 0;
+                m_strideKneeMargin = std::fmax(a, 0.0f) * 0.017453293f;
+                m_strideKneeFree = b * 0.017453293f;
+            }
+        }
 #endif
         m_handBackFactors = blendprofile::Resolve(blendprofile::kHandBack, m_n, [&](uint32_t b) { return db.BoneName(b); });
         m_deadPrev.resize(m_n);
@@ -306,6 +323,13 @@ class BlendStack
         m_strideYawFade = yawFade;
         m_strideCrouchMode = std::clamp(crouchMode, 0, 2);
         m_strideLayerFade = layerFade;
+    }
+    // Knee limit of stride warping (default UTPP_STRIDE_KNEE_LIMIT, see LegStrideScale): on / off, margin and free flexion in radians.
+    void SetStrideKneeLimit(bool enabled, float margin = stridewarp::kKneeMargin, float freeFlexion = stridewarp::kKneeFreeFlexion)
+    {
+        m_strideKneeLimit = enabled;
+        m_strideKneeMargin = std::isfinite(margin) ? std::fmax(margin, 0.0f) : stridewarp::kKneeMargin;
+        m_strideKneeFree = std::isfinite(freeFlexion) ? std::fmax(freeFlexion, 0.0f) : stridewarp::kKneeFreeFlexion;
     }
     // A loop clip of the crouched gait (named "_Crouch_"), see UTPP_STRIDE_CROUCH.
     bool StrideCrouchClip(int32_t clip) const
@@ -955,21 +979,38 @@ class BlendStack
             // Model-space thigh of the warped pose: FK along the ankle chain down to the thigh.
             math::Quat q{0, 0, 0, 1};
             math::Vec3 origin{0, 0, 0};
-            for (const int32_t b : m_ankleChain[side])
+            const auto &chain = m_ankleChain[side];
+            size_t k = 0;
+            for (; k < chain.size(); ++k)
             {
+                const int32_t b = chain[k];
                 origin = origin + math::QuatRotate(q, m_pose[i][b].p);
                 if (b == m_thighBones[side])
                     break;
                 q = math::QuatNormalize(math::QuatMul(q, m_pose[i][b].q));
             }
             auto &foot = m_targets[i].feet[side].p;
-            const math::Vec3 offset = stridewarp::WarpOffset(foot, origin, direction, scale);
+            const float legScale = LegStrideScale(m_pose[i], chain, k, foot, origin, direction, scale);
+            const math::Vec3 offset = stridewarp::WarpOffset(foot, origin, direction, legScale);
             foot = foot + offset;
             m_strideOffset[i][side] = offset;
         }
         m_strideAmount[i] = 1.0f - scale;
         m_strideDir[i] = direction;
         m_targets[i].warpWeight = 1.0f;
+    }
+    // Stride scale of one leg (see stridewarp::KneeLimitedScale): the thigh is chain[k], the knee and the ankle the next two chain bones of
+    // the pose; without them, or with the knee limit off, the layer's scale.
+    float LegStrideScale(const std::vector<BoneTransform> &pose, const std::vector<int32_t> &chain, size_t k, math::Vec3 ankle,
+                         math::Vec3 thigh, math::Vec3 direction, float scale) const
+    {
+        if (!m_strideKneeLimit || k + 2 >= chain.size())
+            return scale;
+        const math::Vec3 shinOffset = pose[size_t(chain[k + 1])].p, ankleOffset = pose[size_t(chain[k + 2])].p;
+        const math::Vec3 r = ankle - thigh;
+        return stridewarp::KneeLimitedScale(scale, math::Dot(r, direction), std::sqrt(math::Dot(r, r)),
+                                            std::sqrt(math::Dot(shinOffset, shinOffset)), std::sqrt(math::Dot(ankleOffset, ankleOffset)),
+                                            m_strideKneeMargin, m_strideKneeFree);
     }
     // Clip factor of every loop clip (the clips stride warping applies to): over the frame pairs where a foot's contact is set at both ends,
     // the backward motion of its toe (the foot when the rig has no toe) along the clip's root direction in the character frame, summed
@@ -1358,15 +1399,22 @@ class BlendStack
             // Model-space thigh and ankle of the mixed pose: FK along the ankle chain.
             math::Quat q{0, 0, 0, 1};
             math::Vec3 pos{0, 0, 0}, thigh{0, 0, 0};
-            for (const int32_t b : m_ankleChain[side])
+            const auto &chain = m_ankleChain[side];
+            size_t thighAt = chain.size();
+            for (size_t k = 0; k < chain.size(); ++k)
             {
+                const int32_t b = chain[k];
                 pos = pos + math::QuatRotate(q, m_out[uint32_t(b)].p);
                 q = math::QuatNormalize(math::QuatMul(q, m_out[uint32_t(b)].q));
                 if (b == m_thighBones[side])
+                {
                     thigh = pos;
+                    thighAt = k;
+                }
             }
             auto &corr = m_outputTargets.feet[side].p;
-            corr = corr + stridewarp::WarpOffset(pos + corr, thigh, direction, 1.0f - extra);
+            const float legScale = LegStrideScale(m_out, chain, thighAt, pos + corr, thigh, direction, 1.0f - extra);
+            corr = corr + stridewarp::WarpOffset(pos + corr, thigh, direction, legScale);
         }
         m_outputTargets.warpWeight = 1.0f;
     }
@@ -1392,6 +1440,8 @@ class BlendStack
     int32_t m_strideCrouchMode = UTPP_STRIDE_CROUCH;  // SetStrideOptions
     float m_strideCrouchYawStart = stridewarp::kYawFadeStart, m_strideCrouchYawEnd = stridewarp::kYawFadeEnd; // yaw fade of crouched loops
     bool m_strideLayerFade = UTPP_STRIDE_LAYER_FADE != 0; // SetStrideOptions
+    bool m_strideKneeLimit = UTPP_STRIDE_KNEE_LIMIT != 0; // LegStrideScale
+    float m_strideKneeMargin = stridewarp::kKneeMargin, m_strideKneeFree = stridewarp::kKneeFreeFlexion; // LegStrideScale
     motionPose::Warp m_poseWarp;
     motionFeet::Warp m_feetWarp;
     bool m_feetReady = false;
