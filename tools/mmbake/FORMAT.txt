@@ -462,3 +462,28 @@ first slideExitMapS 0.6 s after the slide the query speed decays from slideExitS
 5-7 m/s). Matcher: on the frame with MovementMode OnGround and movementModeLast Sliding only the PSD_Slide_ExitTo* databases are
 searched (when any is in the chooser result); later frames keep the exit clip via the continuing pose. Bake: FeetOut/KneesOut
 ContinuingPoseCostBias -2.0 (1.2: -0.02) [P], needed to stop the Into_Lfoot <-> Into_Rfoot flicker; exit blocks from pelvis recovery.
+
+VERSION 2 EXTENSIONS: MORE THAN 64 DATABASES, CURVE CHANNELS, OFF-GRID TIME OFFSETS (format version stays 2)
+Files without these features are unchanged and load unchanged (the reader derives the same per-clip database sets from them).
+- num_databases <= 128. CLIP db_mask keeps bit d for databases 0..63 (bits of databases >= 64 are not stored there); the
+  reader takes the membership of a clip in database d >= 64 from its DENT entries (MotionDatabase::ClipDatabases /
+  ClipInDatabase). NORM member_mask likewise holds databases 0..63 only (informative). The chooser evaluates up to 128
+  databases per update (chooser::kMaxResults, chooser::DbSet: two 64-bit words, no allocation).
+- Header flags bit1 CURVE_CHANNELS: set exactly when SCHC holds a Curve channel; readers without this extension refuse such
+  files through the unknown-flag check.
+- SCHC kind 5 Curve: one dimension read from the CURV curve given by the last record field (offset 72, "curve" = CRVN index,
+  0 for kinds 1-4). components 1, cardinality 1, bone -1, origin bone -1, t_origin 0, velocity space 0, input query 0 (the
+  runtime reads the playing pose for both UE input query kinds), flags UNITLESS only, axis 0. Producer: compile_schema(...,
+  allow_curve=True) from PoseSearchFeatureChannel_Curve (curve_name, sample_time_offset, weight, normalization_group);
+  label "Curve_<name> <t_sample>"; normalization: own UE class "Curve", unitless deviation rule.
+  Value of a row (frame f of clip c) and of the runtime query: curve k of clip c at local time t = f / fps + t_sample,
+  x = t * fps; loops wrap x into [0, loop_period) (x mod loop_period, negative values from the end), non-loops clamp x to
+  [0, N - 1]; value = linear interpolation of the CURV values of frames floor(x) and floor(x) + 1 (absent curve = 0)
+  (MotionDatabase::CurveAt / CurveFeature). Query: the continuing pose row's stored value when a continuing row of the same
+  schema exists, otherwise the playing clip at its current time; with no playing clip the query dimension is the database mean.
+  The baker's row values (schema_features) for kind 5 must follow this rule; until it does, allow_curve stays off.
+- Time offsets: the reader accepts any finite t_sample / t_origin; the runtime query interpolates the trajectory and the pose
+  history linearly. The baker evaluates features on the 1/60 s grid only, so compile_schema(..., quantize=True) moves an off-grid
+  offset to the nearest multiple of 1/60 s (ties away from zero; -0.125 -> -8/60 = -0.1333, 0.33 -> 20/60 = 0.3333; error
+  <= 1/120 s) and stores that float32 value in SCHC, so rows and queries use the same offset; without quantize the baker refuses
+  off-grid offsets as before.

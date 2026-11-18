@@ -61,6 +61,7 @@ FPS = 30
 HALF = 2 * FPS                     # half-frame grid (60 Hz): every source pack sample offset is a multiple of 1/60 s
 
 HDR_HAS_SCALE = 1 << 0
+HDR_CURVE_CHANNELS = 1 << 1        # SCHC holds Curve channels (kind 5); set exactly when it does
 
 # FFLG (per global frame)
 FF_SELECTABLE = 1 << 0             # non-block indexed row in at least one database
@@ -90,9 +91,9 @@ RIG_ID_QUANT_PER_M = 1000.0
 RIG_ID_MIN_MARGIN = 1e-3           # quanta (1 um): closer to a rounding boundary -> warning
 
 # channel kinds (SCHC)
-CK_POSITION, CK_VELOCITY, CK_VELOCITY_DIR, CK_HEADING = 1, 2, 3, 4
-CK_NAMES = {CK_POSITION: "Pos", CK_VELOCITY: "Vel", CK_VELOCITY_DIR: "VelDir", CK_HEADING: "Head"}
-COMP_XYZ, COMP_XY, COMP_Z = 7, 3, 4
+CK_POSITION, CK_VELOCITY, CK_VELOCITY_DIR, CK_HEADING, CK_CURVE = 1, 2, 3, 4, 5
+CK_NAMES = {CK_POSITION: "Pos", CK_VELOCITY: "Vel", CK_VELOCITY_DIR: "VelDir", CK_HEADING: "Head", CK_CURVE: "Curve"}
+COMP_XYZ, COMP_XY, COMP_Z, COMP_SCALAR = 7, 3, 4, 1
 VS_NONE, VS_CHARACTER, VS_WORLD = 0, 1, 2
 IQ_CONTINUING, IQ_CHARACTER = 0, 1
 CHF_TRAJECTORY = 1 << 0
@@ -340,7 +341,8 @@ class Channel:
         self.axis = kw.get("axis")                 # heading axis letter of the UE bone ('X'/'Y'/'Z')
         self.flags = kw.get("flags", 0)
         self.outer = kw.get("outer", "")
-        self.card = {COMP_XYZ: 3, COMP_XY: 2, COMP_Z: 1}[self.comp]
+        self.curve = kw.get("curve")               # Curve channels: curve name (CRVN index resolved by the writer)
+        self.card = {COMP_XYZ: 3, COMP_XY: 2, COMP_Z: 1, COMP_SCALAR: 1}[self.comp]
         self.offset = 0
         self.local_axis = (0.0, 1.0, 0.0)          # filled from rest poses for bone headings
         self.game_bone = -1
@@ -348,11 +350,13 @@ class Channel:
 
     @property
     def unitless(self):
-        return self.kind in (CK_VELOCITY_DIR, CK_HEADING)
+        return self.kind in (CK_VELOCITY_DIR, CK_HEADING, CK_CURVE)
 
     def label(self):
-        strip = {COMP_XYZ: "", COMP_XY: "_xy", COMP_Z: "_z"}[self.comp]
+        strip = {COMP_XYZ: "", COMP_XY: "_xy", COMP_Z: "_z", COMP_SCALAR: ""}[self.comp]
         s = "%s%s%s" % (self.outer, CK_NAMES[self.kind], strip)
+        if self.kind == CK_CURVE:
+            return s + "_" + self.curve + " %.2f" % self.t_sample
         if self.kind == CK_HEADING and self.axis:
             s += "_" + self.axis
         s += "_" + ("Trj" if self.bone == "root" else self.bone)
@@ -382,9 +386,21 @@ def _bone(ref):
     return "root" if _none(n) else n
 
 
-def compile_schema(schema):
-    """posesearch.json schema -> list of leaf Channel in UE data order (PS Finalize)."""
+def quantize_offset(t):
+    """Sample / origin time offset on the 1/60 s grid of the feature evaluation: the nearest multiple of 1/60 s (ties
+    away from zero), returned as the float32 value stored in SCHC, so database rows and runtime queries use the same
+    offset. Offsets already on the grid are returned unchanged."""
+    q = math.floor(abs(t) * HALF + 0.5) / HALF
+    return float(F32(math.copysign(q, t) if q else 0.0))
+
+
+def compile_schema(schema, allow_curve=False, quantize=False):
+    """posesearch.json schema -> list of leaf Channel in UE data order (PS Finalize).
+    allow_curve: accept PoseSearchFeatureChannel_Curve (SCHC kind 5, header flag CURVE_CHANNELS); otherwise refused.
+    quantize: move time offsets off the 1/60 s grid to the nearest grid value (quantize_offset; the source and stored
+    values are listed in compile_schema.quantized); otherwise refused."""
     out = []
+    compile_schema.quantized = []
 
     def strip_of(s):
         return {"NONE": COMP_XYZ, "STRIP_Z": COMP_XY, "STRIP_XY": COMP_Z}[s or "NONE"]
@@ -437,6 +453,20 @@ def compile_schema(schema):
                 if fl & 8:
                     raise SystemExit("schema %s: Pose channel Phase sub-channel not supported" % short_name(schema["_path"]))
             return
+        if cls == "PoseSearchFeatureChannel_Curve":
+            if not allow_curve:
+                raise SystemExit("schema %s: Curve channel needs allow_curve" % short_name(schema["_path"]))
+            if _none(ch.get("curve_name")):
+                raise SystemExit("schema %s: Curve channel without a curve name" % short_name(schema["_path"]))
+            if ch.get("sampling_attribute_id", -1) not in (-1, None):
+                raise SystemExit("sampling attributes not supported")
+            # USE_CHARACTER_POSE and USE_CONTINUING_POSE both read the playing pose at runtime (the character pose
+            # is the matcher's own output)
+            out.append(Channel(kind=CK_CURVE, cls="Curve", comp=COMP_SCALAR, curve=ch["curve_name"],
+                               t_sample=float(ch.get("sample_time_offset", 0.0)), weight=float(ch["weight"]),
+                               group=None if _none(ch.get("normalization_group")) else ch["normalization_group"],
+                               input_query=iq(ch.get("input_query_pose")), outer=outer))
+            return
         common = dict(bone=_bone(ch.get("bone")), origin=_bone(ch.get("origin_bone")),
                       t_sample=float(ch.get("sample_time_offset", 0.0)), t_origin=float(ch.get("origin_time_offset", 0.0)),
                       weight=float(ch["weight"]), comp=strip_of(ch.get("component_stripping")),
@@ -474,16 +504,43 @@ def compile_schema(schema):
         # the root Z enters as rz(sample) - rz(origin) (positions, character-space velocities with different times) or
         # rz(t) - rz(t - 1/60) (world-space velocities); VelDir XY too, because the clamp uses the 3D length
         moves = abs(c.t_sample - c.t_origin) > 1e-6 or (c.kind in (CK_VELOCITY, CK_VELOCITY_DIR) and c.vel_space == VS_WORLD)
-        if c.kind != CK_HEADING and moves and (c.comp != COMP_XY or c.kind == CK_VELOCITY_DIR):
+        if c.kind not in (CK_HEADING, CK_CURVE) and moves and (c.comp != COMP_XY or c.kind == CK_VELOCITY_DIR):
             c.flags |= CHF_Z_FROM_RTZ
     if int(schema.get("number_of_permutations", 1)) != 1 or int(schema.get("sample_rate", FPS)) != FPS:
         raise SystemExit("schema %s: permutations / sample rate %s not supported" % (short_name(schema["_path"]),
                                                                                     schema.get("sample_rate")))
     for c in out:
-        for t in (c.t_sample, c.t_origin):
+        for attr in ("t_sample", "t_origin"):
+            t = getattr(c, attr)
             if abs(t * HALF - round(t * HALF)) > 1e-3:
-                raise SystemExit("schema %s: time offset %.4f is not a multiple of 1/60 s" % (short_name(schema["_path"]), t))
+                if not quantize:
+                    raise SystemExit("schema %s: time offset %.4f is not a multiple of 1/60 s" % (short_name(schema["_path"]), t))
+                q = quantize_offset(t)
+                compile_schema.quantized.append((c.label(), attr, t, q))
+                setattr(c, attr, q)
     return out, off
+
+
+def schc_record(c, wsum, st, curve_index):
+    """One 76-byte SCHC record (FORMAT.txt v2). Curve channels: bone / origin -1, axis 0, curve index (CRVN) in the
+    last field, the input query always 0 (the runtime reads the playing pose for both UE query kinds)."""
+    if c.kind == CK_CURVE:
+        if c.curve not in curve_index:
+            raise SystemExit("Curve channel reads curve %s, which is not baked" % c.curve)
+        return struct.pack("<IIiiffIIffIIIIfffII", CK_CURVE, COMP_SCALAR, -1, -1, c.t_sample, 0.0, VS_NONE,
+                           IQ_CONTINUING, c.weight, c.weight / wsum if wsum else 0.0, c.offset, 1,
+                           st.add(c.group) if c.group else 0xFFFFFFFF, st.add(c.label()), 0.0, 0.0, 0.0,
+                           c.flags & CHF_UNITLESS, curve_index[c.curve])
+    return struct.pack("<IIiiffIIffIIIIfffII", c.kind, c.comp, c.game_bone, c.game_origin, c.t_sample,
+                       c.t_origin, c.vel_space, c.input_query, c.weight, c.weight / wsum if wsum else 0.0,
+                       c.offset, c.card, st.add(c.group) if c.group else 0xFFFFFFFF, st.add(c.label()),
+                       c.local_axis[0], c.local_axis[1], c.local_axis[2], c.flags, 0)
+
+
+def header_flags(has_scale, schemas):
+    """Header flags: HAS_SCALE, CURVE_CHANNELS exactly when some schema has a Curve channel."""
+    curve = any(c.kind == CK_CURVE for chans, _ in schemas.values() for c in chans)
+    return (HDR_HAS_SCALE if has_scale else 0) | (HDR_CURVE_CHANNELS if curve else 0)
 
 
 def channel_groups(channels):
@@ -2068,10 +2125,7 @@ def bake_v2(args, log):
         schm_b += struct.pack("<IIIIfIfI", st.add(s), dims, ch_first, len(chans), float(FPS),
                               PREPROC[ps_schema[s]["data_preprocessor"]], wsum, 0)
         for c in chans:
-            schc_b += struct.pack("<IIiiffIIffIIIIfffII", c.kind, c.comp, c.game_bone, c.game_origin, c.t_sample,
-                                  c.t_origin, c.vel_space, c.input_query, c.weight, c.weight / wsum if wsum else 0.0,
-                                  c.offset, c.card, st.add(c.group) if c.group else 0xFFFFFFFF, st.add(c.label()),
-                                  c.local_axis[0], c.local_axis[1], c.local_axis[2], c.flags, 0)
+            schc_b += schc_record(c, wsum, st, cindex)
         ch_first += len(chans)
     norm_b, nrmv = bytearray(), []
     vpos = 0
@@ -2156,7 +2210,7 @@ def bake_v2(args, log):
     ]
     if has_scale:
         sections.append(("SCAL", NF, nb * 12, S.astype("<f4").tobytes()))
-    hdr = dict(rig_hash=rh, flags=HDR_HAS_SCALE if has_scale else 0, num_frames=NF, num_bones=nb, num_clips=len(clips),
+    hdr = dict(rig_hash=rh, flags=header_flags(has_scale, schemas), num_frames=NF, num_bones=nb, num_clips=len(clips),
                num_schemas=len(schema_names), num_channels=ch_first, num_norms=len(norms), num_databases=len(db_names),
                num_entries=len(entries), num_rows=len(drow), num_curves=NC, num_events=len(events), fps=FPS,
                bound_sm_size=SM, bound_lr_size=LR, max_dims=max_dims, num_events_clipped=0,

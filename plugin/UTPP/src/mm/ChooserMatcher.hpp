@@ -658,7 +658,8 @@ struct MatchResult
     bool turnHold = false;             // MatcherConfig::turnCommit kept the playing turn clip on this update
     Interrupt interrupt = Interrupt::DoNotInterrupt;
     BlendRequest blend;
-    uint64_t dbMask = 0; // chooser databases (DBAS bits)
+    chooser::DbSet dbSet;  // chooser databases (DBAS ids)
+    uint64_t dbMask = 0;   // dbSet ids < 64 only (diagnostics of bundles with at most 64 databases)
     uint32_t numDatabases = 0;
     uint32_t rowsEvaluated = 0;
     // stage times of this update (microseconds, steady clock): continuing candidates, query building inside the database search,
@@ -1201,7 +1202,7 @@ public:
             if (std::find(dbList, dbList + numDb, static_cast<uint32_t>(d)) == dbList + numDb)
             {
                 dbList[numDb++] = static_cast<uint32_t>(d);
-                res.dbMask |= uint64_t(1) << d;
+                res.dbSet.Set(d);
             }
         }
         // G10 (MatcherConfig::runWalkLoopsMaxCmS): the Walk_Loops database of the same LOD joins the Run gait's searched set at walking pace
@@ -1218,7 +1219,7 @@ public:
                     std::find(dbList, dbList + numDb, static_cast<uint32_t>(w)) == dbList + numDb)
                 {
                     dbList[numDb++] = static_cast<uint32_t>(w);
-                    res.dbMask |= uint64_t(1) << w;
+                    res.dbSet.Set(w);
                 }
             }
         }
@@ -1228,19 +1229,20 @@ public:
         if (m_table->GetSlide().present && aState.movementMode == 0 && aState.movementModeLast == kMovementSliding)
         {
             uint32_t k = 0;
-            uint64_t mask = 0;
+            chooser::DbSet mask;
             for (uint32_t i = 0; i < numDb; ++i)
                 if (db.DbName(dbList[i]).starts_with("PSD_Slide_ExitTo"))
                 {
                     dbList[k++] = dbList[i];
-                    mask |= uint64_t(1) << dbList[i];
+                    mask.Set(dbList[i]);
                 }
             if (k)
             {
                 numDb = k;
-                res.dbMask = mask;
+                res.dbSet = mask;
             }
         }
+        res.dbMask = res.dbSet.Low();
         res.numDatabases = numDb;
 
         // Reset() intentionally forgets motion history across a yield. Keep a completed one-shot transition suppressed
@@ -1391,7 +1393,7 @@ public:
         if (UTPP_AND_NOT(JUMPPICK, 4) aState.movementMode == 1 && m_cfg.blendSlideAir > 0.0f && m_sinceSlideS < m_cfg.slideAirWindowS)
             blendTime = std::fmax(blendTime, m_cfg.blendSlideAir);
         const bool allowLastPose = m_cur.valid &&
-            !IsInvalidating(res.interrupt, (res.dbMask >> static_cast<uint32_t>(m_cur.db)) & 1u);
+            !IsInvalidating(res.interrupt, res.dbSet.Test(m_cur.db));
 
         // ---- continuing pose searches (UE 5.8 UPoseSearchLibrary::MotionMatch, PoseSearchLibrary.cpp 1340-1373;
         // PopulateContinuingPoseSearches 276-300; IsForceInterrupt 326-344; IsInvalidatingContinuingPose 346-365).
@@ -1415,7 +1417,7 @@ public:
                 for (uint32_t k = 0; k < m_numCand; ++k)
                     if (m_cand[k].db == static_cast<int32_t>(c))
                         return;
-                const bool in = (res.dbMask >> c) & 1u;
+                const bool in = res.dbSet.Test(c);
                 if (IsInvalidating(res.interrupt, in))
                     return;
                 const DatabaseRecord& C = db.Db(c);
@@ -1453,7 +1455,7 @@ public:
         m_slideHandoverDb = -1;
 #if UTPP_LOCOMATCHER_MUTATION != 4 // mutation 4: no Into -> Loop handover (the mirrored Into re-jump)
         if (m_cfg.slideIntoHandover && aState.movementMode == kMovementSliding && contValid && curIsSlide && m_numCand == 0 &&
-            m_clipSlideInto[static_cast<uint32_t>(m_cur.clip)] && ((res.dbMask >> static_cast<uint32_t>(m_cur.db)) & 1u))
+            m_clipSlideInto[static_cast<uint32_t>(m_cur.clip)] && (res.dbSet.Test(m_cur.db)))
         {
             const DatabaseRecord& C = db.Db(static_cast<uint32_t>(m_cur.db));
             for (uint32_t e = C.firstEntry; e < C.firstEntry + C.numEntries; ++e)
@@ -1589,7 +1591,7 @@ public:
             // capsule speed within the play rate range is not evaluated (it stays the source of the query pose channels)
 #if UTPP_LOCOMATCHER_MUTATION != 6 // mutation 6: the Start tail keeps competing (UE DoNotInterrupt)
             if (m_cfg.slowWalkStartTail && m_cfg.startTailAccelFraction > 0.0f && aState.movementMode == 0 && aState.movementState == 1 &&
-                aState.gait == 0 && !aState.isStarting && m_dbWalkStarts[d] && !((res.dbMask >> d) & 1u) &&
+                aState.gait == 0 && !aState.isStarting && m_dbWalkStarts[d] && !res.dbSet.Test(d) &&
                 m_clipAccelEndS[static_cast<uint32_t>(m_cur.clip)] >= 0.0f && m_cur.clipTime >= m_clipAccelEndS[static_cast<uint32_t>(m_cur.clip)])
             {
                 const auto tail = rate2::Calculate(db, d, static_cast<uint32_t>(cc.localRow), m_raw.data(), m_cfg.minPlayRate, m_cfg.maxPlayRate);
@@ -1631,7 +1633,7 @@ public:
         bool continueShotTurn = false;
         if (contEvaluated && aState.stationaryShotTurn && aState.shouldTurnInPlace &&
             aState.movementMode == 0 && aState.movementState == 0 &&
-            ((res.dbMask >> static_cast<uint32_t>(bestDb)) & 1u))
+            res.dbSet.Test(bestDb))
         {
             const auto name = db.ClipName(static_cast<uint32_t>(m_cur.clip));
             continueShotTurn = steer::ClassifyClip(name) == steer::kClassTurnInPlace &&
@@ -1656,7 +1658,7 @@ public:
             m_cur.stationaryAimGoalValid = false;
         bool continueAimTurn = false;
         if (contEvaluated && stationaryAim && m_cur.stationaryAimGoalValid &&
-            ((res.dbMask >> static_cast<uint32_t>(bestDb)) & 1u))
+            res.dbSet.Test(bestDb))
         {
             const auto name = db.ClipName(static_cast<uint32_t>(m_cur.clip));
             continueAimTurn = steer::ClassifyClip(name) == steer::kClassTurnInPlace &&
@@ -1671,7 +1673,7 @@ public:
             res.interrupt == Interrupt::DoNotInterrupt &&
             aState.committedStartTurnClip == m_cur.clip &&
             StartTurnDirection(m_cur.clip) == startTurnDirection &&
-            ((res.dbMask >> static_cast<uint32_t>(bestDb)) & 1u);
+            res.dbSet.Test(bestDb);
 
         // fix/slide-exit: the held exit clip keeps playing, no other database is searched during its hold
         const bool continueSlideExit = slideExitHold && contEvaluated;
@@ -1868,7 +1870,7 @@ public:
                 m_cur.db = bestDb;
                 m_cur.localRow = bestRow;
                 m_cur.entry = bestEntry;
-                res.continuingOutsideSet = !((res.dbMask >> bestDb) & 1u);
+                res.continuingOutsideSet = !res.dbSet.Test(bestDb);
             }
             if (jump)
             {
@@ -2133,6 +2135,14 @@ public:
                     const uint32_t o = ch.dataOffset + k;
                     m_raw[o] = contF[o] / contScale[o] + contMean[o];
                 }
+                continue;
+            }
+            else if (ch.kind == kChanCurve)
+            {
+                // continuing pose curve without a feature row of this schema: read the curve of the playing clip at its
+                // current time (the same sampling rule as the database rows); no playing clip leaves the mean
+                if (m_cur.valid && m_cur.clip >= 0 && static_cast<uint32_t>(m_cur.clip) < db.NumClips())
+                    m_raw[ch.dataOffset] = db.CurveFeature(ch, static_cast<uint32_t>(m_cur.clip), m_cur.clipTime);
                 continue;
             }
             else

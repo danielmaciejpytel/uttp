@@ -1127,5 +1127,11 @@ if(DEFINED _utpp_mdmotion_data AND EXISTS "${_utpp_mdmotion_data}/utpp_motion_wo
   add_test(NAME utpp_mm_loco_stride_warp_test COMMAND utpp_mm_loco_stride_warp_test "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
 endif()
 
+# ---- wide database set (more than 64 databases) and SCHC Curve channels of the motion database reader ----
+add_executable(utpp_mmdb_curve_channel_test tests/MotionCurveChannelTest.cpp src/mm/MotionDatabase.hpp src/mm/Chooser.hpp src/mm/ChooserMatcher.hpp)
+target_compile_options(utpp_mmdb_curve_channel_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_mmdb_curve_channel_test PRIVATE cxx_std_20)
+add_test(NAME utpp_mmdb_curve_channel_test COMMAND utpp_mmdb_curve_channel_test "${UTPP_MOTION_DB_TEST_FILE}")
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

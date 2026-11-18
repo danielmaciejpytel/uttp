@@ -22,11 +22,14 @@
 #include <vector>
 
 #include "../BaseDatabase.hpp"
+#include "Chooser.hpp"
 
 namespace utpp::mm::motion
 {
 inline constexpr uint32_t kVersion = 2;
-inline constexpr uint32_t kMaxDatabases = 64;
+// Databases per file. Up to 64 the CLIP db_mask word holds every membership bit; above 64 the membership of a clip
+// in database d >= 64 comes from its DENT entries (db_mask keeps the bits of databases 0..63).
+inline constexpr uint32_t kMaxDatabases = chooser::kDbSetBits;
 inline constexpr uint32_t kMaxCurves = 32;
 inline constexpr uint32_t kMaxDims = 1024;
 
@@ -57,6 +60,23 @@ enum MotionFrameFlags : uint32_t
     kFrameClipEnd = 1u << 7,
     kFrameExcludedTail = 1u << 8,
     kFrameIndexed = 1u << 9,
+};
+
+// Header flags (FORMAT.txt v2 header "flags").
+enum HeaderFlags : uint32_t
+{
+    kHeaderHasScale = 1u << 0,
+    kHeaderCurveChannels = 1u << 1, // SCHC may hold Curve channels (kind 5); set exactly when it does
+};
+
+// SCHC channel kinds.
+enum ChannelKind : uint32_t
+{
+    kChanPosition = 1,
+    kChanVelocity = 2,
+    kChanVelocityDirection = 3,
+    kChanHeading = 4,
+    kChanCurve = 5, // CURV curve value of the pose at t_sample (cardinality 1, components 1, bone / origin -1)
 };
 
 enum ChannelFlags : uint32_t
@@ -182,8 +202,8 @@ static_assert(sizeof(SchemaRecord) == 32);
 
 struct ChannelRecord
 {
-    uint32_t kind;       // 1 Position, 2 Velocity, 3 VelocityDirection, 4 Heading
-    uint32_t components; // 7 xyz, 3 xy, 4 z
+    uint32_t kind;       // ChannelKind: 1 Position, 2 Velocity, 3 VelocityDirection, 4 Heading, 5 Curve
+    uint32_t components; // 7 xyz, 3 xy, 4 z; 1 scalar (Curve)
     int32_t bone;
     int32_t originBone;
     float tSample;
@@ -198,7 +218,7 @@ struct ChannelRecord
     uint32_t labelOff;
     float axis[3];
     uint32_t flags;
-    uint32_t zero;
+    uint32_t curve; // Curve channels: CURV curve index (< num_curves); 0 for the other kinds
 };
 static_assert(sizeof(ChannelRecord) == 76);
 
@@ -371,7 +391,8 @@ public:
     uint32_t NumClips() const { return m_h.numClips; }
     uint32_t NumDatabases() const { return m_h.numDatabases; }
     uint32_t NumRows() const { return m_h.numRows; }
-    bool HasScale() const { return (m_h.flags & 1u) != 0; }
+    bool HasScale() const { return (m_h.flags & kHeaderHasScale) != 0; }
+    bool HasCurveChannels() const { return (m_h.flags & kHeaderCurveChannels) != 0; }
 
     std::string_view String(uint32_t aOff) const
     {
@@ -384,6 +405,9 @@ public:
     int32_t BoneParent(uint32_t i) const { return m_bones[i].parent; }
     const RigRestRecord& RigRest(uint32_t i) const { return m_rigr[i]; }
     const MotionClipRecord& Clip(uint32_t i) const { return m_clips[i]; }
+    // Databases the clip has an entry in (every database id, also >= 64; Clip().dbMask holds ids < 64 only).
+    const chooser::DbSet& ClipDatabases(uint32_t i) const { return m_clipDbs[i]; }
+    bool ClipInDatabase(uint32_t aClip, uint32_t aDb) const { return m_clipDbs[aClip].Test(aDb); }
     std::string_view ClipName(uint32_t i) const { return String(m_clips[i].nameOff); }
     uint32_t FrameFlags(uint32_t f) const { return m_fflg[f]; }
     const SchemaRecord& Schema(uint32_t i) const { return m_schemas[i]; }
@@ -411,6 +435,36 @@ public:
         float v;
         std::memcpy(&v, &m_curv[static_cast<size_t>(f) * (m_h.numCurves + 1) + 1 + k], 4);
         return v;
+    }
+    // Value of curve k of clip aClip at local time aTimeS (s): frame position x = aTimeS * fps; loops wrap x into
+    // [0, loop_period), non-loops clamp it to [0, num_frames - 1]; linear interpolation of the CURV values of the two
+    // neighbouring frames (absent curve = 0). FORMAT.txt v2 "Curve channels".
+    float CurveAt(uint32_t aClip, uint32_t k, double aTimeS) const
+    {
+        const MotionClipRecord& cl = m_clips[aClip];
+        double x = aTimeS * static_cast<double>(m_h.fps);
+        const uint32_t last = cl.numFrames - 1;
+        if ((cl.flags & kClipLoop) && cl.loopPeriod > 0)
+        {
+            const double p = static_cast<double>(cl.loopPeriod);
+            x = std::fmod(x, p);
+            if (x < 0.0)
+                x += p;
+            if (x >= p)
+                x = 0.0;
+        }
+        else
+            x = std::clamp(x, 0.0, static_cast<double>(last));
+        const uint32_t f0 = std::min(static_cast<uint32_t>(x), last);
+        const uint32_t f1 = std::min(f0 + 1, last);
+        const float u = static_cast<float>(x - static_cast<double>(f0));
+        const float a = CurveValue(cl.firstFrame + f0, k), b = CurveValue(cl.firstFrame + f1, k);
+        return a + (b - a) * u;
+    }
+    // Raw (un-normalized) value of Curve channel aCh for the pose at local time aTimeS of clip aClip.
+    float CurveFeature(const ChannelRecord& aCh, uint32_t aClip, double aTimeS) const
+    {
+        return CurveAt(aClip, aCh.curve, aTimeS + static_cast<double>(aCh.tSample));
     }
     const EventRecord& Event(uint32_t i) const { return m_events[i]; }
     const RtzRecord& Rtz(uint32_t f) const { return m_rtz[f]; }
@@ -612,7 +666,7 @@ private:
             return Fail(aError, "payload CRC mismatch");
         if (h.rigHash != aExpected)
             return Fail(aError, "rig identity mismatch (database for another rig)");
-        if (h.flags & ~1u)
+        if (h.flags & ~(kHeaderHasScale | kHeaderCurveChannels))
             return Fail(aError, "unknown header flags");
         if (h.numBones == 0 || h.numBones > kMaxBones || h.numFrames == 0 || h.numClips == 0 || h.numSchemas == 0 ||
             h.numDatabases == 0 || h.numDatabases > kMaxDatabases || h.numCurves > kMaxCurves || h.numSections == 0 ||
@@ -788,10 +842,14 @@ private:
             if (h.numDatabases < 64 && (cl.dbMask >> h.numDatabases) != 0)
                 return Fail(aError, "clip db_mask references a missing database");
         }
+        m_clipDbs.assign(h.numClips, chooser::DbSet{});
+        for (uint32_t c = 0; c < h.numClips; ++c)
+            m_clipDbs[c] = chooser::DbSet::FromLow(m_clips[c].dbMask);
         if (frameCursor != h.numFrames)
             return Fail(aError, "clips do not cover the frames");
 
         // ---- schemas / channels
+        uint32_t numCurveChannels = 0;
         for (uint32_t s = 0; s < h.numSchemas; ++s)
         {
             const SchemaRecord& sc = m_schemas[s];
@@ -805,10 +863,22 @@ private:
                 if (ch.cardinality < 1 || ch.cardinality > 3 || static_cast<uint64_t>(ch.dataOffset) + ch.cardinality > sc.dims ||
                     ch.bone < -1 || ch.bone >= static_cast<int32_t>(h.numBones) || ch.originBone < -1 ||
                     ch.originBone >= static_cast<int32_t>(h.numBones) || !Finite(&ch.tSample, 2) || !Finite(&ch.weight, 2) ||
-                    !Finite(ch.axis, 3) || ch.kind < 1 || ch.kind > 4 || !strOk(ch.normGroupOff) || !strOk(ch.labelOff))
+                    !Finite(ch.axis, 3) || ch.kind < kChanPosition || ch.kind > kChanCurve || !strOk(ch.normGroupOff) ||
+                    !strOk(ch.labelOff))
                     return Fail(aError, "bad schema channel");
+                if (ch.kind == kChanCurve)
+                {
+                    // continuing-pose scalar read from CURV; no bones, no origin time, no trajectory / RTZ semantics
+                    if (!(h.flags & kHeaderCurveChannels) || ch.curve >= h.numCurves || ch.cardinality != 1 || ch.components != 1 ||
+                        ch.bone != -1 || ch.originBone != -1 || ch.tOrigin != 0.0f || ch.velocitySpace != 0 || ch.inputQuery != 0 ||
+                        (ch.flags & (kChanTrajectory | kChanNormalizeOutput | kChanClampUnitUe | kChanZFromRtz)) != 0)
+                        return Fail(aError, "bad curve channel");
+                    ++numCurveChannels;
+                }
             }
         }
+        if (((h.flags & kHeaderCurveChannels) != 0) != (numCurveChannels != 0))
+            return Fail(aError, "header CURVE_CHANNELS flag differs from the channels");
 
         // ---- norms
         for (uint32_t n = 0; n < h.numNorms; ++n)
@@ -856,8 +926,9 @@ private:
                     static_cast<uint64_t>(en.firstRow) + en.numRows > static_cast<uint64_t>(db.firstRow) + db.numRows ||
                     !std::isfinite(en.rangeMin) || !std::isfinite(en.rangeMax))
                     return Fail(aError, "bad entry " + std::to_string(e));
-                if (((m_clips[en.clip].dbMask >> d) & 1u) == 0)
+                if (d < 64 && ((m_clips[en.clip].dbMask >> d) & 1u) == 0)
                     return Fail(aError, "entry clip without the database bit in db_mask");
+                m_clipDbs[en.clip].Set(d);
             }
             for (uint32_t r = db.firstRow; r < db.firstRow + db.numRows; ++r)
             {
@@ -957,6 +1028,7 @@ private:
     std::vector<BoneRecord> m_bones;
     std::vector<RigRestRecord> m_rigr;
     std::vector<MotionClipRecord> m_clips;
+    std::vector<chooser::DbSet> m_clipDbs; // per clip: databases with an entry of it
     std::vector<Clip2Record> m_clip2;
     std::vector<uint32_t> m_fflg;
     std::vector<SchemaRecord> m_schemas;
