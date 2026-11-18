@@ -1281,6 +1281,35 @@ def _notify_state_active(notifies, t, length):
     return [n for n in notifies if n["time"] <= b and n["time"] + n["duration"] > a]
 
 
+def _apply_reference_clip(cl, refx, cn, log):
+    """Added clip listed in the reference export: UE loop flag, length check and contact curves from the export."""
+    if refx.num_frames(cn) + 1 != cl.N:
+        raise SystemExit(f"{cn}: clip has {cl.N} frames, reference record {refx.num_frames(cn)} + 1 keys")
+    if abs(refx.length(cn) - (cl.N - 1) / FPS) > 1e-3:
+        log.warn(f"{cn}: reference length {refx.length(cn):.4f} s != clip {(cl.N - 1) / FPS:.4f} s")
+    cl.ref = True
+    cl.loop = refx.loop(cn)
+    cl.contacts = refx.contact_matrix(cn, cl.N, FPS)
+
+
+def _reference_curves(c, refx, cindex, curve_units, CURV, CMASK, src, tfr, phase_p):
+    """Authored curves of a reference-export clip, replacing any recomputed value of the same bundle curve."""
+    cm_per_unit = UE_CM / c.hip_ratio
+    for bn, rn in refx.curves.items():
+        if bn not in cindex:
+            raise SystemExit(f"reference_export curve {bn} is not a bundle curve")
+        if rn in refx.absent[c.name]:
+            src.setdefault(bn, "reference_absent")
+            continue
+        k = cindex[bn]
+        vals = refx.evaluate(c.name, rn, tfr, phase=(bn == (phase_p or {}).get("curve")))
+        if curve_units[k] in (CU_UNITS["m/s"], CU_UNITS["m"]):
+            vals = vals / cm_per_unit
+        CURV[c.first:c.first + c.N, k] = vals
+        CMASK[c.first:c.first + c.N] |= np.uint32(1 << k)
+        src[bn] = "reference"
+
+
 def bake_v2(args, log):
     root = v1.project_root()
     cfg1 = load_json(args.config)
@@ -1320,12 +1349,17 @@ def bake_v2(args, log):
     # ---- optional source pack slide extension (--slide-spec): extra schemas / databases / normalization sets merged
     #      into the parsed posesearch.json; the extra databases are appended AFTER the sorted base list, so the ids
     #      of every base database are those of a bake without the slide spec
-    slide, slide_dbs, slide_schemas, slide_windows = None, [], [], {}
+    slide, slide_dbs, slide_schemas, slide_windows, refx = None, [], [], {}, None
     if getattr(args, "slide_spec", None):
         import slide_spec as sspec
         slide = load_json(args.slide_spec)
         slide_dbs, slide_schemas, slide_windows = sspec.merge_into_posesearch(ps, slide, os.path.join(root, slide["dump_dir"]))
         log(f"slide spec {os.path.relpath(args.slide_spec, root)}: databases {slide_dbs}, schemas {slide_schemas}")
+    import reference_curves as rcurves
+    refx = rcurves.load(slide, root)          # optional reference export of added clips (reference_curves.py)
+    if refx is not None:
+        log(f"reference export {os.path.relpath(refx.dir, root)}: {len(refx.recs)} clips, curves {refx.curves}, "
+            f"contacts {refx.contacts}, recomputed modifiers {sorted(refx.recompute)}")
 
     # ---- databases (family from the data file, list from the clip map)
     fam = cfg2["databases"]["family"]
@@ -1517,6 +1551,8 @@ def bake_v2(args, log):
                 log.warn(f"{cn}: UE length {float(cl.length):.4f} s != clip {(cl.N - 1) / FPS:.4f} s")
             if cl.loop and not cl.ends_match:
                 log.warn(f"{cn}: UE bLoop but first/last pose differ by {cl.pose_delta:.4f} m (wrapped as UE does)")
+        elif refx is not None and cn in refx:
+            _apply_reference_clip(cl, refx, cn, log)
         else:
             cl.loop = cl.name_loop and cl.ends_match
         cl.build_grid(h_lo, h_hi)
@@ -1899,6 +1935,8 @@ def bake_v2(args, log):
         sourcepack_mods = _sourcepack_modifiers(c.rec) if c.sourcepack else {}
         if c.sourcepack:
             mod_set = set(sourcepack_mods)
+        elif getattr(c, "ref", False):
+            mod_set = set(refx.recompute)
         else:
             mod_set = {m for m, frac in fam_mod.get(fdb[0], {}).items() if frac >= fmin} if fdb else set()
             curve_report["female_modifiers"][c.name] = sorted(mod_set)
@@ -1992,6 +2030,8 @@ def bake_v2(args, log):
             if src.get(cn) != "sourcepack":
                 rmask |= 1 << k
             CMASK[c.first:c.first + N] |= np.uint32(1 << k)
+        if getattr(c, "ref", False):
+            _reference_curves(c, refx, cindex, curve_units, CURV, CMASK, src, tfr, phase_p)
         # authored source pack curves (no modifier)
         for cn, k in cindex.items():
             if cn in src or not c.sourcepack or cn not in gcv:
