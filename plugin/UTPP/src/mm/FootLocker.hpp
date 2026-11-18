@@ -122,6 +122,65 @@ struct FootReplantConfig
     }
 };
 
+// Reference plant model (opt-in, default off; FootFeedPolicy::referencePlant / FootLocker::SetPlantReference). Standing and sprint
+// feet use it instead of the soft slip and the radius steps; crouch keeps its own policy.
+//   - a foot plants (locks its toe in world) only when its contact exceeds `contact`; the usual release threshold still unlocks it;
+//   - a planted foot unplants when its toe is more than `radius` from the animated toe, or (yaw on) when its locked world yaw is more
+//     than `unplantAngle` from the animated foot yaw;
+//   - an unplanted foot follows the animated toe through a critically damped spring on the offset (closed form, the same result at any
+//     update rate for the same animated motion), started with the velocity that keeps the displayed foot still at the unplant moment and
+//     never further from the animated toe than the radius (or the offset it unplanted at);
+//   - it plants again where it is shown once the offset is within ratio x radius (and the yaw offset within `replantAngle`);
+//   - yaw lock: the foot keeps (1 - twistReduction) of the difference between its locked world yaw and the animated world yaw, rotated
+//     about the toe (the toe stays on its lock point). The difference is taken against the pose the locker receives, so a foot rotation
+//     already applied upstream is not applied a second time.
+// The radius is never larger than FootLockConfig::maxDrift (the drift unlock fires first beyond it).
+#ifndef UTPP_FOOT_PLANT_REFERENCE
+#define UTPP_FOOT_PLANT_REFERENCE 0 // 0 off, 1 position, 2 position and planted yaw (measurement builds)
+#endif
+#ifndef UTPP_FOOT_PLANT_RADIUS
+#define UTPP_FOOT_PLANT_RADIUS 0.20f
+#endif
+#ifndef UTPP_FOOT_PLANT_RADIUS_STOPS
+#define UTPP_FOOT_PLANT_RADIUS_STOPS 0.40f
+#endif
+#ifndef UTPP_FOOT_PLANT_TWIST_REDUCTION
+#define UTPP_FOOT_PLANT_TWIST_REDUCTION 0.75f
+#endif
+struct FootPlantReferenceConfig
+{
+    float contact = 0.99f;          // plant when the contact exceeds this
+    float radius = UTPP_FOOT_PLANT_RADIUS;            // m, unplant radius (Default profile)
+    float radiusStops = UTPP_FOOT_PLANT_RADIUS_STOPS; // m, unplant radius while the playing clip is idle / stop (Stops profile)
+    float ratio = 0.2f;             // replant at offset <= ratio x radius
+    float ratioStops = 0.75f;
+    float unplantAngle = 1.04719755f; // rad (60 deg)
+    float replantAngle = 0.20943951f; // rad (12 deg)
+    float twistReduction = UTPP_FOOT_PLANT_TWIST_REDUCTION; // share of the planted yaw difference left to the animation
+    float linearStiffness = 100.0f; // 1/s^2, unplanted offset spring (critically damped)
+    float linearStiffnessStops = 250.0f;
+    float angularStiffness = 450.0f;
+    bool yaw = UTPP_FOOT_PLANT_REFERENCE >= 2; // planted yaw lock
+
+    static bool Valid(const FootPlantReferenceConfig& c)
+    {
+        auto in = [](float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; };
+        return in(c.contact, 0.0f, 1.0f) && in(c.radius, 0.01f, 0.5f) && in(c.radiusStops, 0.01f, 0.5f) && in(c.ratio, 0.0f, 0.95f) &&
+               in(c.ratioStops, 0.0f, 0.95f) && in(c.unplantAngle, 0.01f, 3.1f) && in(c.replantAngle, 0.0f, 3.1f) &&
+               c.replantAngle < c.unplantAngle && in(c.twistReduction, 0.0f, 1.0f) && in(c.linearStiffness, 1.0f, 10000.0f) &&
+               in(c.linearStiffnessStops, 1.0f, 10000.0f) && in(c.angularStiffness, 1.0f, 10000.0f);
+    }
+};
+
+// Critically damped spring towards 0, exact for any step (x: value, v: its rate, w = sqrt(stiffness)).
+inline void SpringCritical(float& aX, float& aV, float aOmega, float aDt)
+{
+    const float e = std::exp(-aOmega * aDt);
+    const float j = aV + aOmega * aX;
+    aX = (aX + j * aDt) * e;
+    aV = (aV - aOmega * j * aDt) * e;
+}
+
 struct FootLockFootDiag
 {
     bool contact = false;    // hysteresis state
@@ -138,6 +197,9 @@ struct FootLockFootDiag
     bool hurried = false;    // loco C1b: that step closed at stepSpeed x hurry (the other foot waits)
     float lift = 0.0f;       // loco C1b: m, step lift applied to the ankle target this update (before the IK weight)
     bool stopReleased = false; // loco-stop-knees: a standing-stop swing contact released this lock this update
+    bool plantRef = false;     // reference plant model: this lock runs in it
+    bool unplanted = false;    // reference plant model: the foot follows the animated toe through the spring (planted otherwise)
+    float yawOffset = 0.0f;    // rad, reference plant model: yaw applied to the foot this update (before the IK weight)
 };
 
 // loco C0 (diagnostics only): foot events - drift unlocks and (loco C1b) replant steps by trigger. The driver writes one
@@ -194,6 +256,9 @@ struct FootLockDiagnostics
     uint64_t stepUpdates = 0;                   // foot updates in a step
     uint64_t handovers = 0;                     // feet handed over to the 0.5.9 path (replant switched off while planted)
     uint64_t simultaneousSteps = 0;             // updates with both feet stepping (one foot at a time: stays 0)
+    uint64_t plantUnplants = 0;                 // reference plant model: planted -> unplanted (radius / angle / reach)
+    uint64_t plantReplants = 0;                 // reference plant model: unplanted -> planted
+    uint64_t plantBounds = 0;                   // reference plant model: updates with the unplanted offset held at the radius
     float maxLift = 0.0f;                       // m, highest step lift since Init / Reset
     uint64_t blendOutLifts = 0;                 // foot updates where the blend-out sink bound lifted the ankle (loco-fix 2026-11-09)
     uint64_t stopSwingReleases = 0;             // standing-stop locks released as a swing contact (loco-stop-knees 2026-11-09)
@@ -364,6 +429,19 @@ public:
         return true;
     }
     const FootReplantConfig& ReplantConfig() const { return m_rcfg; }
+    // Reference plant model (FootPlantReferenceConfig) for the feet that lock while it is on; the driver sets it per feed with the
+    // replant mode (ApplyFootFeedPolicy). Off (default) = the previous paths bit for bit.
+    void SetPlantReference(bool aOn) { m_plantRef = aOn; }
+    bool PlantReferenceOn() const { return m_plantRef; }
+    // False = invalid (FootPlantReferenceConfig::Valid), previous kept.
+    bool SetPlantReferenceConfig(const FootPlantReferenceConfig& aCfg)
+    {
+        if (!FootPlantReferenceConfig::Valid(aCfg))
+            return false;
+        m_pcfg = aCfg;
+        return true;
+    }
+    const FootPlantReferenceConfig& PlantReferenceConfig() const { return m_pcfg; }
 
     // Pelvis stage (PelvisPlacement.hpp): after both feet are solved, the pelvis moves so that every ankle target is reachable and
     // both legs are solved again from the moved pelvis (a locked foot to its target, a free foot to the ankle of the foot pass, each
@@ -514,6 +592,18 @@ private:
         bool crouchSourceValid = false;
         bool crouchSourceQuiet = false;
         math::Vec3 stopRel{};     // loco-stop-knees: at the lock, animated toe - the other foot's animated toe (character frame, z = 0)
+        // reference plant model (only while locked in it)
+        bool plantRef = false;    // this lock runs in the reference plant model
+        bool unplanted = false;   // following the animated toe through the spring
+        math::Vec3 springX{};     // world, displayed toe - animated toe while unplanted (z = 0)
+        math::Vec3 springV{};     // world, its rate
+        float springMax = 0.0f;   // m, bound of |springX| (the radius, or the offset at the unplant if larger)
+        float yawLock = 0.0f;     // rad, world yaw of the planted foot
+        float yawX = 0.0f, yawV = 0.0f; // rad, rad/s: displayed - animated world yaw while unplanted, and its rate
+        float yawApply = 0.0f;    // rad, yaw applied to the foot this update (before the IK weight)
+        // animated toe world position / foot world yaw of the previous update (unplant start velocity)
+        float prevToeX = 0.0f, prevToeY = 0.0f, prevYaw = 0.0f;
+        bool prevValid = false;
     };
 
     static bool ValidConfig(const FootLockConfig& c)
@@ -569,6 +659,17 @@ private:
         {
             UpdateCrouchContact(aSide, aDt, aToe, aOff);
             return;
+        }
+        if (f.plantRef)
+        {
+            if (PlantRefActive())
+            {
+                UpdatePlantReference(aSide, aDt, aToe, aOff);
+                return;
+            }
+            // the reference model was switched off while planted: the radius-step path continues from the shown offset
+            f.plantRef = f.unplanted = false;
+            f.yawApply = 0.0f;
         }
         const Foot& o = m_foot[aSide ^ 1];
         const FootReplantConfig& rc = m_rcfg;
@@ -653,6 +754,82 @@ private:
         f.lift = std::fmax(0.0f, h * std::sin(math::kPi * progress));
         if (f.lift > m_diag.maxLift)
             m_diag.maxLift = f.lift;
+    }
+
+    bool PlantRefActive() const { return m_plantRef && m_replantOn && !m_crouchContactPolicy; }
+
+    // Reference plant model of a locked foot (see FootPlantReferenceConfig). aOff = locked toe - animated toe (character frame).
+    void UpdatePlantReference(int aSide, float aDt, math::Vec3 aToe, math::Vec3 aOff)
+    {
+        Foot& f = m_foot[aSide];
+        const FootPlantReferenceConfig& pc = m_pcfg;
+        const bool stops = m_replantStops;
+        const float radius = std::fmin(stops ? pc.radiusStops : pc.radius, m_cfg.maxDrift);
+        const float ratio = stops ? pc.ratioStops : pc.ratio;
+        const float wl = std::sqrt(stops ? pc.linearStiffnessStops : pc.linearStiffness);
+        const float wa = std::sqrt(pc.angularStiffness);
+        const bool yawOn = pc.yaw && m_toePathLen[aSide] > 0;
+        const float keep = 1.0f - pc.twistReduction; // share of the planted yaw difference applied to the foot
+        const float animYaw = m_animYawW[aSide];
+        f.offset = aOff;
+        f.lift = 0.0f;
+        if (!f.unplanted)
+        {
+            const float yawErr = yawOn ? math::WrapAngle(f.yawLock - animYaw) : 0.0f;
+            const float len = Len(aOff);
+            uint8_t reason = kFootEventNone;
+            if (len > radius || (yawOn && std::fabs(yawErr) > pc.unplantAngle))
+                reason = kFootEventRadius;
+            else if (f.clampTime >= m_rcfg.clampTime)
+                reason = kFootEventClamp;
+            if (reason == kFootEventNone)
+            {
+                f.yawApply = yawErr * keep;
+                return;
+            }
+            // unplant: the spring starts from the shown foot of the previous update (still: offset rate = -animated toe velocity) and runs this
+            // update's dt, so the shown foot leaves its plant without a velocity step
+            const math::Vec3 u = m_animToeVel[aSide];
+            f.unplanted = true;
+            f.springX = math::Vec3{m_cos * aOff.x - m_sin * aOff.y + u.x * aDt, m_sin * aOff.x + m_cos * aOff.y + u.y * aDt, 0.0f};
+            f.springV = math::Vec3{-u.x, -u.y, 0.0f};
+            f.springMax = std::fmax(radius, Len(f.springX));
+            f.yawX = (yawErr + m_animYawRate[aSide] * aDt) * keep;
+            f.yawV = -m_animYawRate[aSide] * keep;
+            f.clampTime = 0.0f;
+            ++m_diag.footSteps[aSide];
+            ++m_diag.stepReasons[reason];
+            ++m_diag.plantUnplants;
+            FootEvent(aSide, reason, len);
+        }
+        SpringCritical(f.springX.x, f.springV.x, wl, aDt);
+        SpringCritical(f.springX.y, f.springV.y, wl, aDt);
+        // the spring never takes the foot further from the animated toe than the radius (or the offset it unplanted at): a fast animated
+        // toe would otherwise drag the still-started foot far behind it (IK correction beyond the radius); the outward rate is dropped
+        const float lx = Len(f.springX);
+        if (lx > f.springMax && lx > 1e-6f)
+        {
+            const math::Vec3 n{f.springX.x / lx, f.springX.y / lx, 0.0f};
+            f.springX = n * f.springMax;
+            const float vr = math::Dot(f.springV, n);
+            if (vr > 0.0f)
+                f.springV = f.springV - n * vr;
+            ++m_diag.plantBounds;
+        }
+        if (yawOn)
+            SpringCritical(f.yawX, f.yawV, wa, aDt);
+        else
+            f.yawX = f.yawV = 0.0f;
+        f.offset = math::Vec3{m_cos * f.springX.x + m_sin * f.springX.y, -m_sin * f.springX.x + m_cos * f.springX.y, 0.0f};
+        CharacterToWorld(math::Vec3{aToe.x + f.offset.x, aToe.y + f.offset.y, aToe.z}, f.lockX, f.lockY);
+        f.yawApply = f.yawX;
+        if (Len(f.springX) <= ratio * radius && (!yawOn || std::fabs(f.yawX) <= pc.replantAngle))
+        {
+            // plant again where the foot is shown (position and yaw)
+            f.unplanted = false;
+            f.yawLock = keep > 1e-4f ? animYaw + f.yawX / keep : animYaw;
+            ++m_diag.plantReplants;
+        }
     }
 
     void UpdateCrouchContact(int aSide, float dt, math::Vec3 toe, math::Vec3 off)
@@ -818,6 +995,21 @@ private:
             return;
         }
 
+        {
+            // animated toe world position and planar foot world yaw (toe - ankle) of this update, and their rates (reference plant model)
+            float tx = 0.0f, ty = 0.0f;
+            CharacterToWorld(gl.p, tx, ty);
+            const float dx = gl.p.x - gc.p.x, dy = gl.p.y - gc.p.y;
+            const float yawW = math::WrapAngle(std::atan2(dy, dx) + m_charYaw);
+            const bool rate = f.prevValid && aDt > 0.0f;
+            m_animToeVel[aSide] = rate ? math::Vec3{(tx - f.prevToeX) / aDt, (ty - f.prevToeY) / aDt, 0.0f} : math::Vec3{};
+            m_animYawRate[aSide] = rate ? math::WrapAngle(yawW - f.prevYaw) / aDt : 0.0f;
+            m_animYawW[aSide] = yawW;
+            f.prevToeX = tx;
+            f.prevToeY = ty;
+            f.prevYaw = yawW;
+            f.prevValid = true;
+        }
         if (m_crouchContactPolicy || f.crouchContact)
         {
             if (aDt > 0.0f)
@@ -837,7 +1029,7 @@ private:
 
         const float wPrev = Smoothstep(f.s);
         f.targetScale = 1.0f; // set below by the soft-slip bound only
-        if (f.contact && !f.locked && !f.suppressed)
+        if (f.contact && !f.locked && !f.suppressed && !(PlantRefActive() && !(aContact > m_pcfg.contact)))
         {
             math::Vec3 shown = gl.p;
             if (wPrev > 0.0f)
@@ -861,6 +1053,11 @@ private:
             f.waiting = false;
             const math::Vec3 rel = gl.p - m_animToe[aSide ^ 1]; // loco-stop-knees: reference of the standing-stop swing-contact check
             f.stopRel = math::Vec3{rel.x, rel.y, 0.0f};
+            f.plantRef = PlantRefActive(); // reference plant model: planted at the animated foot yaw
+            f.unplanted = false;
+            f.springX = f.springV = math::Vec3{};
+            f.yawLock = m_animYawW[aSide];
+            f.yawX = f.yawV = f.yawApply = 0.0f;
         }
         if (f.locked)
         {
@@ -964,6 +1161,8 @@ private:
         {
             f.crouchContact = f.crouchTidy = false;
             f.crouchVelocity = {};
+            f.plantRef = f.unplanted = false;
+            f.yawApply = 0.0f;
         }
         f.s = f.locked ? std::fmin(1.0f, f.s + aDt / m_cfg.blendInTime) : std::fmax(0.0f, f.s - aDt / m_cfg.blendOutTime);
         const float w = Smoothstep(f.s);
@@ -974,6 +1173,9 @@ private:
         d.replant = f.locked && f.replant; // loco C1b
         d.stepping = f.locked && f.stepping;
         d.lift = f.locked ? f.lift : 0.0f;
+        d.plantRef = f.locked && f.plantRef;
+        d.unplanted = d.plantRef && f.unplanted;
+        d.yawOffset = d.plantRef ? f.yawApply : 0.0f;
         if (w <= 0.0f)
         {
             f.offset = {};
@@ -987,9 +1189,23 @@ private:
             if (f.lift > 0.0f) // loco C1b replant step: lifted ankle target (never in the 0.5.9 path)
                 target.z += f.lift * w;
             m_solveLocked[aSide] = true;
-            m_solveTarget[aSide] = target;
             m_prevClampTime[aSide] = f.clampTime;
-            Solve(aSide, gp, ga, gb, gc, target, gl.p, d);
+            if (f.plantRef && f.yawApply != 0.0f && m_toePathLen[aSide] > 0)
+            {
+                // planted yaw: the foot turns about its locked toe (the ankle target goes round it), weight as the position
+                const math::Quat rz = legik::AxisAngle(math::Vec3{0.0f, 0.0f, 1.0f}, f.yawApply * w);
+                const math::Vec3 toe = gl.p + f.offset * (w * f.targetScale);
+                const math::Vec3 rel = math::QuatRotate(rz, gc.p - gl.p);
+                const math::Vec3 yawTarget{toe.x + rel.x, toe.y + rel.y, target.z};
+                const BoneTransform gcYaw{gc.p, math::QuatNormalize(math::QuatMul(rz, gc.q))};
+                m_solveTarget[aSide] = yawTarget;
+                Solve(aSide, gp, ga, gb, gcYaw, yawTarget, toe, d);
+            }
+            else
+            {
+                m_solveTarget[aSide] = target;
+                Solve(aSide, gp, ga, gb, gc, target, gl.p, d);
+            }
             // loco C1b clamp trigger (read only in replant mode): hard clamp or a target missed in the soft reach zone
             f.clampTime = (d.clamped || d.error > m_rcfg.reachError) ? f.clampTime + aDt : 0.0f;
             return;
@@ -1200,6 +1416,8 @@ private:
     bool m_replantOn = false, m_replantStops = false;  // loco C1b
     bool m_crouchContactPolicy = false;               // explicit V2 crouch policy, off preserves legacy path
     bool m_poleCarry = false;                          // batch 2 knee fix
+    bool m_plantRef = false;                           // reference plant model for new locks (SetPlantReference)
+    FootPlantReferenceConfig m_pcfg{};
     int m_supportHoldSide = -1;
     bool m_supportHoldEligible = false;
     bool m_standingStopSupport = false;
@@ -1217,6 +1435,9 @@ private:
     float m_capsuleSpeed = 0.0f;
     float m_cos = 1.0f, m_sin = 0.0f;
     math::Vec3 m_animToe[2] = {};  // animated lock points of this update (character frame), before any correction
+    math::Vec3 m_animToeVel[2] = {}; // reference plant model: animated toe world velocity of this update
+    float m_animYawRate[2] = {0.0f, 0.0f}; // rad/s, animated planar foot world yaw rate of this update
+    float m_animYawW[2] = {0.0f, 0.0f};    // rad, animated planar foot world yaw of this update
     FootLockDiagnostics m_diag{};
     PelvisPlacement m_pelvis;            // pelvis stage (SetPelvisPlacement)
     bool m_pelvisOn = false;
@@ -1243,6 +1464,7 @@ struct FootFeedPolicy
     int32_t cancelStartSupport = -1;
     bool standingStopGate = false;   // gate open, no hold, tpp, stick <= 0.15 (driver side)
     bool classStop = false, classIdle = false;
+    bool referencePlant = UTPP_FOOT_PLANT_REFERENCE != 0; // reference plant model for stand / sprint (FootPlantReferenceConfig)
 };
 // Per clip-class slip start of the locked toe (soft slip of the 0.5.9 path; the crouch contact policy takes min(radius, slip start) as its
 // moving radius): starts (Start / StartSprint classes) and turns / pivots / refaces may drift further from the animated toe before the lock
@@ -1286,7 +1508,10 @@ inline void ApplyFootSlipProfile(FootLocker& aLocker, const FootSlipProfile& aPr
 inline void ApplyFootFeedPolicy(FootLocker& aLocker, const FootFeedPolicy& p)
 {
     const int32_t stanceBit = p.stance == 2 ? 2 : ((p.stance == 1 || p.stance == 3) ? 1 : 0);
-    aLocker.SetReplant(!p.airborne && p.contactScale > 0.0f && ((p.replantMask & stanceBit) != 0 || p.airHoldGroundReplant), p.stops);
+    const bool reference = p.referencePlant && !p.airborne && p.contactScale > 0.0f && stanceBit == 1;
+    aLocker.SetReplant(reference || (!p.airborne && p.contactScale > 0.0f && ((p.replantMask & stanceBit) != 0 || p.airHoldGroundReplant)),
+                       p.stops);
+    aLocker.SetPlantReference(reference);
     aLocker.SetCrouchContactPolicy(p.v2 && !p.airborne && p.contactScale > 0.f && p.stance == 2 && (p.replantMask & 2) != 0);
     aLocker.SetPoleCarry(p.poleCarry);
     const float k = p.airborne ? 0.0f : p.contactScale;

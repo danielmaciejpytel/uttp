@@ -1327,6 +1327,217 @@ static void SectionStopSwing()
     }
 }
 
+// Reference plant model (FootPlantReferenceConfig): spring exactness across update rates, lock / unplant / replant hysteresis, unplant
+// and replant timing at 30 / 60 / 144 Hz, planted yaw lock about the toe and no second rotation of a foot already turned upstream.
+static float DisplayedFootYaw(const FootLocker& fl, std::span<const BoneTransform> aPose, int aSide, float aCharYaw)
+{
+    const math::Vec3 a = fl.ModelSpace(aPose, fl.ChainBone(aSide, 2)).p, t = fl.ModelSpace(aPose, fl.LockBone(aSide)).p;
+    return math::WrapAngle(std::atan2(t.y - a.y, t.x - a.x) + aCharYaw);
+}
+static void ToeWorld(const FootLocker& fl, std::span<const BoneTransform> aPose, int aSide, float aCx, float aCy, float aYaw, double& aX,
+                     double& aY)
+{
+    const math::Vec3 t = fl.ModelSpace(aPose, fl.LockBone(aSide)).p;
+    aX = double(aCx) + std::cos(double(aYaw)) * t.x - std::sin(double(aYaw)) * t.y;
+    aY = double(aCy) + std::sin(double(aYaw)) * t.x + std::cos(double(aYaw)) * t.y;
+}
+static void SectionPlantReference(const Database& db)
+{
+    // (r0) the spring is exact for any step: same state after 0.5 s at 30 / 60 / 144 Hz as the closed form
+    {
+        double worst = 0.0;
+        const float w = 10.0f, x0 = 0.1f, v0 = -0.3f, T = 0.5f;
+        const double e = std::exp(-double(w) * T);
+        const double xr = (x0 + (v0 + double(w) * x0) * T) * e;
+        for (const int hz : {30, 60, 144})
+        {
+            float x = x0, v = v0;
+            for (int i = 0; i < int(std::lround(T * float(hz))); ++i)
+                SpringCritical(x, v, w, 1.0f / float(hz));
+            worst = std::max(worst, std::fabs(double(x) - xr));
+        }
+        Expect("(r0) reference plant spring: closed form, same value at 30 / 60 / 144 Hz", worst < 1e-5, Fmt("max error %.2g m", worst));
+    }
+    int32_t wc = FindClip("M_Neutral_Walk_Loop_F");
+    if (wc < 0)
+        wc = 0;
+    std::vector<BoneTransform> pose(db.NumBones());
+    FramePose(db, db.Clips()[size_t(wc)].firstFrame + 6, pose);
+    FootPlantReferenceConfig pc;
+    pc.radius = pc.radiusStops = 0.07f;
+    pc.yaw = true;
+    auto make = [&](FootLocker& fl, const FootPlantReferenceConfig& c) {
+        const bool ok = fl.Init(db) && fl.SetPlantReferenceConfig(c);
+        fl.SetReplant(true, false);
+        fl.SetPlantReference(true);
+        return ok;
+    };
+    // (r1) lock hysteresis: no plant at 0.95, plant above 0.99, held at 0.5 (release threshold 0.3), released at 0.2
+    {
+        FootLocker fl;
+        const bool ok = make(fl, pc);
+        const std::span<const BoneTransform> in(pose);
+        bool a = true, b = false, c = false, d = true;
+        for (int i = 0; i < 10; ++i)
+        {
+            fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.95f, 0.0f, in);
+            a = a && !fl.Diagnostics().foot[0].locked;
+        }
+        fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.995f, 0.0f, in);
+        b = fl.Diagnostics().foot[0].locked && fl.Diagnostics().foot[0].plantRef && !fl.Diagnostics().foot[0].unplanted;
+        for (int i = 0; i < 10; ++i)
+            fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, in);
+        c = fl.Diagnostics().foot[0].locked;
+        fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.2f, 0.0f, in);
+        d = !fl.Diagnostics().foot[0].locked;
+        Expect("(r1) reference plant: plants only above contact 0.99, keeps the plant down to the release threshold", ok && a && b && c && d,
+               Fmt("no lock at 0.95 %.0f, lock at 0.995 %.0f, held at 0.5 %.0f, released at 0.2 %.0f", a, b, c, d));
+    }
+    // (r2) capsule slides at 0.5 m/s under a still pose: unplant beyond the radius, the foot starts from rest (no jump), the spring takes
+    // it back and it replants within ratio x radius; unplant / replant times and the shown toe agree across 30 / 60 / 144 Hz
+    {
+        std::vector<double> firstUnplant, firstReplant;
+        std::vector<std::vector<double>> toeAt30; // shown toe world x at the instants common to all rates (every 1/6 s)
+        double maxJump = 0.0, maxCorr = 0.0;
+        bool ok = true, replantInRatio = true;
+        for (const int hz : {30, 60, 144})
+        {
+            FootLocker fl;
+            ok = make(fl, pc) && ok;
+            const float dt = 1.0f / float(hz);
+            const std::span<const BoneTransform> in(pose);
+            float cx = 0.0f;
+            double tU = -1.0, tR = -1.0, prevX = 0.0;
+            uint64_t prevUn = 0;
+            std::vector<double> samples;
+            const int n = 2 * hz;
+            for (int i = 0; i <= n; ++i)
+            {
+                const float vx = i == 0 ? 0.0f : 0.5f;
+                cx += vx * dt;
+                fl.Update(dt, vx, 0.0f, 0.0f, 1.0f, 0.0f, in);
+                const FootLockDiagnostics& d = fl.Diagnostics();
+                double x = 0.0, y = 0.0;
+                ToeWorld(fl, fl.Output(), 0, cx, 0.0f, 0.0f, x, y);
+                if (d.plantUnplants > prevUn)
+                {
+                    if (tU < 0.0)
+                        tU = double(i) * dt;
+                    maxJump = std::max(maxJump, std::max(prevX - x, (x - prevX) - 0.5 * double(dt))); // shown toe: not backwards, not ahead of the animation
+                }
+                if (tU >= 0.0 && tR < 0.0 && d.plantReplants > 0)
+                {
+                    tR = double(i) * dt;
+                    replantInRatio = replantInRatio && d.foot[0].offset <= pc.ratio * pc.radius + 1e-4f;
+                }
+                prevUn = d.plantUnplants;
+                prevX = x;
+                maxCorr = std::max(maxCorr, double(d.foot[0].correction));
+                if ((i * 6) % hz == 0)
+                    samples.push_back(x);
+            }
+            firstUnplant.push_back(tU);
+            firstReplant.push_back(tR);
+            toeAt30.push_back(samples);
+        }
+        double spreadU = 0.0, spreadR = 0.0, toeDiff = 0.0;
+        for (size_t k = 1; k < firstUnplant.size(); ++k)
+        {
+            spreadU = std::max(spreadU, std::fabs(firstUnplant[k] - firstUnplant[0]));
+            spreadR = std::max(spreadR, std::fabs((firstReplant[k] - firstUnplant[k]) - (firstReplant[0] - firstUnplant[0])));
+            for (size_t j = 0; j < std::min(toeAt30[k].size(), toeAt30[0].size()); ++j)
+                toeDiff = std::max(toeDiff, std::fabs(toeAt30[k][j] - toeAt30[0][j]));
+        }
+        const bool all = firstUnplant[0] > 0.0 && firstReplant[0] > 0.0 && firstUnplant[1] > 0.0 && firstReplant[1] > 0.0 &&
+                         firstUnplant[2] > 0.0 && firstReplant[2] > 0.0;
+        // unplant instant quantised by the update (<= one 30 Hz update); spring duration within one 30 Hz update (replant instant quantised the same way); shown toe within 2 x 1.7 cm + 3 mm (0.5 m/s x
+        // one 30 Hz update for the unplant instant and again for the update the spring reaches its radius bound); at the unplant update the shown toe moves neither backwards nor further than
+        // the animated toe (the spring starts from the still plant); correction <= radius + 0.5 m/s x 1/30 s + 2 mm
+        Expect("(r2) reference plant: unplant beyond the radius from rest, spring back, replant in ratio x radius, rate independent",
+               ok && all && maxJump <= 1e-4 && replantInRatio && spreadU <= 1.0 / 30.0 + 1e-6 && spreadR <= 1.0 / 30.0 + 1e-6 && toeDiff <= 2.0 * 0.5 / 30.0 + 0.003 &&
+                   maxCorr <= pc.radius + 0.5 / 30.0 + 0.002,
+               Fmt("unplant at %.3f s (spread %.3f), spring %.3f s (spread %.3f), shown toe outside [0, animated step] at unplant %.2f mm, shown toe spread %.2f cm",
+                   firstUnplant[0], spreadU, firstReplant[0] - firstUnplant[0], spreadR, maxJump * 1000.0, toeDiff * 100.0) +
+                   Fmt(", correction max %.2f cm", maxCorr * 100.0));
+    }
+    // (r3) turn in place with a still pose: yaw lock about the toe. Twist reduction 0 keeps the locked world yaw (drift < 1 deg over a 20 deg
+    // turn); 0.75 leaves 3/4 of the turn to the animation; 70 deg unplants on the angle. (r4) a foot already turned back upstream (the input
+    // foot counter-rotated by the turn) gets no second rotation: applied yaw ~0, output foot rotation = input.
+    {
+        for (const int mode : {0, 1, 2, 3})
+        {
+            FootPlantReferenceConfig c = pc;
+            c.radius = c.radiusStops = 0.24f; // position stays planted; only the yaw is tested
+            c.twistReduction = mode == 1 ? 0.75f : 0.0f;
+            FootLocker fl;
+            const bool ok = make(fl, c);
+            const int32_t fb = fl.ChainBone(0, 2);
+            const int32_t par = fl.Parents()[size_t(fb)];
+            const float turn = (mode == 2 ? 70.0f : 20.0f) / kRad2Deg;
+            const int n = 20;
+            std::vector<BoneTransform> in = pose;
+            fl.Update(kDt, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, std::span<const BoneTransform>(in));
+            const float lockYaw = DisplayedFootYaw(fl, fl.Output(), 0, 0.0f);
+            float yaw = 0.0f, maxApplied = 0.0f, maxRotDiff = 0.0f;
+            for (int i = 1; i <= n; ++i)
+            {
+                yaw = turn * float(i) / float(n);
+                in = pose;
+                if (mode == 3)
+                {
+                    // upstream stage turned the foot back by the turn (model space): local' = inv(parent) * Rz(-yaw) * parent * local
+                    const math::Quat pq = fl.ModelSpace(std::span<const BoneTransform>(in), par).q;
+                    const math::Quat rz = legik::AxisAngle(math::Vec3{0.0f, 0.0f, 1.0f}, -yaw);
+                    in[size_t(fb)].q = math::QuatNormalize(math::QuatMul(math::QuatMul(math::QuatInv(pq), math::QuatMul(rz, pq)), in[size_t(fb)].q));
+                }
+                fl.Update(kDt, 0.0f, 0.0f, yaw, 1.0f, 0.0f, std::span<const BoneTransform>(in));
+                maxApplied = std::max(maxApplied, std::fabs(fl.Diagnostics().foot[0].yawOffset));
+                if (mode == 3)
+                {
+                    const math::Quat qi = fl.ModelSpace(std::span<const BoneTransform>(in), fb).q;
+                    const math::Quat qo = fl.ModelSpace(fl.Output(), fb).q;
+                    const float dq = std::fabs(math::Dot(math::Vec3{qi.x, qi.y, qi.z}, math::Vec3{qo.x, qo.y, qo.z}) + qi.w * qo.w);
+                    maxRotDiff = std::max(maxRotDiff, 2.0f * std::acos(std::fmin(1.0f, dq)));
+                }
+            }
+            const float drift = std::fabs(math::WrapAngle(DisplayedFootYaw(fl, fl.Output(), 0, yaw) - lockYaw)) * kRad2Deg;
+            const FootLockDiagnostics& d = fl.Diagnostics();
+            if (mode == 0)
+                Expect("(r3) reference plant yaw lock, twist reduction 0: the planted foot keeps its world yaw through a 20 deg turn",
+                       ok && drift < 1.0f && d.plantUnplants == 0, Fmt("drift %.2f deg, applied max %.1f deg", drift, maxApplied * kRad2Deg));
+            else if (mode == 1)
+                Expect("(r3) reference plant yaw lock, twist reduction 0.75: a quarter of the turn is held (drift 15 +- 1 deg)",
+                       ok && std::fabs(drift - 15.0f) < 1.0f && d.plantUnplants == 0, Fmt("drift %.2f deg", drift));
+            else if (mode == 2)
+                Expect("(r3) reference plant yaw lock: a 70 deg turn unplants on the angle (60 deg)", ok && d.plantUnplants >= 1,
+                       Fmt("unplants %.0f", double(d.plantUnplants)));
+            else
+                Expect("(r4) reference plant yaw lock: a foot turned back upstream is not rotated a second time", ok && maxApplied * kRad2Deg < 1.0f &&
+                           maxRotDiff * kRad2Deg < 1.0f && drift < 1.0f,
+                       Fmt("applied max %.2f deg, output vs input foot rotation max %.2f deg, world yaw drift %.2f deg", maxApplied * kRad2Deg,
+                           maxRotDiff * kRad2Deg, drift));
+        }
+    }
+    // (r5) off (default) is the previous path: the policy without the reference flag leaves the mode off
+    {
+        FootLocker fl;
+        fl.Init(db);
+        FootFeedPolicy p;
+        p.referencePlant = false;
+        p.stance = 1;
+        ApplyFootFeedPolicy(fl, p);
+        const bool off = !fl.PlantReferenceOn() && !fl.ReplantOn();
+        p.referencePlant = true;
+        ApplyFootFeedPolicy(fl, p);
+        const bool on = fl.PlantReferenceOn() && fl.ReplantOn();
+        p.stance = 2;
+        ApplyFootFeedPolicy(fl, p);
+        const bool crouch = !fl.PlantReferenceOn();
+        Expect("(r5) reference plant: policy flag off leaves stand replant off; on enables it for stand only", off && on && crouch,
+               Fmt("off %.0f on %.0f crouch untouched %.0f", off, on, crouch));
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 2)
@@ -1657,6 +1868,7 @@ int main(int argc, char** argv)
 
     SectionPoleCarry();
     SectionStopSwing(); // loco-stop-knees 2026-11-09
+    SectionPlantReference(db);
 
     std::printf("SUMMARY: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
