@@ -155,7 +155,8 @@ struct RunStats
     bool ok = true, identical = true;
     float scale = 1, minScale = 1, alongError = 0, lengthened = 0, heightError = 0, jumpOff = 0, jumpOn = 0;
 };
-static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ratio, bool ground, bool enabled)
+// crouchMode >= 0 sets the crouched loop mode of the warped stack (SetStrideOptions, no yaw fade, whole-layer fade); -1 keeps the default.
+static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ratio, bool ground, bool enabled, int crouchMode = -1)
 {
     RunStats r;
     const float dt = 1.0f / float(hz), fps = db.Header().fps;
@@ -163,6 +164,8 @@ static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ra
     r.ok = off.Init(db) && on.Init(db);
     off.SetStrideWarp(false);
     on.SetStrideWarp(enabled);
+    if (crouchMode >= 0)
+        on.SetStrideOptions(false, crouchMode, true);
     const int foot[2]{Bone(db, "LeftFoot"), Bone(db, "RightFoot")}, thigh[2]{Bone(db, "LeftUpLeg"), Bone(db, "RightUpLeg")};
     const auto &c = db.Clip(uint32_t(clip));
     std::vector<BoneTransform> mOff, mOn;
@@ -354,9 +357,148 @@ static void StackClipFactor(const motion::MotionDatabase &db, int hz)
     std::printf("INFO crouch loop clip factor %.4f @Hz=%d\n", k, hz);
     Check(k >= stridewarp::kClipFactorMin && k < 0.995f, "crouch loop: planted feet slower than the root (clip factor below 1)", hz);
     Check(probe.StrideClipFactor(start) == 1.0f && probe.StrideClipFactor(-1) == 1.0f, "a clip that is not a loop keeps clip factor 1", hz);
-    const RunStats r = Run(db, crouch, hz, 0.8f, true, true);
+    const RunStats r = Run(db, crouch, hz, 0.8f, true, true, 0); // crouched loops warped like the others
     Check(r.ok && std::fabs(r.scale - std::fmin(1.0f, 0.8f / k)) < 0.02f, "crouch loop, capsule at 0.8 of the root speed: scale 0.8 / clip factor", hz);
     Check(r.alongError < 0.005f && r.lengthened < 0.001f, "crouch loop: offset along the root direction shrinks by the scale, never lengthens", hz);
+}
+
+// Crouched loop modes (SetStrideOptions): 1 leaves a crouched loop bit for bit unwarped and still warps a standing loop; 2 under a steady
+// visual yaw (no swing) warps it exactly like 0.
+static void StackCrouchModes(const motion::MotionDatabase &db, int run, int hz)
+{
+    motionstack::BlendStack probe;
+    const int crouch = ClipIndex(db, "M_Neutral_Crouch_Loop_F");
+    Check(crouch >= 0 && probe.Init(db), "crouched loop fixture clip found, stack initialised", hz);
+    if (crouch < 0)
+        return;
+    Check(probe.StrideCrouchClip(crouch) && !probe.StrideCrouchClip(run) && !probe.StrideCrouchClip(-1),
+          "crouched loops recognised by name, a standing loop is not one", hz);
+    Check(Run(db, crouch, hz, 0.8f, true, true, 1).identical, "crouched loop mode 1: crouched loop pose bit for bit unwarped", hz);
+    const RunStats standing = Run(db, run, hz, 0.8f, true, true, 1);
+    Check(standing.ok && std::fabs(standing.scale - 0.8f) < 0.02f, "crouched loop mode 1: a standing loop is still warped", hz);
+    const RunStats a = Run(db, crouch, hz, 0.8f, true, true, 0), b = Run(db, crouch, hz, 0.8f, true, true, 2);
+    Check(a.ok && b.ok && a.scale < 0.99f && a.scale == b.scale && a.alongError == b.alongError,
+          "crouched loop mode 2 without a yaw swing warps like mode 0", hz);
+}
+
+// Crouched loop mode 2 under a sustained visual yaw swing (the visual root and the capsule velocity turning at 180 deg/s, well above the
+// fade end): over the last 0.3 s of 1.5 s the crouched loop is no longer warped (ankles within 1 mm of the unwarped stack), while mode 0
+// still warps it and a standing loop stays warped in mode 2 (the yaw fade applies to crouched loops only).
+static float YawSwingWarp(const motion::MotionDatabase &db, int clip, int hz, int crouchMode)
+{
+    const float dt = 1.0f / float(hz), fps = db.Header().fps, rate = 3.14159265f;
+    motionstack::BlendStack off, on;
+    if (!off.Init(db) || !on.Init(db))
+        return -1.0f;
+    off.SetStrideWarp(false);
+    on.SetStrideWarp(true);
+    on.SetStrideOptions(false, crouchMode, true);
+    const int foot[2]{Bone(db, "LeftFoot"), Bone(db, "RightFoot")};
+    const auto &c = db.Clip(uint32_t(clip));
+    std::vector<BoneTransform> mOff, mOn;
+    const int steps = int(1.5f * float(hz)), from = steps - int(0.3f * float(hz));
+    float t = 0.5f, warp = 0;
+    for (int k = 0; k < steps; ++k, t += dt)
+    {
+        const auto &root = db.Root(c.firstFrame + uint32_t(std::fmod(t, 1.0f) * fps));
+        const float yaw = rate * float(k) * dt, vx = root.dx * fps * 0.8f, vy = root.dy * fps * 0.8f;
+        motionstack::GraphInputs g;
+        g.enabled = true;
+        g.previousVisualWorldYaw = g.targetWorldYaw = g.actorWorldYaw = yaw;
+        g.velocityWorldX = std::cos(yaw) * vx - std::sin(yaw) * vy;
+        g.velocityWorldY = std::sin(yaw) * vx + std::cos(yaw) * vy;
+        off.SetGraphInputs(g);
+        on.SetGraphInputs(g);
+        if (!off.Step(Pick(clip, t, k == 0, true), dt) || !on.Step(Pick(clip, t, k == 0, true), dt))
+            return -1.0f;
+        if (k < from)
+            continue;
+        Model(db, off.Output(), mOff);
+        Model(db, on.Output(), mOn);
+        for (int s = 0; s < 2; ++s)
+        {
+            const math::Vec3 d = mOn[size_t(foot[s])].p - mOff[size_t(foot[s])].p;
+            warp = std::fmax(warp, std::sqrt(math::Dot(d, d)));
+        }
+    }
+    return warp;
+}
+static void StackCrouchYawSwing(const motion::MotionDatabase &db, int run, int hz)
+{
+    const int crouch = ClipIndex(db, "M_Neutral_Crouch_Loop_F");
+    if (crouch < 0)
+        return;
+    const float faded = YawSwingWarp(db, crouch, hz, 2), crouchWarped = YawSwingWarp(db, crouch, hz, 0),
+                standing = YawSwingWarp(db, run, hz, 2);
+    std::printf("INFO yaw swing 180 deg/s: largest warp offset of the ankles, crouched mode 2 %.2f mm, mode 0 %.2f mm, standing loop "
+                "mode 2 %.2f mm @Hz=%d\n",
+                faded * 1e3f, crouchWarped * 1e3f, standing * 1e3f, hz);
+    Check(faded >= 0 && faded < 0.001f, "crouched loop mode 2 under a sustained yaw swing: not warped (within 1 mm)", hz);
+    Check(crouchWarped > 0.01f, "crouched loop mode 0 under the same yaw swing: still warped (above 1 cm)", hz);
+    Check(standing > 0.01f, "standing loop in mode 2 under the same yaw swing: still warped (above 1 cm)", hz);
+}
+
+// Stride direction swing: the capsule velocity turns by 90 degrees in one update under a warped loop (a turn pick changing the visual
+// root does the same to the orientation warping target). The stride direction follows the angle orientation warping actually turned the
+// legs, so the warped ankles may not step farther in one update than the unwarped ones beyond a small absolute margin. It used to follow
+// the warped root signal, which turns by the full target angle at once and swung the shortening sideways (a visible knee snap).
+static void StackDirectionSwing(const motion::MotionDatabase &db, int clip, int hz, float turn)
+{
+    const float dt = 1.0f / float(hz), fps = db.Header().fps;
+    motionstack::BlendStack off, on;
+    bool ok = off.Init(db) && on.Init(db);
+    off.SetStrideWarp(false);
+    on.SetStrideWarp(true);
+    const int foot[2]{Bone(db, "LeftFoot"), Bone(db, "RightFoot")};
+    const auto &c = db.Clip(uint32_t(clip));
+    std::vector<BoneTransform> mOff, mOn;
+    math::Vec3 lastOff[2]{}, lastOn[2]{};
+    const int switchAt = int(0.4f * float(hz));
+    float t = 0.5f, stepOff = 0, stepOn = 0, minScale = 1, warpStepBefore = 0, warpStepAfter = 0;
+    for (int k = 0; k < switchAt + int(0.3f * float(hz)) && ok; ++k, t += dt)
+    {
+        const auto &root = db.Root(c.firstFrame + uint32_t(t * fps));
+        const float a = k >= switchAt ? turn : 0.0f;
+        const float vx = root.dx * fps * 0.8f, vy = root.dy * fps * 0.8f;
+        motionstack::GraphInputs g;
+        g.enabled = true;
+        g.velocityWorldX = std::cos(a) * vx - std::sin(a) * vy;
+        g.velocityWorldY = std::sin(a) * vx + std::cos(a) * vy;
+        off.SetGraphInputs(g);
+        on.SetGraphInputs(g);
+        ok = off.Step(Pick(clip, t, k == 0, true), dt) && on.Step(Pick(clip, t, k == 0, true), dt);
+        if (!ok)
+            break;
+        Model(db, off.Output(), mOff);
+        Model(db, on.Output(), mOn);
+        if (k < switchAt)
+            minScale = std::fmin(minScale, on.StrideScale());
+        for (int s = 0; s < 2; ++s)
+        {
+            const math::Vec3 aOff = mOff[size_t(foot[s])].p, aOn = mOn[size_t(foot[s])].p;
+            // the warp's own part of the ankle step: change of (warped - unwarped) ankle in one update
+            const math::Vec3 dWarp = (aOn - aOff) - (lastOn[s] - lastOff[s]);
+            if (k >= switchAt)
+            {
+                const math::Vec3 dOff = aOff - lastOff[s], dOn = aOn - lastOn[s];
+                stepOff = std::fmax(stepOff, std::sqrt(math::Dot(dOff, dOff)));
+                stepOn = std::fmax(stepOn, std::sqrt(math::Dot(dOn, dOn)));
+                warpStepAfter = std::fmax(warpStepAfter, std::sqrt(math::Dot(dWarp, dWarp)));
+            }
+            else if (k > 0)
+                warpStepBefore = std::fmax(warpStepBefore, std::sqrt(math::Dot(dWarp, dWarp)));
+            lastOff[s] = aOff;
+            lastOn[s] = aOn;
+        }
+    }
+    std::printf("INFO direction swing %.0f deg: largest ankle step after the swing off %.2f mm, warped %.2f mm, scale before %.3f, warp part of the step "
+                "before %.2f after %.2f mm @Hz=%d\n",
+                turn * 57.2957795f, stepOff * 1e3f, stepOn * 1e3f, minScale, warpStepBefore * 1e3f, warpStepAfter * 1e3f, hz);
+    Check(ok && minScale < 0.9f, "direction swing fixture: warped loop before the swing", hz);
+    Check(stepOn <= stepOff + 0.01f, "a 90 degree capsule swing under a warped loop: ankle step within 1 cm of the unwarped one", hz);
+    // the warp's own part of the step may grow by at most 3 cm over its largest gait value before the swing (the warped root direction
+    // grew it by 9-14 cm at every rate)
+    Check(warpStepAfter <= warpStepBefore + 0.03f, "a 90 degree capsule swing: the warp part of the ankle step stays within 3 cm of the gait", hz);
 }
 
 int main(int argc, char **argv)
@@ -384,6 +526,10 @@ int main(int argc, char **argv)
             Stack(db, clip, hz);
             StackFadeOut(db, clip, hz, 0.2f);
             StackFadeOut(db, clip, hz, 0.05f);
+            StackCrouchModes(db, clip, hz);
+            StackCrouchYawSwing(db, clip, hz);
+            StackDirectionSwing(db, clip, hz, 1.5707963f);
+            StackDirectionSwing(db, clip, hz, -1.5707963f);
         }
     for (int hz : {30, 60, 144})
         StackClipFactor(db, hz);

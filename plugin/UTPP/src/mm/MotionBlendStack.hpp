@@ -23,6 +23,13 @@
 // 1 = stride warping fades out while the visual root keeps swinging (stridewarp::YawFade); 0 = no yaw fade. A build may override it.
 #define UTPP_STRIDE_YAW_FADE 0
 #endif
+#ifndef UTPP_STRIDE_CROUCH
+// Stride warping of crouched loops (loop clips named "_Crouch_"): 0 = like every other loop, 1 = not warped, 2 = warped with the yaw fade
+// (the crouched gait sways the visual root in step with the stance foot; the sway alone moves a planted foot, which the warp then pushes).
+// On recorded sessions 2 was the only mode with less crouched loop slide than no warping on both bodies; the yaw fade on every loop also
+// fades the walk / run gait sway of the male V and loses its loop gain. A build may override it.
+#define UTPP_STRIDE_CROUCH 2
+#endif
 #ifndef UTPP_STRIDE_WARP
 // Default of BlendStack::SetStrideWarp: 1 = shrink-only stride warping of the leg targets (StrideWarp.hpp) on ground locomotion picks,
 // 0 = off (the pose is bit for bit the one without it). A build may override it.
@@ -189,6 +196,24 @@ class BlendStack
             SetHandBackBlend(g_testStackOverrides.handBack != 0);
         else if (const char *e = std::getenv("UTPP_TEST_HANDBACK_BLEND"); e && (e[0] == '0' || e[0] == '1'))
             SetHandBackBlend(e[0] == '1');
+        // stride warping: UTPP_TEST_STRIDE_WARP (0 / 1), UTPP_TEST_STRIDE_OPTIONS = three digits: yaw fade (0 / 1), crouched loop mode
+        // (0 / 1 / 2), whole-layer fade (0 / 1)
+        if (const char *e = std::getenv("UTPP_TEST_STRIDE_WARP"); e && (e[0] == '0' || e[0] == '1'))
+            SetStrideWarp(e[0] == '1');
+        if (const char *e = std::getenv("UTPP_TEST_STRIDE_OPTIONS");
+            e && (e[0] == '0' || e[0] == '1') && e[1] >= '0' && e[1] <= '2' && (e[2] == '0' || e[2] == '1'))
+            SetStrideOptions(e[0] == '1', e[1] - '0', e[2] == '1');
+        // UTPP_TEST_STRIDE_CROUCH_YAW = "start end" in deg/s: yaw fade rates of crouched loops (mode 2)
+        if (const char *e = std::getenv("UTPP_TEST_STRIDE_CROUCH_YAW"))
+        {
+            char *rest = nullptr;
+            const float a = std::strtof(e, &rest), b = std::strtof(rest, nullptr);
+            if (std::isfinite(a) && std::isfinite(b) && b > a && a >= 0)
+            {
+                m_strideCrouchYawStart = a * 0.017453293f;
+                m_strideCrouchYawEnd = b * 0.017453293f;
+            }
+        }
 #endif
         m_handBackFactors = blendprofile::Resolve(blendprofile::kHandBack, m_n, [&](uint32_t b) { return db.BoneName(b); });
         m_deadPrev.resize(m_n);
@@ -273,6 +298,19 @@ class BlendStack
     bool StrideWarp() const
     {
         return m_strideWarp;
+    }
+    // Stride warping details (defaults UTPP_STRIDE_YAW_FADE, UTPP_STRIDE_CROUCH, UTPP_STRIDE_LAYER_FADE): yaw fade on every loop,
+    // crouched loop mode (0 like the others, 1 not warped, 2 yaw fade), stride offsets fading on the whole-layer weight.
+    void SetStrideOptions(bool yawFade, int32_t crouchMode, bool layerFade)
+    {
+        m_strideYawFade = yawFade;
+        m_strideCrouchMode = std::clamp(crouchMode, 0, 2);
+        m_strideLayerFade = layerFade;
+    }
+    // A loop clip of the crouched gait (named "_Crouch_"), see UTPP_STRIDE_CROUCH.
+    bool StrideCrouchClip(int32_t clip) const
+    {
+        return clip >= 0 && size_t(clip) < m_strideCrouchClip.size() && m_strideCrouchClip[size_t(clip)] != 0;
     }
     // Planted-foot speed over root speed of a clip (stridewarp::ClipFactor), measured at Init; 1 for a clip that is not a loop.
     float StrideClipFactor(int32_t clip) const
@@ -523,7 +561,7 @@ class BlendStack
             head.rootApproximate = false;
         }
         m_strideScale = 1.0f;
-        if (m_strideWarp && UTPP_STRIDE_YAW_FADE && m_graph.enabled)
+        if (m_strideWarp && (m_strideYawFade || m_strideCrouchMode == 2) && m_graph.enabled)
         {
             if (m_strideYawValid)
                 m_strideYawRate = stridewarp::SmoothYawRate(m_strideYawRate, m_graph.previousVisualWorldYaw - m_strideLastYaw, dt);
@@ -854,7 +892,7 @@ class BlendStack
         for (uint32_t side = 0; side < 2; ++side)
         {
             const float weight = Alpha(player, m_footBones[side]);
-            if (!UTPP_STRIDE_LAYER_FADE || (IsZero(sa[side]) && IsZero(sb[side])))
+            if (!m_strideLayerFade || (IsZero(sa[side]) && IsZero(sb[side])))
                 out.feet[side].p = math::Lerp(a.feet[side].p, b.feet[side].p, weight);
             else
             {
@@ -894,8 +932,11 @@ class BlendStack
         in.rootSpeed = rootSpeed;
         in.clipFactor = StrideClipFactor(p.clip);
         in.alpha = m_warpCurve >= 0 ? Curve(p, m_warpCurve) : 1.0f;
-        in.allowed = p.strideGround && !p.airFade && IsLoop(p.clip);
-        if (UTPP_STRIDE_YAW_FADE)
+        const bool crouched = StrideCrouchClip(p.clip);
+        in.allowed = p.strideGround && !p.airFade && IsLoop(p.clip) && !(crouched && m_strideCrouchMode == 1);
+        if (crouched && m_strideCrouchMode == 2)
+            in.yawFade = stridewarp::YawFade(m_strideYawRate, m_strideCrouchYawStart, m_strideCrouchYawEnd);
+        else if (m_strideYawFade)
             in.yawFade = stridewarp::YawFade(m_strideYawRate);
         const float scale = stridewarp::Step(p.stride, in);
         // Stride direction: the clip root turned by the angle orientation warping turned this layer's legs and feet (twice the pose half
@@ -937,6 +978,10 @@ class BlendStack
     {
         const auto &db = *m_db;
         m_strideClipFactor.assign(db.NumClips(), 1.0f);
+        m_strideCrouchClip.assign(db.NumClips(), 0);
+        for (uint32_t c = 0; c < db.NumClips(); ++c)
+            if (IsLoop(int32_t(c)) && db.ClipName(c).find("_Crouch_") != std::string_view::npos)
+                m_strideCrouchClip[c] = 1;
         int32_t toe[2]{m_footBones[0], m_footBones[1]};
         for (uint32_t k = 0; k < db.NumBones(); ++k)
         {
@@ -1342,6 +1387,11 @@ class BlendStack
     bool m_strideWarp = UTPP_STRIDE_WARP != 0; // SetStrideWarp
     float m_strideScale = 1.0f;                // StrideScale
     std::vector<float> m_strideClipFactor;     // StrideClipFactor, per clip
+    std::vector<uint8_t> m_strideCrouchClip;   // StrideCrouchClip, per clip
+    bool m_strideYawFade = UTPP_STRIDE_YAW_FADE != 0;  // SetStrideOptions
+    int32_t m_strideCrouchMode = UTPP_STRIDE_CROUCH;  // SetStrideOptions
+    float m_strideCrouchYawStart = stridewarp::kYawFadeStart, m_strideCrouchYawEnd = stridewarp::kYawFadeEnd; // yaw fade of crouched loops
+    bool m_strideLayerFade = UTPP_STRIDE_LAYER_FADE != 0; // SetStrideOptions
     motionPose::Warp m_poseWarp;
     motionFeet::Warp m_feetWarp;
     bool m_feetReady = false;

@@ -100,12 +100,12 @@ inline float Step(State &state, const Inputs &in) noexcept
     return 1.0f - alpha * fade * (1.0f - state.scale);
 }
 
-// Warp weight for a smoothed |visual yaw rate| (rad/s): 1 up to kYawFadeStart, 0 from kYawFadeEnd, linear between.
-inline float YawFade(float smoothedYawRate) noexcept
+// Warp weight for a smoothed |visual yaw rate| (rad/s): 1 up to start (kYawFadeStart), 0 from end (kYawFadeEnd), linear between.
+inline float YawFade(float smoothedYawRate, float start = kYawFadeStart, float end = kYawFadeEnd) noexcept
 {
-    if (!std::isfinite(smoothedYawRate))
+    if (!std::isfinite(smoothedYawRate) || !std::isfinite(start) || !std::isfinite(end) || !(end > start))
         return 1.0f;
-    return std::clamp((kYawFadeEnd - std::fabs(smoothedYawRate)) / (kYawFadeEnd - kYawFadeStart), 0.0f, 1.0f);
+    return std::clamp((end - std::fabs(smoothedYawRate)) / (end - start), 0.0f, 1.0f);
 }
 
 // Advances the smoothed |yaw rate| (rad/s) from the visual yaw change over dt (radians, any winding); dt <= 0 holds it.
