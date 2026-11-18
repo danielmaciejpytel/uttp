@@ -275,6 +275,99 @@ int main(int argc, char **argv)
     const ApplyResult reject = feet.Apply(pose, targets);
     C("bad ankle target fails closed without partial pose mutation",
       !reject.applied && std::memcmp(pose.data(), rejectBefore.data(), pose.size() * sizeof(BoneTransform)) == 0);
+
+    // Correction continuity filter.
+    {
+        auto same = [](const Targets &a, const Targets &b) {
+            return a.valid == b.valid && a.relative == b.relative && a.warpWeight == b.warpWeight &&
+                   std::memcmp(a.feet.data(), b.feet.data(), sizeof(a.feet)) == 0;
+        };
+        auto rel = [](float lx, float rz) {
+            Targets t{};
+            t.valid = t.relative = true;
+            t.warpWeight = 1.0f;
+            t.feet[0].p = {lx, 0.0f, 0.0f};
+            t.feet[1].p = {0.0f, 0.0f, rz};
+            return t;
+        };
+        CorrectionFilter off;
+        bool offSame = true;
+        for (int i = 0; i < 20; ++i)
+        {
+            const Targets t = rel(0.1f * float(i % 3), -0.05f * float(i % 2));
+            offSame = offSame && same(off.Step(t, 1.0f / 60.0f), t);
+        }
+        C("correction filter disabled is an exact pass-through", offSame && !off.Enabled());
+
+        CorrectionFilter on;
+        on.SetLimits(1.0f, 6.2832f);
+        bool smooth = true;
+        float lx = 0.0f;
+        for (int i = 0; i < 60; ++i)
+        {
+            lx += 0.008f; // 0.48 m/s, inside the bound
+            const Targets t = rel(lx, -0.3f * lx);
+            smooth = smooth && same(on.Step(t, 1.0f / 60.0f), t);
+        }
+        C("changes within the bound pass through bit for bit", smooth && on.Limited() == 0);
+
+        // A step of 8 cm (the stride-correction cut) is spread at 1 m/s and then meets the input exactly.
+        const float dt = 1.0f / 60.0f;
+        const float from = lx;
+        const Targets cut = rel(from - 0.08f, -0.3f * from);
+        float maxStep = 0.0f, prev = from;
+        int updates = 0;
+        bool otherExact = true;
+        Targets o{};
+        for (; updates < 30; ++updates)
+        {
+            o = on.Step(cut, dt);
+            otherExact = otherExact && std::memcmp(&o.feet[1], &cut.feet[1], sizeof(FootTarget)) == 0;
+            maxStep = std::fmax(maxStep, std::fabs(o.feet[0].p.x - prev));
+            prev = o.feet[0].p.x;
+            if (same(o, cut))
+                break;
+        }
+        C("an 8 cm correction step is limited to maxSpeed * dt per update",
+          maxStep <= 1.0f * dt + 1.0e-6f && updates >= 4 && updates <= 6);
+        C("the untouched foot keeps its exact correction while the other is limited", otherExact && on.Limited() >= 4);
+
+        // A neutral (warpWeight 0) target after a large correction decays instead of cutting, then is passed through exactly.
+        Targets neutral{};
+        neutral.valid = neutral.relative = true;
+        neutral.warpWeight = 0.0f;
+        const Targets first = on.Step(neutral, dt);
+        int decay = 1;
+        Targets last = first;
+        while (!same(last, neutral) && decay < 60)
+        {
+            last = on.Step(neutral, dt);
+            ++decay;
+        }
+        C("a neutral target after a correction decays with warp weight 1, then passes through",
+          first.warpWeight == 1.0f && first.feet[0].p.x > 0.0f && same(last, neutral) && decay > 2);
+
+        // Frame-rate independence of the spread: the time to close a 6 cm step is the same at 30 and 144 Hz.
+        auto closeTime = [&](float hz) {
+            CorrectionFilter f;
+            f.SetLimits(1.0f, 6.2832f);
+            f.Step(rel(0.06f, 0.0f), 1.0f / hz);
+            int n = 0;
+            while (!same(f.Step(rel(0.0f, 0.0f), 1.0f / hz), rel(0.0f, 0.0f)) && n < 1000)
+                ++n;
+            return float(n + 1) / hz;
+        };
+        const float t30 = closeTime(30.0f), t144 = closeTime(144.0f);
+        std::printf("INFO correction filter close time 30 Hz %.4f s, 144 Hz %.4f s\n", t30, t144);
+        C("correction spread time is frame-rate independent (30 / 144 Hz)",
+          std::fabs(t30 - 0.06f) <= 1.0f / 30.0f && std::fabs(t144 - 0.06f) <= 1.0f / 144.0f);
+
+        // Disabling resets: a later enable starts from the next input without a spread.
+        on.SetLimits(0.0f, 0.0f);
+        on.SetLimits(1.0f, 6.2832f);
+        const Targets far = rel(0.2f, 0.1f);
+        C("re-enabled filter starts from the next input", same(on.Step(far, dt), far));
+    }
     std::printf("%d passed, %d failed\n", pass, fail);
     return fail ? 1 : 0;
 }
