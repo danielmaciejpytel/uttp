@@ -65,6 +65,46 @@ static void Solver()
     Check(Len(PelvisPlacement::TargetOffset(c, l)) == 0.0f, "solver: non-finite input -> no offset");
 }
 
+// continuity in the reach bound: one leg nearly straight with its lock target behind, the other free; its leg length is swept so the
+// reach bound passes from above the lowest desired offset to well below it (through the point where the two distances of the
+// combine cancel). The target offset must change smoothly with the bound (no jump) and never leave the leg out of reach.
+static void Continuity()
+{
+    for (float heel : {0.0f, 0.5f})
+    {
+        PelvisPlacementConfig c;
+        c.heelLift = heel;
+        PelvisLeg l[2];
+        Legs(l);
+        l[0].target = l[0].ankle + math::Vec3{0, -.12f, 0};
+        const float ext = Len(l[0].ankle - l[0].hip); // 0.87 m animated hip-ankle distance
+        float prevZ = 0.0f, maxStep = 0.0f;
+        bool first = true, reachable = true, sawAbove = false, sawBelow = false;
+        const int n = 4000;
+        for (int i = 0; i <= n; ++i)
+        {
+            // leg length from 0.86 to 0.94 m: reach x length from below to above the animated hip-ankle distance
+            l[0].length = .86f + .08f * static_cast<float>(i) / static_cast<float>(n);
+            const math::Vec3 o = PelvisPlacement::TargetOffset(c, l);
+            if (!first)
+                maxStep = std::fmax(maxStep, std::fabs(o.z - prevZ));
+            first = false;
+            prevZ = o.z;
+            (c.reach * l[0].length < ext ? sawBelow : sawAbove) = true;
+            if (heel == 0.0f && o.z > -c.maxDrop + 1e-4f)
+                reachable &= Len(l[0].target - (l[0].hip + o)) <= c.reach * l[0].length + 1e-4f;
+        }
+        std::printf("  continuity (heel share %.1f): max offset step %.5f m per 0.02 mm of leg length\n", static_cast<double>(heel),
+                    static_cast<double>(maxStep));
+        Check(sawAbove && sawBelow, heel > 0 ? "continuity: sweep crosses the lowest desired offset (heel share 0.5)"
+                                             : "continuity: sweep crosses the lowest desired offset (heel share 0)");
+        Check(maxStep < 1e-3f, heel > 0 ? "continuity: target offset continuous in the reach bound (heel share 0.5)"
+                                        : "continuity: target offset continuous in the reach bound (heel share 0)");
+        if (heel == 0.0f)
+            Check(reachable, "continuity: stretched leg reachable over the whole sweep");
+    }
+}
+
 // spring: same response at a fixed time at any update rate, no overshoot, fade to zero when not allowed
 static void Spring()
 {
@@ -237,6 +277,7 @@ int main(int argc, char** argv)
         return 2;
     }
     Solver();
+    Continuity();
     Spring();
     for (int hz : {30, 60, 144})
     {

@@ -100,11 +100,19 @@ public:
             desiredMin = std::fmin(desiredMin, desired);
             desiredAvg += 0.5f * desired;
         }
-        // 3. combine (between the lowest and the average desired offset, pulled towards the reach bound), never above the reach bound
+        // 3. combine (between the lowest and the average desired offset, pulled towards the reach bound), never above the reach bound.
+        // The harmonic blend a*b/(a+b) lies in [0, min(a, b)] only for a >= 0, b > 0; for a reach bound below the lowest desired
+        // offset (b <= 0, common with an almost straight leg) the denominator can pass through zero and the target would jump, so
+        // the bound itself is used there. Both branches meet at b = 0 (blend 0, z = desiredMin = maxMin): continuous in the bound.
         const float minToAvg = desiredAvg - desiredMin;
         const float minToMax = maxMin - desiredMin;
-        const float div = minToAvg + minToMax;
-        float z = std::fabs(div) > 1e-6f ? desiredMin + (minToAvg * minToMax) / div : desiredMin;
+        float z;
+        if (!(minToMax > 0.0f))
+            z = maxMin;
+        else if (minToAvg > 0.0f)
+            z = desiredMin + (minToAvg * minToMax) / (minToAvg + minToMax);
+        else
+            z = desiredMin;
         z = std::fmin(z, maxMin);
         z = std::fmin(std::fmax(z, -c.maxDrop), c.maxRaise);
         const math::Vec3 r{hx, hy, z};
