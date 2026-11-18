@@ -5994,12 +5994,40 @@ bool SetAccelParams(float aStand, float aCrouch, float aSprint)
     return true;
 }
 
+// ---- capsule stat samples for offline replays: while the feed dump is on, every change of a reported capsule stat (Acceleration /
+// Deceleration without the script's multiplier) or of its applied multiplier is logged once with the dump time of the query
+// ("UTPP CAPSTAT t=<dump t> stat=<accel|decel> base=<stat> mul=<multiplier>"). The script queries right after each feed, so the
+// sample belongs to the dump row with the largest t below it. Nothing is logged while the dump is off.
+float g_capStatLogged[2][2] = {{-1.0f, -1.0f}, {-1.0f, -1.0f}};
+int64_t g_capStatDumpT0 = 0; // dump start the logged values belong to (a new dump logs the current values again)
+void LogCapsuleStatLocked(int aStat, float aBase, float aMul)
+{
+    if (!g_feedDumpOn || !g_log)
+        return;
+    if (g_capStatDumpT0 != g_feedDumpT0)
+    {
+        g_capStatDumpT0 = g_feedDumpT0;
+        g_capStatLogged[0][0] = g_capStatLogged[0][1] = g_capStatLogged[1][0] = g_capStatLogged[1][1] = -1.0f;
+    }
+    const auto same = [](float a, float b) { return std::fabs(a - b) <= 1.0e-4f * std::fmax(1.0f, std::fabs(b)); };
+    if (same(aBase, g_capStatLogged[aStat][0]) && same(aMul, g_capStatLogged[aStat][1]))
+        return; // unchanged (a relative 1e-4 tolerance: float noise of the script's current / applied division logs nothing)
+    g_capStatLogged[aStat][0] = aBase;
+    g_capStatLogged[aStat][1] = aMul;
+    char line[160];
+    std::snprintf(line, sizeof line, "UTPP CAPSTAT t=%.6f stat=%s base=%.9g mul=%.9g",
+                  static_cast<double>(Qpc() - g_feedDumpT0) / QpcFreq(), aStat == 0 ? "accel" : "decel",
+                  static_cast<double>(aBase), static_cast<double>(aMul));
+    g_log(line);
+}
+
 float AccelTarget(float aBaseAccel, float aAppliedMul)
 {
     std::lock_guard lock(g_mutex);
     ++g_accelQueries;
     g_accelBase = std::isfinite(aBaseAccel) ? aBaseAccel : 0.0f;
     g_accelMul = std::isfinite(aAppliedMul) ? aAppliedMul : 1.0f;
+    LogCapsuleStatLocked(0, g_accelBase, g_accelMul);
     const int64_t now = Qpc();
     const float sinceFeed = g_lastFeedTicks ? static_cast<float>(static_cast<double>(now - g_lastFeedTicks) / QpcFreq()) : 1e9f;
     const int32_t loco = g_lastFeed.locoState;
@@ -7459,6 +7487,7 @@ float DecelTarget(float aBaseDecel, float aAppliedMul)
     ++g_decelQueries;
     g_decelBase = std::isfinite(aBaseDecel) ? aBaseDecel : 0.0f;
     g_decelMul = std::isfinite(aAppliedMul) ? aAppliedMul : 1.0f;
+    LogCapsuleStatLocked(1, g_decelBase, g_decelMul);
     const int64_t now = Qpc();
     g_decelSampleTicks = GroundBrakingDomain(g_lastFeed) && std::isfinite(aBaseDecel) && aBaseDecel > 0.0f &&
         std::isfinite(aAppliedMul) && aAppliedMul > 0.0f ? now : 0;

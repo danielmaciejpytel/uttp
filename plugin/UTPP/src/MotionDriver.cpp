@@ -4474,11 +4474,12 @@ void HeadLeadApplyLocked(const Bundle& aB, integ::PoseSnapshot& aSnap)
         g_hl.Reset();
         g_hlHaveApply = false;
     }
-    const auto now = std::chrono::steady_clock::now();
+    // filter dt = feed time since the previous apply (one feed per game frame, one apply per published frame), not the wall clock:
+    // a replay of the same feeds gives the same pose bit for bit
+    const float elapsed = g_hl.TakeElapsed();
     float dt = 1.0f / 60.0f;
     if (g_hlHaveApply)
-        dt = std::clamp(std::chrono::duration<float>(now - g_hlLastApply).count(), 1.0f / 240.0f, 0.1f);
-    g_hlLastApply = now;
+        dt = std::clamp(elapsed, 1.0f / 240.0f, 0.1f);
     g_hlHaveApply = true;
     g_hl.Apply(g_hlParams, g_hlSk, aSnap.pose, std::min<uint32_t>(n, integ::kMaxMMBones), dt);
 }

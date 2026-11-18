@@ -210,6 +210,16 @@ public:
     {
         m_rate = 0.0f; m_prevH = 0.0f; m_havePrev = false; m_lead = 0.0f; m_w = 0.0f; m_mf = 0.0f; m_mInit = false;
         m_corr = 0.0f; m_path = 0.0f; m_pathValid = false; m_hpf = 0.0f; m_hInit = false; m_tel = Telemetry{};
+        m_elapsed = 0.0f;
+    }
+
+    // Feed time (s) covered by the Step calls since the previous call; the publish-rate Apply advances its filters by this game time,
+    // so the result depends on the recorded frame times only (no wall clock).
+    float TakeElapsed()
+    {
+        const float e = m_elapsed;
+        m_elapsed = 0.0f;
+        return e;
     }
 
     // Feed rate. aDt in seconds (non-finite or <= 0: nothing advances).
@@ -217,6 +227,7 @@ public:
     {
         if (!std::isfinite(aDt) || aDt <= 0.0f)
             return;
+        m_elapsed = std::fmin(m_elapsed + aDt, 1.0f);
         const float dt = std::fmin(aDt, 0.25f);
         const float vx = std::isfinite(aS.vx) ? aS.vx : 0.0f, vy = std::isfinite(aS.vy) ? aS.vy : 0.0f;
         const float speed = std::sqrt(vx * vx + vy * vy);
@@ -356,6 +367,7 @@ public:
 private:
     float m_rate = 0.0f, m_prevH = 0.0f, m_lead = 0.0f, m_w = 0.0f, m_mf = 0.0f, m_corr = 0.0f, m_path = 0.0f, m_hpf = 0.0f;
     bool m_havePrev = false, m_mInit = false, m_pathValid = false, m_hInit = false;
+    float m_elapsed = 0.0f; // feed time since the last TakeElapsed (s, capped at 1 s)
     Telemetry m_tel;
 };
 } // namespace utpp::mm::headlead

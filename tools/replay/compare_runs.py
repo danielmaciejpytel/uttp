@@ -19,6 +19,9 @@ locks, lock path p95 cm) of the runtime path: the final pose of every feed measu
 --aa N runs the before build N more times (same commands, same --jobs) and takes, per metric and body, the spread (max - min) of its
 runs as the noise margin (--margin-out writes it); --margin M.json reads a margin written earlier. With a margin the table gets a
 margin column and a mark: '~' = |after - before| within the margin (noise), '!' = outside it.
+--before-stages-args / --after-stages-args "--capsule-stats 1" replay the capsule Acceleration / Deceleration stats the game reports
+after every feed (stop and start forecasts as in the game); a build that does not print the CAPSTAT line for it counts as a failure
+(an older replay tool ignores the option), so both sides must be built with a replay tool that knows it.
 Exit code 1 when a tool fails or a run reports REPLAY_FAILS != 0.
 """
 import argparse
@@ -167,7 +170,10 @@ def main():
 
     bad = False
     for k, (rc, text) in res.items():
-        if rc != 0 or (k[2] == 'replay' and parse_replay(text).get('fails', 0) != 0):
+        stats_ignored = k[2] == 'stages' and rc == 0 and rws.capsule_stats_requested(builds[k[0]][2]) and 'CAPSTAT ' not in text
+        if stats_ignored:
+            text += '\n--capsule-stats 1 requested but the %s replay tool printed no CAPSTAT line (it does not know the option)' % k[0]
+        if rc != 0 or stats_ignored or (k[2] == 'replay' and parse_replay(text).get('fails', 0) != 0):
             bad = True
             print('FAIL %s rc=%d' % (' '.join(str(x) for x in k), rc))
             print('\n'.join(text.splitlines()[-5:]))
