@@ -17,7 +17,7 @@ inline constexpr float kFinishDegrees = 5.f;
 inline constexpr float kAbandonDegrees = 45.f;
 // Admission (recording 2026-10-23 21:08, Nue / rifle hipfire): every Shoot with the body more than kFinishDegrees off the camera
 // started a footwork clip, also for errors the aim offset absorbs (MotionPose spine yaw clamp 60 deg), so short bursts turned V
-// 45 deg back and forth. A NEW shot turn is admitted only from the ADS turn-in-place angle (motiontraj::kTurnInPlaceDeg, 50 deg, checked
+// 45 deg back and forth. A NEW shot turn is admitted only from the turn admission angle (motiontraj::kTurnInPlaceDeg, 50 deg, checked
 // in MotionDriver.cpp): below it the arms aim with the aim offset and the feet stay. A running turn keeps re-latching the camera.
 inline constexpr float kAdmitDegrees = 50.f;
 // A single Shoot state can end well before a 135/180-degree footwork clip.

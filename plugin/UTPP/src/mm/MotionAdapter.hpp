@@ -760,6 +760,15 @@ enum class FacingSource : uint8_t
     MotionActor
 };
 
+#ifndef UTPP_CAPSULE_SPEED_QUERY_DEFAULT
+#define UTPP_CAPSULE_SPEED_QUERY_DEFAULT 0
+#endif
+#ifndef UTPP_VELOCITY_PREDICATES_DEFAULT
+#define UTPP_VELOCITY_PREDICATES_DEFAULT 0
+#endif
+inline constexpr bool kCapsuleSpeedQueryDefault = UTPP_CAPSULE_SPEED_QUERY_DEFAULT != 0;
+inline constexpr bool kVelocityPredicatesDefault = UTPP_VELOCITY_PREDICATES_DEFAULT != 0;
+
 struct MapConfig
 {
     // Horizontal game m/s -> motion cm/s. speedScale > 0: uniform (x 100 x speedScale). speedScale 0 (default): piecewise map
@@ -913,6 +922,18 @@ struct MapConfig
     bool stanceCleanEdge = false;
     float stanceCleanHoldS = 0.15f;
     float stanceCleanMaxSpeedMs = 3.0f;
+    // Capsule speed query: the query trajectory handed to the matcher (BuildQueryTrajectory) is in capsule units - every horizontal
+    // segment of the mapped trajectory is converted back through the inverse of this feed's speed map, so a steady query speed equals
+    // the capsule speed (database metres per second) and the play rate (capsule / clip speed) needs no second source. The prediction,
+    // Speed2D and every chooser predicate stay on the mapped scale, where their thresholds (IsStarting +100, pivot angles, spin speed,
+    // speed bands) keep their meaning. Inside the slide and its exit window the query keeps the slide map. false = the mapped query.
+    bool capsuleSpeedQuery = kCapsuleSpeedQueryDefault;
+    // Velocity predicates: IsMoving / MovementState from the current velocity and the input acceleration
+    // (motiontraj::IsMovingFromVelocity), turn angle and IsPivoting from the input acceleration against the velocity.
+    // false = IsMoving from the predicted future velocity, turn angle future against velocity.
+    bool velocityPredicates = kVelocityPredicatesDefault;
+    // ShouldTurnInPlace angle (degrees). motiontraj::kTurnInPlaceDeg (50) = the previous angle; the rest / shot turn admission keeps it.
+    float turnInPlaceDeg = motiontraj::kTurnInPlacePredicateDeg;
 };
 
 // Factor for motiontraj::GameVelocityToCm (horizontal cm/s = m/s x 100 x factor) at the game planar speed aGameSpeed (m/s).
@@ -1144,6 +1165,13 @@ struct MapState
     float capsuleBrakeModel = 0.0f; // active grounded no-input CP deceleration; trace only
     float capsuleAccelModel = 0.0f; // active grounded full-input applied acceleration; trace only
     motiontraj::Trajectory traj; // Update_Trajectory (history 30 + prediction 15 x 0.1 s)
+    // MapConfig::capsuleSpeedQuery: the speed map of the last feed (stand / crouch points, crouch weight), read by BuildQueryTrajectory
+    struct QuerySpeedMap
+    {
+        bool active = false;
+        float crouchWeight = 0.0f;
+        SpeedPoints stand{0, {}, {}}, crouch{0, {}, {}};
+    } querySpeed;
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -1477,6 +1505,19 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
                 const float normal = gameSp * 100.0f * scale;
                 scale = (c.slideExitStartCmS + (normal - c.slideExitStartCmS) * k) / (gameSp * 100.0f);
             }
+        }
+    }
+    {
+        // capsule speed query: the slide map (slide and its exit window) is not the stand / crouch map, so the query keeps it there
+        const bool slideScale = c.slide && c.slideSpec.declared && gameSp > 0.01f &&
+            (slideActive || (mode == 0 && m.slideExitAge < c.slideExitMapS));
+        m.querySpeed.active = c.capsuleSpeedQuery && !slideScale;
+        if (m.querySpeed.active)
+        {
+            const brake::Prediction map = CapsuleStopPrediction(c, calibrationWeight, gameSp);
+            m.querySpeed.crouchWeight = map.crouchWeight;
+            m.querySpeed.stand = map.stand;
+            m.querySpeed.crouch = map.crouch;
         }
     }
     const motiontraj::V3 vel = motiontraj::GameVelocityToCm(velIn, scale);
@@ -1813,7 +1854,9 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     st.movementMode = mode;
     st.rotationModeLast = st.rotationMode;
     st.rotationMode = rot;
-    st.isMoving = motiontraj::IsMoving(st.trjFuture, acc);
+    st.isMoving = c.velocityPredicates
+        ? motiontraj::IsMovingFromVelocity(motiontraj::V3{vel.x, vel.y, 0.0f}, st.trjFuture, acc, st.accelerationLast)
+        : motiontraj::IsMoving(st.trjFuture, acc);
     st.movementStateLast = st.movementState;
     st.movementState = st.isMoving ? 1 : 0;
     st.gaitLast = st.gait;
@@ -1844,15 +1887,17 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     st.justLandedTimer = st.justLanded ? motiontraj::kJustLandedSeconds - m.sinceLand : 0.0f;
 
     // predicates (ABP functions l. 1777-1937)
-    st.turnAngle = motiontraj::TurnAngle(st.trjFuture, vel);
+    // velocity predicates: the turn is the input acceleration against the velocity (IsPivoting reads it in place of the future)
+    const motiontraj::V3 turnTarget = c.velocityPredicates ? acc : st.trjFuture;
+    st.turnAngle = motiontraj::TurnAngle(turnTarget, vel);
     st.isStarting = motiontraj::IsStarting(st.isMoving, st.trjFuture, vel, x.currentDbPivots);
-    st.isPivoting = motiontraj::IsPivoting(st.isMoving, st.trjFuture, vel, rot);
+    st.isPivoting = motiontraj::IsPivoting(st.isMoving, turnTarget, vel, rot);
     const bool stationaryAimTurn = facing.aimTurnInPlace && f.aiming;
     const bool stationaryRestTurn = restTurn && !stationaryAimTurn;
     const float rootTargetYaw = facing.shotTurn ? x.shotTargetYawDeg : stationaryAimTurn ? f.cameraYawDeg : yawNow;
     const float rootDelta = x.rootYawValid ? motiontraj::RootDeltaYaw(rootTargetYaw, x.rootYawDeg) : 0.0f;
     st.shouldTurnInPlace = motiontraj::ShouldTurnInPlace(rootDelta, f.aiming || visualStrafe || stationaryRestTurn, st.movementState,
-                                                    st.movementStateLast, false);
+                                                    st.movementStateLast, false, c.turnInPlaceDeg);
     if (facing.shotTurn)
         st.shouldTurnInPlace = rootDelta > shotturn::kFinishDegrees;
     // Shooter mode / H2 safeguard and the spin transition (the 180 deg Reface clips of PSD_*_SpinTransition).
@@ -2231,12 +2276,99 @@ inline motion::TrajSample QuerySample(const motiontraj::Trajectory& aTraj, float
 
 // Fills aOut[0 .. aTimes.n) (aMax >= aTimes.n) with the query trajectory of MapState::traj after MapToChooser. Returns the
 // sample count; 0 = not built (trajectory not initialised, overflow or aMax too small). Allocation-free.
+// Inverse of MapSpeedPoints: game speed (m/s) of a mapped speed aDb (cm/s). The points rise strictly, so the map is monotonic.
+inline float InverseMapSpeedPoints(const SpeedPoints& m, float aDb)
+{
+    if (!(aDb > 0.0f))
+        return 0.0f;
+    if (m.count <= 0)
+        return aDb;
+    float pg = 0.0f, pd = 0.0f;
+    for (int i = 0; i < m.count; ++i)
+    {
+        if (aDb <= m.db[i])
+            return pg + (aDb - pd) * (m.game[i] - pg) / (m.db[i] - pd);
+        pg = m.game[i];
+        pd = m.db[i];
+    }
+    return aDb * (pg / pd);
+}
+
+// Capsule cm per mapped cm at the mapped speed aMappedCmS: capsule speed x 100 / mapped speed. A stance blend maps with
+// (1 - w) x stand + w x crouch, which is solved by bisection between the two single-stance inverses.
+inline float CapsuleCmPerMappedCm(const MapState::QuerySpeedMap& q, float aMappedCmS)
+{
+    const float y = std::fmax(aMappedCmS, 1.0f); // below 1 cm/s: the slope of the first segment
+    const float xs = InverseMapSpeedPoints(q.stand, y), xc = InverseMapSpeedPoints(q.crouch, y);
+    float x = xs;
+    if (q.crouchWeight >= 1.0f)
+        x = xc;
+    else if (q.crouchWeight > 0.0f)
+    {
+        float lo = std::fmin(xs, xc), hi = std::fmax(xs, xc);
+        for (int i = 0; i < 20; ++i)
+        {
+            const float mid = 0.5f * (lo + hi);
+            const float v = (1.0f - q.crouchWeight) * MapSpeedPoints(q.stand, mid) + q.crouchWeight * MapSpeedPoints(q.crouch, mid);
+            (v < y ? lo : hi) = mid;
+        }
+        x = 0.5f * (lo + hi);
+    }
+    return x > 0.0f ? x * 100.0f / y : 1.0f;
+}
+
+// Capsule speed query (MapConfig::capsuleSpeedQuery): rescales the horizontal steps between consecutive query samples (sorted times)
+// outwards from the current sample, each by CapsuleCmPerMappedCm of its own mean speed. A steady mapped speed returns the capsule
+// speed exactly; positions stay relative to the current sample; vertical and facing are unchanged.
+inline void ToCapsuleUnits(const MapState& m, const QueryTimes& aTimes, motion::TrajSample* aOut)
+{
+    const float t0 = m.traj.Prediction(0).t;
+    uint32_t k = 0;
+    while (k < aTimes.n && aTimes.t[k] < t0)
+        ++k;
+    auto step = [&](uint32_t i, float pt, float px, float py, float ox, float oy) {
+        // raw step from (pt, px, py) to sample i, new position from (ox, oy); returns nothing, writes aOut[i]
+        const float dt = std::fabs(aTimes.t[i] - pt);
+        const float dx = aOut[i].x - px, dy = aOut[i].y - py;
+        const float v = dt > 1.0e-6f ? std::sqrt(dx * dx + dy * dy) * 100.0f / dt : 0.0f;
+        const float f = CapsuleCmPerMappedCm(m.querySpeed, v);
+        aOut[i].x = ox + dx * f;
+        aOut[i].y = oy + dy * f;
+    };
+    // forwards: raw previous position, new previous position
+    float pt = t0, px = 0.0f, py = 0.0f, ox = 0.0f, oy = 0.0f;
+    for (uint32_t i = k; i < aTimes.n; ++i)
+    {
+        const float rx = aOut[i].x, ry = aOut[i].y;
+        step(i, pt, px, py, ox, oy);
+        pt = aTimes.t[i];
+        px = rx;
+        py = ry;
+        ox = aOut[i].x;
+        oy = aOut[i].y;
+    }
+    pt = t0;
+    px = py = ox = oy = 0.0f;
+    for (uint32_t i = k; i-- > 0;)
+    {
+        const float rx = aOut[i].x, ry = aOut[i].y;
+        step(i, pt, px, py, ox, oy);
+        pt = aTimes.t[i];
+        px = rx;
+        py = ry;
+        ox = aOut[i].x;
+        oy = aOut[i].y;
+    }
+}
+
 inline uint32_t BuildQueryTrajectory(const MapState& m, const QueryTimes& aTimes, motion::TrajSample* aOut, uint32_t aMax)
 {
     if (m.traj.NumHistory() == 0 || aTimes.overflow || aTimes.n == 0 || aTimes.n > aMax || !aOut)
         return 0;
     for (uint32_t i = 0; i < aTimes.n; ++i)
         aOut[i] = QuerySample(m.traj, aTimes.t[i]);
+    if (m.querySpeed.active)
+        ToCapsuleUnits(m, aTimes, aOut);
     return aTimes.n;
 }
 
