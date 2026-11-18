@@ -612,6 +612,155 @@ inline bool IsPivoting(bool aMoving, V3 aFuture, V3 aVelocity, RotationMode aMod
     return SizeXY(aVelocity) > kHasVelocity && std::fabs(TurnAngle(aFuture, aVelocity)) >= thr && aMoving;
 #endif
 }
+// ---------------------------------------------------------------- directional locomotion inputs (opt-in chooser inputs)
+// Movement direction of the directional locomotion rows: the angle of the movement direction from the orientation intent, split into
+// quadrants by four thresholds (FL <= F <= FR, BL <= left <= FL, FR <= right <= BR, the rest backward). The thresholds depend on the
+// previous direction (hysteresis): the forward and backward sets keep F within +-60 and B beyond +-120; the lateral sets widen the
+// lateral quadrants (further while a transition plays or while aiming). Enum values are the chooser values: F 0, B 1, LL 2, LR 3,
+// RL 4, RR 5.
+enum class MoveDirection : uint8_t
+{
+    F = 0,
+    B = 1,
+    LL = 2,
+    LR = 3,
+    RL = 4,
+    RR = 5
+};
+inline constexpr int kMoveDirectionCount = 6;
+inline bool IsLateral(MoveDirection d) { return d != MoveDirection::F && d != MoveDirection::B; }
+
+struct MoveDirectionThresholds
+{
+    float fl = -60.0f, fr = 60.0f, bl = -120.0f, br = 120.0f;
+};
+struct MoveDirectionConfig
+{
+    MoveDirectionThresholds fromForward{-60.0f, 60.0f, -120.0f, 120.0f};
+    MoveDirectionThresholds fromBackward{-60.0f, 60.0f, -120.0f, 120.0f};
+    MoveDirectionThresholds fromLateralLoop{-60.0f, 60.0f, -140.0f, 140.0f};
+    MoveDirectionThresholds fromLateralTransition{-40.0f, 40.0f, -140.0f, 140.0f};
+    // false: the lateral quadrants report LL / RL only (the row set without the right-foot-forward variants); true: LR / RR when
+    // the right foot leads (MoveDirectionInput::rightFootForward)
+    bool footBias = false;
+    // sprint always reports F (no directional sprint rows)
+    bool sprintForward = true;
+    // seconds a new direction counts as recent: MovementDirection_Recent reports the previous direction until the new one has lasted
+    // this long
+    float recentLimitS = 0.1f;
+};
+
+// Thresholds for the next classification from the previous direction. aPivotingOrBackward: the pivot predicate of this frame (a pivot
+// from a lateral direction uses the backward set); aLateralWide: a transition (non-loop) clip plays or the character aims.
+inline MoveDirectionThresholds MoveDirectionThresholdsFor(const MoveDirectionConfig& c, MoveDirection aPrev, bool aPivoting, bool aLateralWide)
+{
+    if (aPrev == MoveDirection::F)
+        return c.fromForward;
+    if (aPrev == MoveDirection::B || aPivoting)
+        return c.fromBackward;
+    return aLateralWide ? c.fromLateralTransition : c.fromLateralLoop;
+}
+
+// Quadrant of aAngleDeg (-180..180, 0 forward, negative left) with inclusive bounds checked in the reference order F, left, right, B.
+inline MoveDirection ClassifyMoveDirection(float aAngleDeg, const MoveDirectionThresholds& t, bool aRightFootForward)
+{
+    if (aAngleDeg >= t.fl && aAngleDeg <= t.fr)
+        return MoveDirection::F;
+    if (aAngleDeg >= t.bl && aAngleDeg <= t.fl)
+        return aRightFootForward ? MoveDirection::LR : MoveDirection::LL;
+    if (aAngleDeg >= t.fr && aAngleDeg <= t.br)
+        return aRightFootForward ? MoveDirection::RR : MoveDirection::RL;
+    return MoveDirection::B;
+}
+
+// Movement direction angle for ClassifyMoveDirection from a horizontal heading in game world axes (right-handed, Z up; game yaw psi
+// faces (-sin psi, cos psi), a positive yaw turns left) and the orientation intent as a game yaw (degrees). Result in the reference
+// convention: 0 forward, negative left, positive right, -180..180. A zero heading gives 0.
+inline float MoveDirectionAngle(V3 aHeadingGame, float aIntentGameYawDeg)
+{
+    if (aHeadingGame.x == 0.0f && aHeadingGame.y == 0.0f)
+        return 0.0f;
+    const float headingGameYaw = std::atan2(-aHeadingGame.x, aHeadingGame.y) * kRad2Deg; // positive = left of +Y
+    return -NormalizeAxis(headingGameYaw - aIntentGameYawDeg);
+}
+
+struct MoveDirectionInput
+{
+    bool moving = false;          // MovementState Moving (the direction holds while idle)
+    bool directional = false;     // strafe or aim rotation mode; OrientToMovement always reports F
+    bool sprint = false;
+    bool hasDirection = false;    // a non-zero movement direction this frame
+    float angleDeg = 0.0f;        // movement direction from the orientation intent (CalculateDirection convention)
+    bool pivoting = false;
+    bool lateralWide = false;
+    bool rightFootForward = false;
+};
+
+struct MoveDirectionState
+{
+    MoveDirection current = MoveDirection::F, last = MoveDirection::F, recent = MoveDirection::F, previousDifferent = MoveDirection::F;
+    float timeInState = 1.0e9f;
+};
+
+// One frame: last = the previous current; the direction is re-classified while moving; recent = the previous different direction
+// while the current one is younger than recentLimitS, else the current one.
+inline void UpdateMoveDirection(MoveDirectionState& s, const MoveDirectionConfig& c, const MoveDirectionInput& in, float aDt)
+{
+    s.last = s.current;
+    MoveDirection next = s.current;
+    if (in.moving)
+    {
+        if (!in.directional || (in.sprint && c.sprintForward) || !in.hasDirection)
+            next = MoveDirection::F;
+        else
+            next = ClassifyMoveDirection(NormalizeAxis(in.angleDeg),
+                                         MoveDirectionThresholdsFor(c, s.current, in.pivoting, in.lateralWide),
+                                         c.footBias && in.rightFootForward);
+    }
+    if (next != s.current)
+    {
+        s.previousDifferent = s.current;
+        s.current = next;
+        s.timeInState = 0.0f;
+    }
+    else if (std::isfinite(aDt) && aDt > 0.0f)
+        s.timeInState += aDt;
+    s.recent = s.timeInState < c.recentLimitS ? s.previousDifferent : s.current;
+}
+
+// Directional-row IsStarting: the IsStarting test with the low-speed bound (Speed2D <= aMaxSpeed2D, mapped cm/s). aSlowMargin: below
+// kStartingMargin the margin is half the future speed (see IsStarting); false = the fixed margin.
+inline constexpr float kDirectionalStartMaxSpeed = 100.0f;
+inline bool IsStartingDirectional(bool aMoving, V3 aFuture, V3 aVelocity, bool aCurrentDbPivots, float aSpeed2D, bool aSlowMargin,
+                                  float aMaxSpeed2D = kDirectionalStartMaxSpeed)
+{
+    const float future = SizeXY(aFuture);
+    const float margin = aSlowMargin && future < kStartingMargin ? kStartingSlowFraction * future : kStartingMargin;
+    return aMoving && future >= SizeXY(aVelocity) + margin && !aCurrentDbPivots && !(aSpeed2D > aMaxSpeed2D);
+}
+
+// Circling: the facing turns faster than 200 deg/s in the same direction in the past (-0.4..-0.3 s) and current (0..0.1 s)
+// windows while the turn angle exceeds 50 deg. Yaw rates in deg/s.
+inline constexpr float kCirclingYawRate = 200.0f;
+inline constexpr float kCirclingTurnDeg = 50.0f;
+inline bool IsCircling(float aPastYawRate, float aCurrentYawRate, float aTurnAngleDeg)
+{
+    const bool same = (aPastYawRate < -kCirclingYawRate && aCurrentYawRate < -kCirclingYawRate) ||
+                      (aPastYawRate > kCirclingYawRate && aCurrentYawRate > kCirclingYawRate);
+    return same && std::fabs(aTurnAngleDeg) > kCirclingTurnDeg;
+}
+inline float FacingYawRate(const Trajectory& aTraj, float aT1, float aT2)
+{
+    return aT2 > aT1 ? NormalizeAxis(aTraj.FacingYawAt(aT2) - aTraj.FacingYawAt(aT1)) / (aT2 - aT1) : 0.0f;
+}
+
+// Directional-row IsPivoting: |TurnAngle| >= aPivotDeg (75) && not circling && moving, with the velocity floor of IsPivoting.
+inline constexpr float kDirectionalPivotDeg = 75.0f;
+inline bool IsPivotingDirectional(bool aMoving, V3 aFuture, V3 aVelocity, bool aCircling, float aPivotDeg = kDirectionalPivotDeg)
+{
+    return aMoving && SizeXY(aVelocity) > kHasVelocity && std::fabs(TurnAngle(aFuture, aVelocity)) >= aPivotDeg && !aCircling;
+}
+
 // |NormalizedDeltaRotator(actor, RootTransform).Yaw| (RootTransform yaw = OffsetRoot yaw + 90 in UE mesh space; the caller
 // passes both yaws in the same world convention)
 inline float RootDeltaYaw(float aActorYawDeg, float aRootYawDeg) { return std::fabs(NormalizeAxis(aActorYawDeg - aRootYawDeg)); }
@@ -679,5 +828,8 @@ struct States
     bool playLand = false, playMovingLand = false;
     float timeToLand = kPredictionCount * kPredictionInterval;
     float stopHoldCmS = 0.0f; // motionfix item 7: chooser speed held after a speed collapse (0 = none; diagnostics)
+    // directional locomotion inputs (MapConfig::moveDirection / directionalPredicates; F and false while off)
+    MoveDirectionState moveDirection;
+    bool isStartingDirectional = false, isPivotingDirectional = false, isCircling = false;
 };
 } // namespace utpp::mm::motiontraj

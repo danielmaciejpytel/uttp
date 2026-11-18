@@ -766,11 +766,36 @@ enum class FacingSource : uint8_t
 #ifndef UTPP_CAPSULE_SPEED_QUERY_DEFAULT
 #define UTPP_CAPSULE_SPEED_QUERY_DEFAULT 0
 #endif
+#ifndef UTPP_CAPSULE_SPEED_RATE_DEFAULT
+#define UTPP_CAPSULE_SPEED_RATE_DEFAULT 0
+#endif
 #ifndef UTPP_VELOCITY_PREDICATES_DEFAULT
 #define UTPP_VELOCITY_PREDICATES_DEFAULT 0
 #endif
 inline constexpr bool kCapsuleSpeedQueryDefault = UTPP_CAPSULE_SPEED_QUERY_DEFAULT != 0;
 inline constexpr bool kVelocityPredicatesDefault = UTPP_VELOCITY_PREDICATES_DEFAULT != 0;
+
+// Capsule speed play rate (MapConfig::capsuleSpeedRate): the search keeps the mapped query; the play rate of a variable-rate pick is the
+// query speed scaled by capsule / mapped speed at the chooser speed (ChooserState::rateSpeedScale -> rate2::Calculate querySpeedScale).
+// Both: the scale as computed; RaiseOnly: max(1, scale); LowerOnly: min(1, scale). Off: scale 1.
+enum class CapsuleRateMode : uint8_t
+{
+    Off = 0,
+    Both = 1,
+    RaiseOnly = 2,
+    LowerOnly = 3
+};
+inline constexpr CapsuleRateMode kCapsuleSpeedRateDefault = static_cast<CapsuleRateMode>(UTPP_CAPSULE_SPEED_RATE_DEFAULT & 3);
+inline float CapsuleRateScaleForMode(CapsuleRateMode aMode, float aScale)
+{
+    if (aMode == CapsuleRateMode::Off || !std::isfinite(aScale) || aScale <= 0.0f)
+        return 1.0f;
+    if (aMode == CapsuleRateMode::RaiseOnly)
+        return std::fmax(1.0f, aScale);
+    if (aMode == CapsuleRateMode::LowerOnly)
+        return std::fmin(1.0f, aScale);
+    return aScale;
+}
 
 struct MapConfig
 {
@@ -941,6 +966,19 @@ struct MapConfig
     // (motiontraj::IsMovingFromVelocity), turn angle and IsPivoting from the input acceleration against the velocity.
     // false = IsMoving from the predicted future velocity, turn angle future against velocity.
     bool velocityPredicates = kVelocityPredicatesDefault;
+    // Capsule speed play rate (see CapsuleRateMode). Ignored while capsuleSpeedQuery is on (that query already carries the capsule speed)
+    // and inside the slide map.
+    CapsuleRateMode capsuleSpeedRate = kCapsuleSpeedRateDefault;
+    // Directional locomotion inputs for the directional database rows (MapState::st.moveDirection, isStartingDirectional,
+    // isPivotingDirectional). Computed only when on; the existing inputs (slide direction, IsStarting, IsPivoting) are unchanged.
+    // moveDirection: the six-way movement direction with hysteresis (motiontraj::UpdateMoveDirection), from the input direction on the
+    // ground and the velocity in the air against the orientation intent (the camera yaw in the strafe rotation mode).
+    bool moveDirection = false;
+    motiontraj::MoveDirectionConfig moveDirectionConfig;
+    // directionalPredicates: IsStarting with the Speed2D <= 100 bound and IsPivoting at directionalPivotDeg without circling.
+    bool directionalPredicates = false;
+    float directionalPivotDeg = motiontraj::kDirectionalPivotDeg;
+    bool directionalStartSlowMargin = true; // the half-future margin of slow targets (motiontraj::IsStartingDirectional)
     // ShouldTurnInPlace angle (degrees). motiontraj::kTurnInPlaceDeg (50) = the previous angle; the rest / shot turn admission keeps it.
     float turnInPlaceDeg = motiontraj::kTurnInPlacePredicateDeg;
 };
@@ -1106,6 +1144,9 @@ struct MapContext
     // motion CurrentDatabaseTags contains "Pivots": tags of the database of the PREVIOUS search result
     // (ABP l. 1901 sets them after the selection; Update_States of the next frame reads them, l. 1785 / 1875).
     bool currentDbPivots = false;
+    // The current clip loops (false: a transition plays). Read only by MapConfig::moveDirection: a lateral direction keeps the wider
+    // lateral thresholds while a transition plays or while aiming.
+    bool currentClipLoop = true;
     // motion RootTransform yaw (ABP Update_EssentialValues l. 1760: OffsetRoot node transform, RotationMode Accumulate l. 1230 /
     // Get_OffsetRootRotationMode l. 1944-1950) in the integ yaw convention, degrees. rootYawValid false = motion else branch
     // (l. 1762 RootTransform = CharacterTransform): root yaw = actor yaw, no turn in place / spin.
@@ -1206,9 +1247,11 @@ struct MapState
     struct QuerySpeedMap
     {
         bool active = false;
+        bool rate = false; // MapConfig::capsuleSpeedRate (the map is filled for the play-rate scale only)
         float crouchWeight = 0.0f;
         SpeedPoints stand{0, {}, {}}, crouch{0, {}, {}};
     } querySpeed;
+    float rateSpeedScale = 1.0f; // MapConfig::capsuleSpeedRate: this feed's play-rate scale (1 = off)
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -1352,6 +1395,32 @@ inline float TimeToLand(float aHeight, float aVz, float aGravity, float aNoHit)
 // One frame of ABP Update_Logic (pseudo l. 2264-2266): Update_Trajectory -> Update_EssentialValues -> Update_States, then
 // the chooser inputs. motion units inside (cm, cm/s, deg); the game feed is converted with GameVelocityToCm (horizontal x
 // SpeedScaleFor, vertical x 100) so database speeds and motion thresholds compare on the same scale.
+inline float CapsuleCmPerMappedCm(const MapState::QuerySpeedMap& q, float aMappedCmS);
+
+// Chooser-state fields written only when the chooser state declares them (rateSpeedScale, the directional inputs); without them the
+// values stay in MapState.
+template <class S>
+inline void WriteRateSpeedScale(S& s, float aScale)
+{
+    if constexpr (requires { s.rateSpeedScale = aScale; })
+        s.rateSpeedScale = aScale;
+}
+template <class S>
+inline void WriteDirectionalInputs(S& s, const motiontraj::States& st)
+{
+    if constexpr (requires { s.moveDirection = 0; s.moveDirectionLast = 0; s.moveDirectionRecent = 0; })
+    {
+        s.moveDirection = static_cast<int>(st.moveDirection.current);
+        s.moveDirectionLast = static_cast<int>(st.moveDirection.last);
+        s.moveDirectionRecent = static_cast<int>(st.moveDirection.recent);
+    }
+    if constexpr (requires { s.isStartingDirectional = true; s.isPivotingDirectional = true; })
+    {
+        s.isStartingDirectional = st.isStartingDirectional;
+        s.isPivotingDirectional = st.isPivotingDirectional;
+    }
+}
+
 inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfig& c, MapState& m, const MapContext& x)
 {
     motiontraj::States& st = m.st;
@@ -1549,7 +1618,8 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         const bool slideScale = c.slide && c.slideSpec.declared && gameSp > 0.01f &&
             (slideActive || (mode == 0 && m.slideExitAge < c.slideExitMapS));
         m.querySpeed.active = c.capsuleSpeedQuery && !slideScale;
-        if (m.querySpeed.active)
+        m.querySpeed.rate = c.capsuleSpeedRate != CapsuleRateMode::Off && !c.capsuleSpeedQuery && !slideScale;
+        if (m.querySpeed.active || m.querySpeed.rate)
         {
             const brake::Prediction map = CapsuleStopPrediction(c, calibrationWeight, gameSp);
             m.querySpeed.crouchWeight = map.crouchWeight;
@@ -1939,6 +2009,34 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     st.turnAngle = motiontraj::TurnAngle(turnTarget, vel);
     st.isStarting = motiontraj::IsStarting(st.isMoving, st.trjFuture, vel, x.currentDbPivots);
     st.isPivoting = motiontraj::IsPivoting(st.isMoving, turnTarget, vel, rot);
+    // directional locomotion inputs (MapConfig::directionalPredicates / moveDirection)
+    if (c.directionalPredicates)
+    {
+        const float pastRate = motiontraj::FacingYawRate(m.traj, -0.4f, -0.3f);
+        const float currentRate = motiontraj::FacingYawRate(m.traj, 0.0f, 0.1f);
+        st.isCircling = motiontraj::IsCircling(pastRate, currentRate, st.turnAngle);
+        st.isStartingDirectional = motiontraj::IsStartingDirectional(st.isMoving, st.trjFuture, vel, x.currentDbPivots, st.speed2D,
+                                                                     c.directionalStartSlowMargin);
+        st.isPivotingDirectional = motiontraj::IsPivotingDirectional(st.isMoving, turnTarget, vel, st.isCircling, c.directionalPivotDeg);
+    }
+    else
+        st.isCircling = st.isStartingDirectional = st.isPivotingDirectional = false;
+    if (c.moveDirection)
+    {
+        motiontraj::MoveDirectionInput in;
+        in.moving = st.movementState == 1;
+        in.directional = rot != motiontraj::RotationMode::OrientToMovement;
+        in.sprint = st.gait == 2;
+        const motiontraj::V3 heading = mode == 0 ? acc : vel; // ground: the input direction; air: the velocity
+        in.hasDirection = motiontraj::SizeXY(heading) > motiontraj::kKindaSmall;
+        const float intentGameYaw = std::isfinite(f.cameraYawDeg) ? f.cameraYawDeg : (std::isfinite(yawNow) ? yawNow : 0.0f);
+        in.angleDeg = motiontraj::MoveDirectionAngle(heading, intentGameYaw); // heading in game world axes (GameVelocityToCm keeps them)
+        in.pivoting = c.directionalPredicates ? st.isPivotingDirectional : st.isPivoting;
+        in.lateralWide = f.aiming || !x.currentClipLoop;
+        motiontraj::UpdateMoveDirection(st.moveDirection, c.moveDirectionConfig, in, dt);
+    }
+    else
+        st.moveDirection = motiontraj::MoveDirectionState{};
     const bool stationaryAimTurn = facing.aimTurnInPlace && f.aiming;
     const bool stationaryRestTurn = restTurn && !stationaryAimTurn;
     const float rootTargetYaw = facing.shotTurn ? x.shotTargetYawDeg : stationaryAimTurn ? f.cameraYawDeg : yawNow;
@@ -2021,6 +2119,11 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.stationaryAimYawDeg = (s.stationaryAimTurn || s.restTurn) ? std::remainder(aimGoalYaw - x.rootYawDeg, 360.f) : 0;
     s.stationaryAimTargetYawDeg = (s.stationaryAimTurn || s.restTurn) ? aimGoalYaw : 0;
     s.speed2dCmS = chooserSpeed;
+    m.rateSpeedScale = m.querySpeed.rate && chooserSpeed > 1.0f
+                           ? CapsuleRateScaleForMode(c.capsuleSpeedRate, CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
+                           : 1.0f;
+    WriteRateSpeedScale(s, m.rateSpeedScale);
+    WriteDirectionalInputs(s, st);
     s.verticalVelocityCmS = vel.z;
     s.movementState = st.movementState;
     s.gait = st.gait;

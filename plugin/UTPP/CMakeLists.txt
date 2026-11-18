@@ -1127,5 +1127,11 @@ if(DEFINED _utpp_mdmotion_data AND EXISTS "${_utpp_mdmotion_data}/utpp_motion_wo
   add_test(NAME utpp_mm_loco_stride_warp_test COMMAND utpp_mm_loco_stride_warp_test "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
 endif()
 
+# ---- directional locomotion inputs and the capsule play-rate scale (mm/MotionTrajectory.hpp, mm/MotionAdapter.hpp; off by default) ----
+add_executable(utpp_motion_adapter_unit_directional_test tests/DirectionalInputsTest.cpp src/mm/MotionAdapter.hpp src/mm/MotionTrajectory.hpp)
+target_compile_options(utpp_motion_adapter_unit_directional_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_motion_adapter_unit_directional_test PRIVATE cxx_std_20)
+add_test(NAME utpp_motion_adapter_unit_directional_test COMMAND utpp_motion_adapter_unit_directional_test)
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)
