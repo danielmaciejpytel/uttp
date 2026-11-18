@@ -31,6 +31,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -694,6 +695,37 @@ struct MatchResult
     bool cancelledStartSupportAllowed = false;
 };
 
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+// Replay tools only: UTPP_TEST_GUARD_OFF = comma separated guard names; each named selection guard is switched to its documented
+// off value (0 / false) after Init copied the configuration. Unset = the configuration as given.
+inline void TestGuardsOff(MatcherConfig& c)
+{
+    const char* e = std::getenv("UTPP_TEST_GUARD_OFF");
+    if (!e || !*e)
+        return;
+    const std::string list = std::string(",") + e + ",";
+    const auto has = [&](const char* n) { return list.find(std::string(",") + n + ",") != std::string::npos; };
+    if (has("slowwalk")) c.slowWalkLoops = false;
+    if (has("steadyrun")) c.steadyRunLoops = false;
+    if (has("slowcrouch")) c.slowCrouchLoops = false;
+    if (has("starttail")) c.slowWalkStartTail = false;
+    if (has("slideinto")) c.slideIntoHandover = false;
+    if (has("rise")) c.crouchToStandHoldS = 0.0f;
+    if (has("exit")) c.exitTransitionTailS = 0.0f;
+    if (has("stop")) c.stopCommitTailS = 0.0f;
+    if (has("loopdwell")) c.loopDwellS = 0.0f;
+    if (has("fresh")) c.freshEventS = 0.0f;
+    if (has("upshift")) c.startUpshiftHoldS = c.startUpshiftRefaceWalkHoldS = c.startUpshiftRefaceRunHoldS = 0.0f;
+    if (has("restart")) c.startRestartDwellS = 0.0f;
+    if (has("downshift")) c.downshiftDeferS = 0.0f;
+    if (has("headingdip")) c.headingDipHoldS = 0.0f;
+    if (has("catchup")) c.headingCatchUpS = 0.0f;
+    if (has("leadfoot")) c.airKeepLeadFootS = 0.0f;
+    if (has("standjump")) c.standingJumpMaxSpeedCmS = 0.0f;
+    if (has("jumpout")) c.jumpOutNoBack = c.jumpOutFallHandover = false;
+}
+#endif
+
 class ChooserMatcher
 {
 public:
@@ -708,6 +740,9 @@ public:
         m_db = aDb;
         m_table = aTable;
         m_cfg = aCfg;
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        TestGuardsOff(m_cfg);
+#endif
         uint32_t maxRows = 0;
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             maxRows = std::max(maxRows, aDb->Db(d).numRows);
