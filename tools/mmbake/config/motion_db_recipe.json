@@ -1,0 +1,34 @@
+{
+  "format": "utpp-motion-db-recipe",
+  "version": 1,
+  "description": "Recipe of the shipped motion databases (utpp_motion_woman / utpp_motion_man), run by bake_motion_db.py. Paths are relative to the project root. The clip directories, the extra-asset spec, the data file and the slide spec are local bake inputs, given per body in an --inputs file (see bake_motion_db.py).",
+  "common": {
+    "meta": "Animations/sourcepack/SourcePack_export/meta",
+    "config": "Source/tools/mmbake/config/default.json",
+    "sourcepack_dir": "Extracted/sourcepack/sourcepack",
+    "clip_map": "Research/inventory/sourcepack-clip-map.json",
+    "ue_tracks": "Extracted/sourcepack/sourcepack-ue-tracks/modifier_tracks.json",
+    "motion_src": "sourcepack_export",
+    "sourcepack_only": true
+  },
+  "bodies": {
+    "woman": {
+      "rig": "Extracted/game/json/vanilla/player_woman_skeleton.rig.json",
+      "bonemap": "Source/tools/retarget/bonemap_source_to_game_woman.json",
+      "launch_rig": "woman"
+    },
+    "man": {
+      "rig": "Extracted/game/json/vanilla-man/player_man_skeleton.rig.json",
+      "bonemap": "Source/tools/retarget/bonemap_source_to_game_man.json",
+      "launch_rig": "man"
+    }
+  },
+  "input_keys": {
+    "base_clips": "retargeted clip directory; the launch-lean correction (retarget/launch_posture.py apply) is applied to a staging copy",
+    "slide_clips": "retargeted slide clip directory",
+    "rtz_clips": "root-z re-retargeted clip directory",
+    "v2_config": "bake data file (mmbake_base.py --v2-config)",
+    "slide_spec": "slide spec (make_slide_spec.py output)",
+    "extra_assets": "extra-asset spec (extra_assets.py format)"
+  }
+}

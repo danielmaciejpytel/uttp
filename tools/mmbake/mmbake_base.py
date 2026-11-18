@@ -695,6 +695,9 @@ def main():
                                                        "normalization sets, authored notify windows and the chooser 'slide' section")
     g2.add_argument("--extra-assets", default=None, help="extra_assets.py spec: authored retargeted clips appended as entries "
                                                          "of existing databases (optional; without it the bake is unchanged)")
+    g2.add_argument("--db-overrides", default=None, help="database overrides (config/database_overrides.json format): continuing "
+                                                         "cost bias, added entries, DisableReselection; applied to the parsed "
+                                                         "posesearch.json (optional; without it the bake is unchanged)")
     a = ap.parse_args()
     if a.out is None:
         a.out = os.path.join(r, "Data", "utpp_motion_test.utppmm" if a.format == "v2" else "utpp_base_dense_subset.utppmm")
