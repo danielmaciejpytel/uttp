@@ -143,4 +143,55 @@ private:
     std::vector<Q4> dir_;
 };
 
+// The source side of a dead blend on its own: the pose a transition leaves, extrapolated with its finite-difference velocity decaying
+// at the per-component half-life DeadBlender::Start computes (same clamps and formulas). A caller that cross-fades layers itself (the
+// blend stack) samples it in place of a frozen source pose. Allocations occur only in Start.
+class Extrapolator {
+public:
+    void Start(const std::vector<BoneTR>& srcCurr, const std::vector<BoneTR>& srcPrev, float dt, const Settings& s) {
+        s_ = s;
+        const size_t n = srcCurr.size();
+        src_ = srcCurr; vt_.assign(n, {}); vr_.assign(n, {}); hlT_.assign(n, {s.halfLife, s.halfLife, s.halfLife});
+        hlR_.assign(n, {s.halfLife, s.halfLife, s.halfLife});
+        const float mr = s.maxRotationVelocityDeg * 3.14159265358979f / 180.f;
+        for (size_t i = 0; i < n && dt > 1e-8f && i < srcPrev.size(); ++i) {
+            V3 vt = (srcCurr[i].t - srcPrev[i].t) * (1.f / dt);
+            V3 vr = ToRotVec(Mul(srcCurr[i].r, Inv(srcPrev[i].r))) * (1.f / dt);
+            const float lt = Len(vt), lr = Len(vr);
+            if (lt > s.maxTranslationVelocity) vt = vt * (s.maxTranslationVelocity / lt);
+            if (lr > mr) vr = vr * (mr / lr);
+            if (!std::isfinite(vt.x) || !std::isfinite(vt.y) || !std::isfinite(vt.z)) vt = {};
+            if (!std::isfinite(vr.x) || !std::isfinite(vr.y) || !std::isfinite(vr.z)) vr = {};
+            vt_[i] = vt; vr_[i] = vr;
+        }
+    }
+    // Half-lives from the destination pose of the transition (DeadBlender::Start); without a call every component keeps s.halfLife.
+    void SetDestination(const std::vector<BoneTR>& dst) {
+        for (size_t i = 0; i < src_.size() && i < dst.size(); ++i) {
+            const V3 dT = dst[i].t - src_[i].t;
+            const V3 dR = ToRotVec(Mul(dst[i].r, Inv(src_[i].r)));
+            hlT_[i] = {DecayHalfLife(dT.x, vt_[i].x, s_.halfLife, s_.halfLifeMin, s_.halfLifeMax),
+                       DecayHalfLife(dT.y, vt_[i].y, s_.halfLife, s_.halfLifeMin, s_.halfLifeMax),
+                       DecayHalfLife(dT.z, vt_[i].z, s_.halfLife, s_.halfLifeMin, s_.halfLifeMax)};
+            hlR_[i] = {DecayHalfLife(dR.x, vr_[i].x, s_.halfLife, s_.halfLifeMin, s_.halfLifeMax),
+                       DecayHalfLife(dR.y, vr_[i].y, s_.halfLife, s_.halfLifeMin, s_.halfLifeMax),
+                       DecayHalfLife(dR.z, vr_[i].z, s_.halfLife, s_.halfLifeMin, s_.halfLifeMax)};
+        }
+    }
+    size_t Size() const { return src_.size(); }
+    // Extrapolated source bone i at time t (s) after the source pose.
+    BoneTR Sample(size_t i, float t) const {
+        const V3 et{Extrapolate1(src_[i].t.x, vt_[i].x, t, hlT_[i].x), Extrapolate1(src_[i].t.y, vt_[i].y, t, hlT_[i].y),
+                    Extrapolate1(src_[i].t.z, vt_[i].z, t, hlT_[i].z)};
+        const V3 er{Extrapolate1(0.f, vr_[i].x, t, hlR_[i].x), Extrapolate1(0.f, vr_[i].y, t, hlR_[i].y),
+                    Extrapolate1(0.f, vr_[i].z, t, hlR_[i].z)};
+        return {et, Mul(FromRotVec(er), src_[i].r)};
+    }
+
+private:
+    Settings s_;
+    std::vector<BoneTR> src_;
+    std::vector<V3> vt_, vr_, hlT_, hlR_;
+};
+
 }  // namespace utpp::mm::deadblend

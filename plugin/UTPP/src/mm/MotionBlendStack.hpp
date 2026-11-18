@@ -22,6 +22,17 @@
 #ifndef UTPP_FOOTSINK_MUTATION
 #define UTPP_FOOTSINK_MUTATION 0
 #endif
+// ---- hand-back blend (dead-blended tail) ----
+#include "BlendProfile.hpp"
+#include "DeadBlending.hpp"
+#include <cstdlib>
+#ifndef UTPP_HANDBACK_DEAD_BLEND
+// Default of BlendStack::SetHandBackBlend: 1 = a pose handed back from an external source (SeedPose with its previous pose) is
+// extrapolated with its decaying velocity while the new clip fades in over the hand-back profile and time; 0 = a frozen tail with the
+// locomotion profile and the matcher's blend time (the pose is bit for bit the one without it). A build may override it.
+#define UTPP_HANDBACK_DEAD_BLEND 0
+#endif
+// ---- end hand-back blend ----
 namespace utpp::mm::motionstack
 {
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -33,6 +44,7 @@ struct TestStackOverrides
     bool steering = false;
     float halfLife = 0, targetTime = 0;
     int32_t signalMode = -1; // -1 = the build default, else bit 0 root, bit 1 contacts (SetPerBoneSignals)
+    int32_t handBack = -1;   // -1 = the build default or the UTPP_TEST_HANDBACK_BLEND environment value (0 / 1), else SetHandBackBlend
 };
 inline TestStackOverrides g_testStackOverrides{};
 struct TestSteeringProbe
@@ -66,6 +78,8 @@ struct Player
     bool fullLegFade = false; // the leg bones of this layer fade over the whole blend time (BlendRequest::fullLegFade), see Alpha
     bool strideGround = false; // this layer was picked as ground locomotion in a ground movement mode (BlendRequest::toGround), see WarpStride
     stridewarp::State stride;  // stride scale of this layer, see WarpStride
+    bool handBackFade = false; // this layer fades in over a hand-back tail with the hand-back profile, see Alpha
+    bool deadTail = false;     // this stored layer is the extrapolated hand-back pose, see SeedPose
 };
 struct GraphInputs
 {
@@ -161,7 +175,47 @@ class BlendStack
             SetSteering(g_testStackOverrides.halfLife, g_testStackOverrides.targetTime);
         if (g_testStackOverrides.signalMode >= 0)
             SetPerBoneSignals((g_testStackOverrides.signalMode & 1) != 0, (g_testStackOverrides.signalMode & 2) != 0);
+        if (g_testStackOverrides.handBack >= 0)
+            SetHandBackBlend(g_testStackOverrides.handBack != 0);
+        else if (const char *e = std::getenv("UTPP_TEST_HANDBACK_BLEND"); e && (e[0] == '0' || e[0] == '1'))
+            SetHandBackBlend(e[0] == '1');
 #endif
+        m_handBackFactors = blendprofile::Resolve(blendprofile::kHandBack, m_n, [&](uint32_t b) { return db.BoneName(b); });
+        m_deadPrev.resize(m_n);
+        m_deadCurr.resize(m_n);
+        m_deadDst.resize(m_n);
+        return true;
+    }
+    // Hand-back from an external pose (see UTPP_HANDBACK_DEAD_BLEND).
+    void SetHandBackBlend(bool on)
+    {
+        m_handBack = on;
+    }
+    bool HandBackBlend() const
+    {
+        return m_handBack;
+    }
+    // Bridge with velocity: the last emitted external pose, the one emitted dt before it. With the hand-back blend off this is exactly
+    // SeedPose(pose, signals); on, the stored layer is extrapolated each Step (dead blending) and the next pick fades in over the
+    // hand-back profile and time.
+    bool SeedPose(std::span<const BoneTransform> pose, std::span<const BoneTransform> previous, float dt, Signals signals = {})
+    {
+        if (!SeedPose(pose, signals))
+            return false;
+        if (!m_handBack || previous.size() != m_n || !std::isfinite(dt) || dt <= 0)
+            return true;
+        for (uint32_t b = 0; b < m_n; ++b)
+        {
+            m_deadCurr[b] = ToDead(pose[b]);
+            m_deadPrev[b] = ToDead(previous[b]);
+        }
+        deadblend::Settings s;
+        s.maxTranslationVelocity = 5.0f; // m/s (the node's 500 cm/s)
+        m_dead.Start(m_deadCurr, m_deadPrev, dt, s);
+        m_deadTime = 0;
+        m_deadHalfLivesPending = true;
+        m_handBackPending = true;
+        m_players[0].deadTail = true;
         return true;
     }
     void SetGraphInputs(const GraphInputs &input)
@@ -261,6 +315,7 @@ class BlendStack
         m_floorGate = 1.0f;
         m_count = 0;
         m_collapses = 0;
+        m_handBackPending = m_deadHalfLivesPending = false;
     }
     // Bridge only: seed the last actually emitted base pose after raw/traversal.
     // This static snapshot has no animation clock and approximate ROOT metadata.
@@ -428,6 +483,14 @@ class BlendStack
             p.fullLegFade = selected.blend.fullLegFade;
 #endif
             p.strideGround = selected.blend.toGround;
+            if (m_handBackPending && m_count > 1)
+            {
+                // the first pick over a dead-blended hand-back tail: hand-back profile and time
+                p.handBackFade = true;
+                p.fullLegFade = false;
+                p.duration = blendprofile::kBlendHandBack;
+                m_handBackPending = false;
+            }
             m_players[0] = p;
         }
         if (!selected.cancelledStartSupportAllowed) m_players[0].cancelStartSupport = -1;
@@ -467,6 +530,8 @@ class BlendStack
                 }
                 CacheAnkleZ(i);
             }
+            else if (p.deadTail && !StepDeadTail(i, dt))
+                return false;
         }
         // Consolidate the least-significant live tail at its current sampled time.
         if (m_count > kLayers + 1)
@@ -940,7 +1005,10 @@ class BlendStack
     // slide families) otherwise swing the thigh and shin through their difference in a third less time than the rest of the body.
     float Alpha(const Player &p, int32_t bone) const
     {
-        const float factor = bone < 0 ? 1.0f : p.fullLegFade ? m_fullLegFactors[uint32_t(bone)] : m_factors[uint32_t(bone)];
+        const float factor = bone < 0             ? 1.0f
+                             : p.handBackFade     ? m_handBackFactors[uint32_t(bone)]
+                             : p.fullLegFade      ? m_fullLegFactors[uint32_t(bone)]
+                                                  : m_factors[uint32_t(bone)];
         const float duration = p.duration * factor;
         if (duration <= 1e-8f)
             return 1;
@@ -1011,6 +1079,40 @@ class BlendStack
         return {(a.dx + (b.dx - a.dx) * u) * scale, (a.dy + (b.dy - a.dy) * u) * scale,
                 (a.dyaw + (b.dyaw - a.dyaw) * u) * scale, l.l + (r.l - l.l) * u, l.r + (r.r - l.r) * u};
     }
+    // ---- hand-back blend (dead-blended tail) ----
+    static deadblend::BoneTR ToDead(const BoneTransform &b)
+    {
+        return {{b.p.x, b.p.y, b.p.z}, {b.q.x, b.q.y, b.q.z, b.q.w}};
+    }
+    // Stored layer i is the hand-back pose: advance its extrapolation clock and resample it (the head, layer 0, is already sampled this
+    // Step and is the destination the half-lives are taken from on the first call).
+    bool StepDeadTail(uint32_t i, float dt)
+    {
+        if (m_dead.Size() != m_n)
+            return false;
+        if (m_deadHalfLivesPending && i > 0)
+        {
+            for (uint32_t b = 0; b < m_n; ++b)
+                m_deadDst[b] = ToDead(m_pose[0][b]);
+            m_dead.SetDestination(m_deadDst);
+            m_deadHalfLivesPending = false;
+        }
+        m_deadTime += dt;
+        for (uint32_t b = 0; b < m_n; ++b)
+        {
+            const auto e = m_dead.Sample(b, m_deadTime);
+            const math::Quat q = math::QuatNormalize(math::Quat{e.r.x, e.r.y, e.r.z, e.r.w});
+            if (!std::isfinite(e.t.x) || !std::isfinite(e.t.y) || !std::isfinite(e.t.z) || !math::IsFinite(q))
+                return false;
+            m_pose[i][b] = BoneTransform{math::Vec3{e.t.x, e.t.y, e.t.z}, q};
+        }
+        CacheAnkleZ(i);
+        if (m_feetReady &&
+            (!m_feetWarp.Sample(m_pose[i], 0, m_targets[i]) || !m_feetWarp.MakeRelative(m_pose[i], m_targets[i])))
+            return false;
+        return true;
+    }
+    // ---- end hand-back blend ----
     void Collapse()
     {
         // Collapse all indices4..end into index4, preserving their normalized tail.
@@ -1136,5 +1238,14 @@ class BlendStack
     std::array<motionFeet::Targets, kCapacity> m_targets{};
     std::array<std::array<float, 2>, kCapacity> m_ankleZ{}; // per layer: model-space ankle height of its own pose, left / right
     motionFeet::Targets m_outputTargets{};
+    // ---- hand-back blend (dead-blended tail) ----
+    bool m_handBack = UTPP_HANDBACK_DEAD_BLEND != 0; // SetHandBackBlend
+    bool m_handBackPending = false;                  // the next pick fades in with the hand-back profile
+    bool m_deadHalfLivesPending = false;             // the extrapolation half-lives wait for the first destination pose
+    float m_deadTime = 0;                            // s since the hand-back pose
+    std::vector<float> m_handBackFactors;            // blendprofile::kHandBack resolved to the rig
+    deadblend::Extrapolator m_dead;
+    std::vector<deadblend::BoneTR> m_deadPrev, m_deadCurr, m_deadDst;
+    // ---- end hand-back blend ----
 };
 } // namespace utpp::mm::motionstack

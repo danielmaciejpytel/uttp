@@ -532,7 +532,9 @@ private:
             {
                 // No future DB timeline exists for an external montage. Preserve
                 // its last emitted base as a static tail on the MM handback.
-                if (!m_stack.SeedPose(m_base)) return false;
+                // hand-back blend: with the previous emitted external pose the stack can extrapolate it (off: same as SeedPose(m_base))
+                if (!(m_handBackPrevValid ? m_stack.SeedPose(m_base, m_handBackPrev, m_handBackDt) : m_stack.SeedPose(m_base)))
+                    return false;
                 selected.jumped = true;
             }
             else if (!m_havePrev || (selected.jumped && !selected.blend.valid))
@@ -560,6 +562,13 @@ private:
             {
                 m_inertial.Request(aMatch.blend.blendTime, m_ignoreDeficit);
                 m_ignoreDeficit = false;
+            }
+            // hand-back blend: keep the external pose emitted one frame back (only while the stack's hand-back blend is on)
+            m_handBackPrevValid = external && m_havePrev && m_basePolicy == BaseBlendPolicy::LiveCrossfade && m_stack.HandBackBlend();
+            if (m_handBackPrevValid)
+            {
+                m_handBackPrev = m_base;
+                m_handBackDt = aDt;
             }
             const bool continuous = m_havePrev && !aMatch.jumped &&
                 (m_basePolicy == BaseBlendPolicy::Quintic || m_externalBase);
@@ -1929,6 +1938,9 @@ private:
     int m_legDb[2][3]{{-1, -1, -1}, {-1, -1, -1}}; // database bone of the thigh / shin / ankle per side
     std::array<int, kPoseDiagnosticBoneNames.size()> m_poseDiagBones{};
     std::vector<BoneTransform> m_raw, m_prev, m_base;
+    std::vector<BoneTransform> m_handBackPrev; // hand-back blend: external base one frame back
+    float m_handBackDt = 0.0f;
+    bool m_handBackPrevValid = false;
     QuinticInertializer m_inertial;
     motionstack::BlendStack m_stack;
     BaseBlendPolicy m_basePolicy = BaseBlendPolicy::Quintic;
