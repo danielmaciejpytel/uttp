@@ -421,9 +421,13 @@ public:
     // ---- reference search (FORMAT.txt v2 "Search"): aQuery = normalized query (dims floats) of database d.
     // aExcluded (optional, num_rows of d bytes): non-zero = local row excluded by the runtime (reselection window,
     // DISABLE_RESELECTION of the current entry). BLOCK rows are never candidates. Ties -> lowest local row.
-    MotionSearchResult SearchLinear(uint32_t d, const float* aQuery, const uint8_t* aExcluded = nullptr) const
+    // aBound: only rows cheaper than it are results (a caller that already holds a candidate of that cost passes it, so the search
+    // can skip boxes that cannot beat it). With no row below the bound the result has localRow -1 and cost aBound.
+    MotionSearchResult SearchLinear(uint32_t d, const float* aQuery, const uint8_t* aExcluded = nullptr,
+                                    float aBound = std::numeric_limits<float>::max()) const
     {
         MotionSearchResult r;
+        r.cost = aBound;
         const DatabaseRecord& db = m_dbs[d];
         for (uint32_t row = 0; row < db.numRows; ++row)
         {
@@ -441,9 +445,11 @@ public:
         return r;
     }
 
-    MotionSearchResult SearchAabb(uint32_t d, const float* aQuery, const uint8_t* aExcluded = nullptr) const
+    MotionSearchResult SearchAabb(uint32_t d, const float* aQuery, const uint8_t* aExcluded = nullptr,
+                                  float aBound = std::numeric_limits<float>::max()) const
     {
         MotionSearchResult r;
+        r.cost = aBound;
         const DatabaseRecord& db = m_dbs[d];
         const uint32_t dims = db.dims;
         const uint32_t sm = m_h.boundSmSize, lr = m_h.boundLrSize;
