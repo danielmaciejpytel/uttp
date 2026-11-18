@@ -53,7 +53,7 @@ inline constexpr float kStartingMargin = 100.0f;  // IsStarting: |Future|xy >= |
 inline constexpr float kPivotOrient = 45.0f;      // IsPivoting OrientToMovement
 inline constexpr float kPivotStrafe = 30.0f;      // IsPivoting Strafe
 inline constexpr float kTurnInPlaceDeg = 50.0f;   // turn admission angle (rest turn, shot turn) and the previous ShouldTurnInPlace angle
-inline constexpr float kTurnInPlacePredicateDeg = 45.0f; // ShouldTurnInPlace of the reference chooser (MapConfig::turnInPlaceDeg)
+inline constexpr float kTurnInPlacePredicateDeg = 50.0f; // ShouldTurnInPlace (MapConfig::turnInPlaceDeg); the reference chooser uses 45, pending aim-turn evidence
 inline constexpr float kMovingVelocityTolerance = 0.1f; // velocity predicates: Velocity != 0 with tolerance 0.1 per component
 inline constexpr float kSpinDeg = 130.0f;         // ShouldSpinTransition
 inline constexpr float kSpinMinSpeed = 150.0f;
