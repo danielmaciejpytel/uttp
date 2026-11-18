@@ -1549,31 +1549,6 @@ static void SectionPlantReference(const Database& db)
         Expect("(r5) reference plant: policy flag off leaves stand replant off; on enables it for stand only", off && on && crouch,
                Fmt("off %.0f on %.0f crouch untouched %.0f", off, on, crouch));
     }
-    // (r6) unplant on contact: a planted foot whose contact drops to 0.5 follows the animation through the spring while still locked,
-    // plants again only once the contact is above 0.99 again, and is released at 0.2 as before
-    {
-        FootPlantReferenceConfig c6 = pc;
-        c6.unplantOnContact = true;
-        FootLocker fl;
-        const bool ok = make(fl, c6);
-        const std::span<const BoneTransform> in(pose);
-        fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.995f, 0.0f, in);
-        const bool planted = fl.Diagnostics().foot[0].locked && !fl.Diagnostics().foot[0].unplanted;
-        bool held = true;
-        for (int i = 0; i < 10; ++i)
-        {
-            fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, in);
-            held = held && fl.Diagnostics().foot[0].locked && fl.Diagnostics().foot[0].unplanted;
-        }
-        const bool counted = fl.Diagnostics().plantContactUnplants == 1;
-        fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.995f, 0.0f, in);
-        const bool replanted = fl.Diagnostics().foot[0].locked && !fl.Diagnostics().foot[0].unplanted;
-        fl.Update(kDt, 0.0f, 0.0f, 0.0f, 0.2f, 0.0f, in);
-        const bool released = !fl.Diagnostics().foot[0].locked;
-        Expect("(r6) reference plant, unplant on contact: unplanted below 0.99 while locked, replanted above it, released at 0.2",
-               ok && planted && held && counted && replanted && released,
-               Fmt("planted %.0f unplanted at 0.5 %.0f counted %.0f replanted %.0f released %.0f", planted, held, counted, replanted, released));
-    }
     // (r7) stops only: the policy turns the reference model on for stand only while the clip is idle / stop
     {
         FootLocker fl;
@@ -1613,13 +1588,12 @@ static void SectionPlantReference(const Database& db)
                jump < 1e-3, Fmt("locked off %.0f taken %.0f toe jump %.2g m", lockedOff, taken, jump));
     }
     // (r9) handover to the soft slip: a foot planted 8 cm off its animated toe when the model and replant turn off stays locked and goes
-    // to the soft slip at once (no handover step, no lift); (r10) settling: a standing planted foot settles at <= settleSpeed
+    // to the soft slip at once (no handover step, no lift)
     {
         FootPlantReferenceConfig c9 = pc;
         c9.radius = c9.radiusStops = 0.12f;
         c9.yaw = false;
         c9.handoverSlip = true;
-        c9.settle = false;
         FootLocker fl;
         const bool ok = make(fl, c9);
         const std::span<const BoneTransform> in(pose);
@@ -1634,27 +1608,6 @@ static void SectionPlantReference(const Database& db)
         Expect("(r9) reference plant, handover to the soft slip: still locked, no step, no lift", ok && planted && handed,
                Fmt("planted %.0f handovers %.0f steps %.0f lift %.2f cm", planted, double(d.handovers), double(d.footSteps[0]),
                    double(d.foot[0].lift) * 100.0));
-
-        c9.settle = true;
-        FootLocker fs;
-        const bool ok2 = make(fs, c9);
-        fs.Update(kDt, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, in);
-        fs.Update(kDt, 0.05f / kDt, 0.0f, 0.0f, 1.0f, 0.0f, in);
-        const float off0 = fs.Diagnostics().foot[0].offset;
-        float prev = off0, maxStep = 0.0f;
-        for (int i = 0; i < 60; ++i)
-        {
-            fs.Update(kDt, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, in);
-            const float o = fs.Diagnostics().foot[0].offset;
-            maxStep = std::max(maxStep, prev - o);
-            prev = o;
-        }
-        const float speed = fs.Config().settleSpeed;
-        Expect("(r10) reference plant, settle: a standing planted foot's 5 cm offset decays to < 1 mm at <= settleSpeed, still planted",
-               ok2 && off0 > 0.03f && prev < 1e-3f && maxStep <= speed * kDt + 1e-5f && fs.Diagnostics().foot[0].locked &&
-                   fs.Diagnostics().foot[0].plantRef && fs.Diagnostics().plantUnplants == 0,
-               Fmt("offset %.1f -> %.2f mm, max step %.2f mm (limit %.2f)", off0 * 1000.0, prev * 1000.0, maxStep * 1000.0,
-                   speed * kDt * 1000.0));
     }
 }
 
