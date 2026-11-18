@@ -484,6 +484,9 @@ inline constexpr float kAnalogFloorSpeed[kAnalogFloorPoints] = {0.24f, 0.30f, 0.
 inline constexpr float kAnalogFloorMulMax = 4.0f;  // the |mv| < 0.09 range is not measured (linear from 0 there)
 inline constexpr float kAnalogFloorMulMin = 1.03f; // below: 1 (the measured |mv| 0.45 cluster, just under 0.455, would keep ~1.01)
 inline constexpr float kMinAnalogWalkMaxMs = 1.6f; // upper bound of the setting (CET mm.minWalkSpeed, SetMinAnalogWalk); 0 = off
+#ifndef UTPP_STICK_SPEED_FIXED_DEFAULT
+#define UTPP_STICK_SPEED_FIXED_DEFAULT 0
+#endif
 #ifndef UTPP_ANALOGFLOOR_MUTATION
 #define UTPP_ANALOGFLOOR_MUTATION 0
 #endif
@@ -831,6 +834,12 @@ struct MapConfig
     float analogFloorMs = 0.0f;
     // the multiplier cap the script applies (kAnalogFloorMulMax; under the walk toggle AnalogFloorMulMaxWalk, set by EffectiveMapConfig)
     float analogFloorMulMax = kAnalogFloorMulMax;
+    // Fixed stick speed (CET mm.stickSpeed "fixed" -> UTPPSetMotionStickSpeedMode 1; the script holds the capsule at the walk speed below
+    // the stick 0.7, at the run speed from 0.7 and at the crouch speed in a crouch, FixedStickApplies / FixedStickFraction). true: on that
+    // gate the analog modifier (prediction cap) and the input acceleration are those of the held speed, and the minimum analog walk speed
+    // is off (the script removes its multiplier there). false (default): the speed follows the stick, nothing changes, bit for bit.
+    // UTPP_STICK_SPEED_FIXED_DEFAULT=1 only serves offline replays of the fixed mode (the shipped build keeps 0).
+    bool stickSpeedFixed = UTPP_STICK_SPEED_FIXED_DEFAULT != 0;
     // Internal, set by EffectiveMapConfig only (never by the host): walkMapActive = gameStandPoints[0] is the walk toggle point and the
     // full-stick speed of the stand is that point; gameRunReductionMs = Tier2 Slow, m/s taken off the full-stick stand run speed.
     bool walkMapActive = false;
@@ -1050,6 +1059,34 @@ inline float AnalogFloorLiftFraction(float aStick, float aFracMin, float aMulMax
 #else
     return std::fmin(aFracMin, aMulMax * AnalogFloorStickFraction(aStick));
 #endif
+}
+
+// Fixed stick speed (MapConfig::stickSpeedFixed; CET mm.stickSpeed "fixed", script utpp.reds UTPPFixedStickWant): the script holds the
+// capsule at two speeds - the walk speed below the stick kFixedStickSplit, the full-stick run speed at and above it - and at the
+// full-stick crouch speed in a crouch, with one MaxSpeed multiplier, on the same gate as below (ground, Stand 1 / Crouch 3, walk toggle
+// off, no Tier2 Slow, stick above kStickReleased, no sprint). The walk speed is a fraction of the measured full-stick speed (1.6 / 3.84),
+// as in the script, so a slower save keeps its own proportions.
+inline constexpr float kFixedStickWalkMs = 1.6f;
+inline constexpr float kFixedStickSplit = 0.7f;
+inline bool FixedStickApplies(const MapConfig& c, const MotionFeed& f, int aMode, bool aSprint, float aStickRaw)
+{
+    return c.stickSpeedFixed && aMode == 0 && !aSprint && (f.psmDetailed == kPsmStand || f.psmDetailed == kPsmCrouch) && !f.wantsToWalk &&
+           !f.tier2Slow && std::isfinite(aStickRaw) && aStickRaw > kStickReleased;
+}
+// The script caps its multiplier at this (a tilt whose own speed x 10 is below the held speed reaches only that: stand walk below |mv|
+// ~0.06, crouch below ~0.25).
+inline constexpr float kFixedStickMulMax = 10.0f;
+// Fraction of the full-stick speed of aStance (GameFullStickSpeed) the capsule holds in fixed mode: the crouch full speed for a Crouch
+// detail, the walk fraction of the stand run below the split, the stand run at and above it; each at most kFixedStickMulMax x the
+// fraction of the stick itself on the extended curve the script uses.
+inline float FixedStickFraction(const MapConfig& c, int aStance, int aPsmDetailed, float aStickRaw)
+{
+    const bool crouch = aPsmDetailed == kPsmCrouch;
+    const float target = crouch || aStickRaw >= kFixedStickSplit ? 1.0f : kFixedStickWalkMs / kAnalogFloorSpeed[kAnalogFloorPoints - 1];
+    const float held = std::fmin(target, kFixedStickMulMax * AnalogFloorStickFraction(std::fmin(aStickRaw, 1.0f)));
+    const float v = held * (crouch ? c.gameCrouchPoint : c.gameStandPoints[1] - c.gameRunReductionMs);
+    const float full = GameFullStickSpeed(c, aStance, false);
+    return full > 0.0f ? v / full : 0.0f;
 }
 
 inline float GameAnalogModifier(const MapConfig& c, int aGait, int aStance, bool aSprint, float aStick)
@@ -1727,8 +1764,16 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
 #else
     const bool analogFloor = c.analogFloorStick > 0.0f && c.analogFloorFrac > 0.0f && mode == 0 &&
                              !sprintInput && (locoDetail == kPsmStand || locoDetail == kPsmCrouch) && !motiontraj::IsZero(acc) &&
-                             stickRaw > 0.0f && stickRaw < c.analogFloorStick;
+                             stickRaw > 0.0f && stickRaw < c.analogFloorStick && !FixedStickApplies(c, f, mode, sprintInput, stickRaw);
 #endif
+    // Fixed stick speed: the capsule runs at the held speed whatever the tilt, so the prediction gets the full input acceleration (the
+    // direction of the stick) and the cap of that speed (below); the gait still splits at the stick.
+    const bool fixedStick = FixedStickApplies(c, f, mode, sprintInput, stickRaw) && !motiontraj::IsZero(acc);
+    if (fixedStick && !StickModeFixedSpeed(c.stickMode) && stickRaw < 1.0f)
+    {
+        const float lift = 1.0f / stickRaw;
+        acc = {acc.x * lift, acc.y * lift, acc.z * lift};
+    }
     float liftFrac = 0.0f, liftStick = 0.0f;
     if (analogFloor)
     {
@@ -1746,7 +1791,9 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         // the floor's own stick on the measured part of kGameStickMotion (>= its first point, where both curves agree): the stick path of the
         // first version; a capped lift or a floor below that point: the fraction of the extended curve (kGameStickMotion is linear from 0
         // there and would predict below the real capsule speed)
-        if (analogFloor && !(liftStick == c.analogFloorStick && liftStick >= kGameStickMotion[0]))
+        if (fixedStick)
+            stick = GameAnalogModifierFrac(c, gait, stance, false, FixedStickFraction(c, stance, f.psmDetailed, stickRaw));
+        else if (analogFloor && !(liftStick == c.analogFloorStick && liftStick >= kGameStickMotion[0]))
             stick = GameAnalogModifierFrac(c, gait, stance, sprintInput, std::fmax(liftFrac, AnalogFloorStickFraction(stickRaw)));
         else
             stick = GameAnalogModifier(c, gait, stance, sprintInput, std::fmin(analogFloor ? liftStick : stickRaw, 1.0f));

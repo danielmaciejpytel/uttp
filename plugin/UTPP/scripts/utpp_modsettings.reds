@@ -51,6 +51,12 @@ public enum UTPPMS_crosshair_color {
   Black = 4
 }
 
+// mm.stickSpeed: 0 = fixed, 1 = analog
+public enum UTPPMS_mm_stickSpeed {
+  WalkOrRun = 0,
+  FollowsTheStick = 1
+}
+
 public class UTPPModSettings extends IScriptable {
 
   // camera.impl
@@ -654,11 +660,21 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.step", "0.05")
   public let camera_zoomUnarmed_lastDistance: Float = 0.6;
 
-  // camera.zoomUnarmed.fppHandoff
+  // mm.stickSpeed
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
   @runtimeProperty("ModSettings.order", "62")
+  @runtimeProperty("ModSettings.displayName", "Gamepad stick speed")
+  @runtimeProperty("ModSettings.description", "Walk or run: pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the animations. Follows the stick (default): her speed changes smoothly with how far the stick is pushed, as in the base game. Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.")
+  @runtimeProperty("ModSettings.displayValues", "\"Walk or run\", \"Follows the stick\"")
+  public let mm_stickSpeed: UTPPMS_mm_stickSpeed = UTPPMS_mm_stickSpeed.FollowsTheStick;
+
+  // camera.zoomUnarmed.fppHandoff
+  @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
+  @runtimeProperty("ModSettings.category", "Advanced")
+  @runtimeProperty("ModSettings.category.order", "6")
+  @runtimeProperty("ModSettings.order", "63")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: FPP past last step")
   @runtimeProperty("ModSettings.description", "On: past the last step the view goes to first person and the game's own (Kiroshi) zoom takes over. Off: the wheel stops at the last third-person step.")
   public let camera_zoomUnarmed_fppHandoff: Bool = false;
@@ -726,6 +742,7 @@ public class UTPPModSettings extends IScriptable {
     s += "camera_zoomUnarmed_steps=" + IntToString(this.camera_zoomUnarmed_steps) + "\n";
     s += "camera_zoomUnarmed_distance=" + UTPPMSFloat(this.camera_zoomUnarmed_distance) + "\n";
     s += "camera_zoomUnarmed_lastDistance=" + UTPPMSFloat(this.camera_zoomUnarmed_lastDistance) + "\n";
+    s += "mm_stickSpeed=" + IntToString(EnumInt(this.mm_stickSpeed)) + "\n";
     s += "camera_zoomUnarmed_fppHandoff=" + UTPPMSBool(this.camera_zoomUnarmed_fppHandoff) + "\n";
     return s;
   }

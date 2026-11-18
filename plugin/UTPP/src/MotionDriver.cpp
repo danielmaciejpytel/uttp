@@ -354,6 +354,9 @@ std::atomic<bool> g_walkSpeedLive{false};
 // AND v2 can run, refreshed with the walk speed flag (AnalogFloorMul gate).
 std::atomic<float> g_minAnalogWalk{0.0f};
 std::atomic<bool> g_minAnalogWalkLive{false};
+// Fixed stick speed (SetStickSpeedMode, CET mm.stickSpeed; MotionAdapter.hpp MapConfig::stickSpeedFixed): read by every Step; starts at the
+// MapConfig default (analog).
+std::atomic<bool> g_stickSpeedFixed{adapter::MapConfig{}.stickSpeedFixed};
 std::atomic<bool> g_tier2Slow{false};
 // Selection churn guards as a group (SetSelectionGuards, CET mm.selectionGuards): read by every Step
 std::atomic<bool> g_selectionGuards{true};
@@ -2294,6 +2297,19 @@ bool SetMinAnalogWalk(float aMs)
 float MinAnalogWalkSetting()
 {
     return g_minAnalogWalk.load(std::memory_order_acquire);
+}
+
+bool SetStickSpeedMode(int aMode)
+{
+    if (aMode != 0 && aMode != 1)
+        return false;
+    g_stickSpeedFixed.store(aMode == 1, std::memory_order_release); // the next Step maps it (mc.stickSpeedFixed)
+    return true;
+}
+
+int StickSpeedMode()
+{
+    return g_stickSpeedFixed.load(std::memory_order_acquire) ? 1 : 0;
 }
 
 bool SetSelectionGuards(bool aOn)
@@ -5147,6 +5163,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     mc.h2Strafe = g_h2GuardSetting;
     mc.gameWalkTogglePoint = g_walkSpeed.load(std::memory_order_acquire);
     adapter::SetAnalogFloor(mc, g_minAnalogWalk.load(std::memory_order_acquire)); // analogFloorStick / analogFloorFrac; 0 = off
+    mc.stickSpeedFixed = g_stickSpeedFixed.load(std::memory_order_acquire);
     // selection churn guards as a group (SetSelectionGuards): the gait return hold of the speed map and the matcher's guards
     const bool selectionGuards = g_selectionGuards.load(std::memory_order_acquire);
     if (!selectionGuards)
@@ -7303,6 +7320,7 @@ std::string StatusLocked()
            " slideRollHold=" + std::to_string(g_reloadRollHold.hold) +
            " walkSpeed=" + std::to_string(g_walkSpeed.load(std::memory_order_acquire)) +
            " minAnalogWalk=" + std::to_string(g_minAnalogWalk.load(std::memory_order_acquire)) +
+           " stickSpeed=" + std::to_string(g_stickSpeedFixed.load(std::memory_order_acquire) ? 1 : 0) +
            " selGuards=" + std::to_string(g_selectionGuards.load(std::memory_order_acquire) ? 1 : 0) +
            " tier2Slow=" + std::to_string(g_tier2Slow.load(std::memory_order_acquire) ? 1 : 0) +
            " shooterMode=" + std::to_string(g_shooter_modeSetting ? 1 : 0) +

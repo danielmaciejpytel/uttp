@@ -654,7 +654,9 @@ public func UTPPUpdateShooterModeSpeed(player: ref<PlayerPuppet>, scriptInterfac
   // stick released or below the 0.15 gate: keep the last multiplier, except under a small tilt the minimum analog walk speed lifts
   // (UTPPAnalogFloorWouldApply): there it is recomputed (the native answers 1 below 0.15 -> removed), so a stale side / back value
   // (~0.7 / 0.6) never stacks under the floor. Floor setting 0 or a released stick (|mv|^2 <= 0.0004): unchanged.
-  if !moving && IsDefined(player.utppShooterModeSpeedMod) && !UTPPAnalogFloorWouldApply(scriptInterface, stateName, move, walkToggled) {
+  // the same for the fixed stick speeds (UTPPFixedStickWant): a small tilt there is a full walk, recomputed like under the floor
+  if !moving && IsDefined(player.utppShooterModeSpeedMod) && !UTPPAnalogFloorWouldApply(scriptInterface, stateName, move, walkToggled)
+     && AbsF(UTPPFixedStickWant(scriptInterface, stateName, move, walkToggled, UTPPIsTier2Slow(player, scriptInterface)) - 1.0) < 0.001 {
     return;
   }
   let want: Float = ClampF(UTPPMotionShooterModeSpeedMul(move.X, move.Y, detailed), 0.5, 1.0);
@@ -820,6 +822,11 @@ public func UTPPAnalogFloorWant(scriptInterface: ref<StateGameScriptInterface>, 
   if !((state == 1 || state == 2) && (detailed == 1 || detailed == 3) && scriptInterface.IsOnGround()) {
     return 1.0;
   }
+  // fixed stick speeds (UTPPFixedStickWant) replace the floor wherever they apply
+  let owner: ref<PlayerPuppet> = scriptInterface.executionOwner as PlayerPuppet;
+  if IsDefined(owner) && AbsF(UTPPFixedStickWant(scriptInterface, stateName, move, walkToggled, UTPPIsTier2Slow(owner, scriptInterface)) - 1.0) >= 0.001 {
+    return 1.0;
+  }
   // walk toggle (G): the same m/s against the walk speed, not the stand run (0.34 m/s instead of 0.82 at walk speed 1.6)
   return ClampF(UTPPMotionAnalogFloorMul(move.X, move.Y, detailed, walkToggled && Equals(stateName, n"stand")), 1.0, 10.0);
 }
@@ -852,6 +859,172 @@ public func UTPPUpdateAnalogFloor(player: ref<PlayerPuppet>, scriptInterface: re
   player.utppAnalogFloorMod = RPGManager.CreateStatModifier(gamedataStatType.MaxSpeed, gameStatModifierType.Multiplier, want);
   stats.AddModifier(id, player.utppAnalogFloorMod);
   player.utppAnalogFloorMul = want;
+}
+
+// ---- Stick speed model (CET mm.stickSpeed -> UTPPSetStickSpeedMode) ----
+// Analog (mode 0, the state of a fresh session until CET sends the setting): the game speed follows the stick (the curve below), lifted
+// by the minimum analog walk speed above; nothing in this section changes anything. Fixed (mode 1): two speeds like a motion matching
+// character with fixed gait speeds - a stick below 0.7 gives the walk speed, a stick at 0.7 and above the full-stick run speed; in a
+// crouch every tilt gives the full-stick crouch speed. UTPP adds one Multiplier on MaxSpeed, owned by the fields below:
+// multiplier = target fraction / the fraction of the full-stick speed the game gives at this stick (a ratio, so a slower save or body
+// keeps its own proportions). Only in third person, on the ground, locomotion state 'stand' / 'crouch' with LocomotionDetailed Stand 1 /
+// Crouch 3, walk toggle off (the walk toggle keeps UTPPUpdateWalkSpeed), no Tier2 Slow (scene slow zones keep the game speed), motion
+// driving. Removed at once when the stick is released (|mv|^2 <= 0.0004) and when any condition fails; while it applies the minimum analog
+// walk speed is off (UTPPAnalogFloorWant), the Shooter mode side / back multiplier multiplies with it on purpose.
+public class UTPPStickSpeedState extends ScriptableSystem {
+  private let m_mode: Int32;
+
+  public func SetMode(mode: Int32) -> Bool {
+    if mode < 0 || mode > 1 {
+      return false;
+    }
+    this.m_mode = mode;
+    return true;
+  }
+
+  public func GetMode() -> Int32 {
+    return this.m_mode;
+  }
+}
+
+public func UTPPStickSpeedStateOf(game: GameInstance) -> ref<UTPPStickSpeedState> {
+  let container: ref<ScriptableSystemsContainer> = GameInstance.GetScriptableSystemsContainer(game);
+  if !IsDefined(container) {
+    return null;
+  }
+  return container.Get(n"UTPPStickSpeedState") as UTPPStickSpeedState;
+}
+
+// CET: Game.UTPPSetStickSpeedMode(0 analog | 1 fixed). False = no game session yet or a value out of range (nothing stored).
+public func UTPPSetStickSpeedMode(mode: Int32) -> Bool {
+  let state: ref<UTPPStickSpeedState> = UTPPStickSpeedStateOf(GetGameInstance());
+  return IsDefined(state) && state.SetMode(mode);
+}
+
+// -1 = no game session yet.
+public func UTPPGetStickSpeedMode() -> Int32 {
+  let state: ref<UTPPStickSpeedState> = UTPPStickSpeedStateOf(GetGameInstance());
+  if !IsDefined(state) {
+    return -1;
+  }
+  return state.GetMode();
+}
+
+public func UTPPStickSpeedFixed(game: GameInstance) -> Bool {
+  let state: ref<UTPPStickSpeedState> = UTPPStickSpeedStateOf(game);
+  return IsDefined(state) && state.GetMode() == 1;
+}
+
+// Fraction of the full-stick game speed at the stick |mv| (stand, measured game speeds in m/s: 0.09 -> 0.24, 0.18 -> 0.30, 0.27 -> 0.41,
+// 0.455 -> 0.82, 0.73 -> 1.94, 0.82 -> 2.48, 1.0 -> 3.84; linear between the points and from (0, 0)). The same curve as the minimum analog
+// walk speed of the motion driver; crouch follows the same fractions (0.82 -> 0.65 of the crouch full-stick speed).
+public func UTPPGameStickFraction(stick: Float) -> Float {
+  if stick <= 0.0 {
+    return 0.0;
+  }
+  if stick >= 1.0 {
+    return 1.0;
+  }
+  let s0: Float = 0.0;
+  let v0: Float = 0.0;
+  let s1: Float = 1.0;
+  let v1: Float = 3.84;
+  if stick <= 0.09 {
+    s1 = 0.09; v1 = 0.24;
+  } else {
+    if stick <= 0.18 {
+      s0 = 0.09; v0 = 0.24; s1 = 0.18; v1 = 0.30;
+    } else {
+      if stick <= 0.27 {
+        s0 = 0.18; v0 = 0.30; s1 = 0.27; v1 = 0.41;
+      } else {
+        if stick <= 0.455 {
+          s0 = 0.27; v0 = 0.41; s1 = 0.455; v1 = 0.82;
+        } else {
+          if stick <= 0.73 {
+            s0 = 0.455; v0 = 0.82; s1 = 0.73; v1 = 1.94;
+          } else {
+            if stick <= 0.82 {
+              s0 = 0.73; v0 = 1.94; s1 = 0.82; v1 = 2.48;
+            } else {
+              s0 = 0.82; v0 = 2.48;
+            }
+          }
+        }
+      }
+    }
+  }
+  return (v0 + (v1 - v0) * (stick - s0) / (s1 - s0)) / 3.84;
+}
+
+// Fixed mode multiplier of this frame without the third-person test (exactly 1.0 = not applied). Walk = 1.6 m/s at the full-stick curve
+// (the game walk point the motion speed map puts on the walk clips), split at the stick 0.7 (the motion walk / run threshold the driver
+// uses for the gait). The multiplier is capped at 10 (a tilt below ~0.04 ramps up to the walk speed).
+public func UTPPFixedStickWant(scriptInterface: ref<StateGameScriptInterface>, stateName: CName, move: Vector2, walkToggled: Bool, tier2Slow: Bool) -> Float {
+  if move.X * move.X + move.Y * move.Y <= 0.0004 || walkToggled || tier2Slow {
+    return 1.0;
+  }
+  if !IsDefined(scriptInterface.executionOwner) || !UTPPStickSpeedFixed(scriptInterface.executionOwner.GetGame()) {
+    return 1.0;
+  }
+  let bb: ref<IBlackboard> = scriptInterface.localBlackboard;
+  let detailed: Int32 = 0;
+  if IsDefined(bb) {
+    detailed = bb.GetInt(GetAllBlackboardDefs().PlayerStateMachine.LocomotionDetailed);
+  }
+  let state: Int32 = UTPPLocoStateId(stateName);
+  // UTPPLocoStateId: stand / forceWalk 1, crouch 2; gamePSMDetailedLocomotionStates.Stand 1, Crouch 3
+  if !((state == 1 || state == 2) && (detailed == 1 || detailed == 3) && scriptInterface.IsOnGround()) {
+    return 1.0;
+  }
+  let stick: Float = MinF(SqrtF(move.X * move.X + move.Y * move.Y), 1.0);
+  let frac: Float = UTPPGameStickFraction(stick);
+  if frac <= 0.0 {
+    return 1.0;
+  }
+  let target: Float = 1.0;
+  if state == 1 && stick < 0.7 {
+    target = 1.6 / 3.84;
+  }
+  return ClampF(target / frac, 0.1, 10.0);
+}
+
+@addField(PlayerPuppet)
+public let utppStickSpeedMod: ref<gameStatModifierData>;
+
+@addField(PlayerPuppet)
+public let utppStickSpeedMul: Float;
+
+public func UTPPRemoveStickSpeedMod(player: ref<PlayerPuppet>, stats: ref<StatsSystem>, id: StatsObjectID) -> Void {
+  if IsDefined(player.utppStickSpeedMod) {
+    stats.RemoveModifier(id, player.utppStickSpeedMod);
+    player.utppStickSpeedMod = null;
+  }
+  player.utppStickSpeedMul = 1.0;
+}
+
+public func UTPPUpdateStickSpeed(player: ref<PlayerPuppet>, scriptInterface: ref<StateGameScriptInterface>, stateName: CName, move: Vector2, tpp: Bool, walkToggled: Bool, tier2Slow: Bool) -> Void {
+  let stats: ref<StatsSystem> = scriptInterface.GetStatsSystem();
+  if !IsDefined(stats) {
+    return;
+  }
+  let id: StatsObjectID = Cast<StatsObjectID>(scriptInterface.executionOwnerEntityID);
+  if !tpp {
+    UTPPRemoveStickSpeedMod(player, stats, id);
+    return;
+  }
+  let want: Float = UTPPFixedStickWant(scriptInterface, stateName, move, walkToggled, tier2Slow);
+  if AbsF(want - 1.0) < 0.001 {
+    UTPPRemoveStickSpeedMod(player, stats, id);
+    return;
+  }
+  if IsDefined(player.utppStickSpeedMod) && AbsF(want - player.utppStickSpeedMul) <= 0.02 {
+    return;
+  }
+  UTPPRemoveStickSpeedMod(player, stats, id);
+  player.utppStickSpeedMod = RPGManager.CreateStatModifier(gamedataStatType.MaxSpeed, gameStatModifierType.Multiplier, want);
+  stats.AddModifier(id, player.utppStickSpeedMod);
+  player.utppStickSpeedMul = want;
 }
 
 // GameplayRestriction.Tier2LocomotionSlow (PSM HighLevel SceneTier2, highLevelTransitions.script SetTier2LocomotionSlow; the status
@@ -893,6 +1066,9 @@ public func UTPPFeedFromLocomotion(stateName: CName, timeDelta: Float, scriptInt
     if IsDefined(player.utppAnalogFloorMod) {
       UTPPRemoveAnalogFloorMod(player, scriptInterface.GetStatsSystem(), Cast<StatsObjectID>(scriptInterface.executionOwnerEntityID));
     }
+    if IsDefined(player.utppStickSpeedMod) {
+      UTPPRemoveStickSpeedMod(player, scriptInterface.GetStatsSystem(), Cast<StatsObjectID>(scriptInterface.executionOwnerEntityID));
+    }
     return;
   }
   let velocity: Vector4 = scriptInterface.GetOwnerStateVectorParameterVector(physicsStateValue.LinearVelocity);
@@ -917,6 +1093,7 @@ public func UTPPFeedFromLocomotion(stateName: CName, timeDelta: Float, scriptInt
   UTPPUpdateShooterModeSpeed(player, scriptInterface, move, moving, tpp, stateName, walkToggled); // Shooter mode: motion set side / back speeds (1.0 = nothing while off)
   UTPPUpdateWalkSpeed(player, scriptInterface, stateName, walkToggled, moving, tpp, tier2Slow); // walk toggle speed (0 = vanilla)
   UTPPUpdateAnalogFloor(player, scriptInterface, stateName, move, tpp, walkToggled); // minimum analog walk speed (no 'moving' gate; 1.0 = nothing while off)
+  UTPPUpdateStickSpeed(player, scriptInterface, stateName, move, tpp, walkToggled, tier2Slow); // fixed walk / run speeds (1.0 = nothing in analog mode)
 }
 
 // AIR HOLD stage: the air fields of this frame's feed. PSM.Fall is read here, before LocomotionAirEvents writes it
@@ -1351,6 +1528,9 @@ public native func UTPPFeedMotionTier2Slow(slow: Bool) -> Void
 // Lock-free (atomic loads). Keep these declarations and the DLL natives (Main.cpp) in sync.
 public native func UTPPSetMotionMinAnalogWalk(metersPerSecond: Float) -> Bool
 public native func UTPPMotionAnalogFloorMul(moveX: Float, moveY: Float, detailed: Int32, walk: Bool) -> Float
+// Stick speed model of the motion driver (CET mm.stickSpeed, called next to UTPPSetStickSpeedMode; DLL default 0 = analog): 1 = fixed, the
+// prediction follows the speeds UTPPFixedStickWant holds. False for any other value (nothing changed). Keep in sync with Main.cpp.
+public native func UTPPSetMotionStickSpeedMode(mode: Int32) -> Bool
 // ---- AIR HOLD (CET mm.air / mm.airProbe / mm.airSteer) ----
 // Air area mode: 0 auto (default), 1 clips, 2 hold, 3 off. auto / clips run the data-free hold mode
 // (no mid-air search / turn / pivot picks, no foot locks or offset-root drag in the air, slowed stride, clean hand-back). False = invalid.

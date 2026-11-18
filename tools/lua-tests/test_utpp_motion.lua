@@ -11,7 +11,7 @@ local function fresh()
 end
 local function mock()
   local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    walk = {}, minWalk = {}, barrel = {}, camCalls = {}, camOn = false }
+    walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -95,6 +95,16 @@ local function mock()
       t.minWalk[#t.minWalk + 1] = ms
       if t.minWalkError then error("minimum walk speed native failure") end
       return not t.minWalkReject
+    end,
+    setStickSpeed = function(mode)
+      t.stick[#t.stick + 1] = mode
+      if t.stickError then error("stick speed script failure") end
+      return not t.stickReject
+    end,
+    setMotionStickSpeed = function(mode)
+      t.motionStick[#t.motionStick + 1] = mode
+      if t.motionStickError then error("stick speed native missing") end
+      return true
     end,
     setBarrelLoop = function(on)
       t.barrel[#t.barrel + 1] = on
@@ -199,6 +209,11 @@ do
   check("registered mm.minWalkSpeed: float 0..1.6 step 0.01, default 0.82, animation section, label <= 38 chars",
     mw ~= nil and mw.type == "float" and mw.default == 0.82 and mw.min == 0 and mw.max == 1.6 and mw.step == 0.01
     and mw.section == "animation" and #mw.label <= 38 and type(mw.desc) == "string", mw and mw.label)
+  local ss = defs["mm.stickSpeed"]
+  check("registered mm.stickSpeed: choice fixed / analog, default analog, animation section, label <= 38 chars",
+    ss ~= nil and ss.type == "choice" and ss.default == "analog" and type(ss.choices) == "table" and #ss.choices == 2
+    and ss.choices[1][1] == "fixed" and ss.choices[2][1] == "analog" and ss.section == "animation" and #ss.label <= 38
+    and type(ss.desc) == "string", ss and ss.label)
   local bo = defs["mm.bodyYawOffset"]
   check("registered mm.bodyYawOffset: float -20..20 step 0.5, default 4, animation section, label 'Body yaw offset (deg)'",
     bo ~= nil and bo.type == "float" and bo.default == 4 and bo.min == -20 and bo.max == 20 and bo.step == 0.5
@@ -482,6 +497,60 @@ do
   check("minAnalogWalk while motion is off makes no native call", #t.minWalk == 0 and v.want.minAnalogWalk == 0.82)
   v.SetEnabled(true)
   check("minAnalogWalk is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.minWalk == 1 and t.minWalk[1] == 0.82)
+end
+
+-- mm.stickSpeed: the script system of a game session starts in analog (0) -> no call until the wanted mode differs; fixed = 1;
+-- a fresh session (new glue) resends the mode; a rejected call (no session yet) is retried, a thrown one counted
+do
+  local v, t = fresh(), mock()
+  v.SetEnabled(true)
+  check("stickSpeed default before registration (analog): enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.stick == 0)
+  v.SetStickSpeed("fixed", t.api)
+  check("stickSpeed fixed is sent once as 1", #t.stick == 1 and t.stick[1] == 1 and v.rt.stickSpeedApplied == "fixed")
+  check("steady stickSpeed is not resent", v.Sync(t.api) == "same" and #t.stick == 1)
+  t.enabled = false
+  check("stickSpeed is resent for a fresh glue session", v.Sync(t.api) == "enabled" and #t.stick == 2 and t.stick[2] == 1)
+  v.SetStickSpeed("analog", t.api)
+  check("stickSpeed analog is sent as 0", #t.stick == 3 and t.stick[3] == 0 and v.want.stickSpeed == "analog")
+  v.SetStickSpeed("bogus", t.api)
+  check("unknown stickSpeed value -> fixed", #t.stick == 4 and t.stick[4] == 1 and v.want.stickSpeed == "fixed")
+  t.stickReject = true
+  v.SetStickSpeed("analog", t.api)
+  local errors0 = v.rt.errors
+  check("rejected stickSpeed is never acknowledged and not counted", v.rt.stickSpeedApplied == "fixed" and #t.stick == 5 and v.rt.errors == errors0)
+  t.stickReject = false
+  v.Sync(t.api)
+  check("rejected stickSpeed retries", v.rt.stickSpeedApplied == "analog" and #t.stick == 6 and t.stick[6] == 0)
+  t.stickError = true
+  v.SetStickSpeed("fixed", t.api)
+  check("thrown stickSpeed call is never acknowledged and is counted", v.rt.stickSpeedApplied == "analog" and v.rt.errors == errors0 + 1)
+end
+do
+  local v, t = fresh(), mock()
+  v.SetStickSpeed("fixed", t.api)
+  check("stickSpeed while motion is off makes no call", #t.stick == 0 and v.want.stickSpeed == "fixed")
+  v.SetEnabled(true)
+  check("stickSpeed is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.stick == 1 and t.stick[1] == 1)
+-- the motion driver gets the same mode right after the script accepted it (native UTPPSetMotionStickSpeedMode); a rejected script call
+-- sends nothing to the driver; a missing native (older DLL) keeps the script mode acknowledged and is not counted as an error
+do
+  local v, t = fresh(), mock()
+  v.SetEnabled(true)
+  v.Sync(t.api)
+  v.SetStickSpeed("fixed", t.api)
+  check("stickSpeed fixed goes to the motion driver as 1 with the script", #t.motionStick == 1 and t.motionStick[1] == 1 and #t.stick == 1)
+  v.SetStickSpeed("analog", t.api)
+  check("stickSpeed analog goes to the motion driver as 0", #t.motionStick == 2 and t.motionStick[2] == 0)
+  t.stickReject = true
+  v.SetStickSpeed("fixed", t.api)
+  check("a rejected script call sends nothing to the motion driver", #t.motionStick == 2 and v.rt.stickSpeedApplied == "analog")
+  t.stickReject = false
+  t.motionStickError = true
+  local errors0 = v.rt.errors
+  v.Sync(t.api)
+  check("a missing stick speed native keeps the script mode acknowledged, not counted",
+    v.rt.stickSpeedApplied == "fixed" and #t.motionStick == 3 and v.rt.errors == errors0)
+end
 end
 
 -- mm.bodyYawOffset (2026-10-30): DLL default 0 -> no native call until the value differs; clamped to -20..20, NaN -> 0

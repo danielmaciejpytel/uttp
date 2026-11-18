@@ -23,3 +23,9 @@ set_tests_properties(utpp_mm_analogfloor_mut2 PROPERTIES PASS_REGULAR_EXPRESSION
 set_tests_properties(utpp_mm_analogfloor_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL stand \\|mv\\| 0\\.040 floor: predicted")
 set_tests_properties(utpp_mm_analogfloor_mut4 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL walk \\|mv\\| 0\\.150 floor: predicted")
 set_tests_properties(utpp_mm_analogfloor_mut5 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL walk \\|mv\\| 0\\.090 floor: predicted")
+# ---- Fixed stick speed (CET mm.stickSpeed, MapConfig::stickSpeedFixed): the held speed the prediction follows, the floor off there,
+# no change outside the gate (walk toggle, sprint). No data files.
+add_executable(utpp_mm_analogfloor_fixedstick_test tests/FixedStickSpeedTest.cpp src/mm/MotionAdapter.hpp)
+target_compile_options(utpp_mm_analogfloor_fixedstick_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_mm_analogfloor_fixedstick_test PRIVATE cxx_std_20)
+add_test(NAME utpp_mm_analogfloor_fixedstick_test COMMAND utpp_mm_analogfloor_fixedstick_test)
