@@ -65,7 +65,12 @@ FNV64_PRIME = 0x100000001B3
 
 def project_root() -> str:
     r = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    return os.path.dirname(r) if os.path.basename(r).lower() == "build" else r   # worktree Build/wt-*/tools/mmbake
+    if os.path.basename(r).lower() == "build":          # worktree Build/wt-*/tools/mmbake
+        return os.path.dirname(r)
+    up = os.path.dirname(r)
+    if os.path.basename(up).lower() == "wt" and os.path.basename(os.path.dirname(up)).lower() == "build":
+        return os.path.dirname(os.path.dirname(up))     # worktree Build/wt/<name>/Source/tools/mmbake
+    return r
 
 
 class Log:
