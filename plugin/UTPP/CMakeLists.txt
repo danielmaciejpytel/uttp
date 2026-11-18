@@ -1133,5 +1133,11 @@ target_compile_options(utpp_mmdb_curve_channel_test PRIVATE ${UTPP_WARNINGS} /EH
 target_compile_features(utpp_mmdb_curve_channel_test PRIVATE cxx_std_20)
 add_test(NAME utpp_mmdb_curve_channel_test COMMAND utpp_mmdb_curve_channel_test "${UTPP_MOTION_DB_TEST_FILE}")
 
+# ---- directional locomotion inputs and the capsule play-rate scale (mm/MotionTrajectory.hpp, mm/MotionAdapter.hpp; off by default) ----
+add_executable(utpp_motion_adapter_unit_directional_test tests/DirectionalInputsTest.cpp src/mm/MotionAdapter.hpp src/mm/MotionTrajectory.hpp)
+target_compile_options(utpp_motion_adapter_unit_directional_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_motion_adapter_unit_directional_test PRIVATE cxx_std_20)
+add_test(NAME utpp_motion_adapter_unit_directional_test COMMAND utpp_motion_adapter_unit_directional_test)
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

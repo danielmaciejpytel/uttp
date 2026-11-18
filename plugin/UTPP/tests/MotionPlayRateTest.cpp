@@ -55,6 +55,17 @@ int main(int argc,char** argv){
   Check("nonfinite interval fails safely",!rate2::Calculate(db,d,row,base.data(),std::numeric_limits<float>::quiet_NaN(),1).valid);
   if(!velocities.empty()){auto nonfinite=base;nonfinite[db.Channel(velocities.front()).dataOffset]=std::numeric_limits<float>::infinity();const auto bad=rate2::Calculate(db,d,row,nonfinite.data(),.85f,1.15f);Check("nonfinite physical velocity fails safely",!bad.valid&&Near(bad.wanted,1));}
   Check("missing query fallback is unclamped one",Near(rate2::Calculate(db,d,row,nullptr,1.2f,1.5f).wanted,1));
+  {
+   const auto plain=rate2::Calculate(db,d,row,base.data(),.1f,3.f);const auto one=rate2::Calculate(db,d,row,base.data(),.1f,3.f,1.f,1.f);
+   Check("query speed scale 1 is bit-identical",plain.valid&&one.valid&&plain.ratio==one.ratio&&plain.wanted==one.wanted&&plain.querySpeed==one.querySpeed);
+   const auto up=rate2::Calculate(db,d,row,base.data(),.1f,3.f,1.f,1.25f);
+   Check("query speed scale multiplies the query speed and the ratio",up.valid&&Near(up.querySpeed,plain.querySpeed*1.25f,1e-3f)&&Near(up.ratio,plain.ratio*1.25f,1e-3f));
+   const auto clamped=rate2::Calculate(db,d,row,base.data(),.85f,1.15f,1.f,2.f);
+   Check("scaled ratio stays inside the rate bounds",clamped.valid&&Near(clamped.wanted,1.15f));
+   const auto nan=rate2::Calculate(db,d,row,base.data(),.1f,3.f,1.f,std::numeric_limits<float>::quiet_NaN());
+   const auto neg=rate2::Calculate(db,d,row,base.data(),.1f,3.f,1.f,-2.f);
+   Check("non-finite or non-positive scale is ignored",nan.valid&&neg.valid&&nan.ratio==plain.ratio&&neg.ratio==plain.ratio);
+  }
   if(velocities.size()>1){
    ++multiple;auto q=base;double expectedTotal=0,weightedNumerator=0,weightedDenominator=0;
    for(size_t n=0;n<velocities.size();++n){const auto& c=db.Channel(velocities[n]);const float f=n==0?.25f:1.75f;double mag2=0,wm2=0;for(uint32_t k=0;k<c.cardinality;++k){const auto o=c.dataOffset+k;mag2+=double(base[o])*base[o];wm2+=double(base[o]*db.NormScale(rec.norm)[o])*(base[o]*db.NormScale(rec.norm)[o]);q[o]*=f;if(k&&db.NormScale(rec.norm)[o]!=db.NormScale(rec.norm)[c.dataOffset])unequalScale=true;}expectedTotal+=std::sqrt(mag2)*f;weightedNumerator+=std::sqrt(wm2)*f;weightedDenominator+=std::sqrt(wm2);}

@@ -19,7 +19,7 @@ struct Result
 
 inline Result Calculate(const motion::MotionDatabase& db, uint32_t database, uint32_t localRow,
                         const float* rawQuery, float minRate, float maxRate,
-                        float trajectorySpeedMultiplier = 1.0f)
+                        float trajectorySpeedMultiplier = 1.0f, float querySpeedScale = 1.0f)
 {
     Result out;
     const auto invalid = [] { Result r; r.valid = false; return r; };
@@ -68,6 +68,9 @@ inline Result Calculate(const motion::MotionDatabase& db, uint32_t database, uin
     }
     if (!std::isfinite(out.querySpeed) || !std::isfinite(out.poseSpeed)) return invalid();
     if (!haveTrajectory) return out;
+    // Optional scale of the query speed (for example capsule speed / chooser speed): the clip then plays at the scaled speed within
+    // the rate bounds. 1 (and any non-finite or non-positive value) leaves the query speed as it is.
+    if (querySpeedScale != 1.0f && std::isfinite(querySpeedScale) && querySpeedScale > 0.0f) out.querySpeed *= querySpeedScale;
     // UE's 1e-4 cm/s denominator guard in this format's metres/second.
     if (out.poseSpeed > 1e-6f) out.ratio = out.querySpeed / out.poseSpeed;
     out.wanted = std::clamp(out.ratio, minRate, maxRate);
