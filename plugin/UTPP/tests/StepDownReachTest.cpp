@@ -91,8 +91,11 @@ int main()
     const std::vector<int> off = Modes(drop, false), on = Modes(drop, true);
     CHECK(AirFeeds(off) >= 1, "reach off: the recorded 0.31 m drop turns InAir (%d air feeds)", AirFeeds(off));
     CHECK(AirFeeds(on) == 0, "reach on: the recorded 0.31 m drop stays on the ground (%d air feeds)", AirFeeds(on));
-    // 0.43 m without the PSM Fall detail (inside the reach depth; with it the floor is 0.13 m away on the last feed, beyond the PSM Fall reach)
-    CHECK(AirFeeds(Modes(RecordedDrop(1.4f, true, false), true)) == 0, "reach on: a 0.43 m drop of the same duration stays on the ground");
+    // the depth bound: 0.30 m without the PSM Fall detail stays ground; 0.335 m (the recorded 35 cm ledge floor) and 0.43 m turn InAir
+    CHECK(AirFeeds(Modes(RecordedDrop(0.97f, true, false), true)) == 0, "reach on: a 0.30 m drop of the same duration stays on the ground");
+    CHECK(AirFeeds(Modes(RecordedDrop(1.08f, true, false), true)) >= 1, "reach on: a 0.335 m drop turns InAir (deeper than kStepDownReachM)");
+    CHECK(AirFeeds(Modes(RecordedDrop(1.08f), true)) >= 1, "reach on: a 0.335 m drop with the PSM Fall detail on its last feed turns InAir");
+    CHECK(AirFeeds(Modes(RecordedDrop(1.4f, true, false), true)) >= 1, "reach on: a 0.43 m drop turns InAir");
     // 0.62 m: deeper than kStepDownReachM
     CHECK(AirFeeds(Modes(RecordedDrop(2.0f, true, false), true)) >= 1, "reach on: a 0.62 m drop turns InAir");
     CHECK(AirFeeds(Modes(RecordedDrop(1.4f), true)) >= 1, "reach on: a 0.43 m drop whose PSM Fall feed is 0.13 m above the floor turns InAir");

@@ -674,12 +674,15 @@ inline constexpr float kGroundDropPsmFallS = 0.04f;
 // With it on, the step-down reach of groundDropGraceS covers a known floor up to kStepDownReachM below the drop start for kStepDownReachMaxS,
 // a descending PSM Fall run keeps it while the floor is reached within kStepDownReachPsmFallS, and a feed whose probe missed uses the floor
 // of the last probe hit of the same contact loss (dead-reckoned by the capsule drop since). Recorded 0.30 m drops of 0.2 s (probe hit on
-// every second feed) otherwise turned InAir on their last airborne feed: one fall-loop feed, then a land clip.
+// every second feed) otherwise turned InAir on their last airborne feed: one fall-loop feed, then a land clip. Depth bound: the recorded
+// floors that stay ground were 0.29-0.31 m below the drop start, the shallowest recorded ledge falls 0.33-0.35 m (fall_ledge: running off a
+// 35 cm ledge, the floor probed 0.334-0.351 m below, PSM Fall on the last two airborne feeds, must keep its air clips); drop time (0.17-0.20 s)
+// and PSM timing are the same for both. = air::kStepDownReachDepthM.
 #ifndef UTPP_STEP_DOWN_REACH_DEFAULT
 #define UTPP_STEP_DOWN_REACH_DEFAULT 0
 #endif
 inline constexpr bool kStepDownReachDefault = UTPP_STEP_DOWN_REACH_DEFAULT != 0;
-inline constexpr float kStepDownReachM = 0.45f;
+inline constexpr float kStepDownReachM = 0.32f;
 inline constexpr float kStepDownReachMaxS = 0.25f;
 inline constexpr float kStepDownReachPsmFallS = 0.04f;
 // --- end step-down reach ---
