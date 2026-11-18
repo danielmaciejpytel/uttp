@@ -8,6 +8,11 @@
 #include "MotionRootTrack.hpp"
 #include <array>
 #include <span>
+#ifndef UTPP_BLEND_SIGNAL_MODE
+// Default of BlendStack::SetPerBoneSignals: bit 0 = root delta / yaw on the Root bone's weight, bit 1 = contacts on the leg weights,
+// 0 = every signal on the whole-layer weight (default until the per-bone blend factors are settled; a build may override it).
+#define UTPP_BLEND_SIGNAL_MODE 0
+#endif
 #ifndef UTPP_FOOTSINK_MUTATION
 #define UTPP_FOOTSINK_MUTATION 0
 #endif
@@ -45,6 +50,11 @@ class BlendStack
   public:
     static constexpr uint32_t kLayers = 4, kCapacity = 6;
     static constexpr float kFootGateFall = 0.12f; // s, full-scale fall time of the foot height gate
+    // Steering of the root yaw (ProcessGraph): spring half-life of the general node and the animation lookahead both nodes extract the
+    // authored turn over. The shipped default keeps the previous values (0.2 s / 0.5 s): the reference values were worse on pivots and crouch
+    // loops in replay; SetSteering(kSteeringHalfLife, kSteeringTargetTime) selects them for comparison.
+    static constexpr float kSteeringHalfLife = 0.4f, kSteeringTargetTime = 2.0f;
+    static constexpr float kSteeringHalfLifePrevious = 0.2f, kSteeringTargetTimePrevious = 0.5f;
     // durations multiply base blend duration, already resolved to CP bones by caller.
     // No implicit UE skeleton mapping. Empty => uniform. Allocations occur only here.
     bool Init(const motion::MotionDatabase &db, std::span<const float> durationFactors = {})
@@ -66,6 +76,7 @@ class BlendStack
         m_collapses = 0;
         m_footGate[0] = m_footGate[1] = m_stanceGate[0] = m_stanceGate[1] = 0.0f;
         m_orientationCurve = -1;
+        m_rootBone = -1;
         m_poseWarp.Init(db);
         m_feetReady = m_feetWarp.Init(db);
         for (uint32_t k = 0; k < db.NumBones(); ++k)
@@ -76,6 +87,8 @@ class BlendStack
                 m_footBones[1] = int32_t(k);
             if (db.BoneName(k) == "Hips")
                 m_hipsBone = int32_t(k);
+            if (db.BoneName(k) == "Root")
+                m_rootBone = int32_t(k);
         }
         m_hipsChain.clear();
         for (int32_t b = m_hipsBone; b >= 0; b = db.BoneParent(uint32_t(b)))
@@ -109,6 +122,39 @@ class BlendStack
     void SetGraphInputs(const GraphInputs &input)
     {
         m_graph = input;
+    }
+    // Steering parameters (see kSteeringHalfLife). Non-finite or non-positive values are rejected and leave the current ones.
+    bool SetSteering(float halfLife, float targetTime)
+    {
+        if (!std::isfinite(halfLife) || halfLife <= 0 || !std::isfinite(targetTime) || targetTime <= 0 || targetTime > 10)
+            return false;
+        m_steeringHalfLife = halfLife;
+        m_steeringTargetTime = targetTime;
+        return true;
+    }
+    // Root-motion signals of the mix (OutputSignals). root: the root delta and yaw fade with the Root bone's weight; contacts: each foot's
+    // contact fades with its leg's weight, so they reach the new clip together with the bones that carry them. Off: the signal fades with
+    // the whole-layer weight (the previous mix).
+    void SetPerBoneSignals(bool root, bool contacts)
+    {
+        m_perBoneRoot = root;
+        m_perBoneContacts = contacts;
+    }
+    bool PerBoneRoot() const
+    {
+        return m_perBoneRoot;
+    }
+    bool PerBoneContacts() const
+    {
+        return m_perBoneContacts;
+    }
+    float SteeringHalfLife() const
+    {
+        return m_steeringHalfLife;
+    }
+    float SteeringTargetTime() const
+    {
+        return m_steeringTargetTime;
     }
     // Foot height keeping (see KeepFootHeight). Default on; off reproduces the plain crossfade bit for bit.
     void SetFootHeightKeep(bool enabled)
@@ -678,7 +724,8 @@ class BlendStack
         steering.rootSpeedMs = std::hypot(signal.rootX, signal.rootY);
         steering.previousVisualWorldYaw = m_graph.previousVisualWorldYaw;
         steering.targetWorldYaw = m_graph.targetWorldYaw;
-        steering.havePrediction = root2::Extract(*m_db, p.clip, p.time, .5, prediction);
+        steering.halfLife = m_steeringHalfLife;
+        steering.havePrediction = root2::Extract(*m_db, p.clip, p.time, m_steeringTargetTime, prediction);
         steering.predictedAuthoredYaw = float(prediction.yaw);
         steering.alpha = p.generalSteering.UpdateEnable(m_graph.generalSteering, dt);
         const auto general = p.generalSteering.Update(steering);
@@ -754,9 +801,21 @@ class BlendStack
     }
     static Signals MixSignals(Signals a, Signals b, float w)
     {
-        return {a.rootX + (b.rootX - a.rootX) * w, a.rootY + (b.rootY - a.rootY) * w,
-                a.rootYaw + (b.rootYaw - a.rootYaw) * w, a.left + (b.left - a.left) * w,
-                a.right + (b.right - a.right) * w};
+        return MixSignals(a, b, w, w, w);
+    }
+    // root = weight of the root delta / yaw, left / right = weight of each foot's contact.
+    static Signals MixSignals(Signals a, Signals b, float root, float left, float right)
+    {
+        return {a.rootX + (b.rootX - a.rootX) * root, a.rootY + (b.rootY - a.rootY) * root,
+                a.rootYaw + (b.rootYaw - a.rootYaw) * root, a.left + (b.left - a.left) * left,
+                a.right + (b.right - a.right) * right};
+    }
+    // Signal mix of one layer over the layers under it (see SetPerBoneSignals).
+    Signals MixLayerSignals(const Signals &under, const Signals &layer, const Player &p) const
+    {
+        const float whole = Alpha(p, -1);
+        return MixSignals(under, layer, m_perBoneRoot ? Alpha(p, m_rootBone) : whole,
+                          m_perBoneContacts ? Alpha(p, m_footBones[0]) : whole, m_perBoneContacts ? Alpha(p, m_footBones[1]) : whole);
     }
     Signals Sample(const Player &p) const
     {
@@ -792,7 +851,7 @@ class BlendStack
         }
         auto sig = m_samples[last];
         for (int i = int(last) - 1; i >= int(kLayers); --i)
-            sig = MixSignals(sig, m_samples[uint32_t(i)], Alpha(m_players[uint32_t(i)], -1));
+            sig = MixLayerSignals(sig, m_samples[uint32_t(i)], m_players[uint32_t(i)]);
         m_samples[kLayers] = sig;
         if (m_graph.enabled)
         {
@@ -833,7 +892,7 @@ class BlendStack
         }
         m_signals = m_samples[m_count - 1];
         for (int i = int(m_count) - 2; i >= 0; --i)
-            m_signals = MixSignals(m_signals, m_samples[uint32_t(i)], Alpha(m_players[uint32_t(i)], -1));
+            m_signals = MixLayerSignals(m_signals, m_samples[uint32_t(i)], m_players[uint32_t(i)]);
         // A short cancelled start can still contain an older double-support idle
         // layer. Its scalar contact must not carry the non-support foot's old
         // lock through the actual start player's swing. During this admitted
@@ -866,6 +925,7 @@ class BlendStack
     std::vector<BoneTransform> m_out;
     Signals m_signals{};
     GraphInputs m_graph{};
+    float m_steeringHalfLife = kSteeringHalfLifePrevious, m_steeringTargetTime = kSteeringTargetTimePrevious;
     int32_t m_orientationCurve = -1;
     motionPose::Warp m_poseWarp;
     motionFeet::Warp m_feetWarp;
@@ -885,6 +945,8 @@ class BlendStack
     float m_footGate[2]{0.0f, 0.0f};   // applied KeepFootHeight gate per side (stance and ground fades: the lift)
     float m_stanceGate[2]{0.0f, 0.0f}; // applied KeepFootHeight gate per side of the stance fades alone (the lowering through the legs)
     int32_t m_hipsBone = -1;
+    int32_t m_rootBone = -1; // "Root" (-1 = none: the root signals keep the whole-layer weight)
+    bool m_perBoneRoot = (UTPP_BLEND_SIGNAL_MODE & 1) != 0, m_perBoneContacts = (UTPP_BLEND_SIGNAL_MODE & 2) != 0; // SetPerBoneSignals
     std::vector<int32_t> m_hipsChain; // root -> Hips bone indices
     std::array<motionFeet::Targets, kCapacity> m_targets{};
     std::array<std::array<float, 2>, kCapacity> m_ankleZ{}; // per layer: model-space ankle height of its own pose, left / right

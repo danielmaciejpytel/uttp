@@ -17,7 +17,7 @@ inline Delta Compose(const Delta &a, const Delta &b) {
           a.advancedSeconds + b.advancedSeconds};
 }
 // Positive animation seconds, deliberately independent of real dt/play rate.
-// Used for the source Steering node's .5 ANIMATION-second lookahead.
+// Used for the Steering nodes' ANIMATION-second lookahead (BlendStack steering target time).
 // Interpolating absolute key positions is linear; fractional local deltas
 // must therefore be rotated out of the fraction's starting orientation.
 inline bool Extract(const motion::MotionDatabase &db, int32_t clip, double startSeconds,

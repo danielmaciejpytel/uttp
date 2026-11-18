@@ -50,7 +50,10 @@ inline constexpr float kRestFallbackDelay = 0.5f;            // s: the matcher's
 inline constexpr float kRestTurnGrace = 1.6f;                // s: a turn-in-place clip may idle this long (Turn_180 ~1.7 s, turn in the first 0.5 s)
 inline constexpr float kRestAuthoredRate = 10.f * kDegToRad; // idle loops drift <= 3 deg/s, TIP clips are far above
 inline constexpr float kRestAuthoredHold = 0.25f;            // s after the last authored turn: the clip owns the yaw
-inline constexpr float kMaxOffset = .30f;                    // m: radius of the translation offset
+#ifndef UTPP_OFFSET_ROOT_RADIUS
+#define UTPP_OFFSET_ROOT_RADIUS .30f // m: default radius of the translation offset (a build may override it for offline comparisons)
+#endif
+inline constexpr float kMaxOffset = UTPP_OFFSET_ROOT_RADIUS; // m: default radius of the translation offset (Step::maxOffset)
 // Translation continuity bound (m/s^2). Recorded runs: authored starts change the root speed by <= ~10 m/s^2, a capsule dash or a one-frame
 // reversal by 400+ m/s^2. At 60 fps 20 m/s^2 is 0.6 cm of change per frame; the starts' 0.2 s displacement stays within 0.2 cm of the
 // unbounded law.
@@ -80,6 +83,8 @@ struct Step
     bool airFollow = false;
     // Translation continuity (header item 3): bound of the change of the offset's velocity, m/s^2. <= 0 / non-finite = off (the contract).
     float offsetAccel = 0.f;
+    // Radius of the translation offset (m). Non-finite / negative = kMaxOffset; 0 = the visual root stays on the capsule.
+    float maxOffset = kMaxOffset;
 };
 struct State
 {
@@ -174,6 +179,7 @@ class OffsetRoot
         next.translationRelease = !s.movingGround || s.montage;
         const bool aimMoving = s.aimFacing && s.movingGround;
         next.rotationRelease = aimMoving || (s.montage && !s.aimFacing);
+        const float radius = std::isfinite(s.maxOffset) && s.maxOffset >= 0 ? s.maxOffset : kMaxOffset;
         float x = m.x, y = m.y;
         if (!next.translationRelease)
         {
@@ -211,12 +217,12 @@ class OffsetRoot
         ny += dy;
 #if UTPP_ROOT_CONTINUITY_MUTATION != 1
         if (std::isfinite(s.offsetAccel) && s.offsetAccel > 0)
-            ContinuousStep(s.offsetAccel, s.dt, nx, ny);
+            ContinuousStep(s.offsetAccel, s.dt, radius, nx, ny);
 #endif
         const float distance = std::sqrt(nx * nx + ny * ny);
-        if (distance > kMaxOffset)
+        if (distance > radius)
         {
-            const float k = kMaxOffset / distance;
+            const float k = radius / distance;
             nx *= k;
             ny *= k;
         }
@@ -289,8 +295,8 @@ class OffsetRoot
 
   private:
     // Header item 3: (nx, ny) proposed by the law -> the offset reached with the velocity change bounded by aAccel * dt and the outward
-    // speed braked so it reaches zero at kMaxOffset.
-    void ContinuousStep(float aAccel, float aDt, float &nx, float &ny) const
+    // speed braked so it reaches zero at aRadius.
+    void ContinuousStep(float aAccel, float aDt, float aRadius, float &nx, float &ny) const
     {
         float wx = (nx - m.x) / aDt, wy = (ny - m.y) / aDt;
         float ex = wx - m.vx, ey = wy - m.vy;
@@ -307,7 +313,7 @@ class OffsetRoot
         {
             const float ux = m.x / r, uy = m.y / r;
             const float radial = wx * ux + wy * uy;
-            const float brake = std::sqrt(2.f * aAccel * std::fmax(0.f, kMaxOffset - r));
+            const float brake = std::sqrt(2.f * aAccel * std::fmax(0.f, aRadius - r));
             if (radial > brake)
             {
                 wx -= (radial - brake) * ux;

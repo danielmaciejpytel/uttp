@@ -10,6 +10,8 @@ struct Inputs
     float dt = 0, animationYawDelta = 0, rootSpeedMs = 0;
     float previousVisualWorldYaw = 0, targetWorldYaw = 0, predictedAuthoredYaw = .0f;
     float alpha = 1;
+    // Spring half-life (s) of the general (moving) steering. The turn-in-place node keeps its own (no procedural pull).
+    float halfLife = .2f;
     bool enabled = true, havePrediction = true, turnInPlace = false;
 };
 struct Result
@@ -99,7 +101,7 @@ class Steering
         // Y=(4/smoothingTime)/2=2*ln2/h. All angles/velocity radians, rad/s.
         if (in.rootSpeedMs > -.01f)
         {
-            const float halfLife = in.turnInPlace ? 1e6f : .2f;
+            const float halfLife = in.turnInPlace ? 1e6f : (std::isfinite(in.halfLife) && in.halfLife > 0 ? in.halfLife : .2f);
             const float y = 2 * math::kLn2 / halfLife;
             const float j0 = -residual, j1 = m_velocity + j0 * y, x = y * in.dt;
             const float e = 1 / (1 + 1.00746054f * x + .45053901f * x * x + .25724632f * x * x * x);
