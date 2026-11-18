@@ -1,0 +1,9 @@
+{
+  "format": "utpp-mmbake-db-overrides",
+  "version": 1,
+  "description": "Database settings of the newer reference release applied on top of the extracted posesearch.json (mmbake_base.py --db-overrides). Stop databases: continuing cost bias -0.3. The four sprint start / sprint stop FL and FR clips and DisableReselection on all sprint starts are in database_overrides_sprint.json, used only together with these settings.",
+  "databases": {
+    "PSD_Dense_Stand_Run_Stops": {"continuing_pose_cost_bias": -0.3},
+    "PSD_Dense_Stand_Sprint_Stops": {"continuing_pose_cost_bias": -0.3}
+  }
+}

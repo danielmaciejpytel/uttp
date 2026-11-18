@@ -1,0 +1,26 @@
+{
+  "format": "utpp-mmbake-db-overrides",
+  "version": 1,
+  "description": "database_overrides.json plus the sprint start / sprint stop FL and FR entries of the newer reference release and DisableReselection on every sprint start entry (mmbake_base.py --db-overrides).",
+  "databases": {
+    "PSD_Dense_Stand_Run_Stops": {"continuing_pose_cost_bias": -0.3},
+    "PSD_Dense_Stand_Sprint_Stops": {
+      "continuing_pose_cost_bias": -0.3,
+      "add_entries": [
+        {"clip": "M_Neutral_Sprint_Stop_FR_Rfoot", "disable_reselection": true},
+        {"clip": "M_Neutral_Sprint_Stop_FR_Lfoot", "disable_reselection": true},
+        {"clip": "M_Neutral_Sprint_Stop_FL_Rfoot", "disable_reselection": true},
+        {"clip": "M_Neutral_Sprint_Stop_FL_Lfoot", "disable_reselection": true}
+      ]
+    },
+    "PSD_Dense_Stand_Sprint_Starts": {
+      "add_entries": [
+        {"clip": "M_Neutral_Sprint_Start_FL_Lfoot", "disable_reselection": true},
+        {"clip": "M_Neutral_Sprint_Start_FL_Rfoot", "disable_reselection": true},
+        {"clip": "M_Neutral_Sprint_Start_FR_Lfoot", "disable_reselection": true},
+        {"clip": "M_Neutral_Sprint_Start_FR_Rfoot", "disable_reselection": true}
+      ],
+      "disable_reselection_all": true
+    }
+  }
+}

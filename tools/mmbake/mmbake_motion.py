@@ -149,6 +149,54 @@ def load_json(path):
         return json.load(f)
 
 
+DB_OVERRIDE_KEYS = {"continuing_pose_cost_bias", "add_entries", "disable_reselection_all"}
+
+
+def apply_db_overrides(ps_db, spec):
+    """Apply a --db-overrides spec to the parsed posesearch.json databases in place; returns log lines.
+
+    Per database: continuing_pose_cost_bias (float), add_entries ([{clip, disable_reselection}], appended in order;
+    the other entry fields are copied from the database's first entry), disable_reselection_all (bool, applied after
+    the added entries). Unknown databases, keys, or an added clip that is already an entry stop the bake.
+    """
+    out = []
+    for d, ov in sorted((spec.get("databases") or {}).items()):
+        if d not in ps_db:
+            raise SystemExit(f"--db-overrides: database {d} not in posesearch.json")
+        bad = set(ov) - DB_OVERRIDE_KEYS
+        if bad:
+            raise SystemExit(f"--db-overrides: {d}: unknown keys {sorted(bad)}")
+        db = ps_db[d]
+        if "continuing_pose_cost_bias" in ov:
+            old = db["continuing_pose_cost_bias"]
+            db["continuing_pose_cost_bias"] = float(ov["continuing_pose_cost_bias"])
+            out.append(f"{d}: continuing_pose_cost_bias {old} -> {db['continuing_pose_cost_bias']}")
+        if ov.get("add_entries"):
+            if not db["entries"]:
+                raise SystemExit(f"--db-overrides: {d} has no entry to copy fields from")
+            have = {short_name(e["asset"]) for e in db["entries"]}
+            tmpl = db["entries"][0]
+            folder = tmpl["asset"].rsplit("/", 1)[0]
+            for a in ov["add_entries"]:
+                cn = a["clip"]
+                if cn in have:
+                    raise SystemExit(f"--db-overrides: {d}: {cn} is already an entry")
+                e = dict(tmpl)
+                e["asset"] = f"{folder}/{cn}.{cn}"
+                e["index"] = len(db["entries"])
+                e["disable_reselection"] = bool(a.get("disable_reselection", tmpl.get("disable_reselection", False)))
+                for k in ("play_length_s", "estimated_poses", "sampled_seconds"):
+                    e.pop(k, None)
+                db["entries"].append(e)
+                have.add(cn)
+                out.append(f"{d}: + entry {cn} (disable_reselection {e['disable_reselection']})")
+        if ov.get("disable_reselection_all"):
+            for e in db["entries"]:
+                e["disable_reselection"] = True
+            out.append(f"{d}: disable_reselection on all {len(db['entries'])} entries")
+    return out
+
+
 def sha256_bytes(b):
     return hashlib.sha256(b).hexdigest()
 
@@ -1283,6 +1331,11 @@ def bake_v2(args, log):
     fam = cfg2["databases"]["family"]
     db_names = sorted(d["db"] for d in cmap[cfg2["databases"]["clip_map_list"]]) + slide_dbs
     ps_db = {short_name(d["_path"]): d for d in ps["databases"]}
+    db_overrides = None
+    if getattr(args, "db_overrides", None):
+        db_overrides = load_json(args.db_overrides)
+        for line in apply_db_overrides(ps_db, db_overrides):
+            log(f"db override: {line}")
     ps_schema = {short_name(s["_path"]): s for s in ps["schemas"]}
     ps_nset = {short_name(n["_path"]): [short_name(x) for x in n["databases"]] for n in ps["normalization_sets"]}
     for d in db_names:
@@ -2229,6 +2282,8 @@ def bake_v2(args, log):
         "config": os.path.relpath(args.config, root).replace("\\", "/"), "config_sha256": v1.sha256_file(args.config),
         "v2_config": os.path.relpath(cfg2_path, root).replace("\\", "/"), "v2_config_sha256": v1.sha256_file(cfg2_path),
         "motion_src": motion_src,
+        **({"db_overrides": {"file": os.path.relpath(args.db_overrides, root).replace("\\", "/"),
+                             "sha256": v1.sha256_file(args.db_overrides)}} if db_overrides is not None else {}),
         **({"extra_assets": {"file": os.path.relpath(args.extra_assets, root).replace("\\", "/"),
                              "sha256": v1.sha256_file(args.extra_assets),
                              "clips": {n: v1.sha256_file(extra_files[n]) for n in sorted(extra_files)},
