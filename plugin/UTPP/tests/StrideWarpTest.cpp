@@ -5,6 +5,8 @@
 // Blend stack (actual data, a run loop): a capsule slower than the clip shortens the ankle-to-thigh offset along the root direction by the
 // scale and never lengthens it, the ankle height and the frame-to-frame ankle motion stay continuous, and a capsule at or above clip
 // speed, a non-ground pick, a clip that is not a loop or the warp switched off leave the pose bit for bit unchanged.
+// Clip factor: the scale divides by the clip's planted-foot speed over its root speed (measured per loop clip at Init, clamped, 1 for a
+// clip that is not a loop or has too few planted samples), so a crouch loop whose planted feet travel slower than its root shortens less.
 #include "../src/mm/MotionBlendStack.hpp"
 #include "../src/mm/StrideWarp.hpp"
 
@@ -227,12 +229,49 @@ static void Stack(const motion::MotionDatabase &db, int clip, int hz)
     Check(Run(db, clip, hz, 0.8f, true, false).identical, "warp switched off: pose bit for bit unchanged", hz);
 }
 
+static void ClipFactorSolver(int hz)
+{
+    const float dt = 1.0f / float(hz);
+    Check(stridewarp::ClipFactor(9.0, 10.0, 3) == 1.0f, "too few planted samples: clip factor 1", hz);
+    Check(stridewarp::ClipFactor(9.0, 10.0, 40) == 0.9f, "clip factor = planted-foot speed over root speed", hz);
+    Check(stridewarp::ClipFactor(5.0, 10.0, 40) == stridewarp::kClipFactorMin &&
+              stridewarp::ClipFactor(20.0, 10.0, 40) == stridewarp::kClipFactorMax,
+          "clip factor clamped to its range", hz);
+    stridewarp::State a, b;
+    stridewarp::Inputs in = In(dt, 2.4f, 3.0f);
+    in.clipFactor = 0.9f;
+    float s = 1;
+    for (int k = 0; k < hz; ++k)
+        s = stridewarp::Step(a, in);
+    Check(std::fabs(s - 2.4f / (3.0f * 0.9f)) < 1e-4f, "settled scale = capsule / (root speed x clip factor)", hz);
+    in.capsuleSpeed = 2.9f;
+    Check(stridewarp::Step(b, in) == 1.0f, "a clip factor never lengthens the stride (scale stays at most 1)", hz);
+}
+
+static void StackClipFactor(const motion::MotionDatabase &db, int hz)
+{
+    motionstack::BlendStack probe;
+    const int crouch = ClipIndex(db, "M_Neutral_Crouch_Loop_F"), start = ClipIndex(db, "M_Neutral_Run_Start_F_Lfoot");
+    Check(crouch >= 0 && start >= 0 && probe.Init(db), "clip factor fixture clips found, stack initialised", hz);
+    if (crouch < 0 || start < 0)
+        return;
+    const float k = probe.StrideClipFactor(crouch);
+    std::printf("INFO crouch loop clip factor %.4f @Hz=%d\n", k, hz);
+    Check(k >= stridewarp::kClipFactorMin && k < 0.995f, "crouch loop: planted feet slower than the root (clip factor below 1)", hz);
+    Check(probe.StrideClipFactor(start) == 1.0f && probe.StrideClipFactor(-1) == 1.0f, "a clip that is not a loop keeps clip factor 1", hz);
+    const RunStats r = Run(db, crouch, hz, 0.8f, true, true);
+    Check(r.ok && std::fabs(r.scale - std::fmin(1.0f, 0.8f / k)) < 0.02f, "crouch loop, capsule at 0.8 of the root speed: scale 0.8 / clip factor", hz);
+    Check(r.alongError < 0.005f && r.lengthened < 0.001f, "crouch loop: offset along the root direction shrinks by the scale, never lengthens", hz);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2)
         return 2;
     for (int hz : {30, 60, 144})
         Solver(hz);
+    for (int hz : {30, 60, 144})
+        ClipFactorSolver(hz);
     motion::MotionDatabase db;
     std::string error;
     if (!db.LoadFromFile(argv[1], motion::kRigIdentityWoman, error))
@@ -245,6 +284,8 @@ int main(int argc, char **argv)
     if (clip >= 0)
         for (int hz : {30, 60, 144})
             Stack(db, clip, hz);
+    for (int hz : {30, 60, 144})
+        StackClipFactor(db, hz);
     std::printf("%d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
 }
