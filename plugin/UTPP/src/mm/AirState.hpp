@@ -65,6 +65,17 @@ inline constexpr float kStepDownMaxSeconds = 0.20f;
 inline constexpr int kPsmFallDetail = 14;
 inline constexpr float kStepDownPsmFallSeconds = 0.04f;
 inline constexpr float kStepDownFallM = 0.2f;
+// --- Step-down reach for deeper steps (AirConfig::stepDownReach, default off; = adapter MapConfig::stepDownReach, same build switch) ---
+// With it on, a reach configured by stepDownDepthM > 0 covers a known floor up to kStepDownReachDepthM below the drop start for
+// kStepDownReachMaxSeconds, and a descending PSM Fall run keeps it while the floor is reached within kStepDownReachPsmFallSeconds.
+#ifndef UTPP_STEP_DOWN_REACH_DEFAULT
+#define UTPP_STEP_DOWN_REACH_DEFAULT 0
+#endif
+inline constexpr bool kStepDownReachDefault = UTPP_STEP_DOWN_REACH_DEFAULT != 0;
+inline constexpr float kStepDownReachDepthM = 0.45f;
+inline constexpr float kStepDownReachMaxSeconds = 0.25f;
+inline constexpr float kStepDownReachPsmFallSeconds = 0.04f;
+// --- end step-down reach ---
 
 enum class Mode : uint8_t { Off, Hold, Clips };
 enum class Phase : uint8_t { Ground, TakeOff, Descend, FallLoop, LandApproach, Recover };
@@ -173,6 +184,9 @@ struct AirConfig
     // The other fall evidence (PSM air detail, far probe, vehicle exit) is not delayed. stepDownDepthM 0 = off.
     float stepDownDepthM = 0.0f;
     float stepDownMaxS = 0.0f;
+    // stepDownReach: the deeper reach above (kStepDownReach*) in place of stepDownDepthM / stepDownMaxS / kStepDownPsmFallSeconds while
+    // stepDownDepthM > 0. false = the reach above, bit for bit.
+    bool stepDownReach = kStepDownReachDefault;
 };
 
 struct AirInput
@@ -400,12 +414,16 @@ public:
                 airFeeds_ >= 2 && (airTime_ >= std::fmin(cfg_.stepDownS, kStepDownPsmFallSeconds) || airDropM_ >= kStepDownFallM);
             // step-down reach: a known floor within stepDownDepthM of the drop start keeps the step-down until stepDownMaxS
             // (h_ dead-reckoned below 0 = the floor is reached, the touchdown is a feed late: clamped like the chooser floor, AirFloorStep)
-            const bool reachFloor = cfg_.stepDownDepthM > 0.0f && hValid_ && probeAnchored_ && airDropM_ + std::fmax(h_, 0.0f) <= cfg_.stepDownDepthM &&
-                                    airTime_ < cfg_.stepDownMaxS;
+            const bool deepReach = cfg_.stepDownReach && cfg_.stepDownDepthM > 0.0f; // AirConfig::stepDownReach
+            const float reachDepthM = deepReach ? kStepDownReachDepthM : cfg_.stepDownDepthM;
+            const float reachMaxS = deepReach ? kStepDownReachMaxSeconds : cfg_.stepDownMaxS;
+            const float psmReachS = deepReach ? kStepDownReachPsmFallSeconds : kStepDownPsmFallSeconds;
+            const bool reachFloor = cfg_.stepDownDepthM > 0.0f && hValid_ && probeAnchored_ && airDropM_ + std::fmax(h_, 0.0f) <= reachDepthM &&
+                                    airTime_ < reachMaxS;
             const bool stepReach = reachFloor && !airPsmFall_;
             // a descending PSM Fall run keeps the reach while its known floor is reached within kStepDownPsmFallSeconds at the current fall
             // speed (the end of a step-down; = the chooser mapping, adapter::kGroundDropPsmFallS)
-            const bool psmFallReach = reachFloor && psmFallGrace && in.vz < 0.0f && std::fmax(h_, 0.0f) <= -in.vz * kStepDownPsmFallSeconds;
+            const bool psmFallReach = reachFloor && psmFallGrace && in.vz < 0.0f && std::fmax(h_, 0.0f) <= -in.vz * psmReachS;
             const bool fallEvidence = (IsAirDetail(in.psmDetail) && !psmFallGrace) || (psmFallGrace && psmFallOver && !psmFallReach) || in.vehicleExit ||
                                       in.distToGround > cfg_.physFallDist;
             const bool stepDownOver =

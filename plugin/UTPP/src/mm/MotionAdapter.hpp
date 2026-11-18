@@ -670,6 +670,19 @@ inline constexpr float kGroundDropStepMaxS = 0.20f;
 // whole depth <= groundDropStepM, < kGroundDropStepMaxS) while the floor is reached within kGroundDropPsmFallS at the current fall speed. The
 // recorded PSM Fall drops of 31-54 cm predict a depth above groundDropStepM and fall as before; a floor that is not known keeps the rule above.
 inline constexpr float kGroundDropPsmFallS = 0.04f;
+// --- Step-down reach for deeper steps (MapConfig::stepDownReach, default off) ---
+// With it on, the step-down reach of groundDropGraceS covers a known floor up to kStepDownReachM below the drop start for kStepDownReachMaxS,
+// a descending PSM Fall run keeps it while the floor is reached within kStepDownReachPsmFallS, and a feed whose probe missed uses the floor
+// of the last probe hit of the same contact loss (dead-reckoned by the capsule drop since). Recorded 0.30 m drops of 0.2 s (probe hit on
+// every second feed) otherwise turned InAir on their last airborne feed: one fall-loop feed, then a land clip.
+#ifndef UTPP_STEP_DOWN_REACH_DEFAULT
+#define UTPP_STEP_DOWN_REACH_DEFAULT 0
+#endif
+inline constexpr bool kStepDownReachDefault = UTPP_STEP_DOWN_REACH_DEFAULT != 0;
+inline constexpr float kStepDownReachM = 0.45f;
+inline constexpr float kStepDownReachMaxS = 0.25f;
+inline constexpr float kStepDownReachPsmFallS = 0.04f;
+// --- end step-down reach ---
 inline constexpr float kStanceFilterSeconds = 0.15f;    // MapConfig::stanceFilterS the runtime uses (task bound: changes < ~0.15 s filtered)
 // P1 fix batch 2 (2026-10-21 12:15 recording, tests/P1StanceLatencyTest.cpp): the clean Stand <-> Crouch edge bypasses the filter
 // (MapConfig::stanceCleanEdge). The previous raw value must have held kStanceCleanHoldSeconds (= the filter time), a crouch ENTRY
@@ -923,6 +936,9 @@ struct MapConfig
     // groundDropStepM: step-down reach of groundDropGraceS (kGroundDropStepM / kGroundDropStepMaxS): past the grace, a known floor (probe hit,
     // dead-reckoned) with drop so far + floor distance <= groundDropStepM keeps the ground until kGroundDropStepMaxS. 0 = off (the plain grace).
     float groundDropStepM = 0.0f;
+    // stepDownReach: deeper step-down reach (kStepDownReachM / kStepDownReachMaxS / kStepDownReachPsmFallS, probe misses dead-reckoned);
+    // acts only with groundDropStepM > 0. false = the reach above, bit for bit.
+    bool stepDownReach = kStepDownReachDefault;
     // contactHoldS (fix/jumpout-cam, log 2026-11-03 17:34:36 jump-out B): inside the vehicle exit window / jump-out flight a ground-contact feed (onGround, no air
     // PSM detail) while the capsule still falls faster than kContactFallMs is no landing (it grazed the exiting car at 0.23 m, vz -11 m/s, for 2 feeds): the
     // chooser stays InAir for at most this many seconds of such feeds, so the heavy land database is not picked 0.1 s early. The real landing zeroes the vertical
@@ -1286,6 +1302,7 @@ struct MapState
     float groundDropM = 0.0f;
     bool groundDropFell = false; // the current contact loss was released to InAir (the step-down reach does not take it back)
     bool groundDropPsmFall = false; // the current contact loss carried the PSM Fall detail (kGroundDropPsmFallS)
+    float groundDropFloorM = -1.0f; // MapConfig::stepDownReach: floor depth below the drop start from the last probe hit (-1 = not known)
     int32_t groundDropLastGround = 0; // the last ground PSM detail (PsmGround): the locomotion detail of a graced PSM Fall feed
     int stanceOut = -1;
     int stanceRawLast = -1; // last raw stance of a feed that was not a Dodge
@@ -1475,15 +1492,28 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             m.groundDropPsmFall = m.groundDropPsmFall || psmFallDrop;
             const float graceS = m.groundDropPsmFall ? std::fmin(c.groundDropGraceS, kGroundDropPsmFallS) : c.groundDropGraceS;
             bool fall = m.groundDropFeeds >= kGroundDropMinFeeds && (m.groundDropAge >= graceS || m.groundDropM >= kGroundDropFallM);
+            // --- step-down reach parameters (MapConfig::stepDownReach) ---
+            float floorDist = f.air.distanceToGround;
+            float stepM = c.groundDropStepM, stepMaxS = kGroundDropStepMaxS, psmReachS = kGroundDropPsmFallS;
+            if (c.stepDownReach && c.groundDropStepM > 0.0f)
+            {
+                if (floorDist >= 0.0f)
+                    m.groundDropFloorM = m.groundDropM + floorDist;
+                else if (m.groundDropFloorM >= 0.0f)
+                    floorDist = std::fmax(m.groundDropFloorM - m.groundDropM, 0.0f);
+                stepM = kStepDownReachM;
+                stepMaxS = kStepDownReachMaxS;
+                psmReachS = kStepDownReachPsmFallS;
+            }
+            // --- end step-down reach parameters ---
             // step-down reach: the floor is known and close enough that the capsule runs down a step (mutation 40: no reach)
-            if (UTPP_AND_NOT(JUMPPICK, 40) fall && !m.groundDropFell && !m.groundDropPsmFall && f.air.distanceToGround >= 0.0f &&
-                m.groundDropM + f.air.distanceToGround <= c.groundDropStepM && m.groundDropAge < kGroundDropStepMaxS)
+            if (UTPP_AND_NOT(JUMPPICK, 40) fall && !m.groundDropFell && !m.groundDropPsmFall && floorDist >= 0.0f &&
+                m.groundDropM + floorDist <= stepM && m.groundDropAge < stepMaxS)
                 fall = false;
             // the same reach for a descending PSM Fall run whose known floor is reached within kGroundDropPsmFallS at the current fall speed
             // (PSM Fall at the end of a step-down, see kGroundDropPsmFallS; mutation 43: a PSM Fall run never keeps the reach)
             if (UTPP_AND_NOT(JUMPPICK, 43) fall && !m.groundDropFell && m.groundDropPsmFall && c.groundDropStepM > 0.0f && velIn[2] < 0.0f &&
-                f.air.distanceToGround >= 0.0f && m.groundDropM + f.air.distanceToGround <= c.groundDropStepM && m.groundDropAge < kGroundDropStepMaxS &&
-                f.air.distanceToGround <= -velIn[2] * kGroundDropPsmFallS)
+                floorDist >= 0.0f && m.groundDropM + floorDist <= stepM && m.groundDropAge < stepMaxS && floorDist <= -velIn[2] * psmReachS)
                 fall = false;
             m.groundDropFell = m.groundDropFell || fall;
             if (!fall && airFeed)
@@ -1499,6 +1529,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             m.groundDropFeeds = 0;
             m.groundDropFell = false;
             m.groundDropPsmFall = false;
+            m.groundDropFloorM = -1.0f;
         }
     }
     bool psmAir = PsmAir(f.psmDetailed) && !psmFallGraced;
@@ -2223,6 +2254,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // JumpPickTest mutation 21: the heavy land of a jump-out keeps playing (no recovery cap)
     s.jumpOutLandOver = UTPP_AND_NOT(JUMPPICK, 21) m.jumpOutHeavyLand && st.movementMode == 0 && m.sinceLand >= motiontraj::kJumpOutLandRecoverS;
     s.timeToLand = st.timeToLand;
+    s.gravityMs2 = c.gravity; // MatcherConfig::farJumpGravityScale
     // Climb / Vault exit derived from the detail transition (no script flag; 10.8)
     s.justTraversed = PsmTraversal(m.prevPsm) && !PsmTraversal(f.psmDetailed);
     m.prevPsm = f.psmDetailed;
