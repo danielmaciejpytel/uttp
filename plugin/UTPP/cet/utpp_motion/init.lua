@@ -53,6 +53,10 @@
 --                  a small stick tilt (native UTPPSetMotionMinAnalogWalk; reds UTPPUpdateAnalogFloor lifts the capsule with one MaxSpeed multiplier
 --                  1 .. 4 = the fraction of the full-stick speed raised to this one, the motion driver gives the prediction the lifted cap). 0 = the
 --                  game's own slow speeds. Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, air: untouched.
+--   mm.stickSpeed choice "fixed" (default) / "analog" - stick speed model (script Game.UTPPSetStickSpeedMode 1 / 0; reds
+--                  UTPPUpdateStickSpeed). fixed: walk speed below the stick 0.7, run speed from 0.7, the full crouch speed in a crouch,
+--                  the minimum walk speed off while it applies; analog: the game speed follows the stick (the previous behaviour).
+--                  Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, walk toggle, Tier2 Slow, air: untouched.
 --   mm.leanScale float 0 .. 2, default 0.85 (DLL default 1) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
 --   mm.leanHeadScale float 0 .. 2, default 0.9 (DLL default 1) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
 --   mm.selectionGuards bool, default true (developer option; DLL default on, so no call is made at the default) - clip selection guards of the
@@ -73,11 +77,11 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 -- wanted state (settings) and what the glue reported last
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = false, orientWarp = false,
   lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
-  feminineFigure = true, bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, selectionGuards = true }
+  feminineFigure = true, bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true }
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
   leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
-  feminineFigureApplied = true, bodyYawOffsetApplied = 0, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, aimPointApplied = nil,
+  feminineFigureApplied = true, bodyYawOffsetApplied = 0, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, stickSpeedApplied = "analog", aimPointApplied = nil,
   pistolAutoApplied = nil, selectionGuardsApplied = true, errors = 0 }
 
 -- no file system paths in the log: a Lua error text names the script file with its full path (user name included); a path in
@@ -205,6 +209,8 @@ function M.Sync(api)
     M.ApplyBodyYawOffset(api)
     M.ApplyWalkSpeed(api)
     M.ApplyMinAnalogWalk(api)
+    M.rt.stickSpeedApplied = "analog" -- what the script system of a fresh session holds
+    M.ApplyStickSpeed(api)
     M.ApplyBarrelLoop(api)
     M.ApplyLean(api)
     local ok = callGlue(api, "SetEnabled", true)
@@ -249,6 +255,7 @@ function M.Sync(api)
   M.ApplyBodyYawOffset(api)
   M.ApplyWalkSpeed(api)
   M.ApplyMinAnalogWalk(api)
+  M.ApplyStickSpeed(api)
   M.ApplyBarrelLoop(api)
   M.ApplyLean(api)
   return "same"
@@ -682,6 +689,45 @@ function M.SetMinAnalogWalk(v, api)
   return M.want.minAnalogWalk
 end
 
+-- Stick speed model (mm.stickSpeed): "fixed" = walk speed below the stick 0.7, run speed from 0.7, the crouch speed in a crouch
+-- (script UTPPUpdateStickSpeed, one MaxSpeed multiplier); "analog" = the game speed follows the stick (with the minimum walk speed).
+-- The mode lives in a script system of the game session (UTPPStickSpeedState, analog in a fresh session): Sync re-sends it when a
+-- new session's glue starts, otherwise only when the wanted mode differs from what was acknowledged. Only while motion is on.
+M.STICK_SPEED_MODES = { analog = 0, fixed = 1 }
+local function stickSpeedMode(v)
+  if v == "analog" then return "analog" end
+  return "fixed"
+end
+function M.ApplyStickSpeed(api)
+  if not M.want.enabled then return false end
+  local v = M.want.stickSpeed
+  if M.rt.stickSpeedApplied == v then return true end
+  api = api or M.api
+  local mode = M.STICK_SPEED_MODES[v]
+  local ok, accepted
+  if api and api.setStickSpeed then
+    ok, accepted = pcall(api.setStickSpeed, mode)
+  else
+    ok, accepted = pcall(function() return Game.UTPPSetStickSpeedMode(mode) end)
+  end
+  if not ok or accepted ~= true then
+    -- no game session yet (the script answers false): retried on the next Sync, not counted as an error
+    if not ok then
+      M.rt.errors = M.rt.errors + 1
+      if M.rt.errors <= 3 then log("mm.stickSpeed: script call failed") end
+    end
+    return false
+  end
+  M.rt.stickSpeedApplied = v
+  log("mm.stickSpeed -> " .. v)
+  return true
+end
+function M.SetStickSpeed(v, api)
+  M.want.stickSpeed = stickSpeedMode(v)
+  M.ApplyStickSpeed(api)
+  return M.want.stickSpeed
+end
+
 -- Barrel pitch loop + crosshair point (mm.aimAtCrosshair). The DLL loop: the same contract as the trims (DLL default off, called only
 -- while motion is on and the wanted value differs from what the DLL holds). The crosshair point of utpp_camera (CM.AIM_POINT, shipped
 -- off) follows the ACKNOWLEDGED loop: on only with motion on + setting on + native accepted, off otherwise; recomputed on every call.
@@ -882,6 +928,14 @@ function M.RegisterSettings(core)
       .. "there, so her feet glided over the ground; 0.82 (default) is the speed of a half-tilted stick. 0 = the game's own speed. "
       .. "Only on foot in third person, standing or crouching; sprinting, aiming and jumping are unchanged.",
     apply = function(v) M.SetMinAnalogWalk(v) end })
+  core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
+    choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
+    label = "Gamepad stick speed",
+    desc = "Walk or run (default): pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, "
+      .. "pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the "
+      .. "animations. Follows the stick: her speed changes smoothly with how far the stick is pushed, as in the base game. "
+      .. "Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.",
+    apply = function(v) M.SetStickSpeed(v) end })
   core.Register({ key = "mm.aimAtCrosshair", section = "animation", type = "bool", default = true,
     label = "Weapon aims at crosshair point",
     desc = "While aiming or shooting from the hip, V's weapon barrel is steered onto the point under the crosshair (also at close "
