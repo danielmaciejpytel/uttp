@@ -24,6 +24,10 @@
 #include "MMMath.hpp"
 #include <algorithm>
 #include <limits>
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 #ifndef UTPP_ROOT_RELEASE_MUTATION
 #define UTPP_ROOT_RELEASE_MUTATION 0 // 1 = unbounded montage rotation release (motion): tests must FAIL
@@ -102,6 +106,44 @@ class OffsetRoot
     {
         m = {};
     }
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    // Offline measurement hooks (test builds only). UTPP_TEST_OFFSET_ROOT_RADIUS = metres: replaces the default radius (a Step that keeps
+    // kMaxOffset). UTPP_TEST_ROOT_REST_STATS = 1: at exit, prints the yaw turned while resting (authored clip yaw vs the fallback).
+    struct TestHooks
+    {
+        float radius = -1.f;
+        bool stats = false;
+        double restAuthored = 0, restFallback = 0, restCapsule = 0, restTime = 0, fallbackTime = 0;
+        // every standing step (not moving, no aim, no montage), with or without the permission
+        double standTime = 0, standAuthored = 0, standCapsule = 0, standBeyondKnee = 0, standYawSum = 0;
+        TestHooks()
+        {
+            if (const char *e = std::getenv("UTPP_TEST_OFFSET_ROOT_RADIUS"))
+            {
+                const float r = std::strtof(e, nullptr);
+                if (std::isfinite(r) && r >= 0)
+                    radius = r;
+            }
+            const char *s = std::getenv("UTPP_TEST_ROOT_REST_STATS");
+            stats = s && s[0] == '1';
+        }
+        ~TestHooks()
+        {
+            if (stats)
+                std::fprintf(stderr, "ROOTREST t=%.3f fallback_t=%.3f authored_deg=%.2f fallback_deg=%.2f capsule_deg=%.2f\n", restTime,
+                             fallbackTime, restAuthored / kDegToRad, restFallback / kDegToRad, restCapsule / kDegToRad);
+            if (stats)
+                std::fprintf(stderr, "ROOTSTAND t=%.3f beyond_knee_t=%.3f authored_deg=%.2f capsule_deg=%.2f mean_abs_offset_deg=%.2f\n",
+                             standTime, standBeyondKnee, standAuthored / kDegToRad, standCapsule / kDegToRad,
+                             standTime > 0 ? standYawSum / standTime / kDegToRad : 0.0);
+        }
+    };
+    static TestHooks &Hooks()
+    {
+        static TestHooks h;
+        return h;
+    }
+#endif
     bool Seed(float x, float y, float yaw)
     {
         if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(yaw))
@@ -179,7 +221,11 @@ class OffsetRoot
         next.translationRelease = !s.movingGround || s.montage;
         const bool aimMoving = s.aimFacing && s.movingGround;
         next.rotationRelease = aimMoving || (s.montage && !s.aimFacing);
-        const float radius = std::isfinite(s.maxOffset) && s.maxOffset >= 0 ? s.maxOffset : kMaxOffset;
+        float radius = std::isfinite(s.maxOffset) && s.maxOffset >= 0 ? s.maxOffset : kMaxOffset;
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        if (Hooks().radius >= 0 && s.maxOffset == kMaxOffset)
+            radius = Hooks().radius;
+#endif
         float x = m.x, y = m.y;
         if (!next.translationRelease)
         {
@@ -286,6 +332,26 @@ class OffsetRoot
                 next.restStep = std::copysign(step, next.yaw);
                 next.yaw -= next.restStep;
             }
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+            if (!s.movingGround && !s.aimFacing && !s.montage && Hooks().stats)
+            {
+                TestHooks &h = Hooks();
+                h.standTime += s.dt;
+                h.standAuthored += std::fabs(s.animationYawDelta);
+                h.standCapsule += std::fabs(s.capsuleYawDelta);
+                h.standBeyondKnee += std::fabs(next.yaw) > kRestKneeLow ? s.dt : 0.0;
+                h.standYawSum += std::fabs(next.yaw) * s.dt;
+            }
+            if (rest && Hooks().stats)
+            {
+                TestHooks &h = Hooks();
+                h.restTime += s.dt;
+                h.restAuthored += std::fabs(s.animationYawDelta);
+                h.restFallback += std::fabs(next.restStep);
+                h.restCapsule += std::fabs(s.capsuleYawDelta);
+                h.fallbackTime += next.restStep != 0 ? s.dt : 0.0;
+            }
+#endif
         }
         if (!std::isfinite(next.x) || !std::isfinite(next.y) || !std::isfinite(next.yaw))
             return false;
