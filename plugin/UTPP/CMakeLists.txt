@@ -1102,12 +1102,21 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   set_tests_properties(utpp_loco_dodge_driver_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*holds its gait through the dodge state")
 endif()
 
-# ---- feet U11: pelvis stage of the foot locker (mm/PelvisPlacement.hpp), 30 / 60 / 144 Hz ----
+# ---- pelvis stage of the foot locker (mm/PelvisPlacement.hpp), 30 / 60 / 144 Hz ----
 add_executable(utpp_mm_footlock_pelvis_test tests/PelvisPlacementTest.cpp src/BaseDatabase.hpp
   src/mm/FootLocker.hpp src/mm/PelvisPlacement.hpp src/mm/LegIk.hpp)
 target_compile_features(utpp_mm_footlock_pelvis_test PRIVATE cxx_std_20)
 target_compile_options(utpp_mm_footlock_pelvis_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_mm_footlock_pelvis_test COMMAND utpp_mm_footlock_pelvis_test "${UTPP_MMDB_TEST_FILE}")
+
+# ---- live pose history (mm/LivePoseHistory.hpp; MotionDriver SetLivePoseHistory, off by default) ----
+if(DEFINED _utpp_nlr_base AND EXISTS "${_utpp_nlr_base}.utppmm" AND EXISTS "${_utpp_nlr_base}.chooser.json")
+  add_executable(utpp_mm_live_pose_history_test tests/LivePoseHistoryTest.cpp src/mm/LivePoseHistory.hpp src/mm/ExitPoseHistory.hpp)
+  target_compile_options(utpp_mm_live_pose_history_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+  target_compile_features(utpp_mm_live_pose_history_test PRIVATE cxx_std_20)
+  add_test(NAME utpp_mm_live_pose_history_test COMMAND utpp_mm_live_pose_history_test "${_utpp_nlr_base}.utppmm"
+           "${_utpp_nlr_base}.chooser.json")
+endif()
 
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

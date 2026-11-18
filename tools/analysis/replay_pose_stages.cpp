@@ -12,12 +12,39 @@
 // --settings-log applies the setting calls of a game log of the session (the ones this tool knows, in their order) before the first feed.
 // --ahead recorded passes the recorded turn of the coming tick (next feed's yaw minus this one) as the drawn capsule's turn.
 // --body man replays with the male motion database and rig (default: woman); the clip dump (--clips) is always the woman database.
+// --history 1 turns the live pose history on (mm/LivePoseHistory.hpp; default off as in the game): the published pose after the leg
+// tail is fed back to the next search through the same host hook the game uses.
 // <feed dump> = --clips [name part] writes the stored frames of the woman database clips whose name contains the part (all without it)
 // instead (same layout, see the clip mode below).
+// <out prefix> = - writes no files (summary only).
+//
+// Offline measurement split (one command: tools/replay/compare_runs.py runs both tools over the same game dumps):
+//   - utpp_motion_replay = the matcher / evaluator / foot locker lab (fast, deterministic, the slide tables FLTAB / FLROB / FLPEL);
+//   - this tool = the real runtime path (MotionDriver with the blend stack and root frame, MotionHost leg tail with the foot locker).
+// Both read the per-frame game dumps directly. The runtime path is not ported into utpp_motion_replay: it needs the whole driver and
+// host (this tool links them through the integration test harness), and the lab tables must stay comparable with earlier runs.
+//
+// Every run ends with one line
+//   RUNTIME run=<name> secs clipChangesPerS ikCorrMaxCm ikCorrP95Cm turns procYawPerTurnDeg procYawShare feedUsP50 feedUsP95
+// clipChangesPerS: changes of the driver pick clip (Status pick=clip:) per second of feed time.
+// ikCorr*: foot locker correction of either foot (host Status corrL= / corrR=, cm), max and p95 over the frames with a correction.
+// Procedural yaw of a step: the visual root turn not carried by the sampled animation, capsule yaw delta + (offset yaw after - offset yaw
+// before) - animation root yaw delta (root frame probe, deg). A turn: a run of consecutive feeds whose recorded body yaw changes faster
+// than 30 deg/s, at least 0.1 s long and 20 deg in total. procYawPerTurnDeg = mean over the turns of the summed |procedural yaw| inside
+// the turn; procYawShare = summed |procedural yaw| / summed |capsule yaw| over all steps. feedUs: wall time of MotionHost Feed (this
+// machine, single run; a cost comparison needs repeats). historySearches: searches that read the live pose history (--history 1).
+// A second line PICKS covers the picks into stop / start clips: the first-frame foot offset (the picked clip frame's LeftFoot /
+// RightFoot against the shown feet of the previous feed, Root space, horizontal, max of both feet; wrong foot = above 10 cm) and the
+// planted toe drift in the world during the first 0.3 s after the pick (toes of the published pose put into the world with the next
+// feed's capsule and yaw, max distance from where each foot planted while the tail contact >= 0.5). PlantedN / PlantedKept /
+// PlantedOffP50Cm: the same offset for the foot(s) planted in the shown pose (tail contact >= 0.5 on the previous feed) only, and how
+// many picks keep that foot within 10 cm.
+#include <chrono>
 #include <filesystem>
 #define main FullIntegrationSuiteNotRun
 #include "../../plugin/UTPP/tests/MotionDriverIntegrationTest.cpp"
 #undef main
+#include "../../plugin/UTPP/src/mm/ExitPoseHistory.hpp"
 
 namespace
 {
@@ -50,6 +77,38 @@ bool CaptureTail(const int32_t* aMap, uint32_t aN, motionhost::MotionSetFrame& a
         }
     }
     return ok;
+}
+
+// 0 = stop clip, 1 = start clip, -1 = other (clip name convention of the databases)
+int StopStartClass(const std::string& aName)
+{
+    const auto has = [&](const char* k) { return aName.find(k) != std::string::npos; };
+    if (has("Transition_") || has("Pivot") || has("Reface"))
+        return -1;
+    if (has("_Stop") || has("Stop_"))
+        return 0;
+    if (has("_Start") || has("Start_"))
+        return 1;
+    return -1;
+}
+
+// Positions of two bones by forward kinematics from aFirstBone (0 = with the root offset, 2 = Root space); false if a bone is missing.
+template <class LocalAt>
+bool FeetAt(const mm::motion::MotionDatabase& aDb, const int32_t (&aBones)[2], uint32_t aFirstBone, LocalAt&& aLocalAt, math::Vec3 (&aOut)[2])
+{
+    if (aBones[0] < 0 || aBones[1] < 0 || aDb.NumBones() > mm::motion::kExitSeedMaxDbBones)
+        return false;
+    math::Vec3 gp[mm::motion::kExitSeedMaxDbBones];
+    math::Quat gq[mm::motion::kExitSeedMaxDbBones];
+    bool ok[mm::motion::kExitSeedMaxDbBones];
+    mm::motion::RootSpaceFk(aDb, aFirstBone, aLocalAt, gp, gq, ok);
+    for (int s = 0; s < 2; ++s)
+    {
+        if (!ok[aBones[s]])
+            return false;
+        aOut[s] = gp[aBones[s]];
+    }
+    return true;
 }
 
 float Num(const std::string& aStatus, const char* aKey)
@@ -112,7 +171,7 @@ int main(int argc, char** argv)
     const std::string data = argv[1], feedPath = argv[3], out = argv[4];
     float from = -1e30f, to = 1e30f;
     std::string settingsLog;
-    bool aheadRecorded = false, man = false;
+    bool aheadRecorded = false, man = false, liveHistory = false;
     for (int i = 5; i + 1 < argc; i += 2)
     {
         if (std::strcmp(argv[i], "--from") == 0)
@@ -125,6 +184,8 @@ int main(int argc, char** argv)
             aheadRecorded = std::strcmp(argv[i + 1], "recorded") == 0;
         else if (std::strcmp(argv[i], "--body") == 0)
             man = std::strcmp(argv[i + 1], "man") == 0;
+        else if (std::strcmp(argv[i], "--history") == 0)
+            liveHistory = std::atoi(argv[i + 1]) != 0;
     }
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
@@ -228,8 +289,9 @@ int main(int argc, char** argv)
     if (aheadRecorded)
         for (size_t i = 0; i + 1 < inputs.size(); ++i)
             inputs[i].yawAheadDeg = std::remainder(rows[i + 1].yawDeg - rows[i].yawDeg, 360.0f);
-    const motionhost::MotionHooks hooks{&WStep, &WApply, &motiondriver::OnArmed, &motiondriver::OnDisarmed, &CaptureTail,
-                                        &motiondriver::OwnsTraversal};
+    motionhost::MotionHooks hooks{&WStep, &WApply, &motiondriver::OnArmed, &motiondriver::OnDisarmed, &CaptureTail,
+                                  &motiondriver::OwnsTraversal};
+    hooks.published = &motiondriver::RecordPublishedPose;
     g_baseDb = Wide(argv[2]);
     motiondriver::SetPathsOverride(0, womanPaths);
     motiondriver::SetPathsOverride(1, DataPaths(data, "man"));
@@ -242,21 +304,196 @@ int main(int argc, char** argv)
     if (!settingsLog.empty())
         ApplyLoggedSettings(settingsLog, applied, unknown);
     motiondriver::SetEnabled(true);
+    motiondriver::SetLivePoseHistory(liveHistory);
     motiondriver::Step(inputs.front(), 1, inputs.front().dt);
     motiondriver::WaitLoader();
     const uint32_t nb = db->NumBones();
-    std::ofstream bin(out + ".bin", std::ios::binary);
+    const bool files = out != "-";
+    std::ofstream bin;
+    if (files)
+        bin.open(out + ".bin", std::ios::binary);
     std::vector<float> rec(kMetaFloats + size_t(nb) * 14);
+    // summary accumulators (see the header)
+    std::vector<double> feedUs, corrCm;
+    double ikCorrMax = 0, procSum = 0, capSum = 0, turnProc = 0, turnYaw = 0, turnTime = 0, procTurnsSum = 0;
+    int lastPickClip = -2;
+    uint32_t clipChanges = 0, turns = 0;
+    feedUs.reserve(inputs.size());
+    // stop / start picks: first-frame foot offset (cm, Root space, the picked clip frame vs the shown feet of the previous feed) and the
+    // planted toe drift in the world during the first 0.3 s after the pick (cm, max over both feet while the tail contact >= 0.5)
+    const auto boneIndex = [&](const char* aName) {
+        for (uint32_t b = 0; b < nb; ++b)
+            if (db->BoneName(b) == aName)
+                return int32_t(b);
+        return int32_t(-1);
+    };
+    const int32_t footBones[2] = {boneIndex("LeftFoot"), boneIndex("RightFoot")};
+    const int32_t toeBones[2] = {boneIndex("LeftToeBase"), boneIndex("RightToeBase")};
+    std::vector<double> pickOffsets[2], drifts[2], plantedOffsets[2];
+    float prevContact[2] = {0.0f, 0.0f};
+    math::Vec3 shownFeet[2];
+    bool haveShownFeet = false, driftAnchor[2] = {false, false};
+    double driftLeft = 0, driftMax = 0, driftAt[2][2] = {};
+    int driftCls = 0;
+    auto closeTurn = [&] {
+        if (turnTime >= 0.1 && turnYaw >= 20.0)
+        {
+            ++turns;
+            procTurnsSum += turnProc;
+        }
+        turnProc = turnYaw = turnTime = 0;
+    };
     std::map<int, std::string> clipsSeen;
     size_t written = 0, missing = 0;
     for (size_t i = 0; i < inputs.size(); ++i)
     {
         g_log = {};
         g_tailValid = false;
+        const auto feed0 = std::chrono::steady_clock::now();
         motionhost::Feed(inputs[i]);
+        feedUs.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - feed0).count());
         const bool published = ReadPublished();
         if (rows[i].t < from || rows[i].t > to)
             continue;
+        {
+            constexpr double kRadToDeg = 57.29577951308232;
+            const std::string sst = motiondriver::Status(), hst = motionhost::Status();
+            const std::string pk = StatusField(sst, "pick=clip:");
+            const int pc = pk.empty() ? -1 : std::atoi(pk.c_str());
+            if (pc >= 0 && lastPickClip >= 0 && pc != lastPickClip)
+            {
+                ++clipChanges;
+                // a pick into a stop / start clip: first-frame foot offset against the shown feet of the previous feed
+                const std::string cname = uint32_t(pc) < db->NumClips() ? std::string(db->ClipName(uint32_t(pc))) : std::string();
+                const int cls = StopStartClass(cname);
+                if (cls >= 0)
+                {
+                    if (driftLeft > 0.0) // a new stop / start pick closes the running window
+                        drifts[driftCls].push_back(driftMax);
+                    const auto at = pk.find('@');
+                    const float ct = at == std::string::npos ? 0.f : float(std::atof(pk.c_str() + at + 1));
+                    const auto& clip = db->Clip(uint32_t(pc));
+                    const float fps = db->Header().fps > 0.0f ? db->Header().fps : 30.0f;
+                    const uint32_t k = std::min<uint32_t>(clip.numFrames ? clip.numFrames - 1 : 0, uint32_t(std::max(0.0f, ct * fps + 0.5f)));
+                    const auto* cpose = db->Pose(clip.firstFrame + k);
+                    math::Vec3 clipFeet[2];
+                    const bool okClip = FeetAt(*db, footBones, 2,
+                                               [&](uint32_t b, math::Vec3& p, math::Quat& q) {
+                                                   p = math::Vec3{cpose[b].px, cpose[b].py, cpose[b].pz};
+                                                   q = math::Quat{cpose[b].qx, cpose[b].qy, cpose[b].qz, cpose[b].qw};
+                                                   return true;
+                                               },
+                                               clipFeet);
+                    if (okClip && haveShownFeet)
+                    {
+                        double off = 0;
+                        for (int s = 0; s < 2; ++s)
+                            off = std::max(off, 100.0 * std::hypot(double(clipFeet[s].x - shownFeet[s].x), double(clipFeet[s].y - shownFeet[s].y)));
+                        pickOffsets[cls].push_back(off);
+                        // the foot planted in the shown pose (tail contact of the previous feed): does the new clip keep it?
+                        double planted = -1.0;
+                        for (int s = 0; s < 2; ++s)
+                            if (prevContact[s] >= 0.5f)
+                                planted = std::max(planted, 100.0 * std::hypot(double(clipFeet[s].x - shownFeet[s].x), double(clipFeet[s].y - shownFeet[s].y)));
+                        if (planted >= 0.0)
+                            plantedOffsets[cls].push_back(planted);
+                    }
+                    driftCls = cls;
+                    driftLeft = 0.3;
+                    driftMax = 0;
+                    driftAnchor[0] = driftAnchor[1] = false;
+                }
+            }
+            if (pc >= 0)
+                lastPickClip = pc;
+            prevContact[0] = g_tailValid ? g_tail.contact[0] : 0.0f;
+            prevContact[1] = g_tailValid ? g_tail.contact[1] : 0.0f;
+            // shown feet of this feed (Root space, for the next pick) and the planted drift window after a stop / start pick
+            haveShownFeet = published && g_read.numBones == nb &&
+                            FeetAt(*db, footBones, 2, [&](uint32_t b, math::Vec3& p, math::Quat& q) {
+                                const float* v = g_read.pose + size_t(b) * 7;
+                                p = math::Vec3{v[0], v[1], v[2]};
+                                q = math::Quat{v[3], v[4], v[5], v[6]};
+                                return true;
+                            }, shownFeet);
+            if (haveShownFeet) // the published pose carries the visual root offset on the root's children: back to the animation Root space
+            {
+                const float ox = Num(hst, "offX=") / 100.0f, oy = Num(hst, "offY=") / 100.0f;
+                const float oyaw = Num(hst, "offYaw=") * 3.14159265f / 180.0f;
+                if (std::isfinite(ox) && std::isfinite(oy) && std::isfinite(oyaw))
+                    for (math::Vec3& f : shownFeet)
+                    {
+                        const float x = f.x - ox, y = f.y - oy, c = std::cos(-oyaw), s = std::sin(-oyaw);
+                        f = math::Vec3{c * x - s * y, s * x + c * y, f.z};
+                    }
+            }
+            if (driftLeft > 0.0)
+            {
+                math::Vec3 toes[2];
+                const bool okToes = published && g_read.numBones == nb && g_tailValid &&
+                                    FeetAt(*db, toeBones, 0, [&](uint32_t b, math::Vec3& p, math::Quat& q) {
+                                        const float* v = g_read.pose + size_t(b) * 7;
+                                        p = math::Vec3{v[0], v[1], v[2]};
+                                        q = math::Quat{v[3], v[4], v[5], v[6]};
+                                        return true;
+                                    }, toes);
+                // world: the drawn capsule of the next feed (the frame the pose is shown in)
+                const Frame& nx = rows[std::min(i + 1, rows.size() - 1)];
+                const double yw = double(nx.yawDeg) * 3.14159265358979 / 180.0;
+                for (int s = 0; s < 2 && okToes; ++s)
+                {
+                    const double wx = std::cos(yw) * toes[s].x - std::sin(yw) * toes[s].y + nx.cap[0];
+                    const double wy = std::sin(yw) * toes[s].x + std::cos(yw) * toes[s].y + nx.cap[1];
+                    if (g_tail.contact[s] < 0.5f)
+                    {
+                        driftAnchor[s] = false;
+                        continue;
+                    }
+                    if (!driftAnchor[s])
+                    {
+                        driftAnchor[s] = true;
+                        driftAt[s][0] = wx, driftAt[s][1] = wy;
+                    }
+                    driftMax = std::max(driftMax, 100.0 * std::hypot(wx - driftAt[s][0], wy - driftAt[s][1]));
+                }
+                driftLeft -= std::max(1e-4, double(rows[i].dt));
+                if (driftLeft <= 0.0)
+                    drifts[driftCls].push_back(driftMax);
+            }
+            for (const char* key : {"corrL=", "corrR="})
+            {
+                const float c = Num(hst, key);
+                if (std::isfinite(c) && c > 0.0f)
+                {
+                    corrCm.push_back(c);
+                    ikCorrMax = std::max(ikCorrMax, double(c));
+                }
+            }
+            const motiondriver::RootProbe pr = motiondriver::TestRootProbe();
+            double proc = 0;
+            if (pr.prepared)
+            {
+                proc = std::remainder(double(pr.capsuleYawDelta) + double(pr.after[2]) - double(pr.before[2]) - double(pr.animYawDelta),
+                                      2.0 * 3.14159265358979) * kRadToDeg;
+                procSum += std::fabs(proc);
+                capSum += std::fabs(double(pr.capsuleYawDelta)) * kRadToDeg;
+            }
+            const double yawStep = i > 0 ? std::fabs(std::remainder(double(rows[i].yawDeg) - double(rows[i - 1].yawDeg), 360.0)) : 0.0;
+            const double fdt = std::max(1e-4, double(rows[i].dt));
+            if (yawStep / fdt > 30.0)
+            {
+                turnTime += fdt;
+                turnYaw += yawStep;
+                turnProc += std::fabs(proc);
+            }
+            else
+                closeTurn();
+        }
+        if (!files)
+        {
+            ++written;
+            continue;
+        }
         if (!published)
             ++missing;
         const std::string st = motiondriver::Status();
@@ -289,9 +526,65 @@ int main(int argc, char** argv)
         bin.write(reinterpret_cast<const char*>(rec.data()), std::streamsize(rec.size() * sizeof(float)));
         ++written;
     }
+    closeTurn();
+    if (driftLeft > 0.0)
+        drifts[driftCls].push_back(driftMax);
+    const uint64_t liveHistorySearches = motiondriver::TestLiveHistorySearches();
     motionhost::SetMotionHooks(nullptr);
     motiondriver::Shutdown();
     motionhost::Shutdown();
+    {
+        auto pct = [](std::vector<double> v, double q) {
+            if (v.empty())
+                return 0.0;
+            std::sort(v.begin(), v.end());
+            return v[std::min(v.size() - 1, size_t(q * double(v.size())))];
+        };
+        double secs = 0;
+        for (const Frame& r : rows)
+            if (r.t >= from && r.t <= to)
+                secs += r.dt;
+        std::string name = std::filesystem::path(feedPath).filename().string();
+        const std::filesystem::path logs = std::filesystem::path(feedPath).parent_path();
+        if (logs.filename() == "logs" && !logs.parent_path().filename().empty())
+            name = logs.parent_path().filename().string();
+        std::printf("RUNTIME run=%s secs=%.1f clipChangesPerS=%.3f ikCorrMaxCm=%.2f ikCorrP95Cm=%.2f turns=%u procYawPerTurnDeg=%.2f "
+                    "procYawShare=%.4f feedUsP50=%.1f feedUsP95=%.1f historySearches=%llu\n",
+                    name.c_str(), secs, clipChanges / std::max(1e-6, secs), ikCorrMax, pct(corrCm, 0.95), turns,
+                    turns ? procTurnsSum / turns : 0.0, capSum > 0 ? procSum / capSum : 0.0, pct(feedUs, 0.5), pct(feedUs, 0.95),
+                    static_cast<unsigned long long>(liveHistorySearches));
+        // PICKS line: per class (stop, start) picks, wrong-foot picks (first-frame foot offset > 10 cm), offset p50 / p95 (cm), planted
+        // drift in the first 0.3 s mean / p95 (cm)
+        const auto mean = [](const std::vector<double>& v) {
+            double a = 0;
+            for (double x : v)
+                a += x;
+            return v.empty() ? 0.0 : a / double(v.size());
+        };
+        std::printf("PICKS run=%s", name.c_str());
+        const char* cn[2] = {"stop", "start"};
+        for (int c = 0; c < 2; ++c)
+        {
+            size_t wrong = 0;
+            for (double o : pickOffsets[c])
+                wrong += o > 10.0;
+            size_t keep = 0;
+            for (double o : plantedOffsets[c])
+                keep += o <= 10.0;
+            std::printf(" %sPicks=%zu %sWrongFoot=%zu %sOffP50Cm=%.2f %sOffP95Cm=%.2f %sDriftN=%zu %sDriftMeanCm=%.2f %sDriftP95Cm=%.2f"
+                        " %sPlantedN=%zu %sPlantedKept=%zu %sPlantedOffP50Cm=%.2f",
+                        cn[c], pickOffsets[c].size(), cn[c], wrong, cn[c], pct(pickOffsets[c], 0.5), cn[c], pct(pickOffsets[c], 0.95), cn[c],
+                        drifts[c].size(), cn[c], mean(drifts[c]), cn[c], pct(drifts[c], 0.95), cn[c], plantedOffsets[c].size(), cn[c], keep,
+                        cn[c], pct(plantedOffsets[c], 0.5));
+        }
+        std::printf("\n");
+    }
+    if (!files)
+    {
+        std::printf("feeds=%zu written=%zu unpublished=%zu settingsApplied=%d settingsUnknown=%d\n", inputs.size(), written, missing,
+                    applied, unknown);
+        return 0;
+    }
     std::ofstream txt(out + ".txt");
     txt << "UTPP_POSE_STAGES 1\nbones " << nb << "\nmeta " << kMetaFloats;
     for (const char* m : kMeta)

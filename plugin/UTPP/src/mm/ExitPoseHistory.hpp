@@ -31,27 +31,20 @@ namespace utpp::mm::motion
 {
 inline constexpr uint32_t kExitSeedMaxDbBones = 128;
 
-// aLocalAt(uint32_t dbBone, math::Vec3& aP, math::Quat& aQ) -> bool: local (parent space) pose of database bone aBone, false = unknown.
-// Called only for bones >= aFirstBone (Root / Trajectory are identity). Returns false (aOut.numSamples 0) when no tracked bone resolved.
-template <class LocalAt>
-inline bool BuildExitPoseHistory(const MotionDatabase& aDb, uint32_t aFirstBone, LocalAt&& aLocalAt, const TrajSample& aRoot,
-                                 PoseHistory& aOut)
+// The bones a pose history tracks: every non-trajectory channel bone / origin bone of every schema of the database (database bone
+// indices, at most kHistMaxBones, first come first kept). Returns the count.
+inline uint32_t TrackedHistoryBones(const MotionDatabase& aDb, int32_t (&aWant)[kHistMaxBones])
 {
-    aOut.numSamples = 0;
-    aOut.numBones = 0;
     const uint32_t nb = aDb.NumBones();
-    if (nb == 0 || nb > kExitSeedMaxDbBones)
-        return false;
-    int32_t want[kHistMaxBones];
     uint32_t nWant = 0;
     const auto add = [&](int32_t b) {
         if (b < 0 || b >= static_cast<int32_t>(nb))
             return;
         for (uint32_t i = 0; i < nWant; ++i)
-            if (want[i] == b)
+            if (aWant[i] == b)
                 return;
         if (nWant < kHistMaxBones)
-            want[nWant++] = b;
+            aWant[nWant++] = b;
     };
     for (uint32_t s = 0; s < aDb.Header().numSchemas; ++s)
     {
@@ -65,16 +58,19 @@ inline bool BuildExitPoseHistory(const MotionDatabase& aDb, uint32_t aFirstBone,
             add(ch.originBone);
         }
     }
-    if (nWant == 0)
-        return false;
+    return nWant;
+}
 
-    // Root-space forward kinematics over the database parents (parent index < child index)
-    math::Vec3 gp[kExitSeedMaxDbBones];
-    math::Quat gq[kExitSeedMaxDbBones];
-    bool ok[kExitSeedMaxDbBones];
+// Root-space forward kinematics over the database parents (parent index < child index). aLocalAt as in BuildExitPoseHistory; bones
+// below aFirstBone are identity. aGp / aGq / aOk hold aDb.NumBones() entries (<= kExitSeedMaxDbBones); aOk[i] = false where the chain
+// of bone i has a bone without a pose.
+template <class LocalAt>
+inline void RootSpaceFk(const MotionDatabase& aDb, uint32_t aFirstBone, LocalAt&& aLocalAt, math::Vec3* aGp, math::Quat* aGq, bool* aOk)
+{
+    const uint32_t nb = aDb.NumBones();
     for (uint32_t i = 0; i < nb; ++i)
     {
-        ok[i] = false;
+        aOk[i] = false;
         const int32_t par = aDb.BoneParent(i);
         math::Vec3 lp{};
         math::Quat lq{};
@@ -86,17 +82,38 @@ inline bool BuildExitPoseHistory(const MotionDatabase& aDb, uint32_t aFirstBone,
         }
         if (par < 0)
         {
-            gp[i] = lp;
-            gq[i] = lq;
-            ok[i] = true;
+            aGp[i] = lp;
+            aGq[i] = lq;
+            aOk[i] = true;
         }
-        else if (par < static_cast<int32_t>(i) && ok[par])
+        else if (par < static_cast<int32_t>(i) && aOk[par])
         {
-            gq[i] = math::QuatNormalize(math::QuatMul(gq[par], lq));
-            gp[i] = gp[par] + math::QuatRotate(gq[par], lp);
-            ok[i] = true;
+            aGq[i] = math::QuatNormalize(math::QuatMul(aGq[par], lq));
+            aGp[i] = aGp[par] + math::QuatRotate(aGq[par], lp);
+            aOk[i] = true;
         }
     }
+}
+
+// aLocalAt(uint32_t dbBone, math::Vec3& aP, math::Quat& aQ) -> bool: local (parent space) pose of database bone aBone, false = unknown.
+// Called only for bones >= aFirstBone (Root / Trajectory are identity). Returns false (aOut.numSamples 0) when no tracked bone resolved.
+template <class LocalAt>
+inline bool BuildExitPoseHistory(const MotionDatabase& aDb, uint32_t aFirstBone, LocalAt&& aLocalAt, const TrajSample& aRoot,
+                                 PoseHistory& aOut)
+{
+    aOut.numSamples = 0;
+    aOut.numBones = 0;
+    const uint32_t nb = aDb.NumBones();
+    if (nb == 0 || nb > kExitSeedMaxDbBones)
+        return false;
+    int32_t want[kHistMaxBones];
+    const uint32_t nWant = TrackedHistoryBones(aDb, want);
+    if (nWant == 0)
+        return false;
+    math::Vec3 gp[kExitSeedMaxDbBones];
+    math::Quat gq[kExitSeedMaxDbBones];
+    bool ok[kExitSeedMaxDbBones];
+    RootSpaceFk(aDb, aFirstBone, aLocalAt, gp, gq, ok);
 
     uint32_t k = 0;
     for (uint32_t i = 0; i < nWant; ++i)

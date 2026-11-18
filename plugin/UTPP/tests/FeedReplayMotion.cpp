@@ -1,6 +1,12 @@
 // Offline replay of recorded in-game motion-matching feeds through the v2 stack (report 7 stage 10.1 p.4).
 // Input: .feed files from tools/replay/extract_feeds.py (60 Hz reconstruction of MMTRACE lines: TRANS on every v1
-// transition + ~1 Hz tick; NOT true per-frame feeds). Every frame goes through adapter::MakeMotionFeed -> MapToChooser ->
+// transition + ~1 Hz tick; NOT true per-frame feeds) or, read directly, the per-frame game feed dumps (<run>/logs/utpp-feed-*.txt,
+// named after the run folder; see LoadFeed). Measurement split: this tool is the matcher / evaluator / foot locker lab (Quintic
+// inertializer policy, not the runtime blend stack); the real runtime path (MotionDriver, blend stack, root frame, host leg tail) is
+// measured by utpp_replay_pose_stages (tools/analysis/replay_pose_stages.cpp, RUNTIME / PICKS lines); tools/replay/compare_runs.py runs
+// both over the same sessions. Every run prints a SUMMARY line (clip changes / s, foot locker correction max); --opt pelvis=1 (heel=,
+// reach=) runs the pelvis stage before the foot locker and FLPEL reports the pelvis offset and the FootLocker::Update cost.
+// Every frame goes through adapter::MakeMotionFeed -> MapToChooser ->
 // MotionAdapter::Update (ChooserMatcher + chooser + QuinticInertializer + SamplePose) with the woman v2 database.
 // Query trajectory (default, finding 8): adapter::BuildQueryTrajectory = the motion trajectory MapToChooser keeps in MapState
 // (MotionTrajectory: capsule history + CMC ground prediction + gravity / floor pass + facing) sampled with GetSampleAtTime at
@@ -29,6 +35,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -95,6 +102,9 @@ struct FlRunTotals
     double maxCorr = 0, maxLift = 0, maxPostStepDeg = 0, maxToeMs = 0;
 };
 FlRunTotals g_flTot;
+double g_runMaxCorr = 0; // IK (foot locker) correction max of the current run, cm
+std::vector<double> g_pelZ, g_pelXY, g_flUs;
+uint64_t g_pelGround = 0;
 
 double FracAbove(const std::vector<double>& v, double aLimit)
 {
@@ -269,11 +279,41 @@ bool LoadFeed(const char* aPath, Feed& f)
     const size_t sl = f.name.find_last_of("/\\");
     if (sl != std::string::npos)
         f.name = f.name.substr(sl + 1);
+    // Per-frame game dumps (<run>/logs/utpp-feed-*.txt) are named after their run folder.
+    if (f.name.rfind("utpp-feed-", 0) == 0)
+    {
+        const std::filesystem::path logs = std::filesystem::path(aPath).parent_path();
+        if (logs.filename() == "logs" && !logs.parent_path().filename().empty())
+            f.name = logs.parent_path().filename().string();
+    }
     while (std::getline(in, line))
     {
-        if (line.empty() || line[0] == '#')
+        if (line.empty() || line[0] == '#' || line.find_first_not_of(" \t\r") == std::string::npos)
             continue;
-        std::istringstream s(line);
+        // Both inputs load directly: 17-column replay feeds and the per-frame game dumps (31 columns, "-" where the frame has no
+        // transition or base pick). A "-" in trans / baseFlags / baseCost / baseMicros reads as 0 / -1 / 0 / 0 (no transition, no
+        // flags); rows with fewer than 17 columns are skipped; columns after the 17th are ignored.
+        std::vector<std::string> tok;
+        {
+            std::istringstream t(line);
+            std::string w;
+            while (t >> w)
+                tok.push_back(w);
+        }
+        if (tok.size() < 17)
+            continue;
+        if (tok[11] == "-")
+            tok[11] = "0";
+        if (tok[13] == "-")
+            tok[13] = "-1";
+        if (tok[14] == "-")
+            tok[14] = "0";
+        if (tok[15] == "-")
+            tok[15] = "0";
+        std::string norm;
+        for (size_t k = 0; k < 17; ++k)
+            norm += (k ? " " : "") + tok[k];
+        std::istringstream s(norm);
         Frame r;
         s >> r.t >> r.dt >> r.vx >> r.vy >> r.vz >> r.mvx >> r.mvy >> r.yawDeg >> r.camDeg >> r.loco >> r.psm >> r.trans >> r.baseClip >>
             r.baseFlags >> r.baseCost >> r.baseMicros >> r.step;
@@ -661,11 +701,29 @@ void FlFrame(FlState& S, const MotionDatabase& db, const PoseCtx& pc, const Feed
         sp.downRate = g_fl.Opt("slipDown", 0.15f);
         ApplyFootSlipProfile(S.fl, sp, cls);
     }
+    if (g_fl.Opt("pelvis", 0.0f) > 0.5f)
+    {
+        PelvisPlacementConfig pcfg;
+        pcfg.heelLift = g_fl.Opt("heel", 0.5f);
+        pcfg.reach = g_fl.Opt("reach", 0.995f);
+        S.fl.SetPelvisPlacement(true, pcfg);
+        S.fl.SetPelvisAllowed(!air && r.loco >= 1 && r.loco <= 3);
+    }
+    const auto tUp0 = std::chrono::steady_clock::now();
     S.fl.Update(dt, vvx, vvy, vyaw, sig.contact[0], sig.contact[1], aPose);
+    g_flUs.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - tUp0).count());
+    if (!air && r.loco >= 1 && r.loco <= 3)
+    {
+        const math::Vec3 po = S.fl.Diagnostics().pelvisOffset;
+        g_pelZ.push_back(std::fabs(po.z) * 100.0);
+        g_pelXY.push_back(std::hypot(po.x, po.y) * 100.0);
+        ++g_pelGround;
+    }
     const std::span<const BoneTransform> out = S.fl.Output();
     const FootLockDiagnostics& dg = S.fl.Diagnostics();
     ++g_flTot.frames;
     g_flTot.maxCorr = std::max(g_flTot.maxCorr, static_cast<double>(dg.maxCorrection) * 100.0);
+    g_runMaxCorr = std::max(g_runMaxCorr, static_cast<double>(dg.maxCorrection) * 100.0);
     g_flTot.maxLift = std::max(g_flTot.maxLift, static_cast<double>(dg.maxLift) * 100.0);
     if (dg.simultaneousSteps > S.lastSimultaneous)
         g_flTot.simultaneous += static_cast<uint32_t>(dg.simultaneousSteps - S.lastSimultaneous);
@@ -975,9 +1033,13 @@ void RunFeed(const MotionDatabase& db, const chooser::Table& table, const Feed& 
         g_flTot.drift += static_cast<uint32_t>(dg.driftUnlocks);
         g_flTot.steps += static_cast<uint32_t>(dg.footSteps[0] + dg.footSteps[1]);
     }
+    const double secs = static_cast<double>(f.fr.back().t - f.fr.front().t + f.fr.front().dt);
+    // One summary line per run (also in --brief): clip changes per second and the foot-locker correction max (-1 without --footlock).
+    std::printf("SUMMARY run=%s secs=%.1f clipChangesPerS=%.3f jumpsPerS=%.3f ikCorrMaxCm=%.2f\n", f.name.c_str(), secs,
+                st.clipChanges / std::max(1e-6, secs), st.jumps / std::max(1e-6, secs), g_fl.on ? g_runMaxCorr : -1.0);
+    g_runMaxCorr = 0;
     if (g_fl.brief)
         return;
-    const double secs = static_cast<double>(f.fr.back().t - f.fr.front().t + f.fr.front().dt);
     std::vector<double> sorted = st.us;
     const double mean = st.us.empty() ? 0.0 : [&] { double a = 0; for (double v : st.us) a += v; return a / static_cast<double>(st.us.size()); }();
     const double med = Pct(sorted, 0.5), p95 = Pct(sorted, 0.95), mx = sorted.empty() ? 0.0 : *std::max_element(sorted.begin(), sorted.end());
@@ -1221,6 +1283,18 @@ int main(int argc, char** argv)
             for (auto& [k, a] : g_flClip)
                 if (a.n)
                     std::printf("FLCLIP %s %u %.2f %.2f %.2f\n", k.c_str(), a.n, a.sumPre / a.n, Pct(a.pre, 0.5), a.sumPost / a.n);
+        }
+        {
+            auto pct = [](std::vector<double> v, double q) {
+                if (v.empty())
+                    return 0.0;
+                std::sort(v.begin(), v.end());
+                return v[std::min(v.size() - 1, static_cast<size_t>(q * static_cast<double>(v.size())))];
+            };
+            std::printf("FLPEL ground_frames %llu | pelvis |z| cm p50 %.2f p95 %.2f max %.2f | xy cm p50 %.2f p95 %.2f max %.2f | "
+                        "FootLocker::Update us p50 %.2f p95 %.2f max %.1f\n",
+                        static_cast<unsigned long long>(g_pelGround), pct(g_pelZ, 0.5), pct(g_pelZ, 0.95), pct(g_pelZ, 1.0), pct(g_pelXY, 0.5),
+                        pct(g_pelXY, 0.95), pct(g_pelXY, 1.0), pct(g_flUs, 0.5), pct(g_flUs, 0.95), pct(g_flUs, 1.0));
         }
         std::printf("FLTOT frames %u maxCorr %.1f cm maxLift %.1f cm clamps %u driftUnlocks %u steps %u simultaneous %u | leg-bone pops pre %u post %u NEW %u "
                     "maxPostStep %.1f deg | hyperext(>0.995) pre %u post %u | max planted toe %.2f m/s\n",

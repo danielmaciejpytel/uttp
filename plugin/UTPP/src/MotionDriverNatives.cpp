@@ -24,7 +24,7 @@ namespace utpp::motiondriver
 namespace
 {
 const motionhost::MotionHooks kHooks{&Step, &ApplyToSnapshot, &OnArmed, &OnDisarmed, &Frame, &OwnsTraversal, &OwnsSlide,
-                            &TravActive, &VehicleVaultWeapon}; // UTPP-MOTION SEAM ownsTraversal, ownsSlide, travActive (TRAV-1), vehicleVaultWeapon (vault torso limiter, keep last)
+                            &TravActive, &VehicleVaultWeapon, &RecordPublishedPose}; // UTPP-MOTION SEAM ownsTraversal, ownsSlide, travActive (TRAV-1), vehicleVaultWeapon (vault torso limiter), published (live pose history, keep last)
 
 void Native_SetMotionEnabled(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {

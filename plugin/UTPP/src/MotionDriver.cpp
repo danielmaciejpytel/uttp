@@ -44,6 +44,7 @@
 
 #include "mm/Chooser.hpp"
 #include "mm/ExitPoseHistory.hpp"
+#include "mm/LivePoseHistory.hpp"
 #include "mm/GamePoseCapture.hpp"
 #include "mm/MotionDatabase.hpp"
 #include "mm/ChooserMatcher.hpp"
@@ -863,6 +864,11 @@ uint64_t g_handinFrames = 0;
 uint64_t g_tailFrames = 0, g_skipLayout = 0;
 bool g_layoutLogged = false;
 std::array<motion::TrajSample, adapter::kQueryTrajMax> g_traj{};
+// Live pose history (mm/LivePoseHistory.hpp): the published pose after the leg tail, fed back to the search. Off by default.
+bool g_liveHistOn = false;
+motion::LivePoseHistory g_liveHist;
+uint64_t g_liveHistSearches = 0; // searches that read the live history
+bool g_liveHistPushed = false;    // a published pose arrived since the last search (else the ring is not contiguous: reset)
 
 // UTPP-MOTION SEAM trav: one traversal at a time (MotionDriver.hpp TraversalEvent). plan.montage points into the installed
 // bundle's travPlay: TravResetLocked runs before any bundle swap / body switch / toggle / re-arm.
@@ -1879,9 +1885,30 @@ Paths PathsForBody(Body aBody, const std::string& aDir)
     return p;
 }
 
+void SetLivePoseHistory(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_liveHistOn = aOn;
+    g_liveHist.Reset();
+}
+
+void RecordPublishedPose(const mm::BoneTransform* aPose, uint32_t aNumBones, float aDt, float aOffX, float aOffY, float aOffYaw)
+{
+    std::lock_guard lock(g_m);
+    if (!g_liveHistOn)
+        return;
+    if (!g_bundle || !g_enabled)
+    {
+        g_liveHist.Reset();
+        return;
+    }
+    g_liveHistPushed = g_liveHist.Push(g_bundle->db, kFirstBone, aPose, aNumBones, aDt, aOffX, aOffY, aOffYaw);
+}
+
 void SetEnabled(bool aOn)
 {
     std::lock_guard lock(g_m);
+    g_liveHist.Reset();
     g_fnHoldValid = false; // a new v2 session never inherits a held heading
     if (!aOn) g_authoredReload = false;
     if (!aOn) integ::g_gamePoseCaptureWanted.store(false, std::memory_order_relaxed);
@@ -2353,6 +2380,12 @@ RootProbe TestRootProbe()
 {
     std::lock_guard lock(g_m);
     return g_rootProbe;
+}
+
+uint64_t TestLiveHistorySearches()
+{
+    std::lock_guard lock(g_m);
+    return g_liveHistSearches;
 }
 
 DodgeProbe TestDodgeProbe()
@@ -4893,6 +4926,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         rootWanted && (aRaw.dt > .25f || std::hypot(aRaw.capsuleDeltaCurrent[0], aRaw.capsuleDeltaCurrent[1]) > teleportM);
     if (reentry || rootWanted != b.rootPolicyEnabled || rootDiscontinuity)
     {
+        g_liveHist.Reset();
         b.startTurn.Reset();
         // Shooter mode: V stands, the camera has orbited her and her visual root holds its heading (by design far from the capsule). A frame gap
         // or a re-entry after a skipped feed must not reseed that heading onto the actor (she would snap to face the camera); a real teleport
@@ -5287,7 +5321,20 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             g_log(line);
         }
     }
-    motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, exitHistory); // UTPP-MOTION SEAM trav: copy (handback blend)
+    // Live pose history (off by default): the shown pose of the last feeds instead of the continuing / last pose for the pose channels.
+    // A non-null history also disables the matcher's one-sample last-pose fallback. Not on re-entry or a traversal handback (the ring
+    // was reset or holds the montage pose).
+    static motion::PoseHistory liveHistory;
+    const motion::PoseHistory* history = exitHistory;
+    if (!g_liveHistPushed)
+        g_liveHist.Reset();
+    g_liveHistPushed = false;
+    if (!history && g_liveHistOn && !reentry && !travHandback && !travDetail && g_liveHist.Build(dt, g_traj.data(), nt, liveHistory))
+    {
+        history = &liveHistory;
+        ++g_liveHistSearches;
+    }
+    motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
     BudgetStageRecordLocked(r);
     b.startTurn.Selected(r.clip, b.matcher.StartTurnDirection(r.clip));
     g_travProbe.justTraversed = travHandback; // UTPP-MOTION SEAM trav

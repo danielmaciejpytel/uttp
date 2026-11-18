@@ -657,8 +657,11 @@ struct MotionHooks // UTPP-MOTION SEAM
     bool (*travActive)() = nullptr; // UTPP-MOTION SEAM
     // Vault torso limiter (mm/VaultTorso.hpp): motiondriver::VehicleVaultWeapon - the last traversal event is a vault over a vehicle that v2
     // rejected (Unsupported(vehicle)) and the overlay is a ranged pose. Lock-free (atomics only: v1 calls it under its own mutex). null = false.
-    // Keep LAST.
     bool (*vehicleVaultWeapon)() = nullptr; // UTPP-MOTION SEAM
+    // Live pose history: motiondriver::RecordPublishedPose - the published v2 pose (database local space, after the leg tail) of
+    // the feed, once per feed, with the visual root offset applied to it (x, y in m, yaw in rad). null = not recorded. Keep LAST.
+    void (*published)(const mm::BoneTransform* aPose, uint32_t aNumBones, float aDt, float aOffX, float aOffY,
+                      float aOffYaw) = nullptr; // UTPP-MOTION SEAM
 }; // UTPP-MOTION SEAM
 void SetMotionHooks(const MotionHooks* aHooks); // UTPP-MOTION SEAM (null = uninstall)
 // UTPP-MOTION SEAM test hook (motion_adapter integration test): v1 matcher / steering state around a v2-owned span.
