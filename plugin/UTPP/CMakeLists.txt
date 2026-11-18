@@ -1139,5 +1139,11 @@ target_compile_options(utpp_motion_adapter_unit_directional_test PRIVATE ${UTPP_
 target_compile_features(utpp_motion_adapter_unit_directional_test PRIVATE cxx_std_20)
 add_test(NAME utpp_motion_adapter_unit_directional_test COMMAND utpp_motion_adapter_unit_directional_test)
 
+# ---- step-down reach for deeper steps and the chooser time to land at the reference gravity (mm/MotionAdapter.hpp, mm/ChooserMatcher.hpp; off by default) ----
+add_executable(utpp_motion_adapter_unit_step_down_test tests/StepDownReachTest.cpp src/mm/MotionAdapter.hpp src/mm/ChooserMatcher.hpp)
+target_compile_options(utpp_motion_adapter_unit_step_down_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_motion_adapter_unit_step_down_test PRIVATE cxx_std_20)
+add_test(NAME utpp_motion_adapter_unit_step_down_test COMMAND utpp_motion_adapter_unit_step_down_test)
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

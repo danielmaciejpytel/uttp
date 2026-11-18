@@ -136,6 +136,9 @@ struct ChooserState
     // adapter::MapToChooser from MapContext::jumpOutFlight; a hand-built state leaves it false (MatcherConfig::jumpOutNoBack /
     // jumpOutFallHandover then never act). Every other flight is untouched.
     bool jumpOutFlight = false;
+    // Gravity of this feed in m/s^2 (adapter::MapToChooser: the learned game gravity; 0 = unknown, MatcherConfig::farJumpGravityScale then
+    // never acts).
+    float gravityMs2 = 0.0f;
     // r3 landing: the heavy land that followed a vehicle jump-out flight has played motiontraj::kJumpOutLandRecoverS seconds (written by
     // adapter::MapToChooser; a hand-built state leaves it false = the land clip plays on as before). InterruptFor then lets the search leave
     // the land database.
@@ -219,6 +222,22 @@ inline constexpr float kBlendTipAfterSlideS = 0.3f;
 // covered a rest turn-in-place after the hold, when the clip had stood up and the long fade only cut the authored yaw of the turn.
 inline constexpr float kTipRiseGapM = 0.15f;
 inline constexpr float kBlendSlideFamilyS = 0.25f;
+// --- Flight time under the game gravity (MatcherConfig::farJumpGravityScale, default off) ---
+// The chooser's TimeToLand thresholds (the far-jump database from 1.2 s) are authored for kChooserReferenceGravity. A drop of the same height
+// takes t * sqrt(g / g_ref) at the reference gravity, so the chooser reads the time to land in that unit: the threshold acts as
+// 1.2 * sqrt(g_ref / g) of game flight time (0.94 s at 16 m/s^2). A known gravity <= 0 leaves the value unchanged.
+#ifndef UTPP_FAR_JUMP_GRAVITY_DEFAULT
+#define UTPP_FAR_JUMP_GRAVITY_DEFAULT 0
+#endif
+inline constexpr bool kFarJumpGravityScaleDefault = UTPP_FAR_JUMP_GRAVITY_DEFAULT != 0;
+inline constexpr float kChooserReferenceGravity = 9.81f; // m/s^2
+inline float ReferenceTimeToLand(float aTimeToLand, float aGravityMs2) noexcept
+{
+    if (!(aGravityMs2 > 0.0f) || !std::isfinite(aTimeToLand))
+        return aTimeToLand;
+    return aTimeToLand * std::sqrt(aGravityMs2 / kChooserReferenceGravity);
+}
+// --- end flight time under the game gravity ---
 #ifndef UTPP_JUMPPICK_MUTATION
 #define UTPP_JUMPPICK_MUTATION 0
 #endif
@@ -337,6 +356,9 @@ struct MatcherConfig
     // false = the pre-fix selection, bit for bit.
     bool jumpOutNoBack = true;
     bool jumpOutFallHandover = true;
+    // farJumpGravityScale: the chooser reads TimeToLand at the reference gravity (ReferenceTimeToLand, ChooserState::gravityMs2). false = the
+    // raw time to land, bit for bit.
+    bool farJumpGravityScale = kFarJumpGravityScaleDefault;
 
     // fix3/jump (N3, recording 2026-10-21 12:15): quick slide combinations popped the pose in 1-3 frames. Every knob is a cross-fade
     // time in seconds, 0 = the pre-fix time.
@@ -1050,7 +1072,7 @@ public:
         en(m_in.movementDirection, s.movementDirection);
         en(m_in.movementModeLast, s.movementModeLast);
         num(m_in.speed, s.speed2dCmS);
-        num(m_in.ttl, s.timeToLand);
+        num(m_in.ttl, m_cfg.farJumpGravityScale ? ReferenceTimeToLand(s.timeToLand, s.gravityMs2) : s.timeToLand);
         bo(m_in.starting, s.isStarting);
         bo(m_in.pivoting, s.isPivoting);
         bo(m_in.landLight, s.justLandedLight);
