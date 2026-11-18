@@ -18,6 +18,26 @@
 #endif
 namespace utpp::mm::motionstack
 {
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+// Test targets only (the replay stage tool): settings every BlendStack takes at Init in place of its defaults, so a replay can select
+// the steering values and the per-bone signal mode without a rebuild (set before the first Step; nothing changes while they stay unset),
+// and a probe of the yaw the steering nodes apply to the head layer: per call |steered yaw - authored yaw| (rad), summed.
+struct TestStackOverrides
+{
+    bool steering = false;
+    float halfLife = 0, targetTime = 0;
+    int32_t signalMode = -1; // -1 = the build default, else bit 0 root, bit 1 contacts (SetPerBoneSignals)
+};
+inline TestStackOverrides g_testStackOverrides{};
+struct TestSteeringProbe
+{
+    uint64_t calls = 0;          // ProcessGraph calls of the head layer with dt > 0
+    double appliedAbsRad = 0;    // summed |steered - authored| yaw of those calls
+    double lastAppliedRad = 0;   // signed steered - authored yaw of the last call
+    uint64_t lastCall = 0;       // calls at the last update (a reader sees whether this step steered)
+};
+inline TestSteeringProbe g_testSteeringProbe{};
+#endif
 struct Signals
 {
     float rootX = 0, rootY = 0, rootYaw = 0, left = 0, right = 0;
@@ -117,6 +137,12 @@ class BlendStack
                     m_fullLegFactors[k] = 1.0f;
                     break;
                 }
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        if (g_testStackOverrides.steering)
+            SetSteering(g_testStackOverrides.halfLife, g_testStackOverrides.targetTime);
+        if (g_testStackOverrides.signalMode >= 0)
+            SetPerBoneSignals((g_testStackOverrides.signalMode & 1) != 0, (g_testStackOverrides.signalMode & 2) != 0);
+#endif
         return true;
     }
     void SetGraphInputs(const GraphInputs &input)
@@ -739,6 +765,16 @@ class BlendStack
         const auto tip = p.tipSteering.Update(steering);
         if (!tip.valid)
             return false;
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        if (&p == &m_players[0])
+        {
+            const double applied = double(tip.yawDelta) - double(signal.rootYaw) * double(dt);
+            ++g_testSteeringProbe.calls;
+            g_testSteeringProbe.appliedAbsRad += std::fabs(applied);
+            g_testSteeringProbe.lastAppliedRad = applied;
+            g_testSteeringProbe.lastCall = g_testSteeringProbe.calls;
+        }
+#endif
         signal.rootYaw = p.lastSteeredYawRate = tip.yawDelta / dt;
         p.haveSteered = true;
         return true;

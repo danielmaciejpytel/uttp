@@ -14,6 +14,14 @@
 // --body man replays with the male motion database and rig (default: woman); the clip dump (--clips) is always the woman database.
 // --history 1 turns the live pose history on (mm/LivePoseHistory.hpp; default off as in the game): the published pose after the leg
 // tail is fed back to the next search through the same host hook the game uses.
+// Off-by-default options of the runtime path (each absent = the build default, bit for bit):
+//   --steering h,t      blend stack steering half-life / animation lookahead (s), e.g. 0.4,2.0
+//   --signals N         per-bone root-motion signals: bit 0 root on the Root weight, bit 1 contacts on the leg weights
+//   --pelvis 1          pelvis stage of the foot locker
+//   --capsule-query 1   chooser query trajectory in capsule units
+//   --velocity-predicates 1  moving / pivot predicates from the current velocity and the input acceleration
+//   --tip-deg D         turn-in-place angle of the chooser (deg)
+//   --pick-dump 1       one PICKDUMP line per stop / start pick (inspection)
 // <feed dump> = --clips [name part] writes the stored frames of the woman database clips whose name contains the part (all without it)
 // instead (same layout, see the clip mode below).
 // <out prefix> = - writes no files (summary only).
@@ -45,6 +53,16 @@
 #include "../../plugin/UTPP/tests/MotionDriverIntegrationTest.cpp"
 #undef main
 #include "../../plugin/UTPP/src/mm/ExitPoseHistory.hpp"
+#include "../../plugin/UTPP/src/mm/MotionBlendStack.hpp"
+
+namespace utpp::motiondriver
+{
+void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg);
+}
+namespace utpp::motionhost
+{
+void TestSetPelvisPlacement(bool aOn);
+}
 
 namespace
 {
@@ -171,7 +189,10 @@ int main(int argc, char** argv)
     const std::string data = argv[1], feedPath = argv[3], out = argv[4];
     float from = -1e30f, to = 1e30f;
     std::string settingsLog;
-    bool aheadRecorded = false, man = false, liveHistory = false;
+    bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
+    int32_t capsuleQuery = -1, velocityPredicates = -1;
+    float tipDeg = std::numeric_limits<float>::quiet_NaN();
+    auto& stackOverrides = mm::motionstack::g_testStackOverrides;
     for (int i = 5; i + 1 < argc; i += 2)
     {
         if (std::strcmp(argv[i], "--from") == 0)
@@ -186,6 +207,24 @@ int main(int argc, char** argv)
             man = std::strcmp(argv[i + 1], "man") == 0;
         else if (std::strcmp(argv[i], "--history") == 0)
             liveHistory = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--steering") == 0)
+        {
+            stackOverrides.steering = std::sscanf(argv[i + 1], "%f,%f", &stackOverrides.halfLife, &stackOverrides.targetTime) == 2;
+            if (!stackOverrides.steering)
+                return 2;
+        }
+        else if (std::strcmp(argv[i], "--signals") == 0)
+            stackOverrides.signalMode = std::atoi(argv[i + 1]) & 3;
+        else if (std::strcmp(argv[i], "--pelvis") == 0)
+            pelvis = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--capsule-query") == 0)
+            capsuleQuery = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--velocity-predicates") == 0)
+            velocityPredicates = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--tip-deg") == 0)
+            tipDeg = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--pick-dump") == 0)
+            pickDump = std::atoi(argv[i + 1]) != 0;
     }
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
@@ -305,6 +344,8 @@ int main(int argc, char** argv)
         ApplyLoggedSettings(settingsLog, applied, unknown);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
+    motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
+    motionhost::TestSetPelvisPlacement(pelvis);
     motiondriver::Step(inputs.front(), 1, inputs.front().dt);
     motiondriver::WaitLoader();
     const uint32_t nb = db->NumBones();
@@ -329,7 +370,14 @@ int main(int argc, char** argv)
     };
     const int32_t footBones[2] = {boneIndex("LeftFoot"), boneIndex("RightFoot")};
     const int32_t toeBones[2] = {boneIndex("LeftToeBase"), boneIndex("RightToeBase")};
-    std::vector<double> pickOffsets[2], drifts[2], plantedOffsets[2];
+    std::vector<double> pickOffsets[2], drifts[2], plantedOffsets[2], plantedOffsetsDrv[2], plantedOffsetsHip[2];
+    math::Vec3 driverFeet[2], driverHips;
+    const int32_t hipsBone = boneIndex("Hips");
+    bool haveDriverFeet = false;
+    // steering probe: yaw the steering nodes applied to the head layer per feed (deg) against the procedural yaw readout (deg)
+    const auto& steerProbe = mm::motionstack::g_testSteeringProbe;
+    double steerPrevAbs = 0, steerSum = 0, procSumAll = 0, sxy = 0, sxx = 0, syy = 0, sx = 0, sy = 0, steerTurnSum = 0, steerTurn = 0, lastSteerDeg = 0;
+    uint64_t steerFeeds = 0;
     float prevContact[2] = {0.0f, 0.0f};
     math::Vec3 shownFeet[2];
     bool haveShownFeet = false, driftAnchor[2] = {false, false};
@@ -397,6 +445,42 @@ int main(int argc, char** argv)
                                 planted = std::max(planted, 100.0 * std::hypot(double(clipFeet[s].x - shownFeet[s].x), double(clipFeet[s].y - shownFeet[s].y)));
                         if (planted >= 0.0)
                             plantedOffsets[cls].push_back(planted);
+                        // the same against the driver pose of the previous feed (no foot locker correction in it)
+                        double plantedDrv = -1.0, offDrv[2] = {-1.0, -1.0};
+                        if (haveDriverFeet)
+                            for (int s = 0; s < 2; ++s)
+                            {
+                                offDrv[s] = 100.0 * std::hypot(double(clipFeet[s].x - driverFeet[s].x), double(clipFeet[s].y - driverFeet[s].y));
+                                if (prevContact[s] >= 0.5f)
+                                    plantedDrv = std::max(plantedDrv, offDrv[s]);
+                            }
+                        if (plantedDrv >= 0.0)
+                            plantedOffsetsDrv[cls].push_back(plantedDrv);
+                        // the same relative to the Hips (horizontal): the runtime pose carries the visual root offset (the body up to the
+                        // offset radius behind its Root), the stored clip frame does not; Hips-relative feet compare the two poses alone
+                        double plantedHip = -1.0;
+                        if (haveDriverFeet && hipsBone >= 0 && db->BoneParent(uint32_t(hipsBone)) < 2)
+                        {
+                            const float hx = cpose[hipsBone].px, hy = cpose[hipsBone].py;
+                            for (int s = 0; s < 2; ++s)
+                                if (prevContact[s] >= 0.5f)
+                                    plantedHip = std::max(plantedHip, 100.0 * std::hypot(double((clipFeet[s].x - hx) - (driverFeet[s].x - driverHips.x)),
+                                                                                        double((clipFeet[s].y - hy) - (driverFeet[s].y - driverHips.y))));
+                        }
+                        if (plantedHip >= 0.0)
+                            plantedOffsetsHip[cls].push_back(plantedHip);
+                        if (pickDump)
+                            std::printf("PICKDUMP t=%.3f cls=%s clip=%s ct=%.3f contactL=%.2f contactR=%.2f shownOffL=%.2f shownOffR=%.2f "
+                                        "drvOffL=%.2f drvOffR=%.2f clipL=%.3f,%.3f clipR=%.3f,%.3f shownL=%.3f,%.3f shownR=%.3f,%.3f "
+                                        "drvL=%.3f,%.3f drvR=%.3f,%.3f\n",
+                                        double(rows[i].t), cls ? "start" : "stop", cname.c_str(), double(ct), double(prevContact[0]),
+                                        double(prevContact[1]),
+                                        100.0 * std::hypot(double(clipFeet[0].x - shownFeet[0].x), double(clipFeet[0].y - shownFeet[0].y)),
+                                        100.0 * std::hypot(double(clipFeet[1].x - shownFeet[1].x), double(clipFeet[1].y - shownFeet[1].y)),
+                                        offDrv[0], offDrv[1], double(clipFeet[0].x), double(clipFeet[0].y), double(clipFeet[1].x),
+                                        double(clipFeet[1].y), double(shownFeet[0].x), double(shownFeet[0].y), double(shownFeet[1].x),
+                                        double(shownFeet[1].y), double(driverFeet[0].x), double(driverFeet[0].y), double(driverFeet[1].x),
+                                        double(driverFeet[1].y));
                     }
                     driftCls = cls;
                     driftLeft = 0.3;
@@ -406,6 +490,15 @@ int main(int argc, char** argv)
             }
             if (pc >= 0)
                 lastPickClip = pc;
+            haveDriverFeet = g_tailValid && g_driverPose.size() == size_t(nb) * 7 &&
+                             FeetAt(*db, footBones, 2, [&](uint32_t b, math::Vec3& p, math::Quat& q) {
+                                 const float* v = g_driverPose.data() + size_t(b) * 7;
+                                 p = math::Vec3{v[0], v[1], v[2]};
+                                 q = math::Quat{v[3], v[4], v[5], v[6]};
+                                 return true;
+                             }, driverFeet);
+            if (haveDriverFeet && hipsBone >= 0)
+                driverHips = math::Vec3{g_driverPose[size_t(hipsBone) * 7], g_driverPose[size_t(hipsBone) * 7 + 1], g_driverPose[size_t(hipsBone) * 7 + 2]};
             prevContact[0] = g_tailValid ? g_tail.contact[0] : 0.0f;
             prevContact[1] = g_tailValid ? g_tail.contact[1] : 0.0f;
             // shown feet of this feed (Root space, for the next pick) and the planted drift window after a stop / start pick
@@ -478,6 +571,18 @@ int main(int argc, char** argv)
                 procSum += std::fabs(proc);
                 capSum += std::fabs(double(pr.capsuleYawDelta)) * kRadToDeg;
             }
+            {
+                const double steerDeg = (steerProbe.appliedAbsRad - steerPrevAbs) * kRadToDeg;
+                steerPrevAbs = steerProbe.appliedAbsRad;
+                if (pr.prepared)
+                {
+                    const double y = std::fabs(proc);
+                    ++steerFeeds;
+                    steerSum += steerDeg, procSumAll += y;
+                    sx += steerDeg, sy += y, sxx += steerDeg * steerDeg, syy += y * y, sxy += steerDeg * y;
+                }
+                lastSteerDeg = steerDeg;
+            }
             const double yawStep = i > 0 ? std::fabs(std::remainder(double(rows[i].yawDeg) - double(rows[i - 1].yawDeg), 360.0)) : 0.0;
             const double fdt = std::max(1e-4, double(rows[i].dt));
             if (yawStep / fdt > 30.0)
@@ -485,9 +590,15 @@ int main(int argc, char** argv)
                 turnTime += fdt;
                 turnYaw += yawStep;
                 turnProc += std::fabs(proc);
+                steerTurn += lastSteerDeg;
             }
             else
+            {
+                if (turnTime >= 0.1 && turnYaw >= 20.0)
+                    steerTurnSum += steerTurn;
+                steerTurn = 0;
                 closeTurn();
+            }
         }
         if (!files)
         {
@@ -526,6 +637,8 @@ int main(int argc, char** argv)
         bin.write(reinterpret_cast<const char*>(rec.data()), std::streamsize(rec.size() * sizeof(float)));
         ++written;
     }
+    if (turnTime >= 0.1 && turnYaw >= 20.0)
+        steerTurnSum += steerTurn;
     closeTurn();
     if (driftLeft > 0.0)
         drifts[driftCls].push_back(driftMax);
@@ -568,16 +681,32 @@ int main(int argc, char** argv)
             size_t wrong = 0;
             for (double o : pickOffsets[c])
                 wrong += o > 10.0;
-            size_t keep = 0;
+            size_t keep = 0, keepDrv = 0, keepHip = 0;
+            for (double o : plantedOffsetsHip[c])
+                keepHip += o <= 10.0;
             for (double o : plantedOffsets[c])
                 keep += o <= 10.0;
+            for (double o : plantedOffsetsDrv[c])
+                keepDrv += o <= 10.0;
             std::printf(" %sPicks=%zu %sWrongFoot=%zu %sOffP50Cm=%.2f %sOffP95Cm=%.2f %sDriftN=%zu %sDriftMeanCm=%.2f %sDriftP95Cm=%.2f"
                         " %sPlantedN=%zu %sPlantedKept=%zu %sPlantedOffP50Cm=%.2f",
                         cn[c], pickOffsets[c].size(), cn[c], wrong, cn[c], pct(pickOffsets[c], 0.5), cn[c], pct(pickOffsets[c], 0.95), cn[c],
                         drifts[c].size(), cn[c], mean(drifts[c]), cn[c], pct(drifts[c], 0.95), cn[c], plantedOffsets[c].size(), cn[c], keep,
                         cn[c], pct(plantedOffsets[c], 0.5));
+            std::printf(" %sPlantedDrvN=%zu %sPlantedDrvKept=%zu %sPlantedDrvOffP50Cm=%.2f", cn[c], plantedOffsetsDrv[c].size(), cn[c],
+                        keepDrv, cn[c], pct(plantedOffsetsDrv[c], 0.5));
+            std::printf(" %sPlantedHipN=%zu %sPlantedHipKept=%zu %sPlantedHipOffP50Cm=%.2f", cn[c], plantedOffsetsHip[c].size(), cn[c],
+                        keepHip, cn[c], pct(plantedOffsetsHip[c], 0.5));
         }
         std::printf("\n");
+        // STEER line: the yaw the steering nodes applied to the head layer (blend stack probe) against the procedural yaw readout, over
+        // the feeds with a prepared root frame: sums (deg), per-turn sum of the probe and the Pearson correlation per feed
+        const double n = double(steerFeeds);
+        const double den = std::sqrt(std::max(0.0, n * sxx - sx * sx) * std::max(0.0, n * syy - sy * sy));
+        std::printf("STEER run=%s feeds=%llu calls=%llu steerAbsDeg=%.1f procAbsDeg=%.1f ratio=%.3f corr=%.3f steerPerTurnDeg=%.2f\n",
+                    name.c_str(), static_cast<unsigned long long>(steerFeeds), static_cast<unsigned long long>(steerProbe.calls), steerSum,
+                    procSumAll, procSumAll > 0 ? steerSum / procSumAll : 0.0, den > 0 ? (n * sxy - sx * sy) / den : 0.0,
+                    turns ? steerTurnSum / turns : 0.0);
     }
     if (!files)
     {
