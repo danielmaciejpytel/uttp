@@ -1264,7 +1264,10 @@ public:
         // state change (game PSM flicker Crouch 3 <-> CrouchSprint 30 right after a slide) would interrupt it ("InterruptOnDatabaseChange",
         // the exit database is no longer a chooser database) and a closer row of an ordinary database would replace it after 0.07-0.10 s.
         // Air, a new slide, a landing, a traversal or a forced interrupt release it at once.
-        const bool gaitStateDiffers = aState.gait != m_holdGait || aState.movementState != m_holdMovementState;
+        // A gait-only difference counts under the same rule as InterruptFor (MatcherConfig::gaitInterruptMovingOnly): only while Moving,
+        // so the slide-exit hold and the turn commit never deliver a gait edge that InterruptFor itself would not raise.
+        const bool gaitEdgeCounts = !m_cfg.gaitInterruptMovingOnly || aState.movementState == 1;
+        const bool gaitStateDiffers = (aState.gait != m_holdGait && gaitEdgeCounts) || aState.movementState != m_holdMovementState;
         m_holdChangeAge = gaitStateDiffers ? m_holdChangeAge + aDt : 0.0f;
         bool holdReleasedNow = false;
         if (m_slideExitHoldLeft > 0.0f)

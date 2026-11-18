@@ -787,6 +787,7 @@ std::array<float, adapter::Budget::kWindow> g_times{};     // per feed: the smal
 std::array<float, adapter::Budget::kWindow> g_wallTimes{}; // per feed: wall time (status / log only)
 std::array<float, adapter::Budget::kWindow> g_sorted{};
 uint64_t g_timeCount = 0;
+void ClearStageRingsLocked(); // the matcher stage rings of the budget window (defined with them below)
 // Budget pause (FinishFrameLocked trips it, BudgetPauseStepLocked ends it on feed time): g_budgetTripped is the pause flag.
 #ifndef UTPP_MOTION_DRIVER_BUDGET_MUTATION
 #define UTPP_MOTION_DRIVER_BUDGET_MUTATION 0 // test builds only: 1 = a pause never ends, 2 = wall time only
@@ -1704,6 +1705,7 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
             g_timeCount = 0;
+            ClearStageRingsLocked(); // the matcher stage rings restart with the window
             g_wasRunning = false; // commit A: a handover started by the body switch keeps running (held snapshot = game rig)
             g_pending = false;
             TravResetLocked(false); // UTPP-MOTION SEAM trav: the plan points into the replaced bundle
@@ -1932,6 +1934,7 @@ void SetEnabled(bool aOn)
         g_budgetTripped = false; // g_faulted stays: fault = v1 until the end of the session
         g_budgetPauseLeft = 0.0f; // the pause length / trip count stay (session values)
         g_timeCount = 0;
+        ClearStageRingsLocked(); // the matcher stage rings restart with the window
         TravResetLocked(true); // UTPP-MOTION SEAM trav
         ProbeEndLocked(aOn ? "enable-change" : "motion-off");
         GetUpEndLocked(aOn ? "enable-change" : "motion-off", true);
@@ -2395,6 +2398,30 @@ DodgeProbe TestDodgeProbe()
     p.loaded = g_bundle && g_bundle->dodgeOk;
     p.clips = g_dodgeSt.clips;
     return p;
+}
+#endif
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+// Test targets only (the replay stage tool): chooser mapping options applied over the defaults on every Step (-1 / NaN = keep the
+// default). Set before the first Step; never compiled into the plugin.
+struct TestMapOverrides
+{
+    int32_t capsuleSpeedQuery = -1, velocityPredicates = -1;
+    float turnInPlaceDeg = std::numeric_limits<float>::quiet_NaN();
+};
+TestMapOverrides g_testMapOverrides;
+void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg)
+{
+    std::lock_guard lock(g_m);
+    g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg};
+}
+void TestApplyMapOverrides(adapter::MapConfig& aMc)
+{
+    if (g_testMapOverrides.capsuleSpeedQuery >= 0)
+        aMc.capsuleSpeedQuery = g_testMapOverrides.capsuleSpeedQuery != 0;
+    if (g_testMapOverrides.velocityPredicates >= 0)
+        aMc.velocityPredicates = g_testMapOverrides.velocityPredicates != 0;
+    if (std::isfinite(g_testMapOverrides.turnInPlaceDeg))
+        aMc.turnInPlaceDeg = g_testMapOverrides.turnInPlaceDeg;
 }
 #endif
 
@@ -3688,6 +3715,14 @@ std::array<float, adapter::Budget::kWindow> g_stageQueryUs{};
 std::array<float, adapter::Budget::kWindow> g_stageSearchUs{};
 std::array<float, adapter::Budget::kWindow> g_stageSelectUs{};
 
+void ClearStageRingsLocked()
+{
+    g_stageContUs.fill(0.0f);
+    g_stageQueryUs.fill(0.0f);
+    g_stageSearchUs.fill(0.0f);
+    g_stageSelectUs.fill(0.0f);
+}
+
 void BudgetLogLocked(const char* aLine)
 {
     if (g_log != nullptr)
@@ -3747,6 +3782,7 @@ void BudgetPauseStepLocked(float aDt)
         return;
     g_budgetTripped = false;
     g_timeCount = 0; // the statistics window restarts empty
+    ClearStageRingsLocked(); // the matcher stage rings restart with the window
     RefreshTravActiveLocked();
     TravRecheckDeferredLocked();
     std::snprintf(g_budgetBuf, sizeof(g_budgetBuf),
@@ -5239,6 +5275,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     // mutation 3 (the first design): the standing V turns in place behind the camera instead of holding her heading
     const bool shooterModeRest = g_shooter_modeSetting && rootWanted && aRaw.tppActive && !g_release && !g_trav.active && !restAimBlock && !ctx.aimFacing;
     ctx.restTurn = ctx.restTurn || shooterModeRest;
+#endif
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    TestApplyMapOverrides(mc);
 #endif
     motion::ChooserState cs = adapter::MapToChooser(f, mc, b.map, ctx); // UTPP-MOTION SEAM trav: not const (JustTraversed)
     g_shooterFrames += b.map.shooterModeActive ? 1u : 0u;

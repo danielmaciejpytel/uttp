@@ -5679,6 +5679,12 @@ bool MatcherPoseForTest(std::vector<float>& aOut)
     }
     return true;
 }
+// Test hook: the pelvis stage of the foot locker on / off (default off; the replay stage tool selects it per run).
+void TestSetPelvisPlacement(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    g_pelvisPlacementOn = aOn;
+}
 #endif
 
 bool SetFootReplantParams(float aRadius, float aStopsRadius, float aRatio, float aStopsRatio, float aStepSpeed, float aStopsStepSpeed,

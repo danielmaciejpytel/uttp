@@ -202,6 +202,26 @@ struct PhaseStats
     std::vector<double> us;
 };
 
+// Search equivalence: shadow matchers built with the other search settings (bound off, box bound off, both off) take the same
+// inputs as the scenario matcher in every RunPhase update and must select the same database, frame and cost. Resets are mirrored.
+struct SearchShadows
+{
+    std::vector<ChooserMatcher> m;
+    std::vector<const char*> names;
+    uint32_t compared = 0, differ = 0;
+    double maxCostDiff = 0;
+    uint64_t rowsMain = 0;       // rows evaluated by the scenario matcher (bounded box search)
+    std::vector<uint64_t> rows;  // per shadow
+};
+SearchShadows* g_shadows = nullptr;
+void ResetShadowed(ChooserMatcher& mm, bool aKeep = false)
+{
+    mm.Reset(aKeep);
+    if (g_shadows)
+        for (ChooserMatcher& x : g_shadows->m)
+            x.Reset(aKeep);
+}
+
 // Runs aSteps updates; aState(i) gives the chooser state per step. Checks per-step invariants.
 template <class StateFn>
 PhaseStats RunPhase(ChooserMatcher& mm, const MotionDatabase& db, const Sim& sim, double& now, int aSteps, StateFn aState)
@@ -219,6 +239,23 @@ PhaseStats RunPhase(ChooserMatcher& mm, const MotionDatabase& db, const Sim& sim
         const MatchResult& r = mm.Update(kDt, traj.data(), static_cast<uint32_t>(traj.size()), cs);
         const auto t1 = std::chrono::high_resolution_clock::now();
         st.us.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+        if (g_shadows)
+            g_shadows->rowsMain += r.rowsEvaluated;
+        if (g_shadows)
+            for (size_t k = 0; k < g_shadows->m.size(); ++k)
+            {
+                const MatchResult& x = g_shadows->m[k].Update(kDt, traj.data(), static_cast<uint32_t>(traj.size()), cs);
+                ++g_shadows->compared;
+                g_shadows->rows.resize(g_shadows->m.size(), 0);
+                g_shadows->rows[k] += x.rowsEvaluated;
+                const double dc = r.database >= 0 && x.database >= 0 ? std::fabs(double(x.cost) - double(r.cost)) : 0.0;
+                g_shadows->maxCostDiff = std::max(g_shadows->maxCostDiff, dc);
+                const bool same = x.database == r.database && x.frame == r.frame && x.jumped == r.jumped &&
+                                  dc <= 1e-5 * std::max(1.0, std::fabs(double(r.cost)));
+                if (!same && ++g_shadows->differ <= 5)
+                    std::printf("    search equivalence (%s): db %d frame %u cost %.7g, expected db %d frame %u cost %.7g\n",
+                                g_shadows->names[k], x.database, x.frame, double(x.cost), r.database, r.frame, double(r.cost));
+            }
         ++st.updates;
         st.maskUnion |= r.dbMask;
         if (r.database < 0)
@@ -741,7 +778,7 @@ std::vector<MatchResult> Prime(ChooserMatcher& mm, const Sim& sim, double& now, 
     return v;
 }
 
-void ContinuingRules(ChooserMatcher& mm, const MotionDatabase& db)
+void ContinuingRules(ChooserMatcher& mm, const MotionDatabase& db, const chooser::Table& aTable)
 {
     std::vector<TrajSample> traj;
     double now = 0.0;
@@ -1060,9 +1097,21 @@ void ContinuingRules(ChooserMatcher& mm, const MotionDatabase& db)
         const MatchResult c = y.Update(kDt, traj.data(), static_cast<uint32_t>(traj.size()), idle, nullptr, &kModes[kFI]);
         CHECK(c.jumped && c.blend.valid && c.blend.fromClip >= 0, "(g) control: ForceInterrupt jump without a blend source");
     }
-    // (h) motion Get_MMInterruptMode (pseudo l.1924-1927): InterruptOnDatabaseChange if MovementMode changed or (MovementMode
-    // OnGround and MovementState / Gait / Stance changed), else DoNotInterrupt. All 576 combinations; other inputs vary.
+    // (h) Get_MMInterruptMode: InterruptOnDatabaseChange if MovementMode changed or (MovementMode OnGround and MovementState /
+    // Stance changed, or Gait changed while the state is Moving - MatcherConfig::gaitInterruptMovingOnly, the default), else
+    // DoNotInterrupt. All 576 combinations; other inputs vary. The second pass runs a matcher with gaitInterruptMovingOnly = false
+    // against the plain rule (every gait change on the ground interrupts).
+    for (int pass = 0; pass < 2; ++pass)
     {
+        ChooserMatcher anyGait;
+        if (pass == 1)
+        {
+            MatcherConfig c;
+            c.gaitInterruptMovingOnly = false;
+            std::string e;
+            CHECK(anyGait.Init(&db, &aTable, c, e), "(h) init with gaitInterruptMovingOnly = false: %s", e.c_str());
+        }
+        const ChooserMatcher& im = pass == 0 ? mm : anyGait;
         uint32_t n = 0, bad = 0, iod = 0;
         for (int mo0 = 0; mo0 < 2; ++mo0)
             for (int mo1 = 0; mo1 < 2; ++mo1)
@@ -1087,9 +1136,11 @@ void ContinuingRules(ChooserMatcher& mm, const MotionDatabase& db)
                                         last.isStarting = (n & 2u) != 0;
                                         last.databaseLod = static_cast<int>(n % 2);
                                         cur.justLandedLight = (n & 4u) != 0;
-                                        const bool want = mo0 != mo1 || ((st0 != st1 || (g0 != g1 && st0 == 1) || sn0 != sn1) && mo0 == 0); // gait edges only while Moving (MatcherConfig::gaitInterruptMovingOnly)
+                                        // pass 0: gait edges only while Moving (MatcherConfig::gaitInterruptMovingOnly); pass 1: every gait edge
+                                        const bool gaitEdge = g0 != g1 && (pass == 1 || st0 == 1);
+                                        const bool want = mo0 != mo1 || ((st0 != st1 || gaitEdge || sn0 != sn1) && mo0 == 0);
                                         const Interrupt e = want ? Interrupt::InterruptOnDatabaseChange : Interrupt::DoNotInterrupt;
-                                        const Interrupt got = mm.InterruptFor(cur, last);
+                                        const Interrupt got = im.InterruptFor(cur, last);
                                         if (got != e)
                                         {
                                             ++bad;
@@ -1101,8 +1152,11 @@ void ContinuingRules(ChooserMatcher& mm, const MotionDatabase& db)
                                         iod += want ? 1u : 0u;
                                         ++n;
                                     }
-        std::printf("  rules: Get_MMInterruptMode table %u combinations, %u InterruptOnDatabaseChange, %u wrong\n", n, iod, bad);
-        CHECK(n == 576 && bad == 0, "(h) InterruptFor: %u of %u combinations wrong", bad, n);
+        std::printf("  rules: Get_MMInterruptMode table (gaitInterruptMovingOnly %d) %u combinations, %u InterruptOnDatabaseChange, %u wrong\n",
+                    pass == 0 ? 1 : 0, n, iod, bad);
+        CHECK(n == 576 && bad == 0, "(h) InterruptFor pass %d: %u of %u combinations wrong", pass, bad, n);
+        // the two rules differ exactly on the gait-only edges outside Moving (ground, same state / stance, state not Moving)
+        CHECK(iod == (pass == 0 ? 408u : 420u), "(h) pass %d: %u InterruptOnDatabaseChange combinations", pass, iod);
     }
     mm.Reset();
 }
@@ -1130,6 +1184,18 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
     ChooserMatcher mm;
     MatcherConfig cfg;
     CHECK(mm.Init(&db, &table, cfg, err), "init: %s", err.c_str());
+    CHECK(cfg.boundedSearch && cfg.useAabb, "precondition: the scenario matcher runs the bounded box search (the shadows run the others)");
+    SearchShadows shadows;
+    for (int v = 1; v < 4; ++v)
+    {
+        MatcherConfig c = cfg;
+        c.boundedSearch = (v & 1) == 0; // v 1: unbounded, box; v 2: bounded, linear; v 3: unbounded, linear
+        c.useAabb = (v & 2) == 0;
+        shadows.m.emplace_back();
+        shadows.names.push_back(v == 1 ? "unbounded box search" : v == 2 ? "bounded linear search" : "unbounded linear search");
+        CHECK(shadows.m.back().Init(&db, &table, c, err), "init shadow %d: %s", v, err.c_str());
+    }
+    g_shadows = &shadows;
     if (aRef)
         QueryParity(mm, db, aRef);
     // wrong rig is refused
@@ -1161,7 +1227,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         const PhaseStats s = RunPhase(mm, db, sim, now, 60, [](int, double) { return Ground(0, 0, 0.0f); });
         report("idle 2 s", s);
@@ -1193,7 +1259,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         CHECK(transitionClip >= 0 && (transitionEntryFlags & kEntryDisableReselection),
               "crouch transition test: dense entry lacks DISABLE_RESELECTION (clip=%d flags=0x%x)", transitionClip,
               transitionEntryFlags);
-        mm.Reset();
+        ResetShadowed(mm);
         g_selMask = 0;
         double now = 0.0;
         const PhaseStats stand = RunPhase(mm, db, sim, now, 30, [](int, double) { return Ground(0, 0, 0.0f); });
@@ -1223,7 +1289,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
               "crouch transition clip clock reset %u times during stable crouch; expected no restart", transitionClockResets);
         // Simulate a one-frame gate/fallback re-entry while the player remains crouched. Reset the playing pose and
         // history as the runtime does, but keep the completed transition suppressed until the stance actually changes.
-        mm.Reset(true);
+        ResetShadowed(mm, true);
         g_selMask = 0;
         const PhaseStats reentry = RunPhase(mm, db, sim, now, 300, [crouch](int, double) { return crouch; });
         uint32_t transitionReentries = 0;
@@ -1248,7 +1314,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         PhaseStats a = RunPhase(mm, db, sim, now, 45, [](int, double) { return Ground(0, 0, 0.0f); });
         report("walk start: idle", a);
@@ -1274,7 +1340,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         PhaseStats a = RunPhase(mm, db, sim, now, 50, [](int, double) { return Ground(1, 0, 1.6f); });
         report("walk stop: walk", a);
@@ -1293,7 +1359,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         PhaseStats a = RunPhase(mm, db, sim, now, 45, [](int, double) { return Ground(1, 0, 1.6f); });
         report("pivot: walk", a);
@@ -1312,7 +1378,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         PhaseStats a = RunPhase(mm, db, sim, now, 90, [](int, double) { return Ground(1, 1, 3.5f); });
         report("run loop", a);
@@ -1325,7 +1391,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         PhaseStats a = RunPhase(mm, db, sim, now, 60, [](int, double) { return Ground(1, 1, 3.5f); });
         report("jump: run", a);
@@ -1388,7 +1454,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         std::vector<TrajSample> traj;
         uint32_t histViolations = 0, jumps = 0, badBlend = 0;
@@ -1433,7 +1499,7 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         Sim sim;
         sim.m = &m;
         sim.Build(10.0);
-        mm.Reset();
+        ResetShadowed(mm);
         double now = 0.0;
         PhaseStats a = RunPhase(mm, db, sim, now, 50, [](int, double) { return Ground(0, 0, 0.0f); });
         PhaseStats b = RunPhase(mm, db, sim, now, 10, [](int, double) {
@@ -1486,8 +1552,22 @@ void RunDb(const char* aPath, const char* aRef, const std::string& aClipMap)
         CHECK(!ClipMapDense(aClipMap, "M_Neutral_Stand_Turn_090_L", "PSD_Dense_Stand_Run_Loops"),
               "clip map negative control: a turn clip listed in Run_Loops");
     }
+    g_shadows = nullptr;
+    std::printf("  search equivalence: %u shadow updates (%zu settings), %u differ, max |cost diff| %.3g\n", shadows.compared,
+                shadows.m.size(), shadows.differ, shadows.maxCostDiff);
+    CHECK(shadows.compared >= 1000 && shadows.differ == 0, "search equivalence: %u of %u shadow updates differ (db, frame, cost)",
+          shadows.differ, shadows.compared);
+    // non-vacuity: the bound prunes rows (bounded box < unbounded box) and the box prunes rows (linear >= box) on these scenarios
+    shadows.rows.resize(shadows.m.size(), 0);
+    std::printf("  search equivalence rows: bounded box %llu, unbounded box %llu, bounded linear %llu, unbounded linear %llu\n",
+                static_cast<unsigned long long>(shadows.rowsMain), static_cast<unsigned long long>(shadows.rows[0]),
+                static_cast<unsigned long long>(shadows.rows[1]), static_cast<unsigned long long>(shadows.rows[2]));
+    CHECK(shadows.rowsMain < shadows.rows[0] && shadows.rows[1] >= shadows.rowsMain && shadows.rows[2] >= shadows.rows[0],
+          "search equivalence is vacuous: rows bounded box %llu, unbounded box %llu, bounded linear %llu, unbounded linear %llu",
+          static_cast<unsigned long long>(shadows.rowsMain), static_cast<unsigned long long>(shadows.rows[0]),
+          static_cast<unsigned long long>(shadows.rows[1]), static_cast<unsigned long long>(shadows.rows[2]));
     // ---- UE 5.8 continuing-pose rules and Get_MMInterruptMode (commit c3cff14)
-    ContinuingRules(mm, db);
+    ContinuingRules(mm, db, table);
     const double med = Median(allUs);
     std::printf("  all scenario updates: %zu, median %.1f us, p95 %.1f us\n", allUs.size(), med,
                 [&] { auto v = allUs; std::sort(v.begin(), v.end()); return v.empty() ? 0.0 : v[v.size() * 95 / 100]; }());
