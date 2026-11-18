@@ -29,6 +29,18 @@ Gate, per body (each body is judged on the aggregate of its sessions):
 Rows known to be invalid offline (world slide stop p95 on both bodies, Female loop p95) are reported but left out of the decision
 and of the body total; every result is also evaluated with them included and verdicts that depend on them are marked.
 Replay lab rows (FLTAB, FLTOT) and Feed cost are reported, not gated (cost is gated by the hard limit only).
+
+Recommended measurement (the same replay options on both sides; the baseline is the off build measured the same way):
+  python -I gate_eval.py measure --label L --out L.json -- --before-dir <baseline build> --after-dir <candidate build>
+      --before-stages-args "--capsule-stats 1 --air-feed 1 --motion-log 1"
+      --after-stages-args "--capsule-stats 1 --air-feed 1 --motion-log 1 [candidate options]" --world-slide [--root <variant root>]
+  python -I gate_eval.py eval L.json [...] --baseline BASE.json --baseline-side after --margin <A/A margin of the baseline build>
+  --capsule-stats 1  stop / start forecasts with the game's capsule stats (stop picks agree with the game);
+  --air-feed 1       the air fields of each feed reach the driver as in the game (landing / idle picks agree with the game);
+  --motion-log 1     the world slide contact track is rebuilt from the replay's MOTION trace with the game side's model
+                     (planted rows agree with the game; the leg tail contact is crisp where that model crossfades a loop re-pick).
+  --root             a data variant: replay and world slide both read <root>/Data.
+  Cost: add --repeat 3 --jobs 1 (only the first repeat writes the pose files; the reported Feed cost is the median of the repeats).
 """
 import argparse
 import contextlib
