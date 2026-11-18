@@ -148,6 +148,7 @@ class BlendStack
                     thigh[side] = m_ankleChain[side][k + 1];
         m_thighBones[0] = thigh[0];
         m_thighBones[1] = thigh[1];
+        InitStrideClipFactors();
         for (uint32_t k = 0; k < m_n; ++k)
             for (int32_t b = int32_t(k); b >= 0; b = db.BoneParent(uint32_t(b)))
                 if (b == thigh[0] || b == thigh[1])
@@ -208,6 +209,11 @@ class BlendStack
     bool StrideWarp() const
     {
         return m_strideWarp;
+    }
+    // Planted-foot speed over root speed of a clip (stridewarp::ClipFactor), measured at Init; 1 for a clip that is not a loop.
+    float StrideClipFactor(int32_t clip) const
+    {
+        return clip >= 0 && size_t(clip) < m_strideClipFactor.size() ? m_strideClipFactor[size_t(clip)] : 1.0f;
     }
     // Effective stride scale of the head layer in the last Step (1 = no warp).
     float StrideScale() const
@@ -765,6 +771,7 @@ class BlendStack
         in.dt = dt;
         in.capsuleSpeed = std::hypot(m_graph.velocityWorldX, m_graph.velocityWorldY);
         in.rootSpeed = rootSpeed;
+        in.clipFactor = StrideClipFactor(p.clip);
         in.alpha = m_warpCurve >= 0 ? Curve(p, m_warpCurve) : 1.0f;
         in.allowed = p.strideGround && !p.airFade && IsLoop(p.clip);
         const float scale = stridewarp::Step(p.stride, in);
@@ -790,6 +797,67 @@ class BlendStack
             foot = stridewarp::WarpPoint(foot, origin, direction, scale);
         }
         m_targets[i].warpWeight = 1.0f;
+    }
+    // Clip factor of every loop clip (the clips stride warping applies to): over the frame pairs where a foot's contact is set at both ends,
+    // the backward motion of its toe (the foot when the rig has no toe) along the clip's root direction in the character frame, summed
+    // over the root motion of the same pairs. The rest of the clips keep 1.
+    void InitStrideClipFactors()
+    {
+        const auto &db = *m_db;
+        m_strideClipFactor.assign(db.NumClips(), 1.0f);
+        int32_t toe[2]{m_footBones[0], m_footBones[1]};
+        for (uint32_t k = 0; k < db.NumBones(); ++k)
+        {
+            if (db.BoneName(k) == "LeftToeBase")
+                toe[0] = int32_t(k);
+            if (db.BoneName(k) == "RightToeBase")
+                toe[1] = int32_t(k);
+        }
+        if (toe[0] < 0 || toe[1] < 0)
+            return;
+        std::vector<int32_t> chain[2];
+        for (uint32_t side = 0; side < 2; ++side)
+            for (int32_t b = toe[side]; b >= 0; b = db.BoneParent(uint32_t(b)))
+                chain[side].insert(chain[side].begin(), b);
+        const auto toePosition = [&](uint32_t frame, uint32_t side) {
+            const motion::PoseRecord *pose = db.Pose(frame);
+            math::Quat q{0, 0, 0, 1};
+            math::Vec3 o{0, 0, 0};
+            for (const int32_t b : chain[side])
+            {
+                const auto &r = pose[b];
+                o = o + math::QuatRotate(q, math::Vec3{r.px, r.py, r.pz});
+                q = math::QuatNormalize(math::QuatMul(q, math::Quat{r.qx, r.qy, r.qz, r.qw}));
+            }
+            return o;
+        };
+        for (uint32_t c = 0; c < db.NumClips(); ++c)
+        {
+            if (!IsLoop(int32_t(c)))
+                continue;
+            const auto &clip = db.Clip(c);
+            double back = 0, root = 0;
+            int samples = 0;
+            for (uint32_t f = 0; f + 1 < clip.numFrames; ++f)
+            {
+                const uint32_t a = clip.firstFrame + f, b = a + 1;
+                const float dx = 0.5f * (db.Root(a).dx + db.Root(b).dx), dy = 0.5f * (db.Root(a).dy + db.Root(b).dy);
+                const float len = std::hypot(dx, dy);
+                if (!std::isfinite(len) || len <= 1.0e-5f)
+                    continue;
+                for (uint32_t side = 0; side < 2; ++side)
+                {
+                    const float ca = side ? db.Contact(a).r : db.Contact(a).l, cb = side ? db.Contact(b).r : db.Contact(b).l;
+                    if (ca < 0.5f || cb < 0.5f)
+                        continue;
+                    const math::Vec3 d = toePosition(b, side) - toePosition(a, side);
+                    back += -(d.x * dx + d.y * dy) / len;
+                    root += len;
+                    ++samples;
+                }
+            }
+            m_strideClipFactor[c] = stridewarp::ClipFactor(back, root, samples);
+        }
     }
     bool ProcessGraph(Player &p, Signals &signal, float dt)
     {
@@ -1043,6 +1111,7 @@ class BlendStack
     int32_t m_thighBones[2]{-1, -1};
     bool m_strideWarp = UTPP_STRIDE_WARP != 0; // SetStrideWarp
     float m_strideScale = 1.0f;                // StrideScale
+    std::vector<float> m_strideClipFactor;     // StrideClipFactor, per clip
     motionPose::Warp m_poseWarp;
     motionFeet::Warp m_feetWarp;
     bool m_feetReady = false;

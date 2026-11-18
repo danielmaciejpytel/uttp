@@ -3,8 +3,10 @@
 // The play rate speeds a clip up to the capsule; what the rate cannot absorb (a clip whose root, at its rate, still moves faster than the
 // capsule) shows as planted feet sliding backwards. Stride warping shortens the step instead: every ankle target is pulled towards the
 // thigh along the root-motion direction by the stride scale
-//   scale = capsule speed / (clip root speed x play rate), clamped to [kScaleFloor, 1]
-// so a planted foot moves backwards in the character frame at capsule speed. The scale never exceeds 1: a clip slower than the capsule
+//   scale = capsule speed / (clip root speed x play rate x clip factor), clamped to [kScaleFloor, 1]
+// so a planted foot moves backwards in the character frame at capsule speed. The clip factor is the clip's own planted-foot speed over its
+// root speed (ClipFactor, measured once per clip from its contact frames): a clip whose planted feet travel slower than its root needs less
+// shortening than the root speed alone asks for. The scale never exceeds 1: a clip slower than the capsule
 // keeps its strides (the rate handles that side), the step is never lengthened.
 //
 // Reference behaviour (the stride warping node of the locomotion graph, graph mode):
@@ -29,12 +31,16 @@ inline constexpr float kScaleFloor = 0.75f;   // shortest stride, fraction of th
 inline constexpr float kInterpSpeed = 10.0f;  // 1/s, scale interpolation towards the target
 inline constexpr float kMinRootSpeed = 0.10f; // m/s, root-motion speed below which the clip is not warped
 inline constexpr float kIdentityEps = 1.0e-6f; // |1 - scale| at or below this is treated as no warp
+inline constexpr float kClipFactorMin = 0.85f;  // clip factor range: planted-foot speed over root speed of a clip
+inline constexpr float kClipFactorMax = 1.15f;
+inline constexpr int kClipFactorMinSamples = 6; // planted samples a clip needs for a measured factor (else 1)
 
 struct Inputs
 {
     float dt = 0;           // s
     float capsuleSpeed = 0; // m/s, horizontal capsule speed
     float rootSpeed = 0;    // m/s, horizontal clip root speed at the clip's play rate
+    float clipFactor = 1;   // planted-foot speed over root speed of the clip (ClipFactor)
     float alpha = 1;        // warping curve of the clip at its current time, [0, 1]
     bool allowed = false;   // ground locomotion pick (not air, slide, traversal or vehicle)
 };
@@ -51,7 +57,17 @@ inline float TargetScale(const Inputs &in) noexcept
     if (!in.allowed || !std::isfinite(in.capsuleSpeed) || !std::isfinite(in.rootSpeed) || in.rootSpeed < kMinRootSpeed)
         return 1.0f;
     const float capsule = std::max(0.0f, in.capsuleSpeed);
-    return std::clamp(capsule / in.rootSpeed, kScaleFloor, 1.0f);
+    const float factor = std::isfinite(in.clipFactor) ? std::clamp(in.clipFactor, kClipFactorMin, kClipFactorMax) : 1.0f;
+    return std::clamp(capsule / (in.rootSpeed * factor), kScaleFloor, 1.0f);
+}
+
+// Clip factor from summed planted samples of a clip: backward speed of the planted toes along the root direction in the character frame
+// (plantedBack) over the root speed of the same samples (root), clamped to [kClipFactorMin, kClipFactorMax]; 1 with too few samples.
+inline float ClipFactor(double plantedBack, double root, int samples) noexcept
+{
+    if (samples < kClipFactorMinSamples || !std::isfinite(plantedBack) || !std::isfinite(root) || root <= 1.0e-6)
+        return 1.0f;
+    return std::clamp(float(plantedBack / root), kClipFactorMin, kClipFactorMax);
 }
 
 // Advances the layer's stride state and returns the effective scale (alpha applied). The first frame of a layer takes the target
