@@ -10,6 +10,12 @@ frame r of a footslide/world_slide.py Session:
     the published pose, as in the recorded game pose);
   - capsule / yaw / feed step = the feed dump row (read as text: float32 world coordinates would add jitter);
   - contact = the leg tail contact of that feed (contactL / contactR): the contact the foot locker received in the replay;
+    with --stages-args "... --motion-log 1" instead the contact track world_slide.py rebuilds from the replay's own MOTION trace
+    lines (contact_track: the clip / clip time / blend of each line, layers crossfaded), the same reconstruction the game side gets
+    from the game log, so both sides measure planted frames with one model (the tail contact is crisp where the reconstruction
+    crossfades a loop re-pick). Trace mode measures the contact the in-game metric uses (rebuilt from clip, clip time and blend),
+    not what the foot locker received: a variant that changes only the leg tail contact signal (e.g. --signals 2) does not move it,
+    so measure such variants in tail mode;
   - clip = the driver's pick of that feed.
 The pose of row r is drawn at the capsule of row r + FEED_SHIFT, as in the game metric; the per-shift scores are reported.
 Samples, locks, trimming and the per-class pooling are the world_slide.py code.
@@ -20,6 +26,10 @@ the clip and of the planted state. Without --game only the replay is measured (a
 --stages-args "--capsule-stats 1" replays the capsule Acceleration / Deceleration stats the game reports after every feed (the stop
 and start forecasts use them in the game; without them the replay picks other stop clips). A replay tool that ignores the option is
 refused (no CAPSTAT line).
+--stages-args "--air-feed 1" hands each feed's air fields to the driver before the feed, as the game does (landing / idle picks agree
+with the game; without it the replay driver never gets an air feed). A replay tool that ignores it is refused (no AIRFEED line), and
+--motion-log 1 without a written trace file is refused as well (an older replay tool).
+--root <variant root>: the replay reads <root>/Data and the world slide uses the same root's motion database (clip names, contacts).
 Read-only on every input; the .bin files of the replay are written to --work and deleted afterwards unless --keep-bin.
 """
 from __future__ import annotations
@@ -59,7 +69,38 @@ def run_stages(exe_dir, root, feed, log, body, prefix, extra=''):
         raise RuntimeError('replay failed rc=%d: %s' % (p.returncode, (p.stdout + p.stderr)[-400:]))
     if capsule_stats_requested(extra) and 'CAPSTAT ' not in p.stdout:
         raise RuntimeError('--capsule-stats 1 requested but %s printed no CAPSTAT line (the tool does not know the option)' % cmd[0])
+    if air_feed_requested(extra) and 'AIRFEED ' not in p.stdout:
+        raise RuntimeError('--air-feed 1 requested but %s printed no AIRFEED line (the tool does not know the option)' % cmd[0])
     return p.stdout
+
+
+def _flag_on(extra, flag):
+    a = shlex.split(extra or '', posix=False)
+    return any(x == flag and i + 1 < len(a) and a[i + 1] not in ('0', '') for i, x in enumerate(a))
+
+
+def air_feed_requested(extra):
+    """True when the replay arguments ask for the air feed (--air-feed with a non-zero value)."""
+    return _flag_on(extra, '--air-feed')
+
+
+def motion_log_requested(extra):
+    """True when the replay arguments ask for the MOTION trace file (--motion-log with a non-zero value)."""
+    a = shlex.split(extra or '', posix=False)
+    return any(x == '--motion-log' and i + 1 < len(a) and a[i + 1] not in ('0', '') for i, x in enumerate(a))
+
+
+def trace_contact_track(prefix, db, fsec):
+    """world_slide contact Track rebuilt from <prefix>.motion.log (lines stamped with the feed time as 2000-01-01 wall time)."""
+    import datetime
+    base = datetime.datetime(2000, 1, 1)
+    if not os.path.exists(prefix + '.motion.log'):
+        raise ValueError('--motion-log 1 requested but %s.motion.log was not written (the replay tool does not know the option)' % prefix)
+    with open(prefix + '.motion.log', encoding='utf-8', errors='replace') as f:
+        events = ws.parse_motion_lines(f)
+    if not any(e.get('kind', 'motion') == 'motion' for e in events):
+        raise ValueError('%s.motion.log: no MOTION lines' % prefix)
+    return ws.contact_track(db, events, np.asarray(fsec, dtype=np.float64), lambda w: (w - base).total_seconds())
 
 
 def capsule_stats_requested(extra):
@@ -123,22 +164,41 @@ def load_stages(prefix, stage='final'):
     return m, toe, heel, clips
 
 
-def offline_session(prefix, feed_path, body, fixed_shift=ws.FEED_SHIFT):
-    """world_slide Session of a replay output: frame r = feed row r."""
+def db_path_of(root, body):
+    """Motion database of a body under a project root (the one the replay read: <root>/Data/utpp_motion_<body>.utppmm)."""
+    return os.path.join(root, 'Data', 'utpp_motion_%s.utppmm' % body)
+
+
+def offline_session(prefix, feed_path, body, fixed_shift=ws.FEED_SHIFT, db_path=None, contact='tail'):
+    """world_slide Session of a replay output: frame r = feed row r.
+
+    db_path = the database the replay ran with (clip names / classes and contact curves); default the live project database. Pass
+    db_path_of(<root>, body) for a --root variant: its clip indices only name the right clips in that variant's database.
+    contact = 'tail' (the leg tail contact of each feed) or 'trace' (rebuilt from <prefix>.motion.log, see the module doc)."""
     import pose_metrics as pm
     m, toe, heel, _ = load_stages(prefix)
     feed = pm.read_feed(feed_path)
     n = len(m['t'])
     if len(feed['t']) != n or np.nanmax(np.abs(feed['t'] - m['t'])) > 2e-3:
         raise ValueError('%s: replay records do not match the feed rows (%d vs %d)' % (prefix, n, len(feed['t'])))
-    db = ws.load_db(ws.default_db_path(body))
+    db = ws.load_db(db_path or ws.default_db_path(body))
     clip = np.nan_to_num(m['clip'], nan=-1).astype(np.int64)
     published = (m['published'] > 0.5) & (m['tailed'] > 0.5)
     state = np.where(published & np.isfinite(m['contactL']) & np.isfinite(m['contactR']), ws.ST_OK, ws.ST_UNKNOWN)
     cont = np.stack([m['contactL'], m['contactR']], axis=1)
+    cont_pose = cont_cut = None
+    if contact == 'trace':
+        tr = trace_contact_track(prefix, db, feed['t'])
+        cont, cont_pose, cont_cut = tr.cont.copy(), tr.cont_pose.copy(), tr.cont_cut.copy()
+        state = np.where(published, tr.state, ws.ST_UNKNOWN).astype(np.int8)
+        for c in (cont_pose, cont_cut):
+            c[~published] = np.nan
+    elif contact != 'tail':
+        raise ValueError('contact must be tail or trace')
     cont[~published] = np.nan
     toe = [np.where(published[:, None], t, np.nan) for t in toe]
-    ses = ws.Session(feed['t'], toe, feed, np.arange(n, dtype=np.int64), cont, state, clip, db.names, heel)
+    ses = ws.Session(feed['t'], toe, feed, np.arange(n, dtype=np.int64), cont, state, clip, db.names, heel, cont_pose=cont_pose,
+                     cont_cut=cont_cut)
     ses.choose_shift(fixed_shift)
     return ses, m
 
@@ -265,10 +325,11 @@ def measure(spec, a):
     os.makedirs(a.work, exist_ok=True)
     stdout = run_stages(a.exe_dir, a.root, feed, log, body, prefix, a.stages_args)
     try:
-        oses, _ = offline_session(prefix, feed, body)
+        oses, _ = offline_session(prefix, feed, body, db_path=db_path_of(a.root, body),
+                                  contact='trace' if motion_log_requested(a.stages_args) else 'tail')
     finally:
         if not a.keep_bin:
-            for ext in ('.bin', '.txt'):
+            for ext in ('.bin', '.txt', '.motion.log'):
                 try:
                     os.remove(prefix + ext)
                 except OSError:

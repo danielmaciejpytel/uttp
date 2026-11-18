@@ -22,6 +22,9 @@ margin column and a mark: '~' = |after - before| within the margin (noise), '!' 
 --before-stages-args / --after-stages-args "--capsule-stats 1" replay the capsule Acceleration / Deceleration stats the game reports
 after every feed (stop and start forecasts as in the game); a build that does not print the CAPSTAT line for it counts as a failure
 (an older replay tool ignores the option), so both sides must be built with a replay tool that knows it.
+Other replay options (utpp_replay_pose_stages header): "--air-feed 1" feeds the air fields as the game does; "--motion-log 1" makes the
+--world-slide contact track the reconstruction from the replay's MOTION trace (the game side's model) instead of the tail contact.
+--root <variant root>: replay and world slide read <root>/Data (motion databases included).
 Exit code 1 when a tool fails or a run reports REPLAY_FAILS != 0.
 """
 import argparse
@@ -153,7 +156,8 @@ def main():
     ws_parts = {}
     if ws_jobs:
         with ProcessPoolExecutor(max_workers=max(1, min(a.jobs, len(ws_jobs)))) as procs:
-            futs = {k: procs.submit(world_slide_parts, out, feed, body) for k, (_, out, feed, body) in ws_jobs.items()
+            futs = {k: procs.submit(world_slide_parts, out, feed, body, rws.db_path_of(a.root, body),
+                                    'trace' if rws.motion_log_requested(builds[k[0]][2]) else 'tail') for k, (_, out, feed, body) in ws_jobs.items()
                     if res[(k[0], k[1], 'stages', k[2], 0)][0] == 0}
             for k, f in futs.items():
                 try:
@@ -162,7 +166,7 @@ def main():
                     print('FAIL world slide %s: %s' % (' '.join(k), e))
                     ws_parts[k] = None
         for _, out, _, _ in ws_jobs.values():
-            for ext in ('.bin', '.txt'):
+            for ext in ('.bin', '.txt', '.motion.log'):
                 try:
                     os.remove(out + ext)
                 except OSError:
@@ -173,6 +177,10 @@ def main():
         stats_ignored = k[2] == 'stages' and rc == 0 and rws.capsule_stats_requested(builds[k[0]][2]) and 'CAPSTAT ' not in text
         if stats_ignored:
             text += '\n--capsule-stats 1 requested but the %s replay tool printed no CAPSTAT line (it does not know the option)' % k[0]
+        air_ignored = k[2] == 'stages' and rc == 0 and rws.air_feed_requested(builds[k[0]][2]) and 'AIRFEED ' not in text
+        if air_ignored:
+            text += '\n--air-feed 1 requested but the %s replay tool printed no AIRFEED line (it does not know the option)' % k[0]
+            stats_ignored = True
         if rc != 0 or stats_ignored or (k[2] == 'replay' and parse_replay(text).get('fails', 0) != 0):
             bad = True
             print('FAIL %s rc=%d' % (' '.join(str(x) for x in k), rc))
@@ -279,10 +287,11 @@ def main():
     return 1 if bad else 0
 
 
-def world_slide_parts(prefix, feed, body):
-    """Pooled world-slide samples of one runtime-path output (all feed rows)."""
+def world_slide_parts(prefix, feed, body, db_path=None, contact='tail'):
+    """Pooled world-slide samples of one runtime-path output (all feed rows); db_path = the database the replay read; contact = tail /
+    trace (runtime_world_slide.offline_session)."""
     import numpy as np
-    ses, _ = rws.offline_session(prefix, feed, body)
+    ses, _ = rws.offline_session(prefix, feed, body, db_path=db_path, contact=contact)
     return rws.pool(ses, np.ones(len(ses.fsec), dtype=bool))
 
 

@@ -25,6 +25,16 @@
 //   --capsule-stats 1   after every feed, report the capsule Acceleration / Deceleration stats and keep the script's stat multipliers
 //                       as the game does after each locomotion feed (AccelTarget / DecelTarget, see CapsuleStatReplay below); the
 //                       stats are the per-state values of the recorded sessions (default off: no stat reported, motion fallback)
+//   --air-feed 1        hand each feed's air fields (onGround, distToGround, psmFall of the dump) to the driver right before the feed,
+//                       as the game's feed entry does (motiondriver::FeedAirFromInput); default off: the driver never receives an air feed
+//   --qpc-feed 1        every clock the host reads during a feed (feed and publish stamps, capsule stat ages, command dt) is the recorded
+//                       feed time instead of the wall clock (motionhost::TestSetQpcTicks); default off: wall clock
+//   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
+//                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
+//                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
+// Recommended gate settings (both sides the same): --capsule-stats 1 --air-feed 1 --motion-log 1 (see tools/replay/gate_eval.py);
+// --qpc-feed 1 leaves the outputs of the recorded sessions unchanged and is a guard only (it covers the host clocks; driver-side
+// clocks such as the recoil clock still read the real counter). --air-feed 1 adds one AIRFEED line to the summary.
 // <feed dump> = --clips [name part] writes the stored frames of the woman database clips whose name contains the part (all without it)
 // instead (same layout, see the clip mode below).
 // <out prefix> = - writes no files (summary only).
@@ -180,6 +190,19 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         (known ? aApplied : aUnknown) += 1;
     }
 }
+// --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped
+FILE* g_motionLog = nullptr;
+double g_motionLogT = 0.0;
+void MotionLogLine(const char* aLine)
+{
+    if (!g_motionLog || !aLine)
+        return;
+    const double t = g_motionLogT < 0.0 ? 0.0 : g_motionLogT;
+    const long long whole = static_cast<long long>(t);
+    const long long micros = static_cast<long long>((t - double(whole)) * 1e6 + 0.5);
+    std::fprintf(g_motionLog, "[2000-01-01 %02lld:%02lld:%02lld.%06lld] %s\n", (whole / 3600) % 24, (whole / 60) % 60, whole % 60,
+                 micros > 999999 ? 999999 : micros, aLine);
+}
 } // namespace
 
 // The locomotion script queries the capsule stats right after every feed (UTPPUpdateAccel, then UTPPUpdateDecel): it reports the
@@ -289,7 +312,8 @@ int main(int argc, char** argv)
     std::string settingsLog;
     bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int32_t capsuleQuery = -1, velocityPredicates = -1;
-    bool capsuleStats = false;
+    bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
+    uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
     auto& stackOverrides = mm::motionstack::g_testStackOverrides;
     for (int i = 5; i + 1 < argc; i += 2)
@@ -326,6 +350,12 @@ int main(int argc, char** argv)
             pickDump = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--capsule-stats") == 0)
             capsuleStats = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--air-feed") == 0)
+            airFeed = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--qpc-feed") == 0)
+            qpcFeed = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--motion-log") == 0)
+            motionLog = std::atoi(argv[i + 1]) != 0;
     }
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
@@ -450,6 +480,23 @@ int main(int argc, char** argv)
     motiondriver::SetLivePoseHistory(liveHistory);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
     motionhost::TestSetPelvisPlacement(pelvis);
+    // --qpc-feed: feed time t -> QueryPerformanceCounter ticks (offset by 1 s so the first stamp is not 0, which the host reads as unset)
+    LARGE_INTEGER qpcHz{};
+    QueryPerformanceFrequency(&qpcHz);
+    const auto feedTicks = [&](size_t aRow) {
+        return int64_t((double(rows[aRow].t) - double(rows.front().t) + 1.0) * double(qpcHz.QuadPart));
+    };
+    if (qpcFeed)
+        motionhost::TestSetQpcTicks(feedTicks(0));
+    if (motionLog && out != "-")
+    {
+        g_motionLog = std::fopen((out + ".motion.log").c_str(), "w");
+        if (!g_motionLog)
+            return 7;
+        g_motionLogT = rows.front().t;
+        motiondriver::SetLogger(&MotionLogLine);
+        motiondriver::SetTrace(true);
+    }
     motiondriver::Step(inputs.front(), 1, inputs.front().dt);
     motiondriver::WaitLoader();
     const uint32_t nb = db->NumBones();
@@ -501,6 +548,15 @@ int main(int argc, char** argv)
     {
         g_log = {};
         g_tailValid = false;
+        if (qpcFeed)
+            motionhost::TestSetQpcTicks(feedTicks(i));
+        if (airFeed)
+        {
+            motiondriver::FeedAirFromInput(inputs[i]);
+            ++airFeeds;
+            airFeedRows += inputs[i].haveAir ? 1 : 0;
+        }
+        g_motionLogT = rows[i].t;
         const auto feed0 = std::chrono::steady_clock::now();
         motionhost::Feed(inputs[i]);
         feedUs.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - feed0).count());
@@ -750,6 +806,14 @@ int main(int argc, char** argv)
         drifts[driftCls].push_back(driftMax);
     const uint64_t liveHistorySearches = motiondriver::TestLiveHistorySearches();
     motionhost::SetMotionHooks(nullptr);
+    motionhost::TestSetQpcTicks(-1);
+    if (g_motionLog)
+    {
+        motiondriver::SetTrace(false);
+        motiondriver::SetLogger(nullptr);
+        std::fclose(g_motionLog);
+        g_motionLog = nullptr;
+    }
     motiondriver::Shutdown();
     motionhost::Shutdown();
     {
@@ -780,6 +844,9 @@ int main(int argc, char** argv)
                         static_cast<unsigned long long>(capsuleStatReplay.accelKept),
                         static_cast<unsigned long long>(capsuleStatReplay.decelQueries),
                         static_cast<unsigned long long>(capsuleStatReplay.decelKept));
+        if (airFeed) // only with the option: the scripts refuse a tool that was asked for it and printed no AIRFEED line
+            std::printf("AIRFEED run=%s forwarded=%llu withAirFields=%llu\n", name.c_str(), static_cast<unsigned long long>(airFeeds),
+                        static_cast<unsigned long long>(airFeedRows));
         // PICKS line: per class (stop, start) picks, wrong-foot picks (first-frame foot offset > 10 cm), offset p50 / p95 (cm), planted
         // drift in the first 0.3 s mean / p95 (cm)
         const auto mean = [](const std::vector<double>& v) {
