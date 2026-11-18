@@ -102,6 +102,7 @@ return {
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
+    ["mm.aimWorldSmooth"] = "false",
     ["mm.air"] = "\"auto\"",
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
@@ -111,22 +112,26 @@ return {
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
+    ["mm.farJumpGravity"] = "false",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
+    ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
     ["mm.idleHold"] = "true",
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
     ["mm.lean"] = "true",
+    ["mm.leanCoverage"] = "\"standard\"",
     ["mm.leanHead"] = "true",
     ["mm.leanHeadScale"] = "0.90000000000000002",
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
     ["mm.orientWarp"] = "true",
+    ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
@@ -135,6 +140,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"analog\"",
     ["mm.trace"] = "false",
     ["mm.walkSpeed"] = "1.6000000000000001",
@@ -285,6 +291,18 @@ return {
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "v2 setLeanParams(0.84999999999999998,0.90000000000000002)",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "native UTPPSetMMAimWorldSmoothing(false,0)",
+    "native UTPPSetMMPelvisPlacement(false)",
+    "native UTPPSetMMHandBackBlend(false)",
+    "native UTPPSetMMStepDownReach(false)",
+    "native UTPPSetMMFarJumpGravity(false)",
+    "native UTPPSetMotionLeanCoverage(0)",
+    "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.pelvisPlacement(false,\"ok\")",
+    "apply mm.handBackBlend(false,\"ok\")",
+    "apply mm.stepDownReach(false,\"ok\")",
+    "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
@@ -476,6 +494,12 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.pelvisPlacement(false,\"ok\")",
+    "apply mm.handBackBlend(false,\"ok\")",
+    "apply mm.stepDownReach(false,\"ok\")",
+    "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
@@ -1486,6 +1510,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.aimWorldSmooth"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.air"] = {
       ["choices"] = "auto,clips,hold,off",
       ["default"] = "\"auto\"",
@@ -1563,6 +1595,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.farJumpGravity"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.feedDump"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -1594,6 +1634,14 @@ return {
       ["hold"] = false,
       ["onOff"] = false,
       ["section"] = "animation",
+      ["type"] = "bool"
+    },
+    ["mm.handBackBlend"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
       ["type"] = "bool"
     },
     ["mm.headLead"] = {
@@ -1643,6 +1691,15 @@ return {
       ["onOff"] = false,
       ["section"] = "motion",
       ["type"] = "bool"
+    },
+    ["mm.leanCoverage"] = {
+      ["choices"] = "standard,wide",
+      ["default"] = "\"standard\"",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "choice"
     },
     ["mm.leanHead"] = {
       ["default"] = "true",
@@ -1699,6 +1756,14 @@ return {
       ["hold"] = false,
       ["onOff"] = false,
       ["section"] = "animation",
+      ["type"] = "bool"
+    },
+    ["mm.pelvisPlacement"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
       ["type"] = "bool"
     },
     ["mm.pelvisYawTrim"] = {
@@ -1765,6 +1830,14 @@ return {
     },
     ["mm.slide"] = {
       ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
+    ["mm.stepDownReach"] = {
+      ["default"] = "false",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2257,6 +2330,7 @@ return {
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
+    ["mm.aimWorldSmooth"] = "false",
     ["mm.air"] = "\"auto\"",
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
@@ -2266,22 +2340,26 @@ return {
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
+    ["mm.farJumpGravity"] = "false",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
+    ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
     ["mm.idleHold"] = "true",
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
     ["mm.lean"] = "true",
+    ["mm.leanCoverage"] = "\"standard\"",
     ["mm.leanHead"] = "true",
     ["mm.leanHeadScale"] = "0.90000000000000002",
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
     ["mm.orientWarp"] = "true",
+    ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
@@ -2290,6 +2368,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"analog\"",
     ["mm.trace"] = "false",
     ["mm.walkSpeed"] = "1.6000000000000001",
@@ -2452,6 +2531,12 @@ return {
     "mm.leanHead",
     "mm.leanScale",
     "mm.leanHeadScale",
+    "mm.aimWorldSmooth",
+    "mm.pelvisPlacement",
+    "mm.handBackBlend",
+    "mm.stepDownReach",
+    "mm.farJumpGravity",
+    "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
     "camera.impl",
@@ -2631,6 +2716,12 @@ return {
     "mm.leanHead",
     "mm.leanScale",
     "mm.leanHeadScale",
+    "mm.aimWorldSmooth",
+    "mm.pelvisPlacement",
+    "mm.handBackBlend",
+    "mm.stepDownReach",
+    "mm.farJumpGravity",
+    "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
     "camera.impl",
@@ -2800,6 +2891,12 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.pelvisPlacement(false,\"ok\")",
+    "apply mm.handBackBlend(false,\"ok\")",
+    "apply mm.stepDownReach(false,\"ok\")",
+    "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
@@ -2979,6 +3076,12 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=0.85\r\
 mm.leanHeadScale=0.9\r\
+mm.aimWorldSmooth=false\r\
+mm.pelvisPlacement=false\r\
+mm.handBackBlend=false\r\
+mm.stepDownReach=false\r\
+mm.farJumpGravity=false\r\
+mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
 camera.impl=true\r\
@@ -3233,6 +3336,12 @@ vehicle.jumpOutSidePush=true\r\
       "mm.leanHead",
       "mm.leanScale",
       "mm.leanHeadScale",
+      "mm.aimWorldSmooth",
+      "mm.pelvisPlacement",
+      "mm.handBackBlend",
+      "mm.stepDownReach",
+      "mm.farJumpGravity",
+      "mm.leanCoverage",
       "mm.selectionGuards",
       "mm.debug"
     },
@@ -3400,6 +3509,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
+    ["mm.aimWorldSmooth"] = "false",
     ["mm.air"] = "\"hold\"",
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
@@ -3409,22 +3519,26 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.database"] = "\"alt_db\"",
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
+    ["mm.farJumpGravity"] = "false",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.footReplant"] = "\"off\"",
     ["mm.grip"] = "true",
+    ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
     ["mm.idleHold"] = "true",
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
     ["mm.lean"] = "true",
+    ["mm.leanCoverage"] = "\"standard\"",
     ["mm.leanHead"] = "true",
     ["mm.leanHeadScale"] = "0.90000000000000002",
     ["mm.leanScale"] = "1.1000000000000001",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "false",
     ["mm.orientWarp"] = "true",
+    ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
     ["mm.pistolAuto"] = "true",
@@ -3433,6 +3547,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"analog\"",
     ["mm.trace"] = "true",
     ["mm.walkSpeed"] = "1.6000000000000001",
@@ -3564,6 +3679,12 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.9\r\
+mm.aimWorldSmooth=false\r\
+mm.pelvisPlacement=false\r\
+mm.handBackBlend=false\r\
+mm.stepDownReach=false\r\
+mm.farJumpGravity=false\r\
+mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
 camera.impl=true\r\
@@ -3738,6 +3859,12 @@ other.module=42\r\
     "/utpp/motion|switch|mm.leanHead",
     "/utpp/motion|float|mm.leanScale",
     "/utpp/motion|float|mm.leanHeadScale",
+    "/utpp/motion|switch|mm.aimWorldSmooth",
+    "/utpp/motion|switch|mm.pelvisPlacement",
+    "/utpp/motion|switch|mm.handBackBlend",
+    "/utpp/motion|switch|mm.stepDownReach",
+    "/utpp/motion|switch|mm.farJumpGravity",
+    "/utpp/motion|selector|mm.leanCoverage",
     "/utpp/motion|switch|mm.selectionGuards",
     "/utpp/motion|switch|mm.debug",
     "/utpp/camera|switch|camera.impl",

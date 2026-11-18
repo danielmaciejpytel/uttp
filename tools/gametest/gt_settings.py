@@ -37,7 +37,7 @@ SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # Locomotion settings pinned in both modes at their registered defaults, so foot slide and gait measurements of different runs
 # compare the same walk speed, lean, orientation warp, replant and aim jog; logged at arming (settings_line).
 LOCO_VALUES = (('mm.walkSpeed', 1.6), ('mm.minWalkSpeed', 0.82), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
-               ('mm.leanHeadScale', 0.9), ('mm.orientWarp', True), ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
+               ('mm.leanHeadScale', 0.9), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
                ('bodyturn.aimJogSpeed', 3.3), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False))
 LOCO_KEYS = tuple(k for k, _ in LOCO_VALUES)
 AUTHOR_VALUES = (('mm.bodyYawOffset', 4), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
