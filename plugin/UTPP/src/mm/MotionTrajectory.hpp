@@ -52,7 +52,9 @@ inline constexpr float kMovingTolerance = 10.0f;  // IsMoving: Trj_FutureVelocit
 inline constexpr float kStartingMargin = 100.0f;  // IsStarting: |Future|xy >= |Velocity|xy + 100
 inline constexpr float kPivotOrient = 45.0f;      // IsPivoting OrientToMovement
 inline constexpr float kPivotStrafe = 30.0f;      // IsPivoting Strafe
-inline constexpr float kTurnInPlaceDeg = 50.0f;   // ShouldTurnInPlace
+inline constexpr float kTurnInPlaceDeg = 50.0f;   // turn admission angle (rest turn, shot turn) and the previous ShouldTurnInPlace angle
+inline constexpr float kTurnInPlacePredicateDeg = 45.0f; // ShouldTurnInPlace of the reference chooser (MapConfig::turnInPlaceDeg)
+inline constexpr float kMovingVelocityTolerance = 0.1f; // velocity predicates: Velocity != 0 with tolerance 0.1 per component
 inline constexpr float kSpinDeg = 130.0f;         // ShouldSpinTransition
 inline constexpr float kSpinMinSpeed = 150.0f;
 inline constexpr float kHeavyLand = 700.0f;       // HeavyLandSpeedThreshold
@@ -565,6 +567,18 @@ private:
 // ---------------------------------------------------------------- predicates (ABP functions, exact)
 // IsMoving: Trj_FutureVelocity != 0 (tolerance 10 per component) && Acceleration != 0
 inline bool IsMoving(V3 aFuture, V3 aAccel) { return !NearlyZeroPerComponent(aFuture, kMovingTolerance) && !IsZero(aAccel); }
+// Velocity predicates (MapConfig::velocityPredicates): IsMoving from the current capsule velocity (tolerance 0.1 per component) and the
+// input acceleration, so a stick held against a wall (velocity 0, predicted future > 0) is not moving. A start from rest reports exactly zero
+// velocity on its first input feed; that one feed (no input on the previous feed) keeps the future-velocity test, so the start is not
+// delayed by an update.
+inline bool IsMovingFromVelocity(V3 aVelocity, V3 aFuture, V3 aAccel, V3 aAccelLast)
+{
+    if (IsZero(aAccel))
+        return false;
+    if (!NearlyZeroPerComponent(aVelocity, kMovingVelocityTolerance))
+        return true;
+    return IsZero(aAccelLast) && !NearlyZeroPerComponent(aFuture, kMovingTolerance);
+}
 // IsStarting: IsMoving && |Future|xy >= |Velocity|xy + 100 && current database tags without "Pivots"
 // [P] slow targets (2026-10-31 loco diagnostic, findings CR-2 / HIP-3 / GW-2, tests/LocoStartTest.cpp): motion's walk targets are >= 150 cm/s
 // (MinAnalogWalkSpeed 150), the game's slow ones are not - MinAnalogSpeed is 0 here (MotionGameCmc: a 150 cm/s floor predicted an acceleration
@@ -601,9 +615,10 @@ inline bool IsPivoting(bool aMoving, V3 aFuture, V3 aVelocity, RotationMode aMod
 // |NormalizedDeltaRotator(actor, RootTransform).Yaw| (RootTransform yaw = OffsetRoot yaw + 90 in UE mesh space; the caller
 // passes both yaws in the same world convention)
 inline float RootDeltaYaw(float aActorYawDeg, float aRootYawDeg) { return std::fabs(NormalizeAxis(aActorYawDeg - aRootYawDeg)); }
-inline bool ShouldTurnInPlace(float aRootDeltaAbs, bool aAiming, int aMovementState, int aMovementStateLast, bool aFirstPerson)
+inline bool ShouldTurnInPlace(float aRootDeltaAbs, bool aAiming, int aMovementState, int aMovementStateLast, bool aFirstPerson,
+                              float aThresholdDeg = kTurnInPlaceDeg)
 {
-    return aRootDeltaAbs >= kTurnInPlaceDeg && (aAiming || (aMovementState == 0 && aMovementStateLast == 1) || aFirstPerson);
+    return aRootDeltaAbs >= aThresholdDeg && (aAiming || (aMovementState == 0 && aMovementStateLast == 1) || aFirstPerson);
 }
 inline bool ShouldSpinTransition(float aRootDeltaAbs, float aSpeed2D, bool aCurrentDbPivots)
 {
