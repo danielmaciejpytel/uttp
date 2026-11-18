@@ -623,6 +623,128 @@ static void VaultRouting(const DecisionTable& aT, const TraversalFile& aF, const
 // TR-dll identity: with every new key off (old minRate, fixed step limit, no wide vault / low hurdle) the original grid (speeds 0 / 1.5 / 4
 // m/s, original vault cases) must still give exactly the pre-change accepted counts (216 / 126 / 108 / 588 woman, 630 man): the changes are
 // all behind keys and do not touch the old routing.
+// Start window and lead foot (Config::clampStartWindow / leadFootRow, both off by default): over the whole grid (climbs, vaults, low hurdles,
+// wide vaults with their key on)
+//  - every started plan's start time lies inside the montage's sampling range (start frame / fps within [min, max] + 1e-6 s, or, for a
+//    range holding no frame, at most half a frame from its centre) and every started montage has a range entry;
+//  - accepted plans per class are not fewer than with both keys off;
+//  - with a known lead foot, a started montage of the other foot is allowed only when every montage of the lead foot in the same decision
+//    was rejected under the same start rule (checked by planning each of them with forceMontage; an in-window start outranks the foot).
+static bool StartInWindow(const Plan& aP)
+{
+    const StartWindow* w = FindStartWindow(aP.montage->name);
+    if (!w)
+        return false;
+    const double t = static_cast<double>(aP.startFrame) / aP.montage->fps;
+    if (t >= w->minS - 1e-6 && t <= w->maxS + 1e-6)
+        return true;
+    const bool frameInside = std::ceil(w->minS * aP.montage->fps - 1e-6) <= std::floor(w->maxS * aP.montage->fps + 1e-6);
+    return !frameInside && std::fabs(t - 0.5 * (w->minS + w->maxS)) <= 0.5 / aP.montage->fps + 1e-9;
+}
+
+static void StartWindowAndFoot(const DecisionTable& aT, const TraversalFile& aF, const char* aRig)
+{
+    struct Item
+    {
+        Case c;
+        int cls;
+        bool wide;
+    };
+    std::vector<Item> items;
+    for (const Case& c : ClimbCases())
+        items.push_back({c, GameExpect(c.o, c.c).climbClass, false});
+    for (const Case& c : VaultCases())
+        items.push_back({c, 3, false});
+    for (const Case& c : WideVaultCases())
+        items.push_back({c, 4, true});
+    for (const Case& c : LowHurdleCases())
+        items.push_back({c, 5, false});
+    const std::string r(aRig);
+    // variants: 0 keys off, 1 window only (no fallback), 2 window with fallback, 3 / 4 window with fallback + lead foot left / right
+    constexpr int kV = 5;
+    int acc[kV][6] = {}, inWin[kV] = {}, started[kV] = {}, footMatch[kV] = {}, footOther[kV] = {}, footNone[kV] = {}, outside[kV] = {};
+    int otherUnjustified = 0;
+    std::map<std::string, int> rejects[kV];
+    for (const Item& it : items)
+        for (int v = 0; v < kV; ++v)
+        {
+            Config cfg = g_baseCfg;
+            cfg.wideVault = it.wide;
+            cfg.clampStartWindow = v > 0;
+            cfg.startWindowFallback = v > 1;
+            cfg.leadFootRow = v > 2;
+            CapsuleState cs = it.c.c;
+            cs.leadFoot = static_cast<uint8_t>(v > 2 ? v - 2 : 0);
+            const Plan p = PlanTraversal(aT, aF, it.c.o, cs, GameTweaks{}, cfg);
+            if (p.result != StartResult::Ok || !p.montage)
+            {
+                if (p.result == StartResult::Rejected)
+                    ++rejects[v][std::string(p.rejectReason) + " " + (p.montage ? p.montage->name : std::string("-"))];
+                continue;
+            }
+            ++acc[v][it.cls];
+            ++started[v];
+            const bool in = StartInWindow(p);
+            inWin[v] += in ? 1 : 0;
+            outside[v] += p.startOutsideWindow ? 1 : 0;
+            Check(!p.startOutsideWindow || v > 1, r + " " + it.c.tag + ": fallback flag without the fallback key");
+            if (v > 0 && !p.startOutsideWindow)
+                Check(in, r + " " + it.c.tag + ": start frame " + std::to_string(p.startFrame) + " of " + p.montage->name +
+                              " outside the sampling range");
+            if (v < 3)
+                continue;
+            const uint8_t foot = MontageLeadFoot(p.montage->name);
+            if (foot == 0)
+            {
+                ++footNone[v];
+                continue;
+            }
+            if (foot == cs.leadFoot)
+            {
+                ++footMatch[v];
+                continue;
+            }
+            ++footOther[v];
+            bool justified = true;
+            for (const auto& name : p.decision.montages)
+            {
+                if (MontageLeadFoot(name) != cs.leadFoot)
+                    continue;
+                Config f = cfg;
+                f.leadFootRow = false;
+                f.forceMontage = name;
+                // the same start rule as the chosen plan: in-window plans are compared with in-window plans (the window outranks the foot)
+                f.startWindowFallback = false;
+                f.clampStartWindow = !p.startOutsideWindow;
+                const Plan q = PlanTraversal(aT, aF, it.c.o, cs, GameTweaks{}, f);
+                justified = justified && q.result != StartResult::Ok;
+            }
+            otherUnjustified += justified ? 0 : 1;
+            Check(justified, r + " " + it.c.tag + ": other-foot montage " + p.montage->name + " chosen while a lead-foot montage passes");
+        }
+    const char* vn[kV] = {"keys off", "window only", "window + fallback", "window + fallback + left foot", "window + fallback + right foot"};
+    for (int v = 0; v < kV; ++v)
+    {
+        std::printf("%s start window [%s]: %d started, %d in range (%.1f %%), accepted High %d Mid %d Low %d vault %d wide %d low hurdle %d",
+                    aRig, vn[v], started[v], inWin[v], 100.0 * inWin[v] / std::max(started[v], 1), acc[v][0], acc[v][1], acc[v][2],
+                    acc[v][3], acc[v][4], acc[v][5]);
+        if (v > 1)
+            std::printf(", fallback (start past the window) %d", outside[v]);
+        if (v > 2)
+            std::printf(", lead foot %d, other foot %d, no foot %d", footMatch[v], footOther[v], footNone[v]);
+        std::printf("\n");
+        for (int k = 0; k < 6 && v > 1; ++k)
+            Check(acc[v][k] >= acc[0][k], r + " " + vn[v] + " class " + std::to_string(k) + ": " + std::to_string(acc[v][k]) +
+                                               " accepted < " + std::to_string(acc[0][k]) + " with the keys off");
+        if (g_diag)
+            for (const auto& [k, n] : rejects[v])
+                std::printf("%s start window [%s]: rejected %d x %s\n", aRig, vn[v], n, k.c_str());
+        if (v > 2)
+            Check(footMatch[v] > 0, r + " " + vn[v] + ": no lead-foot montage chosen");
+    }
+    Check(otherUnjustified == 0, r + ": lead foot ignored while a lead-foot montage passes");
+}
+
 static void LegacyIdentity(const DecisionTable& aT, const TraversalFile& aF, const char* aRig, int aRigIdx)
 {
     Config legacy;
@@ -814,6 +936,7 @@ int main(int argc, char** argv)
         VehicleRules(table, files[i], rigs[i]);
         VaultRouting(table, files[i], rigs[i]);
         LegacyIdentity(table, files[i], rigs[i], i);
+        StartWindowAndFoot(table, files[i], rigs[i]);
         const char* cn[6] = {"High", "Mid", "Low", "vault", "wide vault", "low hurdle"};
         for (int k = 0; k < 6; ++k)
         {
