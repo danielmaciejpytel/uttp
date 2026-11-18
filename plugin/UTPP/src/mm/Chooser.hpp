@@ -36,7 +36,64 @@
 namespace utpp::mm::chooser
 {
 inline constexpr uint32_t kMaxInputs = 32;
-inline constexpr uint32_t kMaxResults = 64;  // databases per evaluation
+inline constexpr uint32_t kMaxResults = 128; // databases per evaluation
+inline constexpr uint32_t kDbSetBits = 128;  // database ids a DbSet can hold
+
+// Fixed-size set of database ids [0, kDbSetBits): two 64-bit words, no allocation, trivially copyable.
+struct DbSet
+{
+    uint64_t w[kDbSetBits / 64] = {};
+
+    static constexpr bool InRange(int64_t aId) { return aId >= 0 && aId < int64_t(kDbSetBits); }
+    // Ids outside [0, kDbSetBits) are ignored by Set and never contained.
+    void Set(int64_t aId)
+    {
+        if (InRange(aId))
+            w[size_t(aId) >> 6] |= uint64_t(1) << (uint64_t(aId) & 63u);
+    }
+    bool Test(int64_t aId) const { return InRange(aId) && ((w[size_t(aId) >> 6] >> (uint64_t(aId) & 63u)) & 1u) != 0; }
+    bool Any() const
+    {
+        for (uint64_t x : w)
+            if (x)
+                return true;
+        return false;
+    }
+    void Clear()
+    {
+        for (uint64_t& x : w)
+            x = 0;
+    }
+    // Ids < 64 only (the single-word mask of bundles with at most 64 databases).
+    uint64_t Low() const { return w[0]; }
+    static DbSet FromLow(uint64_t aMask)
+    {
+        DbSet s;
+        s.w[0] = aMask;
+        return s;
+    }
+    DbSet& operator|=(const DbSet& o)
+    {
+        for (size_t i = 0; i < kDbSetBits / 64; ++i)
+            w[i] |= o.w[i];
+        return *this;
+    }
+    bool Intersects(const DbSet& o) const
+    {
+        for (size_t i = 0; i < kDbSetBits / 64; ++i)
+            if (w[i] & o.w[i])
+                return true;
+        return false;
+    }
+    bool operator==(const DbSet& o) const
+    {
+        for (size_t i = 0; i < kDbSetBits / 64; ++i)
+            if (w[i] != o.w[i])
+                return false;
+        return true;
+    }
+    bool operator!=(const DbSet& o) const { return !(*this == o); }
+};
 inline constexpr uint32_t kMaxDepth = 16;    // nested table depth
 inline constexpr uint32_t kMaxRows = 256;    // rows per table
 inline constexpr uint32_t kMaxTables = 256;
@@ -243,13 +300,15 @@ struct Output
     bool overflow = false;     // more than kMaxResults databases (extra ones dropped)
     bool depthExceeded = false;
 
-    // Bit mask over database ids < 64.
-    uint64_t Mask() const
+    // Bit mask over database ids < 64 (ids >= 64 are not represented; use Set()).
+    uint64_t Mask() const { return Set().Low(); }
+
+    // Every emitted database id < kDbSetBits.
+    DbSet Set() const
     {
-        uint64_t m = 0;
+        DbSet m;
         for (uint32_t i = 0; i < count; ++i)
-            if (db[i] >= 0 && db[i] < 64)
-                m |= uint64_t(1) << db[i];
+            m.Set(db[i]);
         return m;
     }
 };
