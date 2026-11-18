@@ -147,23 +147,8 @@ struct FootReplantConfig
 #ifndef UTPP_FOOT_PLANT_TWIST_REDUCTION
 #define UTPP_FOOT_PLANT_TWIST_REDUCTION 0.75f
 #endif
-#ifndef UTPP_FOOT_PLANT_UNPLANT_ON_CONTACT
-#define UTPP_FOOT_PLANT_UNPLANT_ON_CONTACT 0 // 1: a planted foot unplants once its contact is no longer above `contact` (not at the release)
-#endif
-#ifndef UTPP_FOOT_PLANT_START_STIFFNESS
-#define UTPP_FOOT_PLANT_START_STIFFNESS 0 // 1: an unplanted foot of a start clip springs back with the Stops stiffness
-#endif
 #ifndef UTPP_FOOT_PLANT_STOPS_ONLY
 #define UTPP_FOOT_PLANT_STOPS_ONLY 0 // 1: the reference model only on the idle / stop databases, 2: only on the Stop / Idle clip classes
-#endif
-#ifndef UTPP_FOOT_PLANT_SETTLE
-#define UTPP_FOOT_PLANT_SETTLE 0 // 1: a planted foot settles towards the animated toe while the capsule stands (FootLockConfig::settleSpeed)
-#endif
-#ifndef UTPP_FOOT_PLANT_SETTLE_SPEED
-#define UTPP_FOOT_PLANT_SETTLE_SPEED 0.0f // m/s, settle speed of the model (0 = FootLockConfig::settleSpeed)
-#endif
-#ifndef UTPP_FOOT_PLANT_STICKY
-#define UTPP_FOOT_PLANT_STICKY 0 // 1: a foot planted in the model keeps it until its contact ends, even when the model turns off
 #endif
 #ifndef UTPP_FOOT_PLANT_HANDOVER_SLIP
 #define UTPP_FOOT_PLANT_HANDOVER_SLIP 0 // 1: a foot planted in the model is handed to the soft slip at once when the model turns off
@@ -182,18 +167,8 @@ struct FootPlantReferenceConfig
     float linearStiffnessStops = 250.0f;
     float angularStiffness = 450.0f;
     bool yaw = UTPP_FOOT_PLANT_REFERENCE >= 2; // planted yaw lock
-    // true: a planted foot unplants into the spring as soon as its contact is <= `contact`, and plants again only above it; false: it
-    // stays planted until the lock release (FootLockConfig::offThreshold)
-    bool unplantOnContact = UTPP_FOOT_PLANT_UNPLANT_ON_CONTACT != 0;
-    // true: while the playing clip is a start (SetStartClip), the unplanted spring uses linearStiffnessStops
-    bool startStopsStiffness = UTPP_FOOT_PLANT_START_STIFFNESS != 0;
     // true: a foot planted in the model when it turns off (replant off) goes to the soft slip at once, without a step to the toe
     bool handoverSlip = UTPP_FOOT_PLANT_HANDOVER_SLIP != 0;
-    // true: a planted foot settles towards the animated toe while the capsule stands (at settleSpeed, else FootLockConfig::settleSpeed)
-    bool settle = UTPP_FOOT_PLANT_SETTLE != 0;
-    float settleSpeed = UTPP_FOOT_PLANT_SETTLE_SPEED; // m/s, 0 = FootLockConfig::settleSpeed
-    // true: a foot planted in the model stays in it until its contact ends (the model turning off only affects new plants)
-    bool sticky = UTPP_FOOT_PLANT_STICKY != 0;
 
     static bool Valid(const FootPlantReferenceConfig& c)
     {
@@ -201,7 +176,7 @@ struct FootPlantReferenceConfig
         return in(c.contact, 0.0f, 1.0f) && in(c.radius, 0.01f, 0.5f) && in(c.radiusStops, 0.01f, 0.5f) && in(c.ratio, 0.0f, 0.95f) &&
                in(c.ratioStops, 0.0f, 0.95f) && in(c.unplantAngle, 0.01f, 3.1f) && in(c.replantAngle, 0.0f, 3.1f) &&
                c.replantAngle < c.unplantAngle && in(c.twistReduction, 0.0f, 1.0f) && in(c.linearStiffness, 1.0f, 10000.0f) &&
-               in(c.linearStiffnessStops, 1.0f, 10000.0f) && in(c.angularStiffness, 1.0f, 10000.0f) && in(c.settleSpeed, 0.0f, 1.0f);
+               in(c.linearStiffnessStops, 1.0f, 10000.0f) && in(c.angularStiffness, 1.0f, 10000.0f);
     }
 };
 
@@ -292,7 +267,6 @@ struct FootLockDiagnostics
     uint64_t plantUnplants = 0;                 // reference plant model: planted -> unplanted (radius / angle / reach)
     uint64_t plantReplants = 0;                 // reference plant model: unplanted -> planted
     uint64_t plantBounds = 0;                   // reference plant model: updates with the unplanted offset held at the radius
-    uint64_t plantContactUnplants = 0;          // reference plant model: unplants because the contact dropped (unplantOnContact)
     uint64_t plantTakeovers = 0;                // reference plant model: feet locked outside it taken over while planted
     float maxLift = 0.0f;                       // m, highest step lift since Init / Reset
     uint64_t blendOutLifts = 0;                 // foot updates where the blend-out sink bound lifted the ankle (loco-fix 2026-11-09)
@@ -468,8 +442,6 @@ public:
     // replant mode (ApplyFootFeedPolicy). Off (default) = the previous paths bit for bit.
     void SetPlantReference(bool aOn) { m_plantRef = aOn; }
     bool PlantReferenceOn() const { return m_plantRef; }
-    // The playing clip is a start (Start / StartSprint class); cleared by ApplyFootFeedPolicy, set by ApplyFootSlipProfile.
-    void SetStartClip(bool aOn) { m_startClip = aOn; }
     // False = invalid (FootPlantReferenceConfig::Valid), previous kept.
     bool SetPlantReferenceConfig(const FootPlantReferenceConfig& aCfg)
     {
@@ -699,7 +671,7 @@ private:
         }
         if (f.plantRef)
         {
-            if (PlantRefActive() || m_pcfg.sticky)
+            if (PlantRefActive())
             {
                 UpdatePlantReference(aSide, aDt, aToe, aOff);
                 return;
@@ -827,7 +799,7 @@ private:
         const bool stops = m_replantStops;
         const float radius = std::fmin(stops ? pc.radiusStops : pc.radius, m_cfg.maxDrift);
         const float ratio = stops ? pc.ratioStops : pc.ratio;
-        const float wl = std::sqrt(stops || (pc.startStopsStiffness && m_startClip) ? pc.linearStiffnessStops : pc.linearStiffness);
+        const float wl = std::sqrt(stops ? pc.linearStiffnessStops : pc.linearStiffness);
         const float wa = std::sqrt(pc.angularStiffness);
         const bool yawOn = pc.yaw && m_toePathLen[aSide] > 0;
         const float keep = 1.0f - pc.twistReduction; // share of the planted yaw difference applied to the foot
@@ -843,21 +815,8 @@ private:
                 reason = kFootEventRadius;
             else if (f.clampTime >= m_rcfg.clampTime)
                 reason = kFootEventClamp;
-            else if (pc.unplantOnContact && !(m_diag.foot[aSide].contactIn > pc.contact))
-            {
-                reason = kFootEventRadius; // contact no longer full: the foot follows the animation through the spring
-                ++m_diag.plantContactUnplants;
-            }
             if (reason == kFootEventNone)
             {
-                const float step = (pc.settleSpeed > 0.0f ? pc.settleSpeed : m_cfg.settleSpeed) * aDt;
-                if (pc.settle && m_capsuleSpeed < m_cfg.settleCapsuleSpeed && step > 0.0f && len > 1e-5f)
-                {
-                    const float k = std::fmin(1.0f, step / len);
-                    f.offset = math::Vec3{aOff.x * (1.0f - k), aOff.y * (1.0f - k), 0.0f};
-                    CharacterToWorld(math::Vec3{aToe.x + f.offset.x, aToe.y + f.offset.y, aToe.z}, f.lockX, f.lockY);
-                    ++m_diag.settles;
-                }
                 f.yawApply = yawErr * keep;
                 return;
             }
@@ -897,8 +856,7 @@ private:
         f.offset = math::Vec3{m_cos * f.springX.x + m_sin * f.springX.y, -m_sin * f.springX.x + m_cos * f.springX.y, 0.0f};
         CharacterToWorld(math::Vec3{aToe.x + f.offset.x, aToe.y + f.offset.y, aToe.z}, f.lockX, f.lockY);
         f.yawApply = f.yawX;
-        if (Len(f.springX) <= ratio * radius && (!yawOn || std::fabs(f.yawX) <= pc.replantAngle) &&
-            (!pc.unplantOnContact || m_diag.foot[aSide].contactIn > pc.contact))
+        if (Len(f.springX) <= ratio * radius && (!yawOn || std::fabs(f.yawX) <= pc.replantAngle))
         {
             // plant again where the foot is shown (position and yaw)
             f.unplanted = false;
@@ -1492,7 +1450,6 @@ private:
     bool m_crouchContactPolicy = false;               // explicit V2 crouch policy, off preserves legacy path
     bool m_poleCarry = false;                          // batch 2 knee fix
     bool m_plantRef = false;                           // reference plant model for new locks (SetPlantReference)
-    bool m_startClip = false;                          // the playing clip is a start (SetStartClip)
     FootPlantReferenceConfig m_pcfg{};
     int m_supportHoldSide = -1;
     bool m_supportHoldEligible = false;
@@ -1577,7 +1534,6 @@ inline int FootSlipGroup(uint8_t aClipClass)
 }
 inline void ApplyFootSlipProfile(FootLocker& aLocker, const FootSlipProfile& aProfile, uint8_t aClipClass)
 {
-    aLocker.SetStartClip(FootSlipGroup(aClipClass) == 1);
     if (!aProfile.active)
         return;
     const int g = FootSlipGroup(aClipClass);
@@ -1591,7 +1547,6 @@ inline void ApplyFootFeedPolicy(FootLocker& aLocker, const FootFeedPolicy& p)
     aLocker.SetReplant(reference || (!p.airborne && p.contactScale > 0.0f && ((p.replantMask & stanceBit) != 0 || p.airHoldGroundReplant)),
                        p.stops);
     aLocker.SetPlantReference(reference);
-    aLocker.SetStartClip(false); // set again by ApplyFootSlipProfile when the driver runs it for this feed
     aLocker.SetCrouchContactPolicy(p.v2 && !p.airborne && p.contactScale > 0.f && p.stance == 2 && (p.replantMask & 2) != 0);
     aLocker.SetPoleCarry(p.poleCarry);
     const float k = p.airborne ? 0.0f : p.contactScale;
