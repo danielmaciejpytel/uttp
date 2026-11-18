@@ -5073,6 +5073,13 @@ void Feed(const FeedInput& aRawIn)
         else if (g_airLandGroundBlendLeft > 0.0f)
             pose = BlendAirLandToGroundLocked(pose, dt);
         ApplyLegPipelineLocked(pose, g_legCtx, dt, aIn, yaw + g_yawAhead); // drawn capsule yaw (planted feet in the drawn frame)
+        if (motionf && g_motion && g_motion->published) // live pose history: the shown v2 pose after the leg tail
+        {
+            const auto shown = PipelineOutputLocked();
+            const bool off = g_offsetRootOn && g_offsetRoot.Ready();
+            g_motion->published(shown.data(), static_cast<uint32_t>(shown.size()), dt, off ? g_offsetRoot.X() : 0.0f,
+                                off ? g_offsetRoot.Y() : 0.0f, off ? g_offsetRoot.Yaw() : 0.0f);
+        }
         if (!motionf && !motionHandback && g_airSetting != 3 && g_airDec.phase == air::Phase::Recover &&
             g_airDec.effectiveMode == air::Mode::Clips && !g_airLandGroundBlendOutputValid)
         {
@@ -5120,6 +5127,13 @@ void Feed(const FeedInput& aRawIn)
             }
             g_legCtx = MotionLegContextLocked(*frame, aIn, capsuleSpeed);
             ApplyLegPipelineLocked(pose, g_legCtx, dt, aIn, yaw + g_yawAhead);
+            if (g_motion->published) // live pose history (held / open publication of a v2 frame)
+            {
+                const auto shown = PipelineOutputLocked();
+                const bool off = g_offsetRootOn && g_offsetRoot.Ready();
+                g_motion->published(shown.data(), static_cast<uint32_t>(shown.size()), dt, off ? g_offsetRoot.X() : 0.0f,
+                                    off ? g_offsetRoot.Y() : 0.0f, off ? g_offsetRoot.Yaw() : 0.0f);
+            }
             g_poseValid = true;
         }
     }

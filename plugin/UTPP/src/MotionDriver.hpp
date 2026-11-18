@@ -94,6 +94,10 @@ Paths PathsForBody(adapter::Body aBody, const std::string& aDir);
 
 // ---- natives (game thread)
 void SetEnabled(bool aOn);
+// Live pose history (off by default): the host hands over the published pose (database local space, after the leg tail) once per
+// feed with the visual root offset it carries (m, rad); the next search reads it as its pose history (mm/LivePoseHistory.hpp).
+void SetLivePoseHistory(bool aOn);
+void RecordPublishedPose(const mm::BoneTransform* aPose, uint32_t aNumBones, float aDt, float aOffX, float aOffY, float aOffYaw);
 bool Enabled();
 bool SetRigBody(int32_t aBody);                                             // false = invalid value (ignored)
 bool SetOverlayInputs(int32_t aPose, int32_t aAim, bool aRelease, bool aInjured, int32_t aResolvedAimPose = -1); // false = pose / aim out of range
@@ -238,6 +242,8 @@ struct RootProbe
     float before[3] = {0, 0, 0}, after[3] = {0, 0, 0}; // x, y (m), yaw (rad): visual minus capsule, capsule axes
 };
 RootProbe TestRootProbe();
+// test targets only: searches that read the live pose history.
+uint64_t TestLiveHistorySearches();
 // test targets only: the ground dodge clip of the last v2 Step (mm/Dodge.hpp).
 struct DodgeProbe
 {
