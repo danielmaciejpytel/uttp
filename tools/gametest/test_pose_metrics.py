@@ -317,5 +317,44 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(pm.parse_cli_windows(['a=23:04:12-23:04:14']), [('a', '23:04:12', '23:04:14')])
 
 
+class FeedAlignmentTests(unittest.TestCase):
+    """align_feed: frame-step matching, and the feed-clock fallback when the feed skipped a block of rows."""
+
+    @staticmethod
+    def session(n=6000, skip=None, seed=3):
+        rng = np.random.default_rng(seed)
+        sec = 1000.0 + np.concatenate([[0.0], np.cumsum(rng.uniform(0.013, 0.020, n - 1))])
+        frames = np.arange(1, n)                        # feed row j <- pose frame frames[j] (its dt is the step into that frame)
+        if skip is not None:
+            a, b = skip
+            frames = np.concatenate([frames[:a], frames[b:]])
+        dt = sec[frames] - sec[frames - 1] + rng.normal(0, 0.0002, len(frames))
+        t = sec[frames] - 997.5 + rng.normal(0, 0.0003, len(frames))
+        return sec, {'t': t, 'dt': dt}, frames
+
+    def test_step_matching_alone_is_kept_when_it_places_every_row(self):
+        sec, feed, frames = self.session()
+        r2f, info = pm.align_feed(sec, feed)
+        self.assertNotIn('feed clock', info)
+        ok = r2f >= 0
+        self.assertGreater(ok.mean(), 0.99)
+        self.assertTrue((r2f[ok] == frames[ok]).all())
+
+    def test_a_skipped_block_of_feed_rows_is_recovered_by_the_feed_clock(self):
+        sec, feed, frames = self.session(skip=(3000, 3142))        # the feed wrote no rows for 142 frames (~2.3 s)
+        r2f, info = pm.align_feed(sec, feed)
+        self.assertIn('feed clock', info)
+        ok = r2f >= 0
+        self.assertGreater(ok.mean(), 0.99)
+        self.assertTrue((r2f[ok] == frames[ok]).all())               # every placed row on its own frame, after the gap too
+        self.assertGreater(ok[3000:].mean(), 0.99)
+
+    def test_the_clock_is_not_used_when_it_disagrees_with_the_step_match(self):
+        sec, feed, frames = self.session(skip=(3000, 3142))
+        bad = dict(feed, t=feed['t'] + np.linspace(0, 0.5, len(feed['t'])))   # a clock drifting 0.5 s over the session
+        seed = np.where(np.arange(len(frames)) < 3000, frames, -1)          # what the step match found before the gap
+        self.assertIsNone(pm.align_feed_clock(sec, bad, seed))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -34,13 +34,19 @@ PACK_VALUES = ('utpp', 'game')
 SETTINGS_AUTHOR = 'author'
 SETTINGS_SHIPPED = 'shipped'
 SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
+# Locomotion settings pinned in both modes at their registered defaults, so foot slide and gait measurements of different runs
+# compare the same walk speed, lean, orientation warp, replant and aim jog; logged at arming (settings_line).
+LOCO_VALUES = (('mm.walkSpeed', 1.6), ('mm.minWalkSpeed', 0.82), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
+               ('mm.leanHeadScale', 0.9), ('mm.orientWarp', True), ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
+               ('bodyturn.aimJogSpeed', 3.3), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False))
+LOCO_KEYS = tuple(k for k, _ in LOCO_VALUES)
 AUTHOR_VALUES = (('mm.bodyYawOffset', 4), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
-                 ('perspective.scene', False), ('perspective.blend', 0.6))
+                 ('perspective.scene', False), ('perspective.blend', 0.6)) + LOCO_VALUES
 # registered defaults (the `default =` of each Register call; camera.side = the shoulder offset of the camera's fixed profile);
 # a key without an entry, or with None, is not known to the harness (nothing is applied for it in 'shipped' mode and a
 # difference cannot be named)
 SHIPPED_DEFAULTS = {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
-                    'perspective.scene': False, 'perspective.blend': 0.8}
+                    'perspective.scene': False, 'perspective.blend': 0.8, **dict(LOCO_VALUES)}
 
 
 def session_plan(mode: str) -> list[tuple[str, object]]:
@@ -70,11 +76,25 @@ def differs_from_shipped(values: dict) -> list[dict]:
     return out
 
 
+def loco_text(values: dict) -> str:
+    """'locomotion walkSpeed=1.6 lean=true ... footReplant=crouch' of the pinned locomotion keys in values ('' when none)."""
+    items = []
+    for k in LOCO_KEYS:
+        if k in values:
+            v = values[k]
+            items.append(f'{k.split(".", 1)[1]}=' + (('true' if v else 'false') if isinstance(v, bool) else str(v)))
+    return 'locomotion ' + ' '.join(items) if items else ''
+
+
 def settings_line(mode: str, values: dict, not_applied=()) -> str:
-    """One line for the run record: which settings of this session differ from the shipped defaults."""
+    """One line for the run record: which settings of this session differ from the shipped defaults, and the values in force of the
+    pinned locomotion keys."""
     diff = differs_from_shipped(values)
     text = ', '.join(f'{d["key"]} {d["value"]!r} (shipped {"unknown" if d["shipped"] is None else repr(d["shipped"])})' for d in diff)
     line = f'settings {mode}: ' + (f'differ from the shipped defaults: {text}' if diff else 'all as shipped')
+    loco = loco_text(values)
+    if loco:
+        line += f'; {loco}'
     if not_applied:
         line += f'; NOT applied: {", ".join(not_applied)}'
     return line

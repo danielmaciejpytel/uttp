@@ -30,7 +30,7 @@ import gt_log  # noqa: E402
 import gt_night as gn  # noqa: E402
 import gt_settings as gs  # noqa: E402
 import night  # noqa: E402
-from gt_scenario import BUTTONS, load_scenarios, parse_scenario  # noqa: E402
+from gt_scenario import BUTTONS, KEYS, load_scenarios, parse_scenario  # noqa: E402
 from test_gametest import GAME_PID, OTHER_HWND, FakeApi  # noqa: E402
 
 night.padd_ping = lambda *a, **k: None          # tests never reach the real padd daemon / ViGEm pad
@@ -62,7 +62,7 @@ class SetTests(unittest.TestCase):
         self.sc = load_scenarios(SCEN)
 
     def test_sets_resolve_and_validate(self):
-        self.assertEqual(len(gn.resolve_sets('loco')), 11)
+        self.assertEqual(len(gn.resolve_sets('loco')), 12)              # walk_toggle (keyboard G) last
         self.assertEqual(gn.resolve_sets('crouch_turns'), ['crouch_walk_turns'])
         self.assertEqual(gn.resolve_sets('loco,crouch_turns').count('crouch_walk_turns'), 1)
         for name in gn.SETS:
@@ -1879,6 +1879,95 @@ class MacroTests(unittest.TestCase):
         self.assertEqual(n.blocked_end, -1.0)
         self.assertTrue(any('approach_stuck' in e for e in ep['events']))
 
+    def test_approach_with_a_tight_radius_walks_the_last_metre_to_the_spot(self):
+        """door_radius_override (the traversal vault): the approach ends inside it, the last metre at a walking stick."""
+        n = self.n
+        v, vr, spot = (0.0, 0.0, 0.0), (0.0, -1.0), (0.9, 1.2)
+        world = {'p': gn.from_car_frame(2.6, 1.4, v[:2], vr), 'cf': (0.0, 1.0)}
+        sticks = []
+
+        def pos():
+            return {'p': (world['p'][0], world['p'][1], 0.0), 'cf': world['cf'], 'v': v, 'vr': vr, 'src': 'tag'}
+
+        def align(pad, g, plan, known, target, ep, tol=None, why='', fine=False, pulses=None):
+            dx, dy = target[0] - world['p'][0], target[1] - world['p'][1]
+            d = math.hypot(dx, dy)
+            if d > 1e-6:
+                world['cf'] = (dx / d, dy / d)
+            return pos()
+
+        def play(pad, g, name, plan, sc=None):
+            if name == 'veh_approach':
+                keys = sc.steps[0].tracks['ls'].keys
+                _, sx, sy = keys[1]
+                dur = keys[2][0] - 0.05
+                mag = math.hypot(sx, sy)
+                sticks.append(mag)
+                # slower than the runner expects: the chunks fall short and the spot is reached in steps
+                world['p'] = gn.dead_reckon(world['p'], world['cf'], (sx, sy), dur, 0.9 if mag < 0.5 else 2.0)
+            return {'steps': []}
+        n.poll_pos = lambda g, pad=None, timeout=None: pos()
+        n.camera_align, n.play = align, play
+        n.door_spot_override, n.door_radius_override = spot, 0.2
+        try:
+            n.approach(_Pad(), _G(), {'runs': []}, pos(), {'events': []})
+        finally:
+            n.door_spot_override = n.door_radius_override = None
+        lon, lat = gn.car_frame(world['p'], v[:2], vr)
+        self.assertLessEqual(math.hypot(lon - spot[0], lat - spot[1]), 0.2 + 1e-6)
+        self.assertLessEqual(sticks[-1], night.FINE_APPROACH_MAG + 1e-6)               # walked, not run, at the end
+        self.assertGreater(sticks[0], 0.9)                                            # the run there at the full stick
+
+    def test_fine_camera_alignment_reaches_a_few_degrees(self):
+        """camera_align(fine=True): a full-stick pulse shorter than 0.2 s does not turn the camera (2026-11-18 face-car
+        k=2/k=3); the partial-stick pulses with the learned rate get the target within 3 deg."""
+        n = self.n
+        world = {'yaw': 0.0}                       # the camera forward, deg clockwise from +y
+        target = (math.sin(math.radians(9.0)) * 2.0, math.cos(math.radians(9.0)) * 2.0)   # 9 deg to the right
+
+        def pos():
+            a = math.radians(world['yaw'])
+            return {'p': (0.0, 0.0, 0.0), 'cf': (math.sin(a), math.cos(a)), 'v': (5.0, 0.0, 0.0), 'vr': (0.0, 1.0)}
+
+        def play(pad, g, name, plan, sc=None):
+            keys = sc.steps[0].tracks['rs'].keys
+            rx, dur = keys[1][1], keys[2][0] - keys[1][0]
+            if abs(rx) > 0.95:
+                world['yaw'] += (150.0 * dur if dur >= 0.2 else 0.0) * (1 if rx > 0 else -1)
+            elif abs(rx) >= world['dead']:          # a partial stick turns once it is out of the dead zone
+                world['yaw'] += 20.0 * max(0.0, dur - 0.05) * (1 if rx > 0 else -1)
+            return {'steps': []}
+        newer = []
+        n.poll_pos = lambda g, pad=None, timeout=None, newer_than=None: newer.append(newer_than) or pos()
+        n.play = play
+        world['dead'] = 0.3
+        coarse = n.camera_align(_Pad(), _G(), {'runs': []}, pos(), target, {'events': []}, tol=3.0, why='t')
+        self.assertGreater(abs(gn.bearing_deg(coarse['p'][:2], coarse['cf'], target)), 3.0)   # the coarse pulses cannot
+        self.assertTrue(newer and all(t is None for t in newer))                              # the coarse feedback as before
+        for dead in (0.3, 0.6):                     # 0.6: the start stick 0.5 is in the dead zone, it is raised
+            world['yaw'], newer[:] = 0.0, []
+            for attr in ('cam_fine_rate', 'cam_fine_stick'):
+                if hasattr(n, attr):
+                    delattr(n, attr)
+            world['dead'] = dead
+            known = n.camera_align(_Pad(), _G(), {'runs': []}, pos(), target, {'events': []}, tol=3.0, why='t', fine=True,
+                                   pulses=12)
+            self.assertLess(abs(gn.bearing_deg(known['p'][:2], known['cf'], target)), 3.0, dead)
+            self.assertTrue(newer and all(t is not None for t in newer))                       # a POS after each pulse
+
+    def test_poll_pos_newer_than_skips_a_line_from_before(self):
+        n = self.n
+        n.auto_pos = True
+        n.args.pos_timeout, n.args.pos_max_age = 0.3, 600.0
+        now = datetime.now()
+        old = (now - timedelta(seconds=0.2)).strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
+        self.append(f'[{old}] [info] [1] [UTPP] UTPP CET [night] POS p=1.00,2.00,0.00 cf=0.000,1.000 v=nil src=none w=0 m=0')
+        self.assertIsNotNone(n.poll_pos(_G()))
+        self.assertIsNone(n.poll_pos(_G(), newer_than=now))                 # only the line from before: none newer came
+        new = (now + timedelta(seconds=0.1)).strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
+        self.append(f'[{new}] [info] [1] [UTPP] UTPP CET [night] POS p=3.00,4.00,0.00 cf=0.000,1.000 v=nil src=none w=0 m=0')
+        self.assertEqual(n.poll_pos(_G(), newer_than=now)['p'][:2], (3.0, 4.0))
+
     def test_cet_mount_flag_default_and_off(self):
         a = night.build_parser().parse_args([])
         self.assertTrue(a.cet_mount)
@@ -1999,6 +2088,85 @@ class MacroTests(unittest.TestCase):
         mech, metr = gn.split_failures([], [{'name': 'crouch_walk_turns', 'run': 1, 'fails': fails}])
         self.assertEqual(len(mech), 2)
         self.assertEqual(metr, [])
+
+    def _walk_toggle(self, on_line=True, sprint_clears=True, lose_first=False):
+        """walk_toggle with a fake game: a G tap toggles the walk state and writes the walk line (on_line=False: the line never
+        comes), the clear_toggle part (L3 sprint) clears it when sprint_clears. Returns (rec, fails, G taps, played parts)."""
+        n, g = self.n, _G()
+        state = {'on': False, 'taps': 0}
+        walk = lambda on: self.append('[2026-10-07 23:00:01.000] [info] [1] [UTPP] [utpp_walk] walkToggled=%d detailed=1 '  # noqa: E731
+                                      'state=stand' % on)
+
+        def send(evs, api=g.api):
+            api.calls.append(('raw', tuple(evs), api.fg))
+            if evs and evs[0] == (KEYS['G'], False):
+                state['taps'] += 1
+                if lose_first and state['taps'] == 1:
+                    return
+                state['on'] = not state['on']
+                if on_line:
+                    walk(state['on'])
+        g.api._send = send
+        calls = []
+
+        def fake_run(sub, pad, guard):
+            calls.append([s.name for s in sub.steps])
+            if 'clear_toggle' in calls[-1] and sprint_clears and state['on']:
+                state['on'] = False
+                walk(False)
+            now = datetime(2026, 10, 7, 23, 0, 0)
+            return {'steps': [{'name': s.name, 'start': now, 'end': now, 'metrics': s.metrics} for s in sub.steps],
+                    'aborted': None}
+        orig = night.gt_run.run_scenario
+        night.gt_run.run_scenario = fake_run
+        try:
+            plan = {'runs': []}
+            att = n.play_attempt(_Pad(), g, plan, 'walk_toggle')
+        finally:
+            night.gt_run.run_scenario = orig
+        return att['res'], att['cfails'], state, calls
+
+    def test_walk_toggle_taps_g_at_the_toggle_step(self):
+        sc = self.n.scenarios['walk_toggle']
+        self.assertEqual(self.n.scenario_key_steps('walk_toggle'), ['toggle'])
+        self.assertTrue(self.n.scenario_needs_keyboard('walk_toggle'))             # skipped with --background
+        self.assertIn('walk_toggle', gn.SETS['loco'])
+        rec, fails, state, calls = self._walk_toggle()
+        self.assertEqual(fails, [])
+        self.assertEqual(state['taps'], 1)                                          # on once; the sprint cleared it
+        self.assertFalse(state['on'])
+        self.assertEqual(calls, [['settle'], ['toggle'], ['straight', 'arc_90', 'stop', 'clear_toggle']])
+        self.assertEqual([s['name'] for s in rec['steps']], [s.name for s in sc.steps])  # thresholds keep their steps
+
+    def test_walk_toggle_is_switched_off_when_the_sprint_did_not_clear_it(self):
+        rec, fails, state, calls = self._walk_toggle(sprint_clears=False)
+        self.assertEqual(fails, [])
+        self.assertEqual(state['taps'], 2)                                          # on, then off after the scenario
+        self.assertFalse(state['on'])
+
+    def test_walk_toggle_lost_tap_is_repeated_once(self):
+        rec, fails, state, calls = self._walk_toggle(lose_first=True)
+        self.assertEqual(fails, [])
+        self.assertEqual(state['taps'], 2)
+        self.assertFalse(state['on'])
+
+    def test_walk_toggle_without_a_walk_line_fails_and_never_taps_blind(self):
+        rec, fails, state, calls = self._walk_toggle(on_line=False, sprint_clears=False)
+        self.assertEqual(len(fails), 1)
+        self.assertIn('keyboard G did not switch the walk toggle on', fails[0])
+        self.assertEqual(state['taps'], 2)                                          # one repeat, no clean-up tap without a line
+        mech, metr = gn.split_failures([], [{'name': 'walk_toggle', 'run': 1, 'fails': fails}])
+        self.assertEqual((len(mech), metr), (1, []))
+
+    def test_walk_toggle_already_on_is_not_tapped_off(self):
+        self.append('[2026-10-07 22:59:59.000] [info] [1] [UTPP] [utpp_walk] walkToggled=1 detailed=1 state=stand')
+        n, g = self.n, _G()
+        res = n.walk_toggle_tap(_Pad(), g, True, 'toggle')
+        self.assertTrue(res['confirmed'])
+        self.assertEqual(res['taps'], 0)
+        self.assertFalse([c for c in g.api.calls if c[0] == 'raw'])
+        self.assertEqual(gn.walk_toggled('x [utpp_walk] walkToggled=1 y\n[utpp_walk] walkToggled=0 detailed=1'), False)
+        self.assertIsNone(gn.walk_toggled('no line'))
 
 
 class Round3Tests(unittest.TestCase):

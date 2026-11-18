@@ -939,6 +939,9 @@ def compute_metrics(lines: list[LogLine], t0: datetime, t1: datetime, saturation
             if f is not None:
                 corr.append(abs(f[2]))
     m['footlock_corr_max_cm'] = _r(max(corr) if corr else None, 2)
+    # report name of the same value: how far the foot locker's IK moved the foot (not the slide that remains visible, which is
+    # the world-space planted-toe speed of Source/tools/footslide/world_slide.py); the key above stays for thresholds and history
+    m['ik_correction_max_cm'] = m['footlock_corr_max_cm']
 
     _, vmean, vmax = _stats([l.num('|v|') for l in trace])
     m['speed_mean'], m['speed_max'] = _r(vmean, 2), _r(vmax, 2)

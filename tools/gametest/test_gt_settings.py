@@ -408,16 +408,48 @@ class LuaTests(unittest.TestCase):
 class SessionSettingsTests(unittest.TestCase):
     """--settings author | shipped: the values of the session, what differs from the shipped defaults, and the way back."""
 
+    # a player who changed every locomotion setting: the session pins them and puts the player's values back
     PLAYER = {'mm.bodyYawOffset': 8, 'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
-              'perspective.scene': True, 'perspective.blend': 0.8}
+              'perspective.scene': True, 'perspective.blend': 0.8,
+              'mm.walkSpeed': 2.4, 'mm.minWalkSpeed': 0.5, 'mm.lean': False, 'mm.leanHead': False, 'mm.leanScale': 1.5,
+              'mm.leanHeadScale': 0.3, 'mm.orientWarp': False, 'mm.footReplant': 'always', 'bodyturn.aimJog': False,
+              'bodyturn.aimJogSpeed': 3.8, 'bodyturn.aimSmooth': False, 'bodyturn.shooterMode': True}
+    LOCO = {'mm.walkSpeed': 1.6, 'mm.minWalkSpeed': 0.82, 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.85,
+            'mm.leanHeadScale': 0.9, 'mm.orientWarp': True, 'mm.footReplant': 'crouch', 'bodyturn.aimJog': True,
+            'bodyturn.aimJogSpeed': 3.3, 'bodyturn.aimSmooth': True, 'bodyturn.shooterMode': False}
+    LOCO_TEXT = ('locomotion walkSpeed=1.6 minWalkSpeed=0.82 lean=true leanHead=true leanScale=0.85 leanHeadScale=0.9 orientWarp=true '
+                 'footReplant=crouch aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
 
     def test_plans(self):
         self.assertEqual(dict(gs.session_plan('author')),
                          {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
-                          'perspective.scene': False, 'perspective.blend': 0.6})
+                          'perspective.scene': False, 'perspective.blend': 0.6, **self.LOCO})
         shipped = dict(gs.session_plan('shipped'))
         self.assertEqual(shipped, {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
-                                   'perspective.scene': False, 'perspective.blend': 0.8})
+                                   'perspective.scene': False, 'perspective.blend': 0.8, **self.LOCO})
+
+    def test_locomotion_keys_are_pinned_at_the_registered_defaults(self):
+        """The pinned locomotion values are the `default =` of the mod's Register calls (a changed default must change the pin)."""
+        cet = os.path.normpath(os.path.join(HERE, '..', '..', 'plugin', 'UTPP', 'cet'))
+        text = ''
+        for mod in ('utpp_motion', 'utpp_bodyturn', 'utpp_core'):
+            with open(os.path.join(cet, mod, 'init.lua'), encoding='utf-8', errors='replace') as f:
+                text += f.read()
+        for key, value in gs.LOCO_VALUES:
+            m = re.search(r'Register\(\{\s*key\s*=\s*"' + re.escape(key) + r'".*?default\s*=\s*("[^"]*"|[-\w.]+)', text, re.S)
+            self.assertIsNotNone(m, key)
+            raw = m.group(1)
+            reg = raw.strip('"') if raw.startswith('"') else (raw == 'true' if raw in ('true', 'false') else float(raw))
+            if isinstance(value, bool):
+                self.assertIs(reg, value, key)
+            elif isinstance(value, str):
+                self.assertEqual(reg, value, key)
+            else:
+                self.assertAlmostEqual(reg, value, msg=key)
+            self.assertEqual(gs.SHIPPED_DEFAULTS[key], value, key)
+        # every lean option of the motion module is pinned
+        leans = set(re.findall(r'key\s*=\s*"(mm\.lean\w*)"', text))
+        self.assertTrue(leans and leans <= set(gs.LOCO_KEYS), leans)
 
     def test_difference_from_shipped(self):
         diff = {d['key']: d for d in gs.differs_from_shipped(dict(gs.session_plan('author')))}
@@ -431,13 +463,14 @@ class SessionSettingsTests(unittest.TestCase):
         self.assertEqual([d['key'] for d in gs.differs_from_shipped({'perspective.scene': True, 'camera.side': 0.5})],
                          ['perspective.scene', 'camera.side'])
         line = gs.settings_line('author', dict(gs.session_plan('author')))
-        self.assertEqual(line, 'settings author: differ from the shipped defaults: perspective.blend 0.6 (shipped 0.8)')
+        self.assertEqual(line, 'settings author: differ from the shipped defaults: perspective.blend 0.6 (shipped 0.8); ' + self.LOCO_TEXT)
         self.assertNotIn('mm.bodyYawOffset', line)
         # a key whose default the harness does not know cannot be called equal: it is listed as unknown
         unknown = gs.differs_from_shipped({'camera.aim.side': 0.5})
         self.assertEqual([(d['key'], d['shipped']) for d in unknown], [('camera.aim.side', None)])
         self.assertIn('camera.aim.side 0.5 (shipped unknown)', gs.settings_line('author', {'camera.aim.side': 0.5}))
-        self.assertEqual(gs.settings_line('shipped', dict(gs.session_plan('shipped'))), 'settings shipped: all as shipped')
+        self.assertEqual(gs.settings_line('shipped', dict(gs.session_plan('shipped'))), 'settings shipped: all as shipped; ' + self.LOCO_TEXT)
+        self.assertEqual(gs.settings_line('shipped', {'perspective.blend': 0.8}), 'settings shipped: all as shipped')
         self.assertIn('NOT applied: camera.side', gs.settings_line('author', {}, ['camera.side']))
 
     def make_night(self, mode, store):

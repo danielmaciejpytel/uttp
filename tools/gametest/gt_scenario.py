@@ -16,7 +16,8 @@ File format (JSON, see scenarios.json):
          "lt": [[t, v], ...], "rt": [[t, v], ...],
          "buttons": [{"t": 0.5, "button": "B", "hold": 0.12}],
          "metrics": false,                                          # exclude the step from pass/fail
-         "dodge": true                                              # the B press of the step is a dodge (push check, gt_log.dodge_metrics)
+         "dodge": true,                                             # the B press of the step is a dodge (push check, gt_log.dodge_metrics)
+         "key": "G"                                                 # keyboard key tapped at the step start (KEYS; night runner only)
         }
       ]
     }
@@ -41,6 +42,9 @@ BUTTONS = {
     'START': 0x0010, 'BACK': 0x0020,
     'DPAD_UP': 0x0001, 'DPAD_DOWN': 0x0002, 'DPAD_LEFT': 0x0004, 'DPAD_RIGHT': 0x0008,
 }
+# keyboard keys a step may tap ("key": "G"), by set-1 scan code; the pad cannot send them (G = ToggleWalk, no pad binding).
+# The night runner taps the key at the step start and verifies the game state it changes (night.py play_with_keys).
+KEYS = {'G': 0x22}
 STICK_CHANNELS = ('ls', 'rs')
 SCALAR_CHANNELS = ('lt', 'rt')
 INTERPS = ('linear', 'smooth', 'step')
@@ -125,6 +129,7 @@ class Step:
     buttons: list = field(default_factory=list)
     metrics: bool = True
     dodge: bool = False      # the DODGE_BUTTON press of the step is a dodge whose direction the analysis checks
+    key: str = ''            # keyboard key (KEYS) the night runner taps at the step start, before the pad input of the step
 
 
 @dataclass
@@ -279,13 +284,16 @@ def parse_scenario(name: str, raw: dict, defaults: dict | None = None) -> Scenar
                 raise ScenarioError(f'{where}: button event {b!r} outside step')
             buttons.append(ev)
         unknown = set(rs) - {'name', 'duration', 'interp', 'ls', 'ls_polar', 'rs', 'rs_polar', 'lt', 'rt',
-                             'buttons', 'metrics', 'note', 'dodge'}
+                             'buttons', 'metrics', 'note', 'dodge', 'key'}
         if unknown:
             raise ScenarioError(f'{where}: unknown keys {sorted(unknown)}')
         dodge = bool(rs.get('dodge', False))
         if dodge and not any(b.button == DODGE_BUTTON for b in buttons):
             raise ScenarioError(f'{where}: "dodge" needs a {DODGE_BUTTON} button event')
-        steps.append(Step(sname, dur, tracks, buttons, bool(rs.get('metrics', True)), dodge))
+        key = str(rs.get('key', '')).upper()
+        if key and key not in KEYS:
+            raise ScenarioError(f'{where}: unknown key {key!r} (known: {sorted(KEYS)})')
+        steps.append(Step(sname, dur, tracks, buttons, bool(rs.get('metrics', True)), dodge, key))
     names = [s.name for s in steps]
     if len(set(names)) != len(names):
         raise ScenarioError(f'{name}: duplicate step names')
@@ -313,7 +321,8 @@ def describe(sc: Scenario, dt: float = 0.5) -> str:
             name, a, b = bounds[i]
             st = sc.steps[i]
             btn = ', '.join(f'{e.button}@{e.t:.2f}s/{e.hold:.2f}' for e in st.buttons)
-            lines.append(f'  [{a:6.2f}-{b:6.2f}] step {name}' + (f'  buttons: {btn}' if btn else '') +
+            lines.append(f'  [{a:6.2f}-{b:6.2f}] step {name}' + (f'  key: {st.key} (keyboard tap at the step start)'
+                                                                if st.key else '') + (f'  buttons: {btn}' if btn else '') +
                          ('' if st.metrics else '  (no metrics)'))
             last_step = i
             next_t = fr.t

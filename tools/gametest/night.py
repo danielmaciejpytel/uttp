@@ -135,6 +135,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import dataclasses
 import glob
 import json
 import math
@@ -170,7 +171,7 @@ import gt_settings as gs  # noqa: E402
 import video_sheets  # noqa: E402
 from gt_input import CET_DIR, SCAN_ENTER, TESTCMD_FILE, BackgroundGuard, FileCommandChannel, NeedsKeyboard, PaddError, file_size, \
     padd_ping, read_cet_overlay_key, read_since, testcmd_ready, wait_for_log  # noqa: E402
-from gt_scenario import BUTTONS, Scenario, load_scenarios, parse_scenario  # noqa: E402
+from gt_scenario import BUTTONS, KEYS, Scenario, load_scenarios, parse_scenario  # noqa: E402
 from gt_win32 import GAME_EXE, IS_WINDOWS, ForegroundGuard, GuardError, TimerResolution  # noqa: E402
 
 PROJECT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
@@ -178,6 +179,15 @@ NIGHT_ROOT = os.path.join(PROJECT, 'Research', 'logs', 'night')
 # mount: X where V arrived (camera along the car), one walk along the car and X again, then the scripted mount
 MOUNT_SEEK_STICK = 0.45             # walking stick of the search along the car
 DOOR_RADIUS_M = 0.45                # the approach ends this close to the door spot (X worked at lon -0.17, not at 0.34)
+FINE_APPROACH_M = 1.0               # door_radius_override set: inside this distance of the spot the stick drops to ...
+FINE_APPROACH_MAG = MOUNT_SEEK_STICK   # ... the walking stick of the mount search (it walks V in game), so a short chunk
+                                    # moves a few decimetres and a tight radius is reached, not overrun at a run
+FINE_APPROACH_CHUNKS = 8            # walking chunks at most; then the approach ends where it is (the caller checks the stand)
+FINE_ALIGN_DEG = 15.0               # camera_align(fine=True): partial-stick pulses inside this bearing
+FINE_ALIGN_STICK = 0.5              # right stick x of those pulses (the camera levelling turns at half stick), raised by ...
+FINE_ALIGN_STICK_STEP = 0.2         # ... this after a pulse that did not turn the camera, up to ...
+FINE_ALIGN_STICK_MAX = 0.9
+FINE_ALIGN_RATE = 30.0              # their start rate (deg/s), learned per run (cam_fine_rate)
 MOUNT_MAX_DIST_M = 4.0              # further from the car centre than this: no X (the approach did not arrive)
 APPROACH_SIDESTEPS = 2              # steps aside around an obstacle on the way to the car
 MOUNT_SPOTS_FILE = os.path.join(NIGHT_ROOT, 'mount_spots.json')   # car-frame spot where X last worked, per V body
@@ -1699,15 +1709,20 @@ class Night:
             raise (StopNight if is_user_stop(res['aborted']) else CycleError)(res['aborted'])
         return res
 
-    def poll_pos(self, guard, pad=None, timeout: float | None = None) -> dict | None:
+    def poll_pos(self, guard, pad=None, timeout: float | None = None, newer_than: datetime | None = None) -> dict | None:
         """One position record: utpp_core NightPos (short command) or the inline Lua line (~770 chars), each sent with
-        console_verified (up to 3 attempts, settle 0.5/1.0/1.5 s). None = LOST (callers dead-reckon)."""
+        console_verified (up to 3 attempts, settle 0.5/1.0/1.5 s). None = LOST (callers dead-reckon).
+        newer_than (NightAuto only): a POS line stamped at or before this time is not taken (the lines come every 0.5 s, so the
+        newest line right after a short camera pulse is often from before it: 2026-11-18 face-car k=2/k=3 read the same
+        line twice)."""
         self.check_scenario_time()
         wait = self.args.pos_timeout if timeout is None else timeout
         if self.auto_pos:  # utpp_core 0.5.4 NightAuto: read the newest POS line, no console at all
             end = time.monotonic() + wait + 1.0
             while True:
                 pos = gn.latest_pos(self.log_tail(60000), datetime.now(), self.args.pos_max_age)
+                if pos is not None and newer_than is not None and pos.get('ts') is not None and pos['ts'] <= newer_than:
+                    pos = None
                 if pos is not None:
                     self.pos_stats['ok'] += 1
                     return pos
@@ -1845,13 +1860,53 @@ class Night:
         self.log(f'[crouch] {want}: {"confirmed" if out["confirmed"] else "NOT confirmed"} after {out["taps"]} C tap(s)')
         return out
 
-    def play_with_key_crouch(self, pad, guard, name: str, plan: dict) -> tuple[dict, list]:
-        """Play a scenario whose pad crouch-toggle steps (B hold) are replaced by keyboard C + MMTRACE verification.
+    def walk_toggle_tap(self, pad, guard, want: bool, why: str) -> dict:
+        """Keyboard G (ToggleWalk, no pad binding) until the newest '[utpp_walk] walkToggled=' line says `want`. G is a
+        toggle, so it is never pressed blind: no tap when the newest walk line already says `want`; after a tap the
+        line is awaited for --crouch-verify s, and the second tap is sent only when NO walk line came at all (the first
+        tap was lost; a line with the other state means the game toggled, a second tap would only undo it)."""
+        out = {'want': want, 'taps': 0, 'confirmed': False, 'start': datetime.now(), 'why': why}
+        if gn.walk_toggled(self.log_tail()) is want:
+            out['confirmed'] = True
+        else:
+            for _ in range(2):
+                off = file_size(self.utpp_log)
+                self.tap_key(pad, guard, KEYS['G'], 0.08)
+                out['taps'] += 1
+                seen = wait_for_log(self.utpp_log, off, lambda t: gn.walk_toggled(t) is not None, self.args.crouch_verify,
+                                    sleep=guard.wait, clock=time.monotonic)
+                state = gn.walk_toggled(read_since(self.utpp_log, off)) if seen else None
+                if state is want:
+                    out['confirmed'] = True
+                if state is not None:
+                    break
+        out['end'] = datetime.now()
+        self.log(f'[walk] {why}: walk toggle {"on" if want else "off"} '
+                 + ('confirmed' if out['confirmed'] else 'NOT confirmed') + f' after {out["taps"]} G tap(s)')
+        return out
+
+    def walk_toggle_cleanup(self, pad, guard, off: int) -> dict | None:
+        """After a scenario that switched the walk toggle on: the L3 sprint of its last step normally clears it (the walk
+        line 'walkToggled=0' comes when V is back at Stand). Wait up to 2 s for that line; only while the newest walk line
+        still says walkToggled=1 tap G (verified). None = nothing was needed."""
+        if gn.walk_toggled(self.log_tail()) is not True:
+            return None
+        if wait_for_log(self.utpp_log, off, lambda t: gn.walk_toggled(t) is False, 2.0, sleep=guard.wait,
+                        clock=time.monotonic) and gn.walk_toggled(self.log_tail()) is not True:
+            return None
+        return self.walk_toggle_tap(pad, guard, False, 'end of the scenario')
+
+    def play_with_key_crouch(self, pad, guard, name: str, plan: dict, crouch: bool = True) -> tuple[dict, list]:
+        """Play a scenario whose pad crouch-toggle steps (B hold) are replaced by keyboard C + MMTRACE verification
+        (`crouch`, --crouch-button key) and whose "key" steps tap their keyboard key at the step start (G = walk toggle
+        on, verified by the '[utpp_walk]' line, walk_toggle_tap) before the step's pad input. A scenario that switched the
+        walk toggle on leaves it off again (walk_toggle_cleanup, also after an abort).
         The merged run record keeps the original step names so run.py's analysis/thresholds apply unchanged."""
         sc = self.scenarios[name]
-        toggles = gn.crouch_toggle_steps(sc)
+        toggles = gn.crouch_toggle_steps(sc) if crouch else []
         steps, fails, crouched = [], [], False
         part: list = []
+        off0, walked = file_size(self.utpp_log), False
 
         def flush():
             if part:
@@ -1863,20 +1918,41 @@ class Night:
                 part.clear()
                 if r['aborted']:
                     raise (StopNight if is_user_stop(r['aborted']) else CycleError)(r['aborted'])
-        for i, st in enumerate(sc.steps):
-            self.check_scenario_time()
-            if i in toggles:
-                flush()
-                want = 'standing' if crouched or 'uncrouch' in st.name else 'crouched'
-                res = self.crouch_toggle(pad, guard, want)
-                crouched = want == 'crouched'
-                steps.append({'name': st.name, 'start': res['start'], 'end': res['end'], 'metrics': st.metrics})
-                if not res['confirmed']:
-                    fails.append(f'{st.name}: keyboard C did not give {want} in MMTRACE within '
-                                 f'{self.args.crouch_verify:.1f} s (x2)')
-            else:
-                part.append(st)
-        flush()
+        try:
+            for i, st in enumerate(sc.steps):
+                self.check_scenario_time()
+                if i in toggles:
+                    flush()
+                    want = 'standing' if crouched or 'uncrouch' in st.name else 'crouched'
+                    res = self.crouch_toggle(pad, guard, want)
+                    crouched = want == 'crouched'
+                    steps.append({'name': st.name, 'start': res['start'], 'end': res['end'], 'metrics': st.metrics})
+                    if not res['confirmed']:
+                        fails.append(f'{st.name}: keyboard C did not give {want} in MMTRACE within '
+                                     f'{self.args.crouch_verify:.1f} s (x2)')
+                elif st.key:
+                    flush()
+                    start = datetime.now()
+                    if st.key == 'G':
+                        walked = True
+                        res = self.walk_toggle_tap(pad, guard, True, st.name)
+                        if not res['confirmed']:
+                            fails.append(f'{st.name}: keyboard G did not switch the walk toggle on (no "[utpp_walk] '
+                                         f'walkToggled=1" line within {self.args.crouch_verify:.1f} s, {res["taps"]} tap(s))')
+                    else:
+                        self.tap_key(pad, guard, KEYS[st.key], 0.08)
+                    part.append(dataclasses.replace(st, key=''))
+                    flush()
+                    steps[-1]['start'] = start
+                else:
+                    part.append(st)
+            flush()
+        finally:
+            if walked:
+                try:
+                    self.walk_toggle_cleanup(pad, guard, off0)
+                except Exception as e:  # noqa: BLE001 - an abort in progress is reported by its own exception
+                    self.log(f'[walk] toggle not switched off after {sc.name}: {type(e).__name__}')
         run_no = 1 + sum(1 for r in plan['runs'] if r['scenario'] == sc.name)
         rec = {'scenario': sc.name, 'run': run_no, 'steps': steps, 'aborted': None}
         plan['runs'].append(rec)
@@ -2621,29 +2697,51 @@ class Night:
         return res
 
     def camera_align(self, pad, guard, plan: dict, known: dict, target, ep: dict, tol: float | None = None,
-                     why: str = 'align') -> dict:
+                     why: str = 'align', fine: bool = False, pulses: int | None = None) -> dict:
         """Turn the camera with short right-stick pulses until the target is within `tol` deg of the camera forward.
-        Each pulse is followed by a real POS (cf feedback); the yaw rate and the turn direction adapt to it."""
+        Each pulse is followed by a real POS (cf feedback); the yaw rate and the turn direction adapt to it.
+        fine=True (a tolerance of a few degrees): the feedback after every pulse is a POS line written after the pulse
+        (poll_pos newer_than; the NightAuto lines come every 0.5 s), and within FINE_ALIGN_DEG of the target the pulses use a
+        partial stick (cam_fine_stick, from FINE_ALIGN_STICK) with their own learned rate; a pulse that did not turn the
+        camera at all raises that stick by FINE_ALIGN_STICK_STEP (up to FINE_ALIGN_STICK_MAX), so a stick inside the
+        dead zone does not use up the pulses. `pulses` = the pulse budget (default --align-pulses). Returns the newest
+        position; the caller checks the bearing."""
         tol = self.args.align_tol if tol is None else tol
         self.probe_cache.invalidate(f'camera turned ({why})')
-        for k in range(self.args.align_pulses):
+        for k in range(self.args.align_pulses if pulses is None else pulses):
             b = gn.bearing_deg(known['p'][:2], known['cf'], target)
             if abs(b) < tol:
                 return known
-            rx, dur = gn.camera_pulse(b, self.cam_rate, self.cam_sign)
-            self.log(f'[camera] {why} k={k} bearing={b:.0f} rs=({rx:.0f},0) for {dur:.2f} s rate={self.cam_rate:.0f}')
+            small = fine and abs(b) <= FINE_ALIGN_DEG
+            if small:
+                rate = getattr(self, 'cam_fine_rate', FINE_ALIGN_RATE)
+                stick = getattr(self, 'cam_fine_stick', FINE_ALIGN_STICK)
+                dur = round(min(0.8, max(0.12, abs(b) * 0.8 / rate)), 3)
+                rx = (stick if b > 0 else -stick) * self.cam_sign
+                self.log(f'[camera] {why} k={k} bearing={b:.1f} rs=({rx:.2f},0) for {dur:.2f} s fine rate={rate:.0f}')
+            else:
+                rx, dur = gn.camera_pulse(b, self.cam_rate, self.cam_sign)
+                self.log(f'[camera] {why} k={k} bearing={b:.0f} rs=({rx:.0f},0) for {dur:.2f} s rate={self.cam_rate:.0f}')
             ep['events'].append({'camera': k, 'bearing': round(b, 1), 'rs': rx, 'dur': dur})
             sc = parse_scenario('cam_turn', {'steps': [
                 {'name': 'turn', 'duration': dur + 0.25, 'interp': 'step', 'ls': [[0, 0, 0]],
                  'rs': [[0, 0, 0], [0.02, rx, 0], [0.02 + dur, 0, 0]], 'metrics': False}]})
             self.play(pad, guard, 'cam_turn', plan, sc)
-            new = self.poll_pos(guard, pad)
+            new = self.poll_pos(guard, pad, newer_than=datetime.now()) if fine else self.poll_pos(guard, pad)
             if not new:  # no feedback: assume the pulse turned the camera by rate * duration
-                known = dict(known, cf=gn.rotate_stick(*known['cf'], rx * self.cam_sign * self.cam_rate * dur))
+                turn = (1.0 if rx * self.cam_sign > 0 else -1.0) * rate * dur if small else \
+                    rx * self.cam_sign * self.cam_rate * dur
+                known = dict(known, cf=gn.rotate_stick(*known['cf'], turn))
                 continue
             turned = gn.turned_deg(known['cf'], new['cf'])
             want = 1.0 if b > 0 else -1.0
-            if abs(turned) > 3.0:
+            if small:   # learn the partial-stick rate; no turn at all = the stick is too small for the game
+                if abs(turned) >= 0.5:
+                    self.cam_fine_rate = min(240.0, max(3.0, 0.5 * rate + 0.5 * abs(turned) / dur))
+                elif stick < FINE_ALIGN_STICK_MAX:
+                    self.cam_fine_stick = round(min(FINE_ALIGN_STICK_MAX, stick + FINE_ALIGN_STICK_STEP), 2)
+                    self.log(f'[camera] {why}: no turn at stick {stick:.2f} -> {self.cam_fine_stick:.2f}')
+            elif abs(turned) > 3.0:
                 if turned * want < 0:  # the game turned the other way: flip the stick sign
                     self.cam_sign = -self.cam_sign
                     self.log('[camera] turn direction inverted -> right stick sign flipped')
@@ -3111,8 +3209,8 @@ class Night:
     def play_attempt(self, pad, guard, plan: dict, name: str, key_crouch: bool = False) -> dict:
         """One attempt of a scenario: {'res', 'cfails', 'off' (UTPP log offset before it), 'start'}."""
         off, start = file_size(self.utpp_log), datetime.now()
-        if key_crouch:
-            res, cfails = self.play_with_key_crouch(pad, guard, name, plan)
+        if key_crouch or self.scenario_key_steps(name):
+            res, cfails = self.play_with_key_crouch(pad, guard, name, plan, crouch=key_crouch)
         else:
             res, cfails = self.play(pad, guard, name, plan), []
         return {'res': res, 'cfails': cfails, 'off': off, 'start': start}
@@ -3198,10 +3296,13 @@ class Night:
           mostly forward (+ L3 sprint tap when far);
         - each iteration: <= --approach-chunk s of stick, then a real POS (NightAuto line); dead reckoning only
           bridges a missed POS (<= --dr-max s); the path is re-planned from every real POS;
-        - stop: within 0.8 m of the door point AND car-frame lat in [0.9, 1.7]; then face the car centre;
+        - stop: within DOOR_RADIUS_M (door_radius_override when set: the traversal vault) of the door point AND
+          car-frame lat in [0.9, 1.7]; then face the car centre. With a tighter override the last FINE_APPROACH_M is
+          walked at FINE_APPROACH_MAG stick (no speed learning from those chunks, at most FINE_APPROACH_CHUNKS of them);
         - time box max(25 s, dist/1.5 + 15 s). Logs '[approach] carframe lon=.. lat=..' every iteration.
         """
         door_rel = self.door_spot()
+        radius = getattr(self, 'door_radius_override', None) or DOOR_RADIUS_M   # the traversal vault stands tighter
         known, est = pos, tuple(pos['p'][:2])
         door = gn.door_target(known, door_rel[1], door_rel[0])
         dist0 = math.hypot(door[0] - est[0], door[1] - est[1])
@@ -3209,13 +3310,14 @@ class Night:
         end = time.monotonic() + box
         self.log(f'[approach] start dist={dist0:.1f} m time box {box:.0f} s')
         dist, i, dr_s, src, aligns, last_wp, stuck_chunks, sidesteps = dist0, 0, 0.0, 'pos', 0, None, 0, 0
+        slow_n = 0
         while time.monotonic() < end:
             self.check_scenario_time()
             v_xy, vr = known['v'][:2], known['vr']
             lon, lat = gn.car_frame(est, v_xy, vr)
             door = gn.door_target(known, door_rel[1], door_rel[0])
             dist = math.hypot(door[0] - est[0], door[1] - est[1])
-            if gn.at_door(lon, lat, door_rel, radius=DOOR_RADIUS_M):
+            if gn.at_door(lon, lat, door_rel, radius=radius):
                 self.log(f'[approach] i={i} carframe lon={lon:.2f} lat={lat:.2f} at the door (dist {dist:.2f}, src={src})')
                 break
             wps = gn.plan_path(lon, lat, door_rel, blocked_end=self.blocked_end)
@@ -3232,7 +3334,15 @@ class Night:
                 est = tuple(known['p'][:2])
                 continue
             to_wp = math.hypot(target[0] - est[0], target[1] - est[1])
-            sx, sy, _ = gn.approach_stick(est, known['cf'], target, self.args.approach_mag)
+            slow = radius < DOOR_RADIUS_M and dist <= FINE_APPROACH_M     # the last metre to a tight spot: walk
+            if slow:
+                slow_n += 1
+                if slow_n > FINE_APPROACH_CHUNKS:
+                    self.log(f'[approach] i={i} carframe lon={lon:.2f} lat={lat:.2f}: the {radius:.2f} m spot not reached '
+                             f'after {FINE_APPROACH_CHUNKS} walking chunks (dist {dist:.2f}) - ending here')
+                    break
+            sx, sy, _ = gn.approach_stick(est, known['cf'], target,
+                                          min(self.args.approach_mag, FINE_APPROACH_MAG) if slow else self.args.approach_mag)
             sprint = dist > self.args.sprint_dist and gn.stick_class(sx, sy) == 'forward'
             dur = min(self.args.approach_chunk, max(0.2, to_wp / max(gn.speed_for(sx, sy, sprint, self.speeds), 0.3)))
             self.log(f'[approach] i={i} carframe lon={lon:.2f} lat={lat:.2f} wp {len(wps)}=({wp[0]:.1f},{wp[1]:.1f}) '
@@ -3253,7 +3363,7 @@ class Night:
             if new and new.get('v') and new.get('src') != 'mounted':
                 moved = math.hypot(new['p'][0] - start_xy[0], new['p'][1] - start_xy[1])
                 stuck = src == 'pos' and dur >= 0.4 and moved < APPROACH_STUCK_M
-                if src == 'pos' and dur >= 0.4 and not stuck:  # learn the speed of this stick class from real displacement
+                if src == 'pos' and dur >= 0.4 and not stuck and not slow:  # learn the speed of this stick class (full stick)
                     cls = gn.stick_class(sx, sy, sprint)
                     self.speeds[cls] = round(min(10.0, max(0.3, 0.5 * self.speeds[cls] + 0.5 * moved / dur)), 2)
                 stuck_chunks = stuck_chunks + 1 if stuck else 0
@@ -3731,10 +3841,15 @@ class Night:
     def scenario_needs_keyboard(self, name: str) -> bool:
         """Scenarios that always press keys (skipped with --background before they start; any other key press of a
         scenario is refused at the api and skips it the same way)."""
-        if name == 'shoulder_key':
+        if name == 'shoulder_key' or self.scenario_key_steps(name):
             return True
         sc = self.scenarios.get(name)
         return sc is not None and self.args.crouch_button == 'key' and bool(gn.crouch_toggle_steps(sc))
+
+    def scenario_key_steps(self, name: str) -> list[str]:
+        """Names of the steps of scenario `name` that tap a keyboard key ("key" in scenarios.json); [] = pad only."""
+        sc = self.scenarios.get(name)
+        return [st.name for st in sc.steps if st.key] if sc is not None else []
 
     def live_invalid_cause(self, res: dict, log_off: int) -> str | None:
         """The cause for which run.py will score the steps of a walking scenario INVALID (the same checks on the log slice of
@@ -3863,8 +3978,8 @@ class Night:
                                         rec['start'] = walked['start']
                                         rec['blocked_attempt'] = walked['discarded']
                                     live = (res, log_off)
-                                elif key_crouch:
-                                    res, cfails = self.play_with_key_crouch(pad, guard, name, plan)
+                                elif key_crouch or self.scenario_key_steps(name):
+                                    res, cfails = self.play_with_key_crouch(pad, guard, name, plan, crouch=key_crouch)
                                 else:
                                     res, cfails = self.play(pad, guard, name, plan), []
                                 if cfails:
@@ -4654,6 +4769,16 @@ def dry_run(args) -> int:
     print(f'     wheel/menu recovery: --wheel-close {args.wheel_close} once, only after |stick|>=0.7 for >=1.5 s '
           'with |v|<0.3')
     print(f'     crouch: {"keyboard C (scan 0x2E) + MMTRACE loco check" if args.crouch_button == "key" else "pad B hold"}')
+    for n in names:
+        keyed = [st for st in scenarios[n].steps if st.key] if n in scenarios else []
+        if keyed:
+            print(f'     {n}: keyboard ' + ', '.join(f'{st.key} (scan 0x{KEYS[st.key]:02X}) at the start of step {st.name}'
+                                             for st in keyed)
+                  + (' - walk toggle on, verified by "[utpp_walk] walkToggled=1" (a second tap only without any walk line); '
+                     'after the scenario G again only while the newest walk line says walkToggled=1'
+                     if any(st.key == 'G' for st in keyed) else '')
+                  + ('; SKIPPED with --background (needs the keyboard)' if getattr(args, 'background', False) else
+                     '; needs the keyboard (skipped with --background)'))
     print(f'     vehicle approach: door point lon {args.door_lon} / lat {args.door_lat} m (car frame, left = driver), '
           f'car-frame waypoints around the ends (>= {gn.CLEAR_LAT} m clearance), stop within 0.8 m and lat 0.9-1.7; '
           f'camera turn first when > {args.turn_first:.0f} deg off (pulses until < {args.align_tol:.0f} deg, start rate '

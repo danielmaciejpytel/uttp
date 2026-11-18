@@ -119,6 +119,7 @@ REGISTRY = {
     'gametest/test_gt_macro_verdicts.py': {},
     'gametest/test_gt_ranged_families.py': {},
     'gametest/test_gt_states.py': {},
+    'footslide/test_world_slide.py': {},
     'gametest/test_gt_traversal.py': {},
     'gametest/test_gt_post.py': {'note': 'one case cuts an 8 s test video with the project ffmpeg and SKIPs without it'},
     'gametest/test_gt_posemeter.py': {'note': 'runs the pose meter worker processes on the small slice in testdata (a few seconds)'},
@@ -159,6 +160,7 @@ REGISTRY = {
     'mmbake/test_travbake.py': {'markers': {'data'}},
     'mmbake/test_travbake_motion.py': {'markers': {'data'}},
     'ragdoll/test_getup_metric.py': {},
+    'replay/test_speed_calibration.py': {},
     'replay/test_slide_replay.py': {
         'markers': {'needs-args'}, 'reason': 'needs --exe <utpp_motion_replay.exe> --db <slide bundle> --feeds <dir>'},
     'retarget/test_ankle_offset_yaw.py': {

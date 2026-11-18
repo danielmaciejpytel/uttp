@@ -37,14 +37,22 @@ class FakeGuard:
         pass
 
 
+V_XY, V_R = (5.0, 0.0), (0.0, 1.0)     # the fake vehicle
+
+
 class FakeNight:
-    def __init__(self, tmp, script, car=True, approach_dist=0.5):
+    """V stands where the approach was sent (plus `stand_errors[i]` of the i-th approach, car frame); after camera_align the camera
+    looks at its target turned by `aim_errors[i]` deg of the i-th alignment (the list repeats its last value)."""
+    def __init__(self, tmp, script, car=True, approach_dist=0.5, stand_errors=((0.0, 0.0),), aim_errors=(0.0,)):
         self.utpp_log = os.path.join(tmp, 'session.log')
         open(self.utpp_log, 'w').close()
         self.args = types.SimpleNamespace(log_dir=tmp)
         self.settings = gs.Ledger(None, log=lambda m: None)
         self.script, self.car, self.approach_dist = script, car, approach_dist
-        self.door_spot_override = None
+        self.stand_errors, self.aim_errors = list(stand_errors), list(aim_errors)
+        self.door_spot_override = self.door_radius_override = None
+        self.at = self.look = None
+        self.n_approach = self.n_align = 0
         self.calls, self.logs, self.plays = [], [], {}
 
     def log(self, msg):
@@ -63,10 +71,19 @@ class FakeNight:
         self.append(['CET [night] TRAVLOG ok=true'])
         return '[night] TRAVLOG ok=true'
 
-    def poll_pos(self, guard, pad=None, timeout=None):
+    def poll_pos(self, guard, pad=None, timeout=None, newer_than=None):
+        self.newer = getattr(self, 'newer', 0) + (newer_than is not None)
         if not self.car:
             return None
-        return {'p': (0.0, 0.0, 0.0), 'cf': (1.0, 0.0), 'v': (5.0, 0.0, 0.0), 'vr': (0.0, 1.0), 'src': 'summon'}
+        if self.at is None:
+            return {'p': (0.0, 0.0, 0.0), 'cf': (1.0, 0.0), 'v': (5.0, 0.0, 0.0), 'vr': V_R, 'src': 'summon'}
+        p = gn.from_car_frame(self.at[0], self.at[1], V_XY, V_R)
+        cf = (1.0, 0.0)
+        if self.look is not None:
+            dx, dy = self.look[0] - p[0], self.look[1] - p[1]
+            d = (dx * dx + dy * dy) ** 0.5
+            cf = gn.rotate_stick(dx / d, dy / d, self.aim_error)
+        return {'p': (p[0], p[1], 0.0), 'cf': cf, 'v': (5.0, 0.0, 0.0), 'vr': V_R, 'src': 'summon'}
 
     def locate_vehicle(self, pad, guard, plan, ep):
         self.calls.append(('locate',))
@@ -77,7 +94,21 @@ class FakeNight:
 
     def approach(self, pad, guard, plan, pos, ep):
         self.calls.append(('approach', self.door_spot_override))
+        self.radii = getattr(self, 'radii', []) + [self.door_radius_override]
+        err = self.stand_errors[min(self.n_approach, len(self.stand_errors) - 1)]
+        self.n_approach += 1
+        spot = self.door_spot_override
+        self.at, self.look = (spot[0] + err[0], spot[1] + err[1]), None
         return self.approach_dist
+
+    def camera_align(self, pad, guard, plan, known, target, ep, tol=None, why='align', fine=False, pulses=None):
+        self.calls.append(('aim', why))
+        self.aims = getattr(self, 'aims', []) + [(tuple(round(c, 3) for c in target), tol)]
+        self.fine = getattr(self, 'fine', []) + [fine]
+        self.aim_error = self.aim_errors[min(self.n_align, len(self.aim_errors) - 1)]
+        self.n_align += 1
+        self.look = target
+        return known
 
     def play(self, pad, guard, name, plan, sc=None):
         self.calls.append(('play', name))
@@ -121,6 +152,38 @@ class TraversalSetTests(unittest.TestCase):
             jump = [st for st in scen[part].steps if st.name == 'jump'][0]
             self.assertTrue([b for b in jump.buttons if b.button == 'A'], part)
             self.assertTrue(any(f.ls[1] > 0.9 for _, f in scen[part].sample(0.1)), part)
+
+
+class PathTests(unittest.TestCase):
+    def test_crossing_of_the_vehicle_axis(self):
+        self.assertAlmostEqual(gt.crossing_lon((1.0, 1.0), (-1.0, -1.0)), 0.0)
+        self.assertAlmostEqual(gt.crossing_lon((1.26, 1.30), (-0.2, -0.2)), 1.26 - 1.46 * 1.30 / 1.50)
+        self.assertIsNone(gt.crossing_lon((1.8, 1.2), (-2.3, 0.9)))      # ran along the side (2026-11-18 Female vault #2)
+        self.assertIsNone(gt.crossing_lon(None, (0.0, -1.0)))
+        self.assertIsNone(gt.crossing_lon((0.0, -0.5), (0.0, -1.0)))     # not on the near side first
+        self.assertIn('crossed the vehicle axis at lon -1.00', gt.path_note((1.0, 1.0), (-3.0, -1.0)))
+        self.assertIn('did not cross', gt.path_note((1.8, 1.2), (-2.3, 0.9)))
+        self.assertEqual(gt.path_note(None, (0.0, 0.0)), '')
+
+    def test_car_frame_point(self):
+        pos = {'p': (5.0, 1.0, 0.0), 'v': (5.0, 0.0, 0.0), 'vr': (0.0, 1.0)}   # forward (-1, 0), left (0, -1)
+        self.assertEqual(gt.car_frame_point(pos), (0.0, -1.0))
+        self.assertIsNone(gt.car_frame_point({'p': (0.0, 0.0, 0.0)}))
+        self.assertEqual(gt.car_frame_point({'p': (4.0, 0.0, 0.0)}, pos), (1.0, 0.0))
+
+    def test_vault_aim_from_the_environment(self):
+        name = 'UTPP_NIGHT_TEST_AIM'
+        old = os.environ.pop(name, None)
+        try:
+            self.assertEqual(gt.env_aim(name, (-0.1, 0.0)), (-0.1, 0.0))
+            os.environ[name] = 'off'
+            self.assertIsNone(gt.env_aim(name, (-0.1, 0.0)))
+            os.environ[name] = '-0.2,0'
+            self.assertEqual(gt.env_aim(name, (-0.1, 0.0)), (-0.2, 0.0))
+        finally:
+            os.environ.pop(name, None)
+            if old is not None:
+                os.environ[name] = old
 
 
 class EvidenceTests(unittest.TestCase):
@@ -193,7 +256,8 @@ class MacroTests(unittest.TestCase):
         night, out = self.run_macro(success)
         self.assertEqual(out['verdict'], 'PASS')
         self.assertEqual(out['results'], {'vault': True, 'climb': True})
-        self.assertEqual([c[1] for c in night.calls if c[0] == 'approach'], [(1.4, 1.3), (-0.2, 1.3)])   # the spot of each kind
+        self.assertEqual([c[1] for c in night.calls if c[0] == 'approach'], [gt.KINDS['vault']['spot'], (-0.2, 1.3)])   # each kind's spot
+        self.assertEqual([c[1] for c in night.calls if c[0] == 'aim'], ['trav-aim'])  # only the vault turns to its crossing point
         self.assertEqual([c[1] for c in night.calls if c[0] == 'play'], ['trav_vault_jump', 'trav_climb_jump'])
         self.assertEqual([w['label'] for w in out['phase_windows']], ['trav_vault_1', 'trav_climb_1'])
         self.assertTrue(all(w['start'] <= w['end'] for w in out['phase_windows']))
@@ -204,6 +268,77 @@ class MacroTests(unittest.TestCase):
         # phase windows are what the pose meter and the sheets read
         self.assertEqual([w['name'] for w in gn.phase_windows_of([dict(out, name='traversal', run=1)])],
                          ['trav_vault_1_r1', 'trav_climb_1_r1'])
+
+    def test_the_vault_aims_at_its_crossing_point_and_logs_the_path(self):
+        night, out = self.run_macro(lambda part, n: [])
+        aim = gt.KINDS['vault']['aim']
+        want = tuple(round(c, 3) for c in gn.from_car_frame(aim[0], aim[1], (5.0, 0.0), (0.0, 1.0)))
+        self.assertEqual(night.aims[0], (want, gt.AIM_TOL_DEG))
+        self.assertEqual(night.fine[0], True)                            # the fine pulses
+        self.assertGreaterEqual(night.newer, 1)                          # the stand / aim check reads a POS after the pulses
+        vault = [a for a in out['attempts'] if a['kind'] == 'vault']
+        self.assertEqual(vault[0]['stand'], list(gt.KINDS['vault']['spot']))   # the fake V stands still at the spot: no crossing
+        self.assertEqual((vault[0]['stand_offset_m'], vault[0]['aim_bearing_deg']), (0.0, 0.0))
+        self.assertIsNone(vault[0]['crossing_lon'])
+        self.assertIn('no traversal line at all', vault[0]['why'])
+        self.assertTrue(any('ready to jump [stand lon +1.30 lat 1.20, 0.00 m from the spot, camera ' in m
+                            and 'deg off the aim]' in m for m in night.logs), night.logs)
+
+    def test_the_vault_stands_tight_and_the_climb_keeps_the_approach_radius(self):
+        night, out = self.run_macro(success)
+        self.assertEqual(night.radii, [gt.STAND_RADIUS_M, None])
+        self.assertIsNone(night.door_radius_override)
+        self.assertLess(gt.STAND_RADIUS_M, gt.STAND_TOL_M)
+
+    def test_a_vault_stand_off_the_spot_is_approached_once_more(self):
+        night, out = self.run_macro(success, stand_errors=[(0.0, 0.45), (0.05, 0.0)])
+        self.assertEqual(out['verdict'], 'PASS')
+        vault = [a for a in out['attempts'] if a['kind'] == 'vault']
+        self.assertEqual(len(vault), 1)
+        self.assertTrue(vault[0]['reapproached'])
+        self.assertEqual(vault[0]['stand_offset_m'], 0.05)
+        self.assertEqual([c[1] for c in night.calls if c[0] == 'approach'][:2], [gt.KINDS['vault']['spot']] * 2)
+        self.assertTrue(any('0.45 m from the spot' in m and 'approaching once more' in m for m in night.logs))
+
+    def test_a_vault_that_cannot_stand_at_the_spot_does_not_jump(self):
+        night, out = self.run_macro(success, stand_errors=[(0.4, 0.0)])
+        self.assertEqual(out['verdict'], 'FAIL')
+        self.assertNotIn('trav_vault_jump', night.plays)
+        vault = [a for a in out['attempts'] if a['kind'] == 'vault']
+        self.assertEqual([a['played'] for a in vault], [False] * gt.ATTEMPTS)
+        self.assertTrue(all(a['reapproached'] and a['stand_offset_m'] == 0.4 for a in vault))
+        self.assertIn('0.40 m from the spot', out['fails'][0])
+        self.assertIn('after a second approach; no jump', out['fails'][0])
+        self.assertTrue(out['fails'][0].startswith('vault: '))
+        self.assertEqual(out['results']['climb'], True)                    # the climb is not held to the vault's stand
+
+    def test_a_vault_aim_off_is_aligned_once_more(self):
+        night, out = self.run_macro(success, aim_errors=[6.0, 1.0])
+        self.assertEqual(out['verdict'], 'PASS')
+        vault = [a for a in out['attempts'] if a['kind'] == 'vault']
+        self.assertTrue(vault[0]['realigned'])
+        self.assertAlmostEqual(abs(vault[0]['aim_bearing_deg']), 1.0, places=3)
+        self.assertEqual([c[1] for c in night.calls if c[0] == 'aim'], ['trav-aim', 'trav-aim'])
+
+    def test_a_vault_whose_aim_is_not_reached_does_not_jump(self):
+        night, out = self.run_macro(success, aim_errors=[5.0])
+        self.assertEqual(out['verdict'], 'FAIL')
+        self.assertNotIn('trav_vault_jump', night.plays)
+        self.assertIn('aim not reached', out['fails'][0])
+        self.assertIn('5.0 deg off the aim point after two alignments (tol 3 deg); no jump', out['fails'][0])
+        vault = [a for a in out['attempts'] if a['kind'] == 'vault']
+        self.assertTrue(all(not a['played'] and a['realigned'] for a in vault))
+
+    def test_stand_and_aim(self):
+        spot, aim = (0.9, 1.2), (-0.1, 0.0)
+        p = gn.from_car_frame(1.2, 1.6, V_XY, V_R)
+        target = gn.from_car_frame(aim[0], aim[1], V_XY, V_R)
+        cf = ((target[0] - p[0]) / 1.0, (target[1] - p[1]) / 1.0)
+        pos = {'p': (p[0], p[1], 0.0), 'cf': cf}
+        res = gt.stand_and_aim(pos, {'v': (5.0, 0.0, 0.0), 'vr': V_R}, spot, aim)   # the vehicle from the other record
+        self.assertAlmostEqual(res['offset_m'], 0.5)
+        self.assertAlmostEqual(res['bearing_deg'], 0.0, places=6)
+        self.assertEqual(gt.stand_and_aim(None, None, spot, aim), {'stand': None, 'offset_m': None, 'bearing_deg': None})
 
     def test_a_second_attempt_can_succeed(self):
         def script(part, n):

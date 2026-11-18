@@ -427,6 +427,60 @@ def read_feed(path):
     return {c: np.asarray(v, dtype=np.float64) for c, v in rows.items()}
 
 
+CLOCK_ALIGN_BELOW = 0.99      # the feed clock alignment is tried when the step sequences matched fewer rows than this share
+CLOCK_TOL_S = 0.004           # a feed row maps to the frame within this time of its clock time (frames are ~16.7 ms apart)
+CLOCK_STEP_TOL_S = 0.003      # ... whose frame step agrees with the row step within this
+CLOCK_AGREE_MIN = 0.9         # share of the step-matched rows the clock must put on the same frame (the step match slips by a frame in
+                              # a few chunks of a long session, the clock does not)
+
+
+def align_feed_clock(sec, feed, seed, block=3000):
+    """Frame of every feed row through the feed clock (column t, which keeps running when the feed writes no rows for a while, e.g.
+    2.5 s inside a 7.5 min session): frame time = t + offset, the offset taken from the rows the step-sequence match already found
+    (seed) and re-centred per block of rows for a slow drift; a row maps to the nearest frame within CLOCK_TOL_S whose step agrees.
+    Returns (frame_of_row, matched rows, description) or None when the clock is missing or does not agree with the seed."""
+    t, fdt = feed.get('t'), feed.get('dt')
+    if t is None or fdt is None or len(t) != len(fdt) or len(sec) < 2:
+        return None
+    rows = len(t)
+    j = np.nonzero(seed >= 0)[0]
+    if len(j) < 100:
+        return None
+    d = sec[seed[j]] - t[j]
+    off = float(np.median(d))
+    if float(np.percentile(np.abs(d - off), 90)) > 0.002:
+        return None                                   # the clock drifts against the frame times: not usable
+    pdt = np.diff(sec, prepend=np.nan)
+    pred = t + off
+    for lo in range(0, rows, block):                   # re-centre per block (drift of ~1 ms over minutes)
+        p = pred[lo:lo + block]
+        f = np.clip(np.searchsorted(sec, p), 1, len(sec) - 1)
+        f = np.where(np.abs(sec[f - 1] - p) < np.abs(sec[f] - p), f - 1, f)
+        r = sec[f] - p
+        good = np.abs(r) <= CLOCK_TOL_S
+        if good.sum() >= 50:
+            pred[lo:lo + block] = p + float(np.median(r[good]))
+    f = np.clip(np.searchsorted(sec, pred), 1, len(sec) - 1)
+    f = np.where(np.abs(sec[f - 1] - pred) < np.abs(sec[f] - pred), f - 1, f)
+    res = sec[f] - pred
+    with np.errstate(invalid='ignore'):
+        ok = np.isfinite(pred) & (np.abs(res) <= CLOCK_TOL_S) & (np.abs(pdt[f] - fdt) <= CLOCK_STEP_TOL_S)
+    ok[0] = False
+    frame_of_row = np.full(rows, -1, dtype=np.int64)
+    frame_of_row[ok] = f[ok]
+    _, first_idx, counts = np.unique(f[ok], return_index=True, return_counts=True)
+    if (counts > 1).any():                            # two rows on one frame: keep neither
+        dup = np.isin(frame_of_row, np.unique(f[ok])[counts > 1])
+        frame_of_row[dup] = -1
+    both = (seed >= 0) & (frame_of_row >= 0)
+    agree = float(np.mean(seed[both] == frame_of_row[both])) if both.any() else 0.0
+    if agree < CLOCK_AGREE_MIN:
+        return None
+    n = int((frame_of_row >= 0).sum())
+    return frame_of_row, n, ('aligned %d of %d feed rows by the feed clock (step sequences matched %d; residual p95 %.2f ms, %.1f %% agree)'
+                             % (n, rows, len(j), 1000 * float(np.percentile(np.abs(res[frame_of_row >= 0]), 95)), 100 * agree))
+
+
 def align_feed(sec, feed, coarse=None, chunk=600):
     """Pose frame index of every feed row (-1 where the two sequences cannot be matched) and a description. The feed dump and the recording are
     written by different threads, so a frame can be missing on either side: a start shift is searched on a central slice (around `coarse` frames
@@ -478,6 +532,9 @@ def align_feed(sec, feed, coarse=None, chunk=600):
         frame_of_row[lo:hi] = np.arange(lo, hi) + prev
         good_rows += hi - lo
         errs_all.append(accepted[1])
+    clock = align_feed_clock(sec, feed, frame_of_row) if good_rows < CLOCK_ALIGN_BELOW * rows else None
+    if clock is not None and clock[1] > good_rows:
+        return clock[0], clock[2]
     if good_rows < 0.3 * rows:
         return None, 'dt sequences do not line up (%d of %d feed rows matched)' % (good_rows, rows)
     shifts = sorted(set(int(frame_of_row[j] - j) for j in range(1, rows - 1, chunk) if frame_of_row[j] >= 0))

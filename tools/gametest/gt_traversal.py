@@ -11,6 +11,7 @@ is recorded as a labelled phase window for the pose meter.
 from __future__ import annotations
 
 import glob
+import math
 import os
 import re
 import sys
@@ -26,7 +27,7 @@ PARTS = ['trav_vault_jump', 'trav_climb_jump']
 SET_NAME = 'traversal'
 
 
-def env_spot(name: str, default: tuple) -> tuple:
+def env_spot(name: str, default: tuple | None) -> tuple | None:
     """A car-frame spot "lon,lat" from the environment (a vehicle of another shape, e.g. a motorcycle, needs another place to
     stand at); unset or not two numbers = the default."""
     try:
@@ -36,17 +37,72 @@ def env_spot(name: str, default: tuple) -> tuple:
     return (lon, lat)
 
 
-# car-frame spot (lon, lat) to stand at (lat > 0 = driver side, 0.9 .. 1.7 is where the approach stops), the pad part and the label of
-# the pose window. Vault: beside the hood (low edge); climb: beside the cabin (higher than a vault allows). The spots can be set
-# from the environment: UTPP_NIGHT_VAULT_SPOT, UTPP_NIGHT_CLIMB_SPOT.
+def env_aim(name: str, default: tuple | None) -> tuple | None:
+    """A car-frame aim point "lon,lat" from the environment; "off" = no aim (the approach's own facing of the vehicle centre)."""
+    if os.environ.get(name, '').strip().lower() == 'off':
+        return None
+    return env_spot(name, default)
+
+
+# car-frame spot (lon, lat) to stand at (lat > 0 = driver side, 0.9 .. 1.7 is where the approach stops), the car-frame point the
+# camera is turned to before the jump (None = keep the approach's facing of the vehicle centre), the pad part and the label of the
+# pose window. Vault: the motorcycle of the test setup is vaulted only when V's path crosses its axis near lon -0.25 .. 0.0 at a
+# diagonal: from the spot (1.3, 1.2) facing the vehicle centre the jump crosses the axis near lon +0.35 and the game plays the
+# vault (2026-11-18, first try; the same stand as the vault seen 2026-11-15); a crossing near lon 0 from (0.9, 1.2) was planned
+# as a climb twice, further back (lon <= -0.55, the low tail) is a plain jump over it with no traversal at all. Facing the
+# vehicle centre with the approach's 25 deg tolerance spread the crossing from +0.6 to -0.9, so the vault aims with a tight
+# tolerance and is played only when V stands within STAND_TOL_M of the spot and
+# the camera is within AIM_TOL_DEG of the aim point (a fresh position after the alignment; one re-approach and one re-alignment,
+# else the attempt is not played and the reason is recorded). Climb: beside the cabin, the approach's facing (passes as it is).
+# From the environment: UTPP_NIGHT_VAULT_SPOT, UTPP_NIGHT_CLIMB_SPOT, UTPP_NIGHT_VAULT_AIM ("lon,lat" or "off").
 KINDS = {
-    'vault': {'action': ACTION_VAULT, 'spot': env_spot('UTPP_NIGHT_VAULT_SPOT', (1.4, 1.3)), 'part': 'trav_vault_jump',
-              'label': 'trav_vault'},
-    'climb': {'action': ACTION_CLIMB, 'spot': env_spot('UTPP_NIGHT_CLIMB_SPOT', (-0.2, 1.3)), 'part': 'trav_climb_jump',
-              'label': 'trav_climb'},
+    'vault': {'action': ACTION_VAULT, 'spot': env_spot('UTPP_NIGHT_VAULT_SPOT', (1.3, 1.2)),
+              'aim': env_aim('UTPP_NIGHT_VAULT_AIM', (0.0, 0.0)), 'part': 'trav_vault_jump', 'label': 'trav_vault'},
+    'climb': {'action': ACTION_CLIMB, 'spot': env_spot('UTPP_NIGHT_CLIMB_SPOT', (-0.2, 1.3)), 'aim': None,
+              'part': 'trav_climb_jump', 'label': 'trav_climb'},
 }
+# the aim before the jump. From the default spot the crossing point is ~1.56 m away and the path crosses the axis ~40 deg off
+# the perpendicular (50 deg to the axis), so
+# 1 deg of aim error moves the crossing ~0.027 m off the path and ~0.035 m along the axis: 8 deg gave +-0.29 m along the axis,
+# wider than the whole vault window (-0.25 .. 0.0, 0.25 m); 3 deg gives about +-0.11 m, inside it from its middle (-0.1).
+AIM_TOL_DEG = 3.0
+AIM_PULSES = 12           # camera pulse budget of one alignment (the fine pulses need a few more than the coarse ones)
+# where V stands moves the crossing as much as the aim does: the vault is played only within this distance of the spot (car
+# frame, from a fresh position after the alignment); the approach is asked to stop at STAND_RADIUS_M (night.py
+# door_radius_override, the last metre walked), so a stop at its edge still passes
+STAND_TOL_M = 0.3
+STAND_RADIUS_M = 0.2
+
+
+def car_frame_point(pos: dict | None, vehicle: dict | None = None) -> tuple | None:
+    """V's (lon, lat) in the frame of the vehicle (`vehicle` = the POS that carries the vehicle, default `pos` itself). Pure."""
+    vehicle = vehicle or pos
+    if not (pos and pos.get('p') and vehicle and vehicle.get('v') and vehicle.get('vr')):
+        return None
+    import gt_night as gn  # late: gt_night imports this module
+    return gn.car_frame(pos['p'][:2], vehicle['v'][:2], vehicle['vr'])
+
+
+def crossing_lon(before: tuple | None, after: tuple | None) -> float | None:
+    """The lon where V's straight path from `before` to `after` (car-frame (lon, lat), V on the lat > 0 side first) crosses the
+    vehicle's long axis (lat 0); None when V did not cross it or a point is missing. Pure."""
+    if not before or not after or before[1] <= 0.0 or after[1] > 0.0:
+        return None
+    t = before[1] / (before[1] - after[1])
+    return before[0] + t * (after[0] - before[0])
+
+
+def path_note(before: tuple | None, after: tuple | None) -> str:
+    """Where V went in the attempt, for the night log and the failure text: the crossing of the vehicle axis or the end place."""
+    if not before or not after:
+        return ''
+    x = crossing_lon(before, after)
+    if x is not None:
+        return f'V crossed the vehicle axis at lon {x:+.2f} (stood at lon {before[0]:+.2f} lat {before[1]:.2f})'
+    return f'V did not cross the vehicle (lon {before[0]:+.2f} lat {before[1]:.2f} -> lon {after[0]:+.2f} lat {after[1]:.2f})'
 ATTEMPTS = 2              # per kind
-APPROACH_OK_M = 2.0       # the approach must end within this distance of the spot, else the attempt is not played
+APPROACH_OK_M = 2.0       # the approach must end within this distance of the spot, else the attempt is not played (the vault
+                          # then also needs STAND_TOL_M from a fresh position: prepare_vault)
 SETTLE_S = 1.2            # log flush and landing after the jump
 TIME_LIMIT_S = 420.0
 VAULT_LOG_ON = ("local ok,e=pcall(function() return Game.UTPPSetVehicleVaultLog(true) end) "
@@ -165,6 +221,85 @@ def _stamp(t: datetime) -> str:
     return t.strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
 
 
+def stand_and_aim(pos: dict | None, vehicle: dict | None, spot: tuple, aim: tuple) -> dict:
+    """Where V stands and how far the camera is off the aim point, from one position record: {'stand': (lon, lat) | None,
+    'offset_m': distance of the stand from `spot` | None, 'bearing_deg': signed angle of the car-frame `aim` point from the camera
+    forward | None}. `vehicle` = the record that carries the vehicle when `pos` lacks it. Pure."""
+    veh = pos if pos and pos.get('v') and pos.get('vr') else vehicle
+    stand = car_frame_point(pos, veh) if pos else None
+    if not stand:
+        return {'stand': None, 'offset_m': None, 'bearing_deg': None}
+    import gt_night as gn  # late: gt_night imports this module
+    target = gn.from_car_frame(aim[0], aim[1], veh['v'][:2], veh['vr'])
+    bearing = gn.bearing_deg(pos['p'][:2], pos['cf'], target) if pos.get('cf') else None
+    return {'stand': stand, 'offset_m': math.hypot(stand[0] - spot[0], stand[1] - spot[1]), 'bearing_deg': bearing}
+
+
+def _prep_fields(prep: dict) -> dict:
+    """The attempt record fields of a prepare_vault result."""
+    rnd = lambda v, n: None if v is None else round(v, n)  # noqa: E731
+    return {'stand': [round(c, 2) for c in prep['stand']] if prep.get('stand') else None,
+            'stand_offset_m': rnd(prep.get('offset_m'), 2), 'aim_bearing_deg': rnd(prep.get('bearing_deg'), 1),
+            'reapproached': prep.get('reapproached', False), 'realigned': prep.get('realigned', False)}
+
+
+def prepare_vault(night, pad, guard, plan, pos: dict, ep: dict, spec: dict) -> dict:
+    """Approach to the vault spot with the tight stop radius, the fine camera alignment to the aim point, then a fresh position:
+    the jump may only follow when V stands within STAND_TOL_M of the spot (one re-approach) and the camera is within
+    AIM_TOL_DEG (one re-alignment). -> {'ok', 'why' (when not ok), 'dist' (the approach's own end distance), 'pos' (the fresh
+    position, with the vehicle), 'stand', 'offset_m', 'bearing_deg', 'reapproached', 'realigned'}."""
+    import gt_night as gn  # late: gt_night imports this module
+    out = {'ok': False, 'why': '', 'dist': None, 'pos': None, 'stand': None, 'offset_m': None, 'bearing_deg': None,
+           'reapproached': False, 'realigned': False}
+    for leg in (1, 2):
+        night.door_spot_override, night.door_radius_override = spec['spot'], STAND_RADIUS_M
+        try:
+            out['dist'] = night.approach(pad, guard, plan, pos, ep)
+        finally:
+            night.door_spot_override = night.door_radius_override = None
+        known = getattr(night, 'last_known', None) or pos
+        if out['dist'] > APPROACH_OK_M:
+            out['why'] = f'V could not stand at the car (approach ended {out["dist"]:.1f} m away)'
+            return out
+        if not (known and known.get('v') and known.get('vr')):
+            out['why'] = 'no vehicle in the position after the approach'
+            return out
+        for align in (1, 2):
+            target = gn.from_car_frame(spec['aim'][0], spec['aim'][1], known['v'][:2], known['vr'])
+            known = night.camera_align(pad, guard, plan, known, target, ep, tol=AIM_TOL_DEG, why='trav-aim', fine=True,
+                                       pulses=AIM_PULSES) or known
+            fresh = night.poll_pos(guard, pad, newer_than=datetime.now())   # a POS line written after the last pulse
+            chk = stand_and_aim(fresh, known, spec['spot'], spec['aim'])
+            if fresh and not fresh.get('v') and known.get('v'):
+                fresh = dict(fresh, v=known['v'], vr=known['vr'])
+            out.update(chk, pos=fresh)
+            if chk['stand'] is None or chk['offset_m'] > STAND_TOL_M or chk['bearing_deg'] is None:
+                break                           # the stand decides first: a re-approach also re-aims
+            if abs(chk['bearing_deg']) <= AIM_TOL_DEG:
+                out['ok'] = True
+                return out
+            if align == 1:
+                out['realigned'] = True
+                night.log(f'[traversal] vault: camera {chk["bearing_deg"]:+.1f} deg off the aim after the alignment '
+                          f'(tol {AIM_TOL_DEG:.0f}): aligning once more')
+                known = fresh
+        if chk['stand'] is not None and chk['offset_m'] <= STAND_TOL_M:
+            out['why'] = (f'aim not reached: the camera stayed {chk["bearing_deg"]:+.1f} deg off the aim point after two '
+                          f'alignments (tol {AIM_TOL_DEG:.0f} deg); no jump') if chk['bearing_deg'] is not None else \
+                'no camera forward in the position after the alignment; no jump'
+            return out
+        where = ('no position after the alignment' if chk['stand'] is None else
+                 f'V stood {chk["offset_m"]:.2f} m from the spot (lon {chk["stand"][0]:+.2f} lat {chk["stand"][1]:.2f}, '
+                 f'tol {STAND_TOL_M:.1f} m)')
+        if leg == 1:
+            out['reapproached'] = True
+            night.log(f'[traversal] vault: {where}: approaching once more')
+            pos = fresh if fresh and fresh.get('v') else known
+            continue
+        out['why'] = f'{where} after a second approach; no jump'
+    return out
+
+
 def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dict:
     """Vault and climb at the car, ATTEMPTS tries each. `out` (the scenario record) is filled while it runs; returns `out` with
     'verdict' PASS | FAIL | INVALID (a kind that only failed because the game reports the vault as not valid; not scored, the text
@@ -196,16 +331,37 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
             done = False
             for attempt in range(1, ATTEMPTS + 1):
                 night.check_continue()
-                night.door_spot_override = spec['spot']
-                try:
-                    dist = night.approach(pad, guard, plan, pos, ep)
-                finally:
-                    night.door_spot_override = None
-                if dist > APPROACH_OK_M:
-                    out['attempts'].append({'kind': kind, 'attempt': attempt, 'played': False, 'approach_dist_m': round(dist, 2)})
-                    night.log(f'[traversal] {kind} #{attempt}: V ended {dist:.1f} m from the spot: attempt not played')
-                    pos = night.poll_pos(guard, pad) or pos
-                    continue
+                prep = None
+                if spec.get('aim'):
+                    # the vault: tight stand, fine aim, checked on a fresh position; no jump when either is not reached
+                    prep = prepare_vault(night, pad, guard, plan, pos, ep, spec)
+                    dist = prep['dist'] if prep['dist'] is not None else float('inf')
+                    aim_note = (f'stand lon {prep["stand"][0]:+.2f} lat {prep["stand"][1]:.2f}, {prep["offset_m"]:.2f} m from the '
+                                f'spot' if prep['stand'] else 'stand unknown') + \
+                        (f', camera {prep["bearing_deg"]:+.1f} deg off the aim' if prep['bearing_deg'] is not None else '')
+                    if not prep['ok']:
+                        out['attempts'].append({'kind': kind, 'attempt': attempt, 'played': False,
+                                                'approach_dist_m': round(dist, 2) if prep['dist'] is not None else None,
+                                                'why': prep['why'], **_prep_fields(prep)})
+                        night.log(f'[traversal] {kind} #{attempt}: attempt not played: {prep["why"]} [{aim_note}]')
+                        pos = night.poll_pos(guard, pad) or pos
+                        continue
+                    night.log(f'[traversal] {kind} #{attempt}: ready to jump [{aim_note}]')
+                    known = prep['pos']
+                else:
+                    night.door_spot_override = spec['spot']
+                    try:
+                        dist = night.approach(pad, guard, plan, pos, ep)
+                    finally:
+                        night.door_spot_override = None
+                    if dist > APPROACH_OK_M:
+                        out['attempts'].append({'kind': kind, 'attempt': attempt, 'played': False, 'approach_dist_m': round(dist, 2),
+                                                'why': f'V could not stand at the car (approach ended {dist:.1f} m away)'})
+                        night.log(f'[traversal] {kind} #{attempt}: V ended {dist:.1f} m from the spot: attempt not played')
+                        pos = night.poll_pos(guard, pad) or pos
+                        continue
+                    known = getattr(night, 'last_known', None) or pos
+                before = car_frame_point(known)
                 off, t0 = file_size(night.utpp_log), datetime.now()
                 night.play(pad, guard, spec['part'], plan)
                 guard.wait(SETTLE_S)
@@ -213,12 +369,22 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
                 ev = evidence(read_since(night.utpp_log, off))
                 feed = feed_detailed(newest_feed(getattr(getattr(night, 'args', None), 'log_dir', None)), (t1 - t0).total_seconds())
                 res = judge(kind, ev, feed)
+                new = night.poll_pos(guard, pad)
+                after = car_frame_point(new, known if known and known.get('v') else new)
+                note = path_note(before, after)
+                why = res['why'] + (f'; {note}' if note and not res['ok'] else '')
                 out['phase_windows'].append({'label': f'{spec["label"]}_{attempt}', 'start': _stamp(t0), 'end': _stamp(t1)})
                 out['attempts'].append({'kind': kind, 'attempt': attempt, 'played': True, 'approach_dist_m': round(dist, 2),
-                                        'ok': res['ok'], 'by': res['by'], 'why': res['why'], 'invalid': res['invalid'], 'evidence': ev,
-                                        'feed_detailed': sorted(feed) if feed is not None else None})
-                night.log(f'[traversal] {kind} #{attempt}: ' + ('OK by ' + ', '.join(res['by']) if res['ok'] else 'NOT done: ' + res['why']))
-                pos = night.poll_pos(guard, pad) or pos
+                                        'ok': res['ok'], 'by': res['by'], 'why': why, 'invalid': res['invalid'], 'evidence': ev,
+                                        'feed_detailed': sorted(feed) if feed is not None else None,
+                                        'stand': [round(c, 2) for c in before] if before else None,
+                                        'end': [round(c, 2) for c in after] if after else None,
+                                        'crossing_lon': (round(crossing_lon(before, after), 2)
+                                                         if crossing_lon(before, after) is not None else None),
+                                        **(_prep_fields(prep) if prep else {})})
+                night.log(f'[traversal] {kind} #{attempt}: ' + ('OK by ' + ', '.join(res['by']) if res['ok'] else 'NOT done: ' + why)
+                          + (f' [{note}]' if note and res['ok'] else ''))
+                pos = new or pos
                 if res['ok']:
                     done = True
                     break
@@ -226,7 +392,7 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
             if not done:
                 last = [a for a in out['attempts'] if a['kind'] == kind]
                 played = [a for a in last if a.get('played')]
-                text = f'{kind}: ' + (played[-1]['why'] if played else
+                text = f'{kind}: ' + (played[-1]['why'] if played else last[-1].get('why') or
                                       f'V could not stand at the car (approach ended {last[-1]["approach_dist_m"]} m away)')
                 if played and all(a.get('invalid') for a in played):
                     # every played attempt met the game's "no vault data" answer: not scored
@@ -257,7 +423,12 @@ def dry_run_lines(scenarios: dict | None = None) -> list[str]:
         sc = scenarios.get(spec['part']) if scenarios else None
         dur = f', {sc.duration:.1f} s of pad input' if sc is not None else ''
         lines.append(f'   {kind:6}  : approach to car-frame lon {spec["spot"][0]:+.1f} lat {spec["spot"][1]:.1f} (side of the driver), '
-                     f'pad part {spec["part"]}{dur}; up to {ATTEMPTS} attempts; ok when the log shows a `UTPP trav: action={spec["action"]} '
+                     + (f'stop radius {STAND_RADIUS_M:.2f} m (last metre walked), camera to car-frame lon {spec["aim"][0]:+.2f} '
+                        f'lat {spec["aim"][1]:.2f} (fine pulses, tol {AIM_TOL_DEG:.0f} deg); jump only when a fresh position '
+                        f'is within {STAND_TOL_M:.1f} m of the spot and {AIM_TOL_DEG:.0f} deg of the aim (one re-approach, one '
+                        f're-alignment, else not played), '
+                        if spec.get('aim') else '')
+                     + f'pad part {spec["part"]}{dur}; up to {ATTEMPTS} attempts; ok when the log shows a `UTPP trav: action={spec["action"]} '
                      f'... result=Ok` line, a release to the game animation with detail={spec["action"]}, '
                      + ('the vehicle vault line, ' if kind == 'vault' else '')
                      + f'or the feed column detailed = {spec["action"]}; pose window {spec["label"]}_<attempt>')

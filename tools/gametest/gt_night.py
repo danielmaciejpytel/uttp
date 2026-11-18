@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 
 LOCO_SET = ['slow_walk_half_stick', 'run_arc_left', 'run_arc_right', 'slalom_stick', 'flick_180_walk',
             'flick_180_run', 'flick_180_sprint', 'camera_whip_180', 'crouch_walk_turns', 'sprint_start_stop',
-            'idle_then_start_sideways']
+            'idle_then_start_sideways', 'walk_toggle']   # walk_toggle taps keyboard G (skipped with --background)
 VEHICLE_PARTS = ['veh_call', 'veh_enter', 'veh_drive', 'veh_exit']
 WEAPON_PARTS = ['weapon_draw', 'weapon_aim', 'weapon_holster', 'weapon_walk']
 # draw, aimed single shots, reload, holster: the weapon macro that fires (night.py weapon_macro(fire=True))
@@ -1225,6 +1225,18 @@ def stance_of(line) -> str | None:
 
 def stance_seen(lines: list, want: str) -> bool:
     return any(stance_of(l) == want for l in lines)
+
+
+# the walk toggle (keyboard G): the plugin writes one line per change while a toggle session lasts (UTPPLogWalkState)
+WALK_STATE_RE = re.compile(r'\[utpp_walk\] walkToggled=([01])\b')
+
+
+def walk_toggled(text: str) -> bool | None:
+    """The walk toggle state of the newest '[utpp_walk] walkToggled=' line of `text`; None = no such line. Pure."""
+    m = None
+    for m in WALK_STATE_RE.finditer(text or ''):
+        pass
+    return None if m is None else m.group(1) == '1'
 
 
 # the dodge direction / travel limits have their own wording (thresholds.json 'text'); a missing push line is test mechanics

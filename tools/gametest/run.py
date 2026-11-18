@@ -292,7 +292,9 @@ def print_table(rows: list, summary: dict) -> None:
             ('dodge_travel_m', 'dodge_travel_m'), ('dodge_clip', 'dodge_clip')]
     # dSrv / dErr / dTrv / dClip: dodge steps only - served heading vs the pressed direction (deg), travel vs want (deg), travel (m),
     # the dodge clip that played ('none' = no dodge clip, information); 'n/a' = the log has no dodge push line (older build)
-    short = ['drv', 'tr/s', 'cmax', 'sat_s', 'flcm', 'rmin', 'crch', 'btC', 'camYaw', 'n', 'nMotion', 'dSrv', 'dErr', 'dTrv', 'dClip']
+    # ikcm = footlock_corr_max_cm: the largest foot IK correction (cm), not a foot slide (the world-space slide is in the
+    # footslide tools)
+    short = ['drv', 'tr/s', 'cmax', 'sat_s', 'ikcm', 'rmin', 'crch', 'btC', 'camYaw', 'n', 'nMotion', 'dSrv', 'dErr', 'dTrv', 'dClip']
     pre = summary.get('mm_precondition') or {}
     if pre.get('ok') is False:
         print(f'[gametest] PRECONDITION FAILED: {pre.get("reason")}' +
