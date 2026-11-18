@@ -28,6 +28,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -288,6 +289,12 @@ struct MatcherConfig
     float blendAirOther = 0.5f;
     float airRisingThresholdCmS = 100.0f;
     bool useAabb = true;
+    // Each database search starts from the best cost found so far (continuing pose and earlier databases, original order) so the box
+    // bound skips more of the rows that cannot win; the selection is the same as an unbounded search. false = every search starts unbounded.
+    bool boundedSearch = true;
+    // A gait change interrupts the playing database only while the state is Moving (an idle or a stop keeps playing through a gait
+    // edge). false = every gait change interrupts on the ground.
+    bool gaitInterruptMovingOnly = true;
     // motionfix item 5 (standing jump): after the apex (Vz <= 0) of an InAir update with Speed2D < airFallMaxSpeedCmS,
     // the rows of the motion fall clip (kAirFallClipNames, PSD_Dense_Jumps entry 16) get this cost addend (< 0 favours them;
     // 0 = off, the default). Same mechanism as the baked per-row cost addends (looping_cost_bias -0.005 of
@@ -654,6 +661,12 @@ struct MatchResult
     uint64_t dbMask = 0; // chooser databases (DBAS bits)
     uint32_t numDatabases = 0;
     uint32_t rowsEvaluated = 0;
+    // stage times of this update (microseconds, steady clock): continuing candidates, query building inside the database search,
+    // the database search itself (without its queries), selection to the end of the update
+    float stageContUs = 0.0f;
+    float stageQueryUs = 0.0f;
+    float stageSearchUs = 0.0f;
+    float stageSelectUs = 0.0f;
     bool airFallBias = false; // motionfix item 5: the fall bias was applied on this update
     bool cancelledStartSupportAllowed = false;
 };
@@ -1055,7 +1068,8 @@ public:
         if (s.movementMode != aLast.movementMode)
             return Interrupt::InterruptOnDatabaseChange;
         if (s.movementMode == 0 &&
-            (s.movementState != aLast.movementState || s.gait != aLast.gait || s.stance != aLast.stance))
+            (s.movementState != aLast.movementState || s.stance != aLast.stance ||
+             (s.gait != aLast.gait && (!m_cfg.gaitInterruptMovingOnly || s.movementState == 1))))
             return Interrupt::InterruptOnDatabaseChange;
         return Interrupt::DoNotInterrupt;
     }
@@ -1550,6 +1564,7 @@ public:
         // fix/jumpout-cam: the Start / Off clip on display does not continue past the apex of a jump-out flight (database with a fall clip only)
         const bool contJumpOutOut = m_jumpOutFall && m_cur.clip >= 0 && m_cur.db >= 0 && m_clipJumpKind[static_cast<uint32_t>(m_cur.clip)] != 0 &&
                                     (m_dbHasFall[static_cast<uint32_t>(m_cur.db)] || m_jumpOutFallMask);
+        const auto tCont = std::chrono::steady_clock::now();
         float bestCost = std::numeric_limits<float>::max();
         int32_t bestDb = -1, bestRow = -1;
         uint32_t bestEntry = 0;
@@ -1729,14 +1744,20 @@ public:
         // a start from rest arms the rule while its start clip plays; it then stays on until the facing has caught up or the window ends
         m_headingRestArmed = m_headingCatchUp && aState.headingStepFromRest;
         // ---- search every chooser database
+        const auto tSearch = std::chrono::steady_clock::now();
+        res.stageContUs = std::chrono::duration<float, std::micro>(tSearch - tCont).count();
+        std::chrono::steady_clock::duration queryTime{};
         for (uint32_t i = 0; i < numDb && !continueShotTurn && !continueAimTurn && !continueStartTurn && !continueSlideExit && !continueRise &&
                                   !continueExitClip && !continueStopClip && !continueDodge && !continueTurn; ++i)
         {
             const uint32_t d = dbList[i];
+            const auto tq0 = std::chrono::steady_clock::now();
             BuildQuery(d, true, allowLastPose);
+            queryTime += std::chrono::steady_clock::now() - tq0;
             const uint32_t marked = MarkExcluded(d, startTurnDirection);
-            MotionSearchResult r = m_cfg.useAabb ? db.SearchAabb(d, m_query.data(), m_excluded.data())
-                                             : db.SearchLinear(d, m_query.data(), m_excluded.data());
+            const float bound = m_cfg.boundedSearch ? bestCost : std::numeric_limits<float>::max();
+            MotionSearchResult r = m_cfg.useAabb ? db.SearchAabb(d, m_query.data(), m_excluded.data(), bound)
+                                             : db.SearchLinear(d, m_query.data(), m_excluded.data(), bound);
             if (fallBias) // exact: the biased rows (bias < 0) are re-evaluated with their addend, the rest keeps the bound search
                 FallBiasSearch(d, r);
             ClearExcluded(d, marked);
@@ -1750,6 +1771,9 @@ public:
             }
         }
         res.searched = true;
+        const auto tSelect = std::chrono::steady_clock::now();
+        res.stageQueryUs = std::chrono::duration<float, std::micro>(queryTime).count();
+        res.stageSearchUs = std::chrono::duration<float, std::micro>(tSelect - tSearch - queryTime).count();
 
         // ---- select
         if (bestDb >= 0)
@@ -1972,6 +1996,7 @@ public:
         }
         m_lastState = aState;
         m_haveLastState = true;
+        res.stageSelectUs = std::chrono::duration<float, std::micro>(std::chrono::steady_clock::now() - tSelect).count();
         m_last = res;
         return m_last;
     }

@@ -1087,7 +1087,7 @@ void ContinuingRules(ChooserMatcher& mm, const MotionDatabase& db)
                                         last.isStarting = (n & 2u) != 0;
                                         last.databaseLod = static_cast<int>(n % 2);
                                         cur.justLandedLight = (n & 4u) != 0;
-                                        const bool want = mo0 != mo1 || ((st0 != st1 || g0 != g1 || sn0 != sn1) && mo0 == 0);
+                                        const bool want = mo0 != mo1 || ((st0 != st1 || (g0 != g1 && st0 == 1) || sn0 != sn1) && mo0 == 0); // gait edges only while Moving (MatcherConfig::gaitInterruptMovingOnly)
                                         const Interrupt e = want ? Interrupt::InterruptOnDatabaseChange : Interrupt::DoNotInterrupt;
                                         const Interrupt got = mm.InterruptFor(cur, last);
                                         if (got != e)

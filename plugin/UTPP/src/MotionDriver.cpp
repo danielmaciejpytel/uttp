@@ -3650,6 +3650,11 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
 // last kWindow decision times exceeds kTripFactor x kFeedP95Us the motion pose pauses (Resolve -> Budget, the held pose hands
 // over to the base path) for g_budgetPauseS of feed time; then the statistics restart empty and the next Step re-enters with the
 // hand-in from the published pose. One log line per trip and per resume.
+std::array<float, adapter::Budget::kWindow> g_stageContUs{};   // matcher stage times per feed (log on a trip only)
+std::array<float, adapter::Budget::kWindow> g_stageQueryUs{};
+std::array<float, adapter::Budget::kWindow> g_stageSearchUs{};
+std::array<float, adapter::Budget::kWindow> g_stageSelectUs{};
+
 void BudgetLogLocked(const char* aLine)
 {
     if (g_log != nullptr)
@@ -3674,6 +3679,24 @@ void BudgetTripLocked(float aP95)
                   static_cast<double>(adapter::Budget::kTripFactor * adapter::Budget::kFeedP95Us), static_cast<double>(g_budgetPauseS),
                   static_cast<double>(g_budgetNextPauseS), g_cyclesPerUs.load(std::memory_order_relaxed) > 0.0f ? 1 : 0);
     BudgetLogLocked(g_budgetBuf);
+    // where the matcher spent the window (same slots as the trip statistic; a feed without a matcher update keeps the older value of its
+    // slot). Own line prefix: readers count the "budget" lines as one trip and one resume line per trip.
+    std::snprintf(g_budgetBuf, sizeof(g_budgetBuf),
+                  "UTPP mm.motionDriver matcherStages trip=%llu p95us cont=%.1f query=%.1f search=%.1f select=%.1f",
+                  static_cast<unsigned long long>(g_budgetTrips), static_cast<double>(P95Of(g_stageContUs)),
+                  static_cast<double>(P95Of(g_stageQueryUs)), static_cast<double>(P95Of(g_stageSearchUs)),
+                  static_cast<double>(P95Of(g_stageSelectUs)));
+    BudgetLogLocked(g_budgetBuf);
+}
+
+// Per-stage matcher times of the feed being recorded (slot of the next BudgetRecordLocked; called once per matcher update).
+void BudgetStageRecordLocked(const motion::MatchResult& aR)
+{
+    const size_t i = static_cast<size_t>(g_timeCount % g_stageContUs.size());
+    g_stageContUs[i] = aR.stageContUs;
+    g_stageQueryUs[i] = aR.stageQueryUs;
+    g_stageSearchUs[i] = aR.stageSearchUs;
+    g_stageSelectUs[i] = aR.stageSelectUs;
 }
 
 // Game thread, every enabled Step before the path is resolved: a pause counts down on feed time (dt clamped like the other feed
@@ -5265,6 +5288,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         }
     }
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, exitHistory); // UTPP-MOTION SEAM trav: copy (handback blend)
+    BudgetStageRecordLocked(r);
     b.startTurn.Selected(r.clip, b.matcher.StartTurnDirection(r.clip));
     g_travProbe.justTraversed = travHandback; // UTPP-MOTION SEAM trav
     if (travHandback) // UTPP-MOTION SEAM trav
