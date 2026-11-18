@@ -11,7 +11,7 @@ local function fresh()
 end
 local function mock()
   local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
+    stride = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -81,10 +81,15 @@ local function mock()
       if t.trimError then error("pelvis trim native failure") end
       return not t.trimReject
     end,
-    setBodyYawOffset = function(deg)
-      t.bodyOffset[#t.bodyOffset + 1] = deg
+    setBodyYawOffsets = function(female, male)
+      t.bodyOffset[#t.bodyOffset + 1] = { female, male }
       if t.bodyOffsetError then error("body yaw offset native failure") end
       return not t.bodyOffsetReject
+    end,
+    setStrideWarp = function(on)
+      t.stride[#t.stride + 1] = on
+      if t.strideError then error("stride warp native failure") end
+      return not t.strideReject
     end,
     setWalkSpeed = function(ms)
       t.walk[#t.walk + 1] = ms
@@ -214,11 +219,21 @@ do
     ss ~= nil and ss.type == "choice" and ss.default == "analog" and type(ss.choices) == "table" and #ss.choices == 2
     and ss.choices[1][1] == "fixed" and ss.choices[2][1] == "analog" and ss.section == "animation" and #ss.label <= 38
     and type(ss.desc) == "string", ss and ss.label)
-  local bo = defs["mm.bodyYawOffset"]
-  check("registered mm.bodyYawOffset: float -20..20 step 0.5, default 4, animation section, label 'Body yaw offset (deg)'",
+  local bo = defs["mm.bodyYawOffsetFemale"]
+  check("registered mm.bodyYawOffsetFemale: float -20..20 step 0.5, default 4, animation section, label 'Body yaw offset (female V, deg)'",
     bo ~= nil and bo.type == "float" and bo.default == 4 and bo.min == -20 and bo.max == 20 and bo.step == 0.5
-    and bo.section == "animation" and bo.label == "Body yaw offset (deg)" and type(bo.desc) == "string"
+    and bo.section == "animation" and bo.label == "Body yaw offset (female V, deg)" and type(bo.desc) == "string"
     and bo.desc:find("movement direction is unchanged", 1, true) ~= nil and bo.desc:find("Not while aiming", 1, true) ~= nil)
+  local bm = defs["mm.bodyYawOffsetMale"]
+  check("registered mm.bodyYawOffsetMale: float -20..20 step 0.5, default 0, animation section, label 'Body yaw offset (male V, deg)'",
+    bm ~= nil and bm.type == "float" and bm.default == 0 and bm.min == -20 and bm.max == 20 and bm.step == 0.5
+    and bm.section == "animation" and bm.label == "Body yaw offset (male V, deg)" and type(bm.desc) == "string"
+    and bm.desc:find("movement direction is unchanged", 1, true) ~= nil and bm.desc:find("Not while aiming", 1, true) ~= nil)
+  check("the single-value key mm.bodyYawOffset is no longer registered", defs["mm.bodyYawOffset"] == nil)
+  local sw = defs["mm.strideWarp"]
+  check("registered mm.strideWarp: bool, on by default, animation section, label 'Stride matching'",
+    sw ~= nil and sw.type == "bool" and sw.default == true and sw.section == "animation" and sw.label == "Stride matching"
+    and type(sw.desc) == "string" and sw.desc:find("slide less", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
@@ -553,35 +568,63 @@ do
 end
 end
 
--- mm.bodyYawOffset (2026-10-30): DLL default 0 -> no native call until the value differs; clamped to -20..20, NaN -> 0
+-- mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale (2026-10-30, one value per body since 2026-11-18): DLL default 0 / 0 -> no native call
+-- until a value differs; both values go in one call; clamped to -20..20, NaN -> 0
+local function pair(p, f, m) return p ~= nil and p[1] == f and p[2] == m end
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("bodyYawOffset default 0: enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.bodyOffset == 0)
-  check("bodyYawOffset default 0: steady sync makes no call", v.Sync(t.api) == "same" and #t.bodyOffset == 0)
-  v.SetBodyYawOffset(8, t.api)
-  check("bodyYawOffset 8 is sent once", #t.bodyOffset == 1 and t.bodyOffset[1] == 8 and v.rt.bodyYawOffsetApplied == 8)
+  check("bodyYawOffset default 0 / 0: enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.bodyOffset == 0)
+  check("bodyYawOffset default 0 / 0: steady sync makes no call", v.Sync(t.api) == "same" and #t.bodyOffset == 0)
+  v.SetBodyYawOffsetFemale(8, t.api)
+  check("female bodyYawOffset 8 is sent once with the male value", #t.bodyOffset == 1 and pair(t.bodyOffset[1], 8, 0)
+    and pair(v.rt.bodyYawOffsetApplied, 8, 0))
   check("steady bodyYawOffset is not resent", v.Sync(t.api) == "same" and #t.bodyOffset == 1)
-  v.SetBodyYawOffset(35, t.api)
-  check("bodyYawOffset clamped to 20", #t.bodyOffset == 2 and t.bodyOffset[2] == 20)
-  v.SetBodyYawOffset(-35, t.api)
-  check("bodyYawOffset clamped to -20", #t.bodyOffset == 3 and t.bodyOffset[3] == -20)
-  v.SetBodyYawOffset(0 / 0, t.api)
-  check("bodyYawOffset NaN -> 0 (back to the DLL default, sent)", #t.bodyOffset == 4 and t.bodyOffset[4] == 0 and v.want.bodyYawOffset == 0)
+  v.SetBodyYawOffsetMale(-2.5, t.api)
+  check("male bodyYawOffset is sent with the female value", #t.bodyOffset == 2 and pair(t.bodyOffset[2], 8, -2.5))
+  v.SetBodyYawOffsetFemale(35, t.api)
+  check("bodyYawOffset clamped to 20", #t.bodyOffset == 3 and pair(t.bodyOffset[3], 20, -2.5))
+  v.SetBodyYawOffsetMale(-35, t.api)
+  check("bodyYawOffset clamped to -20", #t.bodyOffset == 4 and pair(t.bodyOffset[4], 20, -20))
+  v.SetBodyYawOffsetFemale(0 / 0, t.api)
+  check("bodyYawOffset NaN -> 0 (back to the DLL default, sent)", #t.bodyOffset == 5 and pair(t.bodyOffset[5], 0, -20)
+    and v.want.bodyYawOffsetFemale == 0)
+  v.SetBodyYawOffset(0, t.api)
+  check("console SetBodyYawOffset sets both bodies", #t.bodyOffset == 6 and pair(t.bodyOffset[6], 0, 0)
+    and v.want.bodyYawOffsetMale == 0)
   t.bodyOffsetReject = true
-  v.SetBodyYawOffset(-3, t.api)
-  check("rejected bodyYawOffset is never acknowledged", v.rt.bodyYawOffsetApplied == 0 and #t.bodyOffset == 5)
+  v.SetBodyYawOffsetFemale(-3, t.api)
+  check("rejected bodyYawOffset is never acknowledged", pair(v.rt.bodyYawOffsetApplied, 0, 0) and #t.bodyOffset == 7)
   t.bodyOffsetReject = false
   v.Sync(t.api)
-  check("rejected bodyYawOffset retries", v.rt.bodyYawOffsetApplied == -3 and #t.bodyOffset == 6 and t.bodyOffset[6] == -3)
+  check("rejected bodyYawOffset retries", pair(v.rt.bodyYawOffsetApplied, -3, 0) and #t.bodyOffset == 8 and pair(t.bodyOffset[8], -3, 0))
   check("bodyYawOffset never touches the pelvis trim native", #t.trim == 0)
 end
 do
   local v, t = fresh(), mock()
-  v.SetBodyYawOffset(6.5, t.api)
-  check("bodyYawOffset while motion is off makes no native call", #t.bodyOffset == 0 and v.want.bodyYawOffset == 6.5)
+  v.SetBodyYawOffsetFemale(6.5, t.api)
+  check("bodyYawOffset while motion is off makes no native call", #t.bodyOffset == 0 and v.want.bodyYawOffsetFemale == 6.5)
   v.SetEnabled(true)
-  check("bodyYawOffset is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.bodyOffset == 1 and t.bodyOffset[1] == 6.5)
+  check("bodyYawOffset is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.bodyOffset == 1 and pair(t.bodyOffset[1], 6.5, 0))
+end
+
+-- mm.strideWarp (one of M.OPTIONS; DLL default off): the value goes to the DLL before the glue is enabled, then only on a change
+do
+  local v, t = fresh(), mock()
+  v.SetOption("strideWarp", true, t.api)
+  check("strideWarp while motion is off makes no native call", #t.stride == 0 and v.want.strideWarp == true)
+  v.SetEnabled(true)
+  check("strideWarp is sent when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.stride == 1 and t.stride[1] == true and #t.calls == 1 and v.rt.optionsApplied.strideWarp == true)
+  check("steady strideWarp is not resent", v.Sync(t.api) == "same" and #t.stride == 1)
+  v.SetOption("strideWarp", false, t.api)
+  check("strideWarp switched off is sent once", #t.stride == 2 and t.stride[2] == false and v.rt.optionsApplied.strideWarp == false)
+  t.strideReject = true
+  v.SetOption("strideWarp", true, t.api)
+  check("rejected strideWarp is never acknowledged", #t.stride == 3 and v.rt.optionsApplied.strideWarp == false)
+  t.strideReject = false
+  v.Sync(t.api)
+  check("rejected strideWarp retries", #t.stride == 4 and t.stride[4] == true and v.rt.optionsApplied.strideWarp == true)
 end
 
 -- mm.aimAtCrosshair (aim pitch plan 2026-10-30): DLL loop (default off) + utpp_camera crosshair point, P only with an ACKNOWLEDGED loop

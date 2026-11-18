@@ -264,10 +264,11 @@ owarp::PelvisTrim g_pt;
 owarp::Skeleton g_ptSk;
 const void* g_ptSkBundle = nullptr;
 const char* g_ptWhy = "off"; // trace pt=<deg>/<weight>/<reason>: first gate that holds the weight down, else the motion reason
-// Body yaw offset (CET mm.bodyYawOffset -> SetBodyYawOffset, deg, default 0 = nothing): mm/OrientWarp.hpp BodyYawOffset. Step per
-// v2 feed (gates, feed dt), applied in FrameLocked as an addition to the visual root yaw of the leg-tail frame only (the whole pose
-// turns as one rigid unit; no pose edit). 0: no code path touches the frame, the root yaw is bit-identical.
-float g_bodyOffsetDeg = 0.0f;
+// Body yaw offset (CET mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale -> SetBodyYawOffsets, deg, default 0 = nothing): mm/OrientWarp.hpp
+// BodyYawOffset. One value per body (BodyIndex of the installed bundle: 0 = female V, 1 = male V), the one of the bundle's body is used
+// (BodyOffsetDegLocked). Step per v2 feed (gates, feed dt), applied in FrameLocked as an addition to the visual root yaw of the leg-tail
+// frame only (the whole pose turns as one rigid unit; no pose edit). 0: no code path touches the frame, the root yaw is bit-identical.
+float g_bodyOffsetDeg[2] = {0.0f, 0.0f};
 owarp::BodyOffsetParams g_boParams;
 owarp::BodyYawOffset g_bo;
 const char* g_boWhy = "off"; // trace bo=<deg>/<weight>/<reason>: first gate that holds the weight down, else "ok"
@@ -335,6 +336,7 @@ float g_neutralAoPrevYawDeg = 0.0f;
 bool g_neutralAoPrevValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
+int32_t g_strideWarpReq = -1;    // SetStrideWarp: -1 = the build default of the blend stack, else 0 / 1
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
@@ -1195,6 +1197,8 @@ void TravResetLocked(bool aDropPending)
 
 const char* BodyName(Body b) { return b == Body::Woman ? "woman" : (b == Body::Man ? "man" : "unknown"); }
 int BodyIndex(Body b) { return b == Body::Man ? 1 : 0; }
+// body yaw offset of the bundle's body (deg, SetBodyYawOffsets)
+float BodyOffsetDegLocked(const Bundle& aB) { return g_bodyOffsetDeg[BodyIndex(aB.body)]; }
 
 bool ReadText(const std::string& aPath, std::string& aOut)
 {
@@ -1724,6 +1728,8 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
                 g_bundle->eval.SetFeminineFigure(g_femFigureOn);
             if (g_bundle->evalOk && g_handBackBlendReq >= 0)
                 g_bundle->eval.SetHandBackBlend(g_handBackBlendReq != 0);
+            if (g_bundle->evalOk && g_strideWarpReq >= 0)
+                g_bundle->eval.SetStrideWarp(g_strideWarpReq != 0);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
@@ -2156,17 +2162,30 @@ std::string PelvisYawTrimReason()
 
 bool SetBodyYawOffset(float aDeg)
 {
-    if (!owarp::ValidBodyYawOffset(aDeg))
+    return SetBodyYawOffsets(aDeg, aDeg);
+}
+
+bool SetBodyYawOffsets(float aFemaleDeg, float aMaleDeg)
+{
+    if (!owarp::ValidBodyYawOffset(aFemaleDeg) || !owarp::ValidBodyYawOffset(aMaleDeg))
         return false;
     std::lock_guard lock(g_m);
-    g_bodyOffsetDeg = aDeg; // the CET slider moves in 0.5 deg steps; the weight fade covers on / off, a step is applied as set
+    // the CET slider moves in 0.5 deg steps; the weight fade covers on / off, a step is applied as set
+    g_bodyOffsetDeg[0] = aFemaleDeg;
+    g_bodyOffsetDeg[1] = aMaleDeg;
     return true;
 }
 
 float BodyYawOffset()
 {
     std::lock_guard lock(g_m);
-    return g_bodyOffsetDeg;
+    return g_bodyOffsetDeg[BodyIndex(g_bundle ? g_bundle->body : g_body)];
+}
+
+float BodyYawOffsetFor(bool aMale)
+{
+    std::lock_guard lock(g_m);
+    return g_bodyOffsetDeg[aMale ? 1 : 0];
 }
 
 float BodyYawOffsetWeight()
@@ -2272,6 +2291,23 @@ void SetHandBackBlend(bool aOn)
     g_handBackBlendReq = aOn ? 1 : 0;
     if (g_bundle && g_bundle->evalOk)
         g_bundle->eval.SetHandBackBlend(aOn);
+}
+
+bool SetStrideWarp(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_strideWarpReq = aOn ? 1 : 0;
+    if (g_bundle && g_bundle->evalOk)
+        g_bundle->eval.SetStrideWarp(aOn); // the blend stack fades a running warp in / out (MotionBlendStack.hpp SetStrideWarp)
+    return true;
+}
+
+bool StrideWarp()
+{
+    std::lock_guard lock(g_m);
+    if (g_bundle && g_bundle->evalOk)
+        return g_bundle->eval.StrideWarp();
+    return g_strideWarpReq >= 0 ? g_strideWarpReq != 0 : UTPP_STRIDE_WARP != 0;
 }
 
 void SetStepDownReach(bool aOn)
@@ -3822,8 +3858,8 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
     if (g_pelvisTrimDeg != 0.0f || g_pt.Weight() != 0.0f)
         std::snprintf(ptTxt, sizeof(ptTxt), " pt=%.1f/%.2f/%s", static_cast<double>(g_pelvisTrimDeg), static_cast<double>(g_pt.Weight()), g_ptWhy);
     char boTxt[48] = ""; // only with a body yaw offset set or still fading: the default trace line is unchanged
-    if (g_bodyOffsetDeg != 0.0f || g_bo.Weight() != 0.0f)
-        std::snprintf(boTxt, sizeof(boTxt), " bo=%.1f/%.2f/%s", static_cast<double>(g_bodyOffsetDeg), static_cast<double>(g_bo.Weight()), g_boWhy);
+    if (BodyOffsetDegLocked(b) != 0.0f || g_bo.Weight() != 0.0f)
+        std::snprintf(boTxt, sizeof(boTxt), " bo=%.1f/%.2f/%s", static_cast<double>(BodyOffsetDegLocked(b)), static_cast<double>(g_bo.Weight()), g_boWhy);
     char hipTxt[48] = ""; // P9: only on hipfire frames (the other trace lines are unchanged): the native first-burst fallback and its route
     if (g_hipFirePoseNow) // shotWait only while the Shoot state waits for its first shot event (the former line otherwise)
         std::snprintf(hipTxt, sizeof(hipTxt), " hipNative=%d route=%d%s", g_weaponUpperFrame ? 1 : 0, g_shootRouteNow ? 1 : 0,
@@ -4736,7 +4772,7 @@ void PelvisTrimStepLocked(const Bundle& aB, const adapter::MotionFeed& aF, float
 // root frame). Offset 0 and faded: nothing runs.
 void BodyOffsetStepLocked(const Bundle& aB, const adapter::MotionFeed& aF, bool aMelee, float aDt)
 {
-    if (g_bodyOffsetDeg == 0.0f && g_bo.Weight() == 0.0f)
+    if (BodyOffsetDegLocked(aB) == 0.0f && g_bo.Weight() == 0.0f)
     {
         g_boWhy = "off";
         return;
@@ -6108,9 +6144,9 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
             if (g_ow.TorsoDeg() != 0.0f || g_ow.RootDeg() != 0.0f)
                 g_ow.Apply(g_owParams, g_owSk, reinterpret_cast<float*>(aOut.buf), n); // spine twist + leg counter-rotation
         }
-        // body yaw offset (mm.bodyYawOffset): the whole pose turns as one rigid unit about the visual root, added on top of the
-        // warp / trim root yaw only (their leg hold / torso twist never see it; no pose edit). Offset 0 / weight 0: exactly 0, skipped.
-        const float body = g_bo.Deg(g_bodyOffsetDeg);
+        // body yaw offset (mm.bodyYawOffsetFemale / Male): the whole pose turns as one rigid unit about the visual root, added on top of
+        // the warp / trim root yaw only (their leg hold / torso twist never see it; no pose edit). Offset 0 / weight 0: exactly 0, skipped.
+        const float body = g_bo.Deg(BodyOffsetDegLocked(b));
         if (body != 0.0f)
             aOut.rootOffsetYaw += body * integ::kDegToRad;
     }

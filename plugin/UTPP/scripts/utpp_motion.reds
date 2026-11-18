@@ -107,6 +107,14 @@ public native func UTPPSetMotionLeanCoverage(coverage: Int32) -> Bool
 public native func UTPPSetMMAimWorldSmoothing(on: Bool, hz: Float) -> Bool
 // In a strafe / shooter facing without aiming the spine follows the camera through the aim offset (off by default).
 public native func UTPPSetMMNeutralAimOffset(on: Bool) -> Bool
+// Stride matching (DLL default off; CET setting mm.strideWarp): the steps of the walk / run / crouch loops on the ground are shortened
+// to the movement speed so the feet slide less; switching it fades in / out without a pose jump. Always true. Keep this declaration
+// and the DLL native (MotionDriverNatives.cpp) in sync: a declared native without registration breaks the scripts.
+public native func UTPPSetMMStrideWarp(on: Bool) -> Bool
+// Body yaw offset per body (motion poses; CET settings mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale, DLL default 0 / 0): the value of
+// the body in use turns the whole character by deg (+ = left, -20..20) about its visual root; the movement direction is unchanged; off
+// while aiming / during weapon actions. False = NaN / out of range (nothing changed). Keep in sync with MotionDriverNatives.cpp.
+public native func UTPPSetMotionBodyYawOffsets(female: Float, male: Float) -> Bool
 // the motion set-trav (MotionTraversal): obstacle of a game climb (action 8) / vault (action 9) start, sent once from the
 // ClimbEvents / VaultEvents OnEnter wraps below (only while motion is on). The DLL plans one motion set traversal montage from it
 // (MotionDriver.hpp FeedTraversal); false = rejected input (invalid action / non-finite value).

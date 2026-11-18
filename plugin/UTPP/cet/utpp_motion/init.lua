@@ -35,9 +35,16 @@
 --   mm.pelvisYawTrim float -10 .. 10, default 2 (against the ~5 deg right hip bias of the run clips; DLL default 0) - run pelvis yaw trim in degrees (+ = left): turns the
 --                  pelvis while V walks / runs / sprints forward (the forward loops carry it ~5 deg to the right; +5 squares it),
 --                  chest, head and feet keep their direction; not while aiming / weapon drawn (native UTPPSetMotionPelvisYawTrim).
---   mm.bodyYawOffset float -20 .. 20, default 4 (in-game look; DLL default 0) - body yaw offset in degrees (+ = left): turns the whole character
---                  (hips, torso, head, legs, feet) about its visual root against the over-the-shoulder camera parallax; the movement
---                  direction is unchanged; off while aiming / during weapon actions (native UTPPSetMotionBodyYawOffset).
+--   mm.bodyYawOffsetFemale float -20 .. 20, default 4, and mm.bodyYawOffsetMale float -20 .. 20, default 0 (in-game look; DLL default
+--                  0 / 0) - body yaw offset in degrees (+ = left) of female V / male V: turns the whole character (hips, torso, head,
+--                  legs, feet) about its visual root against the over-the-shoulder camera parallax; the DLL uses the value of the body
+--                  in play; the movement direction is unchanged; off while aiming / during weapon actions (native
+--                  UTPPSetMotionBodyYawOffsets(female, male), both values in one call). Replace mm.bodyYawOffset (one value for both
+--                  bodies): utpp_core moves a stored value to mm.bodyYawOffsetFemale on load; male V starts at 0.
+--   mm.strideWarp bool, default true ("Stride matching"; DLL default off, the value is sent with the other M.OPTIONS) - the steps of
+--                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
+--                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
+--                  without a pose jump (native UTPPSetMMStrideWarp).
 --   mm.aimAtCrosshair bool, default true (DLL default off; in game: muzzle slot +Y = weapon entity +Y, barrel vs shot
 --                  pitch error median 4.8 deg / p90 10.9 off -> 0.2-0.6 / p90 1.3 on, Kyubi + pistol) - "Weapon aims at crosshair point":
 --                  the DLL barrel
@@ -78,12 +85,13 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 -- wanted state (settings) and what the glue reported last
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = false, orientWarp = false,
   lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
-  feminineFigure = true, bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true,
-  aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard" }
+  feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true,
+  aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
+  strideWarp = false }
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
   leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
-  feminineFigureApplied = true, bodyYawOffsetApplied = 0, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, stickSpeedApplied = "analog", aimPointApplied = nil,
+  feminineFigureApplied = true, bodyYawOffsetApplied = { 0, 0 }, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, stickSpeedApplied = "analog", aimPointApplied = nil,
   pistolAutoApplied = nil, selectionGuardsApplied = true, optionsApplied = {}, errors = 0 }
 
 -- no file system paths in the log: a Lua error text names the script file with its full path (user name included); a path in
@@ -587,8 +595,9 @@ function M.SetShoulderWidth(v, api)
   return M.SetShoulderNarrow(M.ShoulderNarrowFromWidth(v), api)
 end
 
--- Body yaw offset: the same contract as the pelvis trim (DLL default 0, nothing called while the wanted value equals what the DLL
--- holds). nil / non-numeric / NaN -> 0; otherwise clamped to -20 .. 20 (the native rejects more).
+-- Body yaw offset, one value per body (female V, male V): the same contract as the pelvis trim (DLL default 0 / 0, nothing called
+-- while the wanted pair equals what the DLL holds; both values go in one call, the DLL uses the one of the body in play).
+-- nil / non-numeric / NaN -> 0; otherwise clamped to -20 .. 20 (the native rejects more).
 local function bodyOffsetDeg(v)
   local x = tonumber(v)
   if x == nil or x ~= x then return 0 end
@@ -598,28 +607,41 @@ local function bodyOffsetDeg(v)
 end
 function M.ApplyBodyYawOffset(api)
   if not M.want.enabled then return false end
-  local v = M.want.bodyYawOffset
-  if M.rt.bodyYawOffsetApplied == v then return true end
+  local f, m = M.want.bodyYawOffsetFemale, M.want.bodyYawOffsetMale
+  local applied = M.rt.bodyYawOffsetApplied
+  if applied ~= nil and applied[1] == f and applied[2] == m then return true end
   api = api or M.api
   local ok, accepted
-  if api and api.setBodyYawOffset then
-    ok, accepted = pcall(api.setBodyYawOffset, v)
+  if api and api.setBodyYawOffsets then
+    ok, accepted = pcall(api.setBodyYawOffsets, f, m)
   else
-    ok, accepted = pcall(function() return Game.UTPPSetMotionBodyYawOffset(v) end)
+    ok, accepted = pcall(function() return Game.UTPPSetMotionBodyYawOffsets(f, m) end)
   end
   if not ok or accepted == false then
     M.rt.errors = M.rt.errors + 1
     if M.rt.errors <= 3 then log("mm.bodyYawOffset: native call failed") end
     return false
   end
-  M.rt.bodyYawOffsetApplied = v
-  log("mm.bodyYawOffset -> " .. tostring(v) .. " (native call accepted)")
+  M.rt.bodyYawOffsetApplied = { f, m }
+  log("mm.bodyYawOffsetFemale / Male -> " .. tostring(f) .. " / " .. tostring(m) .. " (native call accepted)")
   return true
 end
-function M.SetBodyYawOffset(v, api)
-  M.want.bodyYawOffset = bodyOffsetDeg(v)
+function M.SetBodyYawOffsetFemale(v, api)
+  M.want.bodyYawOffsetFemale = bodyOffsetDeg(v)
   M.ApplyBodyYawOffset(api)
-  return M.want.bodyYawOffset
+  return M.want.bodyYawOffsetFemale
+end
+function M.SetBodyYawOffsetMale(v, api)
+  M.want.bodyYawOffsetMale = bodyOffsetDeg(v)
+  M.ApplyBodyYawOffset(api)
+  return M.want.bodyYawOffsetMale
+end
+-- console: the same value for both bodies
+function M.SetBodyYawOffset(v, api)
+  M.want.bodyYawOffsetFemale = bodyOffsetDeg(v)
+  M.want.bodyYawOffsetMale = M.want.bodyYawOffsetFemale
+  M.ApplyBodyYawOffset(api)
+  return M.want.bodyYawOffsetFemale
 end
 
 -- Walk toggle speed (mm.walkSpeed): the same contract as the trims (process-lifetime DLL value, default 0 = off, nothing called while
@@ -869,7 +891,7 @@ function M.SetLeanHeadScale(v, api)
   return M.want.leanHeadScale
 end
 
--- Optional motion behaviours, all off by default: setting key -> want field, native, argument conversion. Sent again whenever the
+-- Optional motion behaviours, all off in the DLL by default (their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
 -- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
 M.OPTIONS = {
   { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 0 },
@@ -880,6 +902,7 @@ M.OPTIONS = {
   { want = "farJumpGravity", field = "setFarJumpGravity", native = "UTPPSetMMFarJumpGravity" },
   { want = "leanCoverage", field = "setLeanCoverage", native = "UTPPSetMotionLeanCoverage",
     arg = function(v) return v == "wide" and 1 or 0 end },
+  { want = "strideWarp", field = "setStrideWarp", native = "UTPPSetMMStrideWarp" },
 }
 function M.ApplyOptions(api)
   if not M.want.enabled then return false end
@@ -968,12 +991,19 @@ function M.RegisterSettings(core)
       .. "chest, head and feet keep their direction. The running animations carry the hips about 5 degrees to the right: about +5 "
       .. "squares them with the direction of travel (default 2). 0 = the animations as authored. Not while aiming or with a weapon drawn.",
     apply = function(v) M.SetPelvisYawTrim(v) end })
-  core.Register({ key = "mm.bodyYawOffset", section = "animation", type = "float", default = 4, min = -20, max = 20, step = 0.5,
-    label = "Body yaw offset (deg)",
-    desc = "Turns V's whole character around the vertical axis (+ = to the left, - = to the right): hips, chest, head, legs and "
-      .. "feet together. With the camera over the right shoulder V can look turned to the right; a few degrees to the left "
+  -- replace mm.bodyYawOffset (one value for both bodies; utpp_core moves a stored value to the female key on load)
+  core.Register({ key = "mm.bodyYawOffsetFemale", section = "animation", type = "float", default = 4, min = -20, max = 20, step = 0.5,
+    label = "Body yaw offset (female V, deg)",
+    desc = "Turns female V's whole character around the vertical axis (+ = to the left, - = to the right): hips, chest, head, legs "
+      .. "and feet together. With the camera over the right shoulder she can look turned to the right; a few degrees to the left "
       .. "squares her with the view (default 4). The movement direction is unchanged. 0 = off. Not while aiming or during weapon actions.",
-    apply = function(v) M.SetBodyYawOffset(v) end })
+    apply = function(v) M.SetBodyYawOffsetFemale(v) end })
+  core.Register({ key = "mm.bodyYawOffsetMale", section = "animation", type = "float", default = 0, min = -20, max = 20, step = 0.5,
+    label = "Body yaw offset (male V, deg)",
+    desc = "Turns male V's whole character around the vertical axis (+ = to the left, - = to the right): hips, chest, head, legs "
+      .. "and feet together. With the camera over the right shoulder he can look turned to the right; a few degrees to the left "
+      .. "squares him with the view (default 0 = off). The movement direction is unchanged. Not while aiming or during weapon actions.",
+    apply = function(v) M.SetBodyYawOffsetMale(v) end })
   core.Register({ key = "mm.walkSpeed", section = "animation", type = "float", default = 1.6, min = 0, max = 3.5, step = 0.1,
     label = "Walk speed (m/s)",
     desc = "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed. The game's own walk toggle is faster than the "
@@ -986,6 +1016,11 @@ function M.RegisterSettings(core)
       .. "there, so her feet glided over the ground; 0.82 (default) is the speed of a half-tilted stick. 0 = the game's own speed. "
       .. "Only on foot in third person, standing or crouching; sprinting, aiming and jumping are unchanged.",
     apply = function(v) M.SetMinAnalogWalk(v) end })
+  core.Register({ key = "mm.strideWarp", section = "animation", type = "bool", default = true,
+    label = "Stride matching",
+    desc = "Shortens V's steps to her movement speed while she walks, runs or moves crouched, so her feet slide less over the "
+      .. "ground. Off = the steps of the animations as they are. Starts, stops, turns, jumps and slides are unchanged.",
+    apply = function(v) M.SetOption("strideWarp", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "analog",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
     label = "Gamepad stick speed",

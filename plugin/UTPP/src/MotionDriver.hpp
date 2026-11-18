@@ -267,6 +267,12 @@ DodgeProbe TestDodgeProbe();
 // for straight running, low speed and non-loop clips. SetOrientWarp always returns true. Status: orientWarp= owW= owRoot= owTorso=;
 // MMTRACE (only while on or fading): ow=<on>/<weight>/<root deg>/<torso deg>.
 bool SetOrientWarp(bool aOn);
+// Stride warping (CET mm.strideWarp; mm/StrideWarp.hpp, BlendStack::SetStrideWarp; DLL default UTPP_STRIDE_WARP = off): the steps of
+// ground locomotion loops are shortened to the capsule speed (feet slide less), with the knee limit of the blend stack. Applied to the
+// installed bundle at once (a running warp fades in / out, no pose jump) and to every bundle loaded later. Always true. StrideWarp = the
+// state of the installed bundle (else the requested one).
+bool SetStrideWarp(bool aOn);
+bool StrideWarp();
 // Run pelvis yaw trim (CET mm.pelvisYawTrim; mm/OrientWarp.hpp PelvisTrim): aDeg (+ = left, -10..10, default 0) turns the pelvis of
 // the v2 pose while V walks / runs / sprints forward on the ground (chest, head and feet keep their direction; the motion forward
 // loops carry the pelvis ~5 deg to the right, +5 squares it). Not while aiming / weapon drawn / air / crouch / slide / traversal;
@@ -284,15 +290,19 @@ bool SetPelvisYawTrim(float aDeg);
 float PelvisYawTrim();
 float PelvisYawTrimWeight();
 std::string PelvisYawTrimReason();
-// Body yaw offset (CET mm.bodyYawOffset; mm/OrientWarp.hpp BodyYawOffset): aDeg (+ = left, -20..20, default 0) turns the WHOLE v2
-// character (pelvis, torso, head, legs and feet as one rigid pose) about the visual root: added to the visual root yaw of the leg-tail
-// frame only; entity / capsule yaw, movement direction, matcher state and pose are untouched. On foot in every stance / gait, weapon
-// holstered or drawn; not while aiming, during a weapon action (shot, reload, hip-fire pose, melee), traversal / release / no root
-// frame (weight fades 0.25 s). False on NaN / out of range (nothing changed). MMTRACE: bo=<deg>/<weight>/<reason> while set; reason =
-// the first gate holding the weight down (aim, melee, wpnact, trav, release, noroot) or ok. Weight / reason of the last Step:
-// BodyYawOffsetWeight / BodyYawOffsetReason (diagnostics, tests).
+// Body yaw offset (CET mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale; mm/OrientWarp.hpp BodyYawOffset): deg (+ = left, -20..20,
+// default 0) per body; the value of the installed bundle's body turns the WHOLE v2 character (pelvis, torso, head, legs and feet as one
+// rigid pose) about the visual root: added to the visual root yaw of the leg-tail frame only; entity / capsule yaw, movement direction,
+// matcher state and pose are untouched. On foot in every stance / gait, weapon holstered or drawn; not while aiming, during a weapon
+// action (shot, reload, hip-fire pose, melee), traversal / release / no root frame (weight fades 0.25 s). False on NaN / out of range
+// (nothing changed). MMTRACE: bo=<deg>/<weight>/<reason> while set; reason = the first gate holding the weight down (aim, melee,
+// wpnact, trav, release, noroot) or ok. Weight / reason of the last Step: BodyYawOffsetWeight / BodyYawOffsetReason (diagnostics,
+// tests). SetBodyYawOffset sets the same value for both bodies; BodyYawOffset = the value of the installed bundle's body (female V
+// without a bundle), BodyYawOffsetFor = the value of one body.
 bool SetBodyYawOffset(float aDeg);
+bool SetBodyYawOffsets(float aFemaleDeg, float aMaleDeg);
 float BodyYawOffset();
+float BodyYawOffsetFor(bool aMale);
 float BodyYawOffsetWeight();
 std::string BodyYawOffsetReason();
 // Barrel pitch loop of the v2 aim offset (aim pitch plan 2026-10-30; CET mm.aimAtCrosshair, DLL default OFF = the open-loop aim offset

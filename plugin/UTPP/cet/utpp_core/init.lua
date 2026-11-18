@@ -101,8 +101,8 @@ M.PACK_FORCED = {
 -- options that only work with the mod's animations: their menu text ends with PACK_NOTE (added when the option is registered)
 M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
-for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffset", "mm.walkSpeed", "mm.minWalkSpeed", "mm.shoulderWidth",
-  "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
+for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkSpeed", "mm.minWalkSpeed",
+  "mm.strideWarp", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
@@ -154,7 +154,7 @@ local orderIndex = {}
 -- perspective.startInLastView: the remembered view changes only through console calls (nothing in the controls or the menu
 -- sets it), so the switch changes nothing for a player; a stored value is still read and written.
 M.HIDDEN_KEYS = {}
-for _, k in ipairs({ "camera.aim.occlusion", "mm.pelvisYawTrim", "mm.bodyYawOffset", "mm.minWalkSpeed", "camera.body",
+for _, k in ipairs({ "camera.aim.occlusion", "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.minWalkSpeed", "camera.body",
   "camera.collision", "mm.aimAtCrosshair", "perspective.sceneTier", "interactRange.scale", "lootRange.scale", "lootView.zoom",
   "lootView.radius", "vehicle.keepTpp", "vehicle.pullOut", "vehicle.rideWatchdog", "vehicle.safeTeleportExit", "camera.mouseScale",
   "perspective.minGap", "camera.aim.range", "camera.zoomUnarmed.fov", "camera.zoomUnarmed.lastFov",
@@ -307,11 +307,18 @@ local RETIRED_KEYS = { ["perspective.enforceWithRef"] = true,
 -- Settings sync baseline skips it as well). convert(text) -> value of the new key or nil (invalid: the new key keeps its default).
 -- mm.shoulderNarrow (female V shoulder narrowing, cm per side 0 .. 4, default 2.5) -> mm.shoulderWidth (cm against the
 -- default look, both shoulders together, -5 .. 5, default 0): width = 5 - 2 * narrow (2.5 -> 0, 2 -> 1, 0 -> 5, 4 -> -3).
+-- mm.bodyYawOffset (body yaw offset of both bodies, deg) -> mm.bodyYawOffsetFemale (the same value); mm.bodyYawOffsetMale keeps its
+-- default (0). The changed default of the old key (M.DEFAULT_CHANGES, revision 3) applies to the converted value.
 local MIGRATED_KEYS = {
   ["mm.shoulderNarrow"] = { key = "mm.shoulderWidth", convert = function(v)
     local n = tonumber(v)
     if n == nil or n ~= n or n == math.huge or n == -math.huge then return nil end
     return 5 - 2 * n
+  end },
+  ["mm.bodyYawOffset"] = { key = "mm.bodyYawOffsetFemale", convert = function(v)
+    local n = tonumber(v)
+    if n == nil or n ~= n or n == math.huge or n == -math.huge then return nil end
+    return n
   end },
 }
 M.MIGRATED_KEYS = MIGRATED_KEYS
@@ -327,7 +334,7 @@ M.DEFAULT_CHANGES = {
   { rev = 1, key = "melee.guard", from = false, to = true },
   { rev = 2, key = "body.shadowProxy", from = true, to = false },
   { rev = 3, key = "bodyturn.meleeStrikeTurn", from = false, to = true },
-  { rev = 3, key = "mm.bodyYawOffset", from = 8, to = 4 },
+  { rev = 3, key = "mm.bodyYawOffsetFemale", from = 8, to = 4 }, -- introduced as mm.bodyYawOffset (MIGRATED_KEYS)
   { rev = 3, key = "mm.pelvisYawTrim", from = 5, to = 2 },
   { rev = 3, key = "mm.shinobiBonusReload", from = false, to = true },
   { rev = 3, key = "perspective.scene", from = true, to = false },
@@ -552,14 +559,17 @@ local LAYOUT = {
   --   Camera: one fixed camera profile, no "Active profile" selector; utpp_camera's framing views
   -- (distance, shoulder offset, FOV, height: ranks 1-4) come first, then these
   --   "Run pelvis yaw trim" (mm.pelvisYawTrim, registered by utpp_motion) after the camera controls, then
-  -- "Body yaw offset" (mm.bodyYawOffset, utpp_motion: the whole character turned against the over-the-shoulder parallax);
+  -- "Body yaw offset" of female V and of male V (mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale, utpp_motion: the whole character
+  -- turned against the over-the-shoulder parallax);
   --   "Head follows turns" (mm.headLead, registered below: hidden, the lean head layer takes the head) right after it;
   --   "Walk speed (m/s)" (mm.walkSpeed, utpp_motion: capsule speed under the walk toggle) after it, then "Minimum walk
-  -- speed (m/s)" (mm.minWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt)
+  -- speed (m/s)" (mm.minWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
+  -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
-                         "mm.bodyYawOffset", "mm.headLead", "mm.walkSpeed", "mm.minWalkSpeed", "mm.shoulderWidth", "mm.feminineFigure" } },
+                         "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.headLead", "mm.walkSpeed", "mm.minWalkSpeed",
+                         "mm.strideWarp", "mm.shoulderWidth", "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
   { "developer", "frame", { "body.impl", "headGuard.impl" } },

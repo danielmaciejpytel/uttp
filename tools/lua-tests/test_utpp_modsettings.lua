@@ -453,7 +453,7 @@ local ok, err = pcall(function()
     and string.find(redsText, "public let camera_aim_distance", 1, true) ~= nil)
   -- the options flagged through utpp_core's HIDDEN_KEYS (registered by other modules) have no field either
   local leaked = {}
-  for _, f in ipairs({ "camera_aim_occlusion", "mm_pelvisYawTrim", "mm_bodyYawOffset", "mm_minWalkSpeed", "camera_body", "camera_collision",
+  for _, f in ipairs({ "camera_aim_occlusion", "mm_pelvisYawTrim", "mm_bodyYawOffsetFemale", "mm_bodyYawOffsetMale", "mm_minWalkSpeed", "camera_body", "camera_collision",
                        "mm_aimAtCrosshair", "perspective_sceneTier", "interactRange_scale", "lootRange_scale", "lootView_zoom",
                        "lootView_radius", "vehicle_keepTpp", "vehicle_pullOut", "vehicle_rideWatchdog", "vehicle_safeTeleportExit",
                        "camera_mouseScale", "perspective_minGap", "camera_aim_range", "camera_zoomUnarmed_fov",
@@ -462,7 +462,7 @@ local ok, err = pcall(function()
       leaked[#leaked + 1] = f
     end
   end
-  check("T17 generated class: no field, snapshot line or listing for the 24 options flagged hidden by utpp_core", #redsText > 1000 and #leaked == 0,
+  check("T17 generated class: no field, snapshot line or listing for the 25 options flagged hidden by utpp_core", #redsText > 1000 and #leaked == 0,
     table.concat(leaked, ", "))
   os.remove(settingsFile)
   os.remove(baseFile)

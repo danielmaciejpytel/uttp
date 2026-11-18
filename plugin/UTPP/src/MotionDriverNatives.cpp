@@ -17,6 +17,7 @@
 #include "CommonUtil.hpp"
 #include "MotionHost.hpp"
 #include "MotionDriver.hpp"
+#include "PluginLog.hpp"
 #include "ragdoll/RagdollSlotProbe.hpp" // ragdoll get-up: standing belly reference sign (PelvisTracker)
 
 namespace utpp::motionhost
@@ -546,6 +547,30 @@ void Native_SetMotionLeanCoverage(RED4ext::IScriptable*, RED4ext::CStackFrame* a
     if (aOut)
         *aOut = ok;
 }
+// stride warping (CET utpp_motion mm.strideWarp; the DLL default is off, CET sends its value). Logged in the setting-call form the
+// offline replay applies ("UTPPSet<Name>(<args>) -> <result>").
+void Native_SetMMStrideWarp(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = SetStrideWarp(on);
+    pluginlog::LogInfo("UTPPSetMMStrideWarp(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
+// body yaw offset per body (CET utpp_motion mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale): deg, + = left, -20..20 each
+void Native_SetMotionBodyYawOffsets(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    float female = 0.0f, male = 0.0f;
+    RED4ext::GetParameter(aFrame, &female);
+    RED4ext::GetParameter(aFrame, &male);
+    aFrame->code++;
+    const bool ok = SetBodyYawOffsets(female, male);
+    pluginlog::LogInfo("UTPPSetMotionBodyYawOffsets(%.2f,%.2f) -> %d", static_cast<double>(female), static_cast<double>(male), ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 
 void RegisterNatives()
 {
@@ -715,6 +740,11 @@ void RegisterNatives()
     o6->flags = flags; o6->AddParam("Bool", "on"); o6->AddParam("Float", "hz"); o6->SetReturnType("Bool"); rtti->RegisterFunction(o6);
     auto* o7 = RED4ext::CGlobalFunction::Create("UTPPSetMMNeutralAimOffset", "UTPPSetMMNeutralAimOffset", &Native_SetMMNeutralAimOffset);
     o7->flags = flags; o7->AddParam("Bool", "on"); o7->SetReturnType("Bool"); rtti->RegisterFunction(o7);
+    auto* o8 = RED4ext::CGlobalFunction::Create("UTPPSetMMStrideWarp", "UTPPSetMMStrideWarp", &Native_SetMMStrideWarp);
+    o8->flags = flags; o8->AddParam("Bool", "on"); o8->SetReturnType("Bool"); rtti->RegisterFunction(o8);
+    auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMotionBodyYawOffsets", "UTPPSetMotionBodyYawOffsets", &Native_SetMotionBodyYawOffsets);
+    o9->flags = flags; o9->AddParam("Float", "female"); o9->AddParam("Float", "male"); o9->SetReturnType("Bool");
+    rtti->RegisterFunction(o9);
 }
 
 void Install(const std::wstring& aDllDir)

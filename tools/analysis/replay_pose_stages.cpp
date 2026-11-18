@@ -35,6 +35,8 @@
 //                       aim offset only acts in a strafe / shooter facing)
 //                       Any of these three adds one AIMOPT line: feeds with a neutral aim offset weight / a world aim smoothing delta.
 //                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
+//   --stride-warp 0|1   stride warping of the blend stack off / on after --settings-log (motiondriver::SetStrideWarp, the mm.strideWarp
+//                       setting; the settings log call MMStrideWarp of later sessions is applied as well); not passed: the log / build default
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -186,6 +188,8 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         if (name == "MotionOrientWarp") motiondriver::SetOrientWarp(arg(0) != 0);
         else if (name == "MotionPelvisYawTrim") motiondriver::SetPelvisYawTrim(arg(0));
         else if (name == "MotionBodyYawOffset") motiondriver::SetBodyYawOffset(arg(0));
+        else if (name == "MotionBodyYawOffsets") motiondriver::SetBodyYawOffsets(arg(0), arg(1));
+        else if (name == "MMStrideWarp") motiondriver::SetStrideWarp(flag(0));
         else if (name == "MotionLean") motiondriver::SetLean(arg(0) != 0);
         else if (name == "MotionLeanHead") motiondriver::SetLeanHead(arg(0) != 0);
         else if (name == "MotionLeanParams") motiondriver::SetLeanParams(arg(0), arg(1));
@@ -330,7 +334,7 @@ int main(int argc, char** argv)
     bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
-    int32_t neutralAim = -1, shooterMode = -1; // -1 = not passed (the settings log / build default)
+    int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1; // -1 = not passed (the settings log / build default)
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -381,6 +385,8 @@ int main(int argc, char** argv)
             aimWorldSmoothHz = std::max(0.0f, std::stof(argv[i + 1]));
         else if (std::strcmp(argv[i], "--shooter-mode") == 0)
             shooterMode = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--stride-warp") == 0)
+            strideWarp = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -508,6 +514,8 @@ int main(int argc, char** argv)
         motiondriver::SetAimWorldSmoothing(aimWorldSmoothHz > 0.0f, aimWorldSmoothHz);
     if (shooterMode >= 0)
         motiondriver::SetShooterMode(shooterMode != 0);
+    if (strideWarp >= 0)
+        motiondriver::SetStrideWarp(strideWarp != 0);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);

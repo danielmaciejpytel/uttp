@@ -409,23 +409,25 @@ class SessionSettingsTests(unittest.TestCase):
     """--settings author | shipped: the values of the session, what differs from the shipped defaults, and the way back."""
 
     # a player who changed every locomotion setting: the session pins them and puts the player's values back
-    PLAYER = {'mm.bodyYawOffset': 8, 'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
+    PLAYER = {'mm.bodyYawOffsetFemale': 8, 'mm.bodyYawOffsetMale': -3, 'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
               'perspective.scene': True, 'perspective.blend': 0.8,
               'mm.walkSpeed': 2.4, 'mm.minWalkSpeed': 0.5, 'mm.lean': False, 'mm.leanHead': False, 'mm.leanScale': 1.5,
-              'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'wide', 'mm.orientWarp': False, 'mm.footReplant': 'always', 'bodyturn.aimJog': False,
+              'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'wide', 'mm.orientWarp': False, 'mm.strideWarp': False, 'mm.footReplant': 'always',
+              'bodyturn.aimJog': False,
               'bodyturn.aimJogSpeed': 3.8, 'bodyturn.aimSmooth': False, 'bodyturn.shooterMode': True}
     LOCO = {'mm.walkSpeed': 1.6, 'mm.minWalkSpeed': 0.82, 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.85,
-            'mm.leanHeadScale': 0.9, 'mm.leanCoverage': 'standard', 'mm.orientWarp': True, 'mm.footReplant': 'crouch', 'bodyturn.aimJog': True,
+            'mm.leanHeadScale': 0.9, 'mm.leanCoverage': 'standard', 'mm.orientWarp': True, 'mm.strideWarp': True,
+            'mm.footReplant': 'crouch', 'bodyturn.aimJog': True,
             'bodyturn.aimJogSpeed': 3.3, 'bodyturn.aimSmooth': True, 'bodyturn.shooterMode': False}
     LOCO_TEXT = ('locomotion walkSpeed=1.6 minWalkSpeed=0.82 lean=true leanHead=true leanScale=0.85 leanHeadScale=0.9 leanCoverage=standard orientWarp=true '
-                 'footReplant=crouch aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
+                 'strideWarp=true footReplant=crouch aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
 
     def test_plans(self):
         self.assertEqual(dict(gs.session_plan('author')),
-                         {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+                         {'mm.bodyYawOffsetFemale': 4, 'mm.bodyYawOffsetMale': 0, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
                           'perspective.scene': False, 'perspective.blend': 0.6, **self.LOCO})
         shipped = dict(gs.session_plan('shipped'))
-        self.assertEqual(shipped, {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+        self.assertEqual(shipped, {'mm.bodyYawOffsetFemale': 4, 'mm.bodyYawOffsetMale': 0, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
                                    'perspective.scene': False, 'perspective.blend': 0.8, **self.LOCO})
 
     def test_locomotion_keys_are_pinned_at_the_registered_defaults(self):
@@ -464,7 +466,8 @@ class SessionSettingsTests(unittest.TestCase):
                          ['perspective.scene', 'camera.side'])
         line = gs.settings_line('author', dict(gs.session_plan('author')))
         self.assertEqual(line, 'settings author: differ from the shipped defaults: perspective.blend 0.6 (shipped 0.8); ' + self.LOCO_TEXT)
-        self.assertNotIn('mm.bodyYawOffset', line)
+        self.assertNotIn('mm.bodyYawOffsetFemale', line)
+        self.assertNotIn('mm.bodyYawOffsetMale', line)
         # a key whose default the harness does not know cannot be called equal: it is listed as unknown
         unknown = gs.differs_from_shipped({'camera.aim.side': 0.5})
         self.assertEqual([(d['key'], d['shipped']) for d in unknown], [('camera.aim.side', None)])
@@ -504,10 +507,10 @@ class SessionSettingsTests(unittest.TestCase):
 
     def test_a_cet_command_that_sets_the_same_keys_is_warned_about(self):
         n, io = self.make_night('author', self.PLAYER)
-        n.args.cet = "for k,v in pairs({['mm.bodyYawOffset']=4}) do c.Set(k,v) end"
+        n.args.cet = "for k,v in pairs({['mm.bodyYawOffsetFemale']=4}) do c.Set(k,v) end"
         info = {}
         n.apply_session_settings(None, info)
-        self.assertEqual(info['session_settings_conflict'], ['mm.bodyYawOffset'])
+        self.assertEqual(info['session_settings_conflict'], ['mm.bodyYawOffsetFemale'])
         n2, io2 = self.make_night('author', self.PLAYER)
         info2 = {}
         n2.apply_session_settings(None, info2)

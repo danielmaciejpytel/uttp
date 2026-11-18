@@ -335,6 +335,86 @@ static void StackFadeOut(const motion::MotionDatabase &db, int clip, int hz, flo
     Check(dropExcess <= 0.0f, "the shortening never drops faster than the interpolation rate in one update (no knee snap)", hz);
 }
 
+// Runtime switch (BlendStack::SetStrideWarp under live layers, the menu option): `tog` runs a warped loop like `cont` (on from the
+// start), is switched off at 0.4 s and on again at 1.6 s; `off` never warps. Switched off, the warp part of the ankles (tog - off) is
+// released no faster than the interpolation rate and then the pose is bit for bit the unwarped one; switched on, it grows from 0 no
+// faster than the interpolation rate and reaches the continuously warped pose. Before the first switch `tog` is bit for bit `cont`.
+static void StackToggle(const motion::MotionDatabase &db, int clip, int hz)
+{
+    const float dt = 1.0f / float(hz), fps = db.Header().fps, rate = 1.0f - std::exp(-stridewarp::kInterpSpeed * dt);
+    motionstack::BlendStack off, cont, tog;
+    bool ok = off.Init(db) && cont.Init(db) && tog.Init(db);
+    off.SetStrideWarp(false);
+    cont.SetStrideWarp(true);
+    tog.SetStrideWarp(true);
+    const int foot[2]{Bone(db, "LeftFoot"), Bone(db, "RightFoot")};
+    const auto &c = db.Clip(uint32_t(clip));
+    const float duration = float(c.numFrames - 1) / fps;
+    std::vector<BoneTransform> mOff, mCont, mTog;
+    const int offAt = int(0.4f * float(hz)), onAt = int(1.6f * float(hz)), end = int(2.8f * float(hz));
+    float time = 0.5f, shortening = 0, dropExcess = -1, growExcess = -1, endGap = 0, lastF[2]{}, lastW[2]{};
+    bool sameBefore = true, unwarpedAfter = true, stateOk = true;
+    for (int k = 0; k < end && ok; ++k, time += dt)
+    {
+        const float t = std::fmod(time, duration);
+        const auto &root = db.Root(c.firstFrame + std::min(uint32_t(t * fps), c.numFrames - 1));
+        motionstack::GraphInputs g;
+        g.enabled = true;
+        g.velocityWorldX = root.dx * fps * 0.8f;
+        g.velocityWorldY = root.dy * fps * 0.8f;
+        off.SetGraphInputs(g);
+        cont.SetGraphInputs(g);
+        tog.SetGraphInputs(g);
+        if (k == offAt)
+            tog.SetStrideWarp(false);
+        if (k == onAt)
+            tog.SetStrideWarp(true);
+        stateOk = stateOk && tog.StrideWarp() == (k < offAt || k >= onAt) && tog.StrideKneeLimit();
+        ok = off.Step(Pick(clip, t, k == 0, true), dt) && cont.Step(Pick(clip, t, k == 0, true), dt) &&
+             tog.Step(Pick(clip, t, k == 0, true), dt);
+        if (!ok)
+            break;
+        const size_t bytes = sizeof(BoneTransform) * db.NumBones();
+        if (k < offAt)
+            sameBefore = sameBefore && std::memcmp(tog.Output(), cont.Output(), bytes) == 0;
+        if (k >= onAt - int(0.2f * float(hz)) && k < onAt) // 1 s after the switch: the held shortening is long released
+            unwarpedAfter = unwarpedAfter && std::memcmp(tog.Output(), off.Output(), bytes) == 0;
+        Model(db, off.Output(), mOff);
+        Model(db, cont.Output(), mCont);
+        Model(db, tog.Output(), mTog);
+        for (int s = 0; s < 2; ++s)
+        {
+            const math::Vec3 warp = mCont[size_t(foot[s])].p - mOff[size_t(foot[s])].p;
+            const math::Vec3 part = mTog[size_t(foot[s])].p - mOff[size_t(foot[s])].p;
+            const float w = std::sqrt(math::Dot(warp, warp)), f = std::sqrt(math::Dot(part, part));
+            shortening = std::fmax(shortening, w);
+            // one update moves the warp part by at most the interpolation share (of the held part switched off, of the continuing
+            // warp switched on), plus the change of the continuing warp and 2 mm for the pose difference
+            if (k >= offAt && k < onAt)
+                dropExcess = std::fmax(dropExcess, (lastF[s] - f) - (rate * lastF[s] + std::fabs(w - lastW[s]) + 0.002f));
+            if (k >= onAt)
+                growExcess = std::fmax(growExcess, (f - lastF[s]) - (rate * w + std::fabs(w - lastW[s]) + 0.002f));
+            if (k == end - 1)
+            {
+                const math::Vec3 gap = mTog[size_t(foot[s])].p - mCont[size_t(foot[s])].p;
+                endGap = std::fmax(endGap, std::sqrt(math::Dot(gap, gap)));
+            }
+            lastF[s] = f;
+            lastW[s] = w;
+        }
+    }
+    std::printf("INFO runtime switch: shortening up to %.2f cm, drop excess %.2f mm, growth excess %.2f mm, gap to the continuous warp "
+                "%.3f mm @Hz=%d\n",
+                shortening * 100.0f, dropExcess * 1e3f, growExcess * 1e3f, endGap * 1e3f, hz);
+    Check(ok && shortening > 0.02f, "runtime switch fixture: warped loop with a shortening above 2 cm", hz);
+    Check(sameBefore, "runtime switch: before the first switch the pose is bit for bit the continuously warped one", hz);
+    Check(stateOk, "runtime switch: StrideWarp follows the switch, the knee limit stays on", hz);
+    Check(dropExcess <= 0.0f, "switched off under a warped loop: the shortening is released no faster than the interpolation rate", hz);
+    Check(unwarpedAfter, "switched off: once released, the pose is bit for bit the unwarped one", hz);
+    Check(growExcess <= 0.0f, "switched on under a running loop: the shortening grows no faster than the interpolation rate", hz);
+    Check(endGap < 0.0005f, "switched on: the pose reaches the continuously warped one (within 0.5 mm after 1.2 s)", hz);
+}
+
 // Yaw fade: the warp weight of a smoothed visual yaw rate, the smoothing itself and its effect on the scale.
 static void YawFadeSolver(int hz)
 {
@@ -594,6 +674,7 @@ int main(int argc, char **argv)
             Stack(db, clip, hz);
             StackFadeOut(db, clip, hz, 0.2f);
             StackFadeOut(db, clip, hz, 0.05f);
+            StackToggle(db, clip, hz);
             StackCrouchModes(db, clip, hz);
             StackCrouchYawSwing(db, clip, hz);
             StackDirectionSwing(db, clip, hz, 1.5707963f);

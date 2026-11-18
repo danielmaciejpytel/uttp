@@ -664,14 +664,18 @@ if not WRITE then
     -- 2026-10-30 user: Run pelvis yaw trim, then Body yaw offset right after it (both registered by utpp_motion); 2026-10-31: Walk speed,
     -- then Minimum walk speed; 2026-11-09 (user K5): Shoulder width (female V) last
     -- 2026-11-13: Run pelvis yaw trim, Body yaw offset and Minimum walk speed are hidden in 0.1.0 (level "hidden", layout place kept)
-    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset, Head follows turns), Walk speed, (hidden: Minimum walk speed), Shoulder width, Feminine figure, then the advanced camera options",
-      placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffset") == "hidden/frame/60"
-      and placeOf("mm.headLead") == "hidden/frame/70"
-      and placeOf("mm.walkSpeed") == "player/frame/80" and placeOf("mm.minWalkSpeed") == "hidden/frame/90"
-      and placeOf("mm.shoulderWidth") == "player/frame/100" and placeOf("mm.feminineFigure") == "player/frame/110"
-      and placeOf("camera.idleOrbit") == "advanced/frame/120",
-      placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.bodyYawOffset") .. " " .. placeOf("mm.walkSpeed") .. " "
-        .. placeOf("mm.minWalkSpeed") .. " " .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
+    -- 2026-11-18: Body yaw offset is one option per body (female V, male V, both hidden); Stride matching (player level) after
+    -- Minimum walk speed
+    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Shoulder width, Feminine figure, then the advanced camera options",
+      placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffsetFemale") == "hidden/frame/60"
+      and placeOf("mm.bodyYawOffsetMale") == "hidden/frame/70" and placeOf("mm.headLead") == "hidden/frame/80"
+      and placeOf("mm.walkSpeed") == "player/frame/90" and placeOf("mm.minWalkSpeed") == "hidden/frame/100"
+      and placeOf("mm.strideWarp") == "player/frame/110"
+      and placeOf("mm.shoulderWidth") == "player/frame/120" and placeOf("mm.feminineFigure") == "player/frame/130"
+      and placeOf("camera.idleOrbit") == "advanced/frame/140",
+      placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.bodyYawOffsetFemale") .. " " .. placeOf("mm.bodyYawOffsetMale") .. " "
+        .. placeOf("mm.walkSpeed") .. " " .. placeOf("mm.minWalkSpeed") .. " " .. placeOf("mm.strideWarp") .. " "
+        .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
     -- 2026-10-30 aim pitch plan: "Weapon aims at crosshair point" (mm.aimAtCrosshair, utpp_motion) after the crosshair colour, player level
     -- 2026-11-09: Melee full body / Melee aim tilt (player level) after Weapon aims at crosshair point
     check("layout: Combat = crosshair colour, then Weapon aims at crosshair point, Melee full body, Melee aim tilt, then the advanced combat options",
@@ -758,13 +762,14 @@ if not WRITE then
       and core.settings.defs["camera.startTpp"].label == "Start in third person")
     check("standard: building calls no apply / native and no Save", #LOG == 0 and saves.save == 0, table.concat(LOG, "; "))
     check("standard: settings file and values unchanged by the build", readFile(tmpSettings) == before and valuesOf(core) == valsBefore)
-    -- registry flag hidden = true: four head look tuning options and 24 more options are registered
+    -- registry flag hidden = true: four head look tuning options and 25 more options are registered
     -- and working on their defaults, listed in no view; HIDDEN is the exact set (the head look switch and "Look at the camera"
     -- are visible since 2026-11-13: they keep their defaults, DEFAULTS lists them too, but HIDDEN does not)
     do
       local DEFAULTS = { ["headLook.impl"] = true, ["headLook.whileWalking"] = true, ["headLook.faceCamera"] = true,
                          ["headLook.lookAtLoot"] = true, ["headLook.maxYaw"] = 100, ["headLook.chest"] = 0.5,
-                         ["camera.aim.occlusion"] = true, ["mm.pelvisYawTrim"] = 2, ["mm.bodyYawOffset"] = 4, ["mm.minWalkSpeed"] = 0.82,
+                         ["camera.aim.occlusion"] = true, ["mm.pelvisYawTrim"] = 2, ["mm.bodyYawOffsetFemale"] = 4, ["mm.bodyYawOffsetMale"] = 0,
+                         ["mm.minWalkSpeed"] = 0.82,
                          ["camera.body"] = true, ["camera.collision"] = true, ["mm.aimAtCrosshair"] = true, ["perspective.sceneTier"] = 3,
                          ["interactRange.scale"] = 1.0, ["lootRange.scale"] = 1.0, ["lootView.zoom"] = 0.9, ["lootView.radius"] = 1.8,
                          ["vehicle.keepTpp"] = true, ["vehicle.pullOut"] = true, ["vehicle.rideWatchdog"] = true,
@@ -781,7 +786,7 @@ if not WRITE then
         if (def.hidden == true) ~= (HIDDEN[key] == true) then bad[#bad + 1] = key end
       end
       for _, s in ipairs(list) do if HIDDEN[string.match(s, "|(.*)$")] then listed[#listed + 1] = s end end
-      check("hidden: exactly the 28 listed options carry the flag (4 head look + 24 more)", flagged == 28 and #bad == 0, table.concat(bad, ", "))
+      check("hidden: exactly the 29 listed options carry the flag (4 head look + 25 more)", flagged == 29 and #bad == 0, table.concat(bad, ", "))
       check("hidden: level 'hidden' (kept layout group), no widget, not in the standard list", #listed == 0
         and core.MenuPlacement("headLook.maxYaw") == "hidden" and select(2, core.MenuPlacement("headLook.maxYaw")) == "world"
         and core.settings.widgets["headLook.whileWalking"] == nil and core.settings.widgets["headLook.lookAtLoot"] == nil
@@ -1665,36 +1670,55 @@ do
 
     -- revision 3: the fist strike turn and the Shinobi reload animation on, body yaw offset 8 -> 4, run pelvis yaw trim 5 -> 2.
     -- A stored old default moves once; any other stored value is a choice; a key of an earlier revision is not moved again.
+    -- The files of revision 2 and 3 store the body yaw offset under mm.bodyYawOffset (one value for both bodies): it is read into
+    -- mm.bodyYawOffsetFemale (MIGRATED_KEYS) before the defaults revision runs; male V keeps its default 0.
     local r3 = bootWithFile("core.defaultsRevision=2\nbodyturn.meleeStrikeTurn=false\nmm.bodyYawOffset=8\nmm.pelvisYawTrim=5\n"
       .. "mm.shinobiBonusReload=false\nbody.shadowProxy=true\n")
     local r3Log = loggedLine()
     local r3Disk = readFile(tmpSettings) or ""
     check("T03 defaults revision 3: a file of revision 2 with the four old defaults stored moves them once",
-      r3.Get("bodyturn.meleeStrikeTurn") == true and r3.Get("mm.bodyYawOffset") == 4 and r3.Get("mm.pelvisYawTrim") == 2
+      r3.Get("bodyturn.meleeStrikeTurn") == true and r3.Get("mm.bodyYawOffsetFemale") == 4 and r3.Get("mm.bodyYawOffsetMale") == 0
+      and r3.Get("mm.pelvisYawTrim") == 2
       and r3.Get("mm.shinobiBonusReload") == true and defaultsLines() == 1 and string.find(r3Log, "2 -> 3", 1, true) ~= nil, r3Log)
     check("T03 defaults revision 3: the registered defaults are the new values",
-      r3.settings.defs["bodyturn.meleeStrikeTurn"].default == true and r3.settings.defs["mm.bodyYawOffset"].default == 4
+      r3.settings.defs["bodyturn.meleeStrikeTurn"].default == true and r3.settings.defs["mm.bodyYawOffsetFemale"].default == 4
+      and r3.settings.defs["mm.bodyYawOffsetMale"].default == 0
       and r3.settings.defs["mm.pelvisYawTrim"].default == 2 and r3.settings.defs["mm.shinobiBonusReload"].default == true)
     check("T03 defaults revision 3: a key of an earlier revision stored in a revision-2 file is a choice and stays",
       r3.Get("body.shadowProxy") == true and string.find(r3Log, "body.shadowProxy", 1, true) == nil, r3Log)
     check("T03 defaults revision 3: the file is rewritten with revision 3 and the new values",
       count(r3Disk, "core.defaultsRevision=3") == 1 and count(r3Disk, "core.defaultsRevision=2") == 0
-      and string.find(r3Disk, "mm.bodyYawOffset=4", 1, true) ~= nil and string.find(r3Disk, "mm.pelvisYawTrim=2", 1, true) ~= nil
+      and string.find(r3Disk, "mm.bodyYawOffsetFemale=4", 1, true) ~= nil and string.find(r3Disk, "mm.pelvisYawTrim=2", 1, true) ~= nil
+      and string.find(r3Disk, "mm.bodyYawOffset=", 1, true) == nil
       and string.find(r3Disk, "bodyturn.meleeStrikeTurn=true", 1, true) ~= nil
       and string.find(r3Disk, "mm.shinobiBonusReload=true", 1, true) ~= nil)
     local r3Again = bootWithFile(r3Disk)
     check("T03 defaults revision 3: loading the rewritten file changes nothing and logs nothing",
-      r3Again.Get("mm.bodyYawOffset") == 4 and r3Again.Get("bodyturn.meleeStrikeTurn") == true and defaultsLines() == 0)
+      r3Again.Get("mm.bodyYawOffsetFemale") == 4 and r3Again.Get("bodyturn.meleeStrikeTurn") == true and defaultsLines() == 0)
     local r3Chosen = bootWithFile("core.defaultsRevision=2\nmm.bodyYawOffset=6\nmm.pelvisYawTrim=0\nmm.shinobiBonusReload=true\n")
     check("T03 defaults revision 3: stored values that are not the old defaults are choices and stay",
-      r3Chosen.Get("mm.bodyYawOffset") == 6 and r3Chosen.Get("mm.pelvisYawTrim") == 0 and r3Chosen.Get("mm.shinobiBonusReload") == true
+      r3Chosen.Get("mm.bodyYawOffsetFemale") == 6 and r3Chosen.Get("mm.bodyYawOffsetMale") == 0
+      and r3Chosen.Get("mm.pelvisYawTrim") == 0 and r3Chosen.Get("mm.shinobiBonusReload") == true
       and defaultsLines() == 0)
     local r3Later = bootWithFile("core.defaultsRevision=3\nbodyturn.meleeStrikeTurn=false\nmm.bodyYawOffset=8\n")
     check("T03 defaults revision 3: a file of revision 3 keeps the old values as choices",
-      r3Later.Get("bodyturn.meleeStrikeTurn") == false and r3Later.Get("mm.bodyYawOffset") == 8 and defaultsLines() == 0)
+      r3Later.Get("bodyturn.meleeStrikeTurn") == false and r3Later.Get("mm.bodyYawOffsetFemale") == 8 and defaultsLines() == 0)
+    -- the body yaw offset of both bodies is read into the female key only (also from a file of the current revision); a stored
+    -- female key wins over it; male V keeps the default 0; the next save no longer writes the old key
+    local boMove = bootWithFile("core.defaultsRevision=3\nmm.bodyYawOffset=-6.5\n")
+    boMove.Save(tmpSettings)
+    local boMoveDisk = readFile(tmpSettings) or ""
+    check("body yaw offset per body: a stored mm.bodyYawOffset moves to mm.bodyYawOffsetFemale, male V keeps 0, the old key is dropped",
+      boMove.Get("mm.bodyYawOffsetFemale") == -6.5 and boMove.Get("mm.bodyYawOffsetMale") == 0 and boMove.Get("mm.bodyYawOffset") == nil
+      and string.find(boMoveDisk, "mm.bodyYawOffsetFemale=-6.5", 1, true) ~= nil and string.find(boMoveDisk, "mm.bodyYawOffset=", 1, true) == nil,
+      boMoveDisk)
+    local boBoth = bootWithFile("core.defaultsRevision=3\nmm.bodyYawOffset=7\nmm.bodyYawOffsetFemale=2\nmm.bodyYawOffsetMale=1.5\n")
+    check("body yaw offset per body: stored per-body values win over the old key",
+      boBoth.Get("mm.bodyYawOffsetFemale") == 2 and boBoth.Get("mm.bodyYawOffsetMale") == 1.5)
     local r3Fresh = bootWithFile(nil)
     check("T03 defaults revision 3: a fresh install starts on the new defaults",
-      r3Fresh.Get("bodyturn.meleeStrikeTurn") == true and r3Fresh.Get("mm.bodyYawOffset") == 4 and r3Fresh.Get("mm.pelvisYawTrim") == 2
+      r3Fresh.Get("bodyturn.meleeStrikeTurn") == true and r3Fresh.Get("mm.bodyYawOffsetFemale") == 4
+      and r3Fresh.Get("mm.bodyYawOffsetMale") == 0 and r3Fresh.Get("mm.pelvisYawTrim") == 2
       and r3Fresh.Get("mm.shinobiBonusReload") == true and defaultsLines() == 0)
     -- revision 3 also: scenes and dialogues stay in third person (perspective.scene true -> false) and the camera shoulder
     -- offset is 1 m (camera.side 0.5 -> 1); both options are registered by modules that load after the file is read

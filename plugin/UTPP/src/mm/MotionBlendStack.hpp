@@ -308,13 +308,31 @@ class BlendStack
         return m_steeringTargetTime;
     }
     // Shrink-only stride warping of the leg targets (see WarpStride). Default UTPP_STRIDE_WARP (off); off reproduces the pose bit for bit.
+    // Safe to switch at any time: switched on under live layers, each layer's stride scale starts at 1 and shortens at the interpolation
+    // rate (a fresh pick takes its target at once and fades in with its layer, as always); switched off, the shortening the output
+    // still carries is released at the interpolation rate (LimitStrideRelease) and the pose is the unwarped one once it reaches 0.
     void SetStrideWarp(bool enabled)
     {
+        if (enabled && !m_strideWarp)
+        {
+            for (auto &p : m_players)
+            {
+                p.stride.scale = 1.0f;
+                p.stride.initialized = true;
+            }
+            m_strideYawRate = 0.0f;
+            m_strideYawValid = false;
+        }
         m_strideWarp = enabled;
     }
     bool StrideWarp() const
     {
         return m_strideWarp;
+    }
+    // Knee limit of stride warping in force (see SetStrideKneeLimit).
+    bool StrideKneeLimit() const
+    {
+        return m_strideKneeLimit;
     }
     // Stride warping details (defaults UTPP_STRIDE_YAW_FADE, UTPP_STRIDE_CROUCH, UTPP_STRIDE_LAYER_FADE): yaw fade on every loop,
     // crouched loop mode (0 like the others, 1 not warped, 2 yaw fade), stride offsets fading on the whole-layer weight.
@@ -1379,10 +1397,11 @@ class BlendStack
     // moves at the interpolation rate) but is released no faster than that rate: a short blend to an unwarped pick (a turn out of a warped
     // loop) or the pruning of the warped layer would otherwise drop it by up to 11 cm of ankle offset in one update and snap the knee. The
     // held part shortens the output's own stride: its ankle targets are pulled towards its thighs along the last mixed stride direction.
-    // Without a held part nothing changes.
+    // Without a held part nothing changes. With stride warping switched off the held part keeps being released at the same rate (no
+    // layer adds to it any more), so switching it off never drops the shortening in one update.
     void LimitStrideRelease(float dt)
     {
-        if (!m_strideWarp || !m_outputTargets.valid || m_thighBones[0] < 0 || m_thighBones[1] < 0)
+        if ((!m_strideWarp && !(m_strideHeld > 0.0f)) || !m_outputTargets.valid || m_thighBones[0] < 0 || m_thighBones[1] < 0)
         {
             m_strideHeld = 0.0f;
             return;

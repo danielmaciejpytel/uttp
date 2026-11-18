@@ -473,6 +473,9 @@ public:
     bool FeminineFigure() const { return m_figureOn; }
     // Hand-back blend from an external pose (blend stack switch; the runtime option of the driver)
     void SetHandBackBlend(bool aOn) { m_stack.SetHandBackBlend(aOn); }
+    // Stride warping of ground locomotion loops (blend stack switch, safe at any time; the runtime option of the driver)
+    void SetStrideWarp(bool aOn) { m_stack.SetStrideWarp(aOn); }
+    bool StrideWarp() const { return m_stack.StrideWarp(); }
     void SetGraphInputs(const motionstack::GraphInputs &input)
     {
         m_stack.SetGraphInputs(input);

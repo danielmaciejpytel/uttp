@@ -2266,7 +2266,7 @@ void Native_SetMotionPelvisYawTrim(RED4ext::IScriptable*, RED4ext::CStackFrame* 
         *aOut = ok;
 }
 
-// ---- body yaw offset (motiondriver::SetBodyYawOffset; CET mm.bodyYawOffset, default 0): deg, + = left, -20..20
+// ---- body yaw offset of both bodies (motiondriver::SetBodyYawOffset, default 0; CET uses UTPPSetMotionBodyYawOffsets): deg, + = left, -20..20
 void Native_SetMotionBodyYawOffset(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     float deg = 0.0f;

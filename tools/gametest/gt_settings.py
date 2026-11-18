@@ -35,17 +35,20 @@ SETTINGS_AUTHOR = 'author'
 SETTINGS_SHIPPED = 'shipped'
 SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # Locomotion settings pinned in both modes at their registered defaults, so foot slide and gait measurements of different runs
-# compare the same walk speed, lean, orientation warp, replant and aim jog; logged at arming (settings_line).
+# compare the same walk speed, lean, orientation warp, stride matching, replant and aim jog; logged at arming (settings_line).
+# Stride matching changes the step length (and so the measured foot slide) of every walk and run: it is pinned so a run always
+# measures the shipped configuration, whatever the player chose in the menu.
 LOCO_VALUES = (('mm.walkSpeed', 1.6), ('mm.minWalkSpeed', 0.82), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
-               ('mm.leanHeadScale', 0.9), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
+               ('mm.leanHeadScale', 0.9), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.strideWarp', True),
+               ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
                ('bodyturn.aimJogSpeed', 3.3), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False))
 LOCO_KEYS = tuple(k for k, _ in LOCO_VALUES)
-AUTHOR_VALUES = (('mm.bodyYawOffset', 4), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
+AUTHOR_VALUES = (('mm.bodyYawOffsetFemale', 4), ('mm.bodyYawOffsetMale', 0), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
                  ('perspective.scene', False), ('perspective.blend', 0.6)) + LOCO_VALUES
 # registered defaults (the `default =` of each Register call; camera.side = the shoulder offset of the camera's fixed profile);
 # a key without an entry, or with None, is not known to the harness (nothing is applied for it in 'shipped' mode and a
 # difference cannot be named)
-SHIPPED_DEFAULTS = {'mm.bodyYawOffset': 4, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+SHIPPED_DEFAULTS = {'mm.bodyYawOffsetFemale': 4, 'mm.bodyYawOffsetMale': 0, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
                     'perspective.scene': False, 'perspective.blend': 0.8, **dict(LOCO_VALUES)}
 
 

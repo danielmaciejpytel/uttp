@@ -1489,8 +1489,9 @@ public native func UTPPSetMotionFeminineFigure(on: Bool) -> Bool
 // Run pelvis yaw trim (motion poses; CET setting mm.pelvisYawTrim, default 0): turns the pelvis by deg (+ = left, -10..10) while V
 // walks / runs / sprints forward on the ground; chest, head and feet keep their direction. False = NaN / out of range (nothing changed).
 public native func UTPPSetMotionPelvisYawTrim(deg: Float) -> Bool
-// Body yaw offset (motion poses; CET setting mm.bodyYawOffset, default 0): turns the whole character by deg (+ = left, -20..20) about
-// its visual root; the movement direction is unchanged; off while aiming / during weapon actions. False = NaN / out of range (nothing changed).
+// Body yaw offset of both bodies (motion poses; DLL default 0; the CET settings use UTPPSetMotionBodyYawOffsets with one value per body):
+// turns the whole character by deg (+ = left, -20..20) about its visual root; the movement direction is unchanged; off while aiming /
+// during weapon actions. False = NaN / out of range (nothing changed).
 public native func UTPPSetMotionBodyYawOffset(deg: Float) -> Bool
 // Barrel pitch loop of the motion aim offset (CET setting mm.aimAtCrosshair, DLL default off): the weapon
 // barrel is steered onto the crosshair point (UTPPSetAimTarget / UTPPSetCameraTarget). Off: a running loop fades out. Always true.
