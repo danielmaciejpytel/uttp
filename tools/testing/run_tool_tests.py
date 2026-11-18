@@ -103,6 +103,7 @@ REGISTRY = {
     'analysis/test_punch_direction_report.py': {},
     'analysis/test_pose_stage_pops.py': {'note': 'stage pop attribution on a synthetic stage file and synthetic clip frames'},
     'analysis/test_replay_deformation.py': {'note': 'replay pose deformation: synthetic stage files and a stand-in skinning rig'},
+    'analysis/test_traversal_coverage.py': {'note': 'traversal plan log coverage on synthetic log files'},
     'analysis/test_start_stop_recorded.py': {
         'markers': {'needs-args'}, 'reason': 'analysis CLI: positional baseline candidate feed output'},
     'gametest/test_bike_cases_nav.py': {},

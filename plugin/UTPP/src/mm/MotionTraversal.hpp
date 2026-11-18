@@ -95,6 +95,7 @@ struct CapsuleState
     double speed = 0;             // horizontal linear speed, m/s
     bool airborne = false;        // Locomotion == 5 / dodgeAir / fall
     double climbSpeedModifier = 1; // gamedataStatType.ClimbSpeedModifier (<= 0 -> 1 as in LT:2746-2749)
+    uint8_t leadFoot = 0;          // foot in front at the start (locomotion foot phase): 0 unknown, 1 left, 2 right (Config::leadFootRow)
 };
 
 struct Config
@@ -146,6 +147,17 @@ struct Config
     // vehicle batch (TRAV-1 C): a Hurdle whose true depth (obstacleEnd - topPoint along the facing) exceeds this is Unsupported
     // ("deep") even when topExtent fits the Hurdle row (fallback when climbedEntity is not filled) [P]
     double hurdleMaxTrueDepthM = 0.90;
+    // Start window: the montage start frame is searched only inside the montage's pose-search sampling range (kStartWindows,
+    // seconds from the montage start; frames whose time lies in [min, max], or the frame nearest to the range when none does).
+    // A montage without an entry keeps the full search. Default off: the old search runs from frame 0 to the FrontLedge window start.
+    bool clampStartWindow = false;
+    // Lead foot: with CapsuleState::leadFoot known, the decision's montages whose name ends in the matching foot ("Lfoot" / "Rfoot")
+    // are tried first (row order kept inside each group); the first candidate whose plan passes the gate wins, and when every candidate
+    // is rejected the row-order choice's rejection is returned, so the accepted set can only grow. Default off (row order only).
+    bool leadFootRow = false;
+    // With clampStartWindow: when every in-window plan is rejected by the gate, plan again with the full start search (the start may then
+    // lie past the window; Plan::startOutsideWindow), so the accepted set is never smaller than without the window.
+    bool startWindowFallback = true;
     // trav tests only: non-empty = skip the decision table / action mapping and plan this montage of the file
     // (still needs solvable windows and a FrontLedge window); empty (default) = the table decides
     std::string forceMontage;
@@ -198,6 +210,7 @@ struct Plan
                                       // them separately (LT:2750-2751); vault: -1 (not in data)
     bool rateClamped = false;
     double rateWanted = 1;            // clip time / game duration before the [minRate, maxRate] clamp (1 = no duration match)
+    bool startOutsideWindow = false;  // clampStartWindow: planned again without the window after a gate rejection (startWindowFallback)
     const char* rejectReason = "";    // static string: why the gate rejected the plan ("rate", "step", "warp"); "" when not rejected
     double gateStepLimit = 0;         // horizontal step limit the gate applied (Config::maxStepM scaled by the rig), metres
     double gatePlanarStep = 0;        // max horizontal root step per clip frame and per gateDt tick
@@ -287,6 +300,83 @@ inline int VaultLandingFrame(const TravMontage& aM, int aFrom)
 }
 } // namespace motion_detail
 
+// Pose-search sampling range per traversal montage (seconds from the montage start): the reference picks the montage start time only
+// inside this range (Config::clampStartWindow).
+struct StartWindow
+{
+    const char* montage;
+    double minS, maxS;
+};
+inline constexpr StartWindow kStartWindows[] = {
+    {"AM_M_Neutral_Traversal_Vault_1_0_walk_F_Rfoot", 0.0, 0.5068},
+    {"AM_M_Neutral_Traversal_Vault_1_0_stand_F_Lfoot", 0.0, 0.0846},
+    {"AM_M_Neutral_Traversal_Vault_1_0_run_F_Lfoot", 0.0, 0.6141},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Rfoot", 0.0, 0.7452},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Lfoot", 0.0, 0.3689},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_stand_F_Rfoot", 0.0, 0.1006},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_stand_F_Lfoot", 0.0, 0.0999},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_run_F_Rfoot", 0.0, 0.3229},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_run_F_Lfoot", 0.0, 0.3292},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Rfoot", 0.0, 0.4994},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Lfoot", 0.0, 0.5040},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Rfoot", 0.0, 0.8422},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Lfoot", 0.0, 0.7256},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_stand_F_V2_Rfoot", 0.0, 0.1211},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_stand_F_V2_Lfoot", 0.0, 0.0746},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Rfoot", 0.0, 0.6668},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Lfoot", 0.0, 0.6653},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_Rfoot", 0.0, 0.4784},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_Lfoot", 0.0, 0.4865},
+    {"AM_M_Neutral_Traversal_Climb_Start_2_5_walk_F_Rfoot", 0.0, 1.0308},
+    {"AM_M_Neutral_Traversal_Climb_Start_2_5_walk_F_Lfoot", 0.0, 0.9535},
+    {"AM_M_Neutral_Traversal_Climb_Start_2_5_stand_F_Rfoot", 0.0, 0.1619},
+    {"AM_M_Neutral_Traversal_Climb_Start_2_5_stand_F_Lfoot", 0.0, 0.1686},
+    {"AM_M_Neutral_Traversal_Climb_Start_2_5_run_F_Rfoot", 0.0, 0.5090},
+    {"AM_M_Neutral_Traversal_Climb_Start_2_5_run_F_Lfoot", 0.0, 0.5090},
+    {"AM_M_Neutral_Traversal_Catch_Vault_med", 0.8679, 0.9014},
+    {"AM_M_Neutral_Traversal_Catch_Vault_low", 0.8798, 0.9133},
+    {"AM_M_Neutral_Traversal_Catch_Vault_high", 0.8530, 0.8865},
+    {"AM_M_Neutral_Traversal_Catch_Mantle_med_stand", 0.8393, 0.8726},
+    {"AM_M_Neutral_Traversal_Catch_Mantle_low_stand", 0.8663, 0.9001},
+    {"AM_M_Neutral_Traversal_Catch_Hurdle_med_stand", 0.8344, 0.8693},
+    {"AM_M_Neutral_Traversal_Catch_Hurdle_low_stand", 0.8320, 0.8669},
+    {"AM_M_Neutral_Traversal_Catch_Hurdle_high_stand", 0.8775, 0.9124},
+    {"AM_M_Neutral_Traversal_Catch_Cliff_high_standF", 0.9053, 0.9402},
+};
+
+inline const StartWindow* FindStartWindow(const std::string& aMontage)
+{
+    for (const StartWindow& w : kStartWindows)
+        if (aMontage == w.montage)
+            return &w;
+    return nullptr;
+}
+
+// Frames [aFirst, aLast] whose time f / fps lies inside the montage's start window (1e-6 s tolerance); when no frame does (a range
+// narrower than one frame), the single frame nearest to the range centre. false = no window for this montage.
+inline bool StartWindowFrames(const TravMontage& aM, int& aFirst, int& aLast)
+{
+    const StartWindow* w = FindStartWindow(aM.name);
+    if (!w || aM.frames < 1 || aM.fps <= 0)
+        return false;
+    const int last = aM.frames - 1;
+    aFirst = std::clamp(static_cast<int>(std::ceil(w->minS * aM.fps - 1e-6)), 0, last);
+    aLast = std::clamp(static_cast<int>(std::floor(w->maxS * aM.fps + 1e-6)), 0, last);
+    if (aFirst > aLast)
+        aFirst = aLast = std::clamp(static_cast<int>(std::lround(0.5 * (w->minS + w->maxS) * aM.fps)), 0, last);
+    return true;
+}
+
+// Lead foot of a montage from its name suffix: 1 "Lfoot", 2 "Rfoot", 0 none.
+inline uint8_t MontageLeadFoot(const std::string& aName)
+{
+    auto ends = [&](const char* s) {
+        const size_t n = std::char_traits<char>::length(s);
+        return aName.size() >= n && aName.compare(aName.size() - n, n, s) == 0;
+    };
+    return ends("Lfoot") ? 1 : (ends("Rfoot") ? 2 : 0);
+}
+
 // Chooser inputs (motion units) for a game climb / vault start.
 inline Inputs MakeGameInputs(const GameObstacle& aO, const CapsuleState& aC, const Config& aCfg, double& aHeightM,
                              double& aLandingZ)
@@ -300,7 +390,9 @@ inline Inputs MakeGameInputs(const GameObstacle& aO, const CapsuleState& aC, con
     return MakeInputsFromMetres(true, true, true, aHeightM, aO.topExtent, aO.topPoint.z - aLandingZ, aC.speed, mode);
 }
 
-inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO,
+namespace motion_detail
+{
+inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO,
                           const CapsuleState& aC, const GameTweaks& aT, const Config& aCfg)
 {
     using namespace motion_detail;
@@ -376,15 +468,50 @@ inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFil
     }
     else
         forced.push_back(aCfg.forceMontage);
+    auto usable = [&](const std::string& aName) -> const TravMontage* {
+        const TravMontage* m = aFile.Find(aName);
+        if (!m || !WindowsSolvable(*m) || m->root.size() < 2)
+            return nullptr;
+        for (const auto& w : m->windows)
+            if (w.target == "FrontLedge")
+                return m;
+        return nullptr;
+    };
+    if (aCfg.leadFootRow && aC.leadFoot != 0 && aCfg.forceMontage.empty())
+    {
+        // lead foot: matching-foot montages first (row order inside each group), first plan that passes the gate wins
+        std::vector<std::string> rowOrder;
+        for (const auto& name : p.decision.montages)
+            if (usable(name))
+                rowOrder.push_back(name);
+        if (!rowOrder.empty())
+        {
+            std::vector<std::string> order;
+            for (const auto& name : rowOrder)
+                if (MontageLeadFoot(name) == aC.leadFoot)
+                    order.push_back(name);
+            for (const auto& name : rowOrder)
+                if (MontageLeadFoot(name) != aC.leadFoot)
+                    order.push_back(name);
+            Config sub = aCfg;
+            sub.leadFootRow = false;
+            for (const auto& name : order)
+            {
+                sub.forceMontage = name;
+                Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub);
+                q.decision = p.decision;
+                if (q.result == StartResult::Ok)
+                    return q;
+            }
+            sub.forceMontage = rowOrder.front(); // every candidate rejected: the row-order choice's rejection
+            Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub);
+            q.decision = p.decision;
+            return q;
+        }
+    }
     for (const auto& name : aCfg.forceMontage.empty() ? p.decision.montages : forced)
     {
-        const TravMontage* m = aFile.Find(name);
-        if (!m || !WindowsSolvable(*m) || m->root.size() < 2)
-            continue;
-        bool front = false;
-        for (const auto& w : m->windows)
-            front = front || w.target == "FrontLedge";
-        if (front)
+        if (const TravMontage* m = usable(name))
         {
             p.montage = m;
             break;
@@ -522,6 +649,10 @@ inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFil
     // frame whose distance to the front contact point (along the clip facing at the window end) best matches the
     // capsule's distance to the game's contact point, searched up to the FrontLedge window start.
     p.startFrame = 0;
+    int winFirst = 0, winLast = 0;
+    const bool clampWin = aCfg.clampStartWindow && StartWindowFrames(m, winFirst, winLast);
+    if (clampWin)
+        p.startFrame = winFirst;
     if (aCfg.alignStart && frontWin >= 0)
     {
         const WarpWindow& fw = p.windows[static_cast<size_t>(frontWin)];
@@ -531,7 +662,13 @@ inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFil
         const V3 toTarget = fw.target - aC.pos;
         const double wantDist = toTarget.x * facing.x + toTarget.y * facing.y;
         double best = 1e9;
-        for (int f = 0; f <= fw.startFrame; ++f)
+        int f0 = 0, f1 = fw.startFrame;
+        if (clampWin) // the start window, cut at the FrontLedge window start unless the window lies past it (catch montages)
+        {
+            f0 = winFirst;
+            f1 = winFirst <= fw.startFrame ? std::min(winLast, fw.startFrame) : winLast;
+        }
+        for (int f = f0; f <= f1; ++f)
         {
             const V3 d = clipContact - m.root[static_cast<size_t>(f)].pos;
             const double err = std::fabs(d.x * clipFwd.x + d.y * clipFwd.y - wantDist);
@@ -600,6 +737,26 @@ inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFil
         {
             p.result = StartResult::Rejected;
             p.reason = p.rejectReason; // the "UTPP trav:" line prints result=Rejected(<reason>)
+        }
+    }
+    return p;
+}
+
+} // namespace motion_detail
+
+inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO,
+                          const CapsuleState& aC, const GameTweaks& aT, const Config& aCfg)
+{
+    Plan p = motion_detail::PlanOnce(aTable, aFile, aO, aC, aT, aCfg);
+    if (p.result == StartResult::Rejected && aCfg.clampStartWindow && aCfg.startWindowFallback)
+    {
+        Config full = aCfg;
+        full.clampStartWindow = false;
+        Plan q = motion_detail::PlanOnce(aTable, aFile, aO, aC, aT, full);
+        if (q.result == StartResult::Ok)
+        {
+            q.startOutsideWindow = true;
+            return q;
         }
     }
     return p;
