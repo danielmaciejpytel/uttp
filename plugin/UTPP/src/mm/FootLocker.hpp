@@ -42,6 +42,7 @@
 #include "Inertializer.hpp"
 #include "LegIk.hpp"
 #include "MMMath.hpp"
+#include "PelvisPlacement.hpp"
 #include "Steering.hpp"
 
 namespace utpp::mm
@@ -196,6 +197,10 @@ struct FootLockDiagnostics
     float maxLift = 0.0f;                       // m, highest step lift since Init / Reset
     uint64_t blendOutLifts = 0;                 // foot updates where the blend-out sink bound lifted the ankle (loco-fix 2026-11-09)
     uint64_t stopSwingReleases = 0;             // standing-stop locks released as a swing contact (loco-stop-knees 2026-11-09)
+    // pelvis stage (SetPelvisPlacement; zero / 0 while it is off)
+    math::Vec3 pelvisOffset{};                  // m, pelvis offset applied this update (model space)
+    math::Vec3 pelvisTarget{};                  // m, its unfiltered target this update
+    uint64_t pelvisSolves = 0;                  // updates with a non-zero pelvis offset (legs solved again from the moved pelvis)
 };
 
 class FootLocker
@@ -360,9 +365,25 @@ public:
     }
     const FootReplantConfig& ReplantConfig() const { return m_rcfg; }
 
+    // Pelvis stage (PelvisPlacement.hpp): after both feet are solved, the pelvis moves so that every ankle target is reachable and
+    // both legs are solved again from the moved pelvis (a locked foot to its target, a free foot to the ankle of the foot pass, each
+    // foot keeping its model-space rotation). Off (default) = no pelvis stage, bit for bit. aAllowed (per update): false -> the
+    // offset springs back to zero (air, vehicle, scripted scenes, traversal).
+    void SetPelvisPlacement(bool aOn, const PelvisPlacementConfig& aCfg = {})
+    {
+        if (aOn != m_pelvisOn)
+            m_pelvis.Reset();
+        m_pelvisOn = aOn;
+        m_pelvis.SetConfig(aCfg);
+    }
+    void SetPelvisAllowed(bool aAllowed) { m_pelvisAllowed = aAllowed; }
+    bool PelvisPlacementOn() const { return m_pelvisOn; }
+    void ResetPelvis() { m_pelvis.Reset(); }
+
     // Instant reset (no blend): both feet unlocked, character transform at the origin, statistics cleared.
     void Reset()
     {
+        m_pelvis.Reset();
         m_supportHoldSide = -1;
         m_supportHoldEligible = false;
         m_standingStopSupport = false;
@@ -413,6 +434,8 @@ public:
         const float contacts[2] = {aContactL, aContactR};
         for (int s = 0; s < 2; ++s)
             UpdateFoot(s, dt, std::isfinite(contacts[s]) ? contacts[s] : 0.0f);
+        if (m_pelvisOn)
+            ApplyPelvis(dt, aIn);
         if (m_diag.foot[0].stepped && m_diag.foot[1].stepped) // loco C1b invariant (one foot at a time, also within an update)
             ++m_diag.simultaneousSteps;
     }
@@ -748,6 +771,7 @@ private:
         d.contactIn = aContact; // loco C0
         d.stepped = d.hurried = false; // loco C1b
         d.stopReleased = false;        // loco-stop-knees
+        m_solveLocked[aSide] = false;  // pelvis stage: no locked solve yet this update
 
         // contact hysteresis (disabled -> contact off -> blend out)
         if (!m_enabled)
@@ -962,6 +986,9 @@ private:
             math::Vec3 target = gc.p + f.offset * (w * f.targetScale);
             if (f.lift > 0.0f) // loco C1b replant step: lifted ankle target (never in the 0.5.9 path)
                 target.z += f.lift * w;
+            m_solveLocked[aSide] = true;
+            m_solveTarget[aSide] = target;
+            m_prevClampTime[aSide] = f.clampTime;
             Solve(aSide, gp, ga, gb, gc, target, gl.p, d);
             // loco C1b clamp trigger (read only in replant mode): hard clamp or a target missed in the soft reach zone
             f.clampTime = (d.clamped || d.error > m_rcfg.reachError) ? f.clampTime + aDt : 0.0f;
@@ -1048,6 +1075,86 @@ private:
         return g.p;
     }
 
+    // Pelvis stage (SetPelvisPlacement). Leg data from the animated pose aIn (hips, ankles, lengths) and the foot pass (targets);
+    // the pelvis bone is the common parent of both UpLegs. A zero offset leaves the foot pass output untouched.
+    void ApplyPelvis(float aDt, std::span<const BoneTransform> aIn)
+    {
+        m_diag.pelvisOffset = m_diag.pelvisTarget = math::Vec3{};
+        if (m_pathLen[0] <= 0 || m_pathLen[1] <= 0 || m_path[0][m_pathLen[0] - 1] != m_path[1][m_pathLen[1] - 1])
+            return;
+        const int32_t pel = m_path[0][m_pathLen[0] - 1];
+        PelvisLeg legs[2];
+        math::Vec3 passAnkle[2], animAnkle[2];
+        for (int s = 0; s < 2; ++s)
+        {
+            BoneTransform gp{};
+            for (int32_t i = 0; i < m_pathLen[s]; ++i)
+                gp = Mul(gp, aIn[size_t(m_path[s][i])]);
+            const BoneTransform ga = Mul(gp, aIn[size_t(m_chain[s][0])]);
+            const BoneTransform gb = Mul(ga, aIn[size_t(m_chain[s][1])]);
+            const BoneTransform gc = Mul(gb, aIn[size_t(m_chain[s][2])]);
+            BoneTransform gl = gc;
+            for (int32_t i = 0; i < m_toePathLen[s]; ++i)
+                gl = Mul(gl, aIn[size_t(m_toePath[s][i])]);
+            BoneTransform pp{};
+            for (int32_t i = 0; i < m_pathLen[s]; ++i)
+                pp = Mul(pp, m_out[size_t(m_path[s][i])]);
+            const BoneTransform pc = Mul(Mul(Mul(pp, m_out[size_t(m_chain[s][0])]), m_out[size_t(m_chain[s][1])]), m_out[size_t(m_chain[s][2])]);
+            passAnkle[s] = pc.p;
+            animAnkle[s] = gc.p;
+            legs[s].hip = ga.p;
+            legs[s].ankle = gc.p;
+            legs[s].target = m_solveLocked[s] ? m_solveTarget[s] : pc.p;
+            legs[s].length = Len(gb.p - ga.p) + Len(gc.p - gb.p);
+            legs[s].footLength = m_toePathLen[s] > 0 ? Len(gl.p - gc.p) : 0.0f;
+        }
+        const math::Vec3 off = m_pelvis.Update(aDt, legs, m_pelvisAllowed);
+        m_diag.pelvisTarget = m_pelvis.Target();
+        if (!(math::Dot(off, off) > 1e-10f))
+            return;
+        m_diag.pelvisOffset = off;
+        ++m_diag.pelvisSolves;
+        BoneTransform par{}; // pelvis parent (model space)
+        for (int32_t i = 0; i + 1 < m_pathLen[0]; ++i)
+            par = Mul(par, m_out[size_t(m_path[0][i])]);
+        m_out[size_t(pel)].p = m_out[size_t(pel)].p + math::QuatRotate(math::QuatInv(par.q), off);
+        for (int s = 0; s < 2; ++s)
+        {
+            BoneTransform gp{};
+            for (int32_t i = 0; i < m_pathLen[s]; ++i)
+                gp = Mul(gp, m_out[size_t(m_path[s][i])]);
+            const BoneTransform ga = Mul(gp, m_out[size_t(m_chain[s][0])]);
+            const BoneTransform gb = Mul(ga, m_out[size_t(m_chain[s][1])]);
+            const BoneTransform gc = Mul(gb, m_out[size_t(m_chain[s][2])]);
+            BoneTransform gl = gc;
+            for (int32_t i = 0; i < m_toePathLen[s]; ++i)
+                gl = Mul(gl, m_out[size_t(m_toePath[s][i])]);
+            const bool locked = m_solveLocked[s];
+            const math::Vec3 want = locked ? m_solveTarget[s] : passAnkle[s];
+            const legik::TwoBoneSolution r =
+                legik::SolveTwoBone(gp, ga, gb, gc, want, gl.p, m_cfg.maxExtension, m_cfg.softExtension, m_poleCarry, !locked);
+            if (r.status != legik::TwoBoneStatus::kOk || !math::IsFinite(r.ankle))
+                continue; // the leg follows the pelvis (fail safe: no new rotation)
+            for (int k = 0; k < 3; ++k)
+                m_out[size_t(m_chain[s][k])].q = r.local[k];
+            if (!locked)
+                continue;
+            // reach diagnostics of a locked foot come from this final solve
+            FootLockFootDiag& d = m_diag.foot[s];
+            if (d.clamped && m_diag.clamps > 0)
+                --m_diag.clamps;
+            d.clamped = r.clamped;
+            if (r.clamped)
+                ++m_diag.clamps;
+            d.correction = Len(r.ankle - animAnkle[s]);
+            d.error = Len(r.ankle - want);
+            if (d.correction > m_diag.maxCorrection)
+                m_diag.maxCorrection = d.correction;
+            Foot& f = m_foot[s];
+            f.clampTime = (d.clamped || d.error > m_rcfg.reachError) ? m_prevClampTime[s] + aDt : 0.0f;
+        }
+    }
+
     // Two-bone IK in model space (shared analytic solver mm/LegIk.hpp, extracted bit-exactly from this function); writes
     // UpLeg/Leg/Foot local rotations of m_out (foot keeps its animated model-space rotation). Leaves the animated pose on any
     // non-finite result.
@@ -1111,6 +1218,12 @@ private:
     float m_cos = 1.0f, m_sin = 0.0f;
     math::Vec3 m_animToe[2] = {};  // animated lock points of this update (character frame), before any correction
     FootLockDiagnostics m_diag{};
+    PelvisPlacement m_pelvis;            // pelvis stage (SetPelvisPlacement)
+    bool m_pelvisOn = false;
+    bool m_pelvisAllowed = false;
+    bool m_solveLocked[2] = {false, false}; // this update: the foot pass solved a locked target
+    math::Vec3 m_solveTarget[2] = {};       // that target (model space)
+    float m_prevClampTime[2] = {0.0f, 0.0f}; // clampTime before that solve
     uint64_t m_eventSeq = 0; // loco C0: foot event sequence (not cleared by Reset, so a reader never misses a new event)
 };
 

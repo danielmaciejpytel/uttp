@@ -1513,6 +1513,8 @@ struct LegContext
     int32_t cancelStartSupport = -1;
 };
 LegContext g_legCtx; // last feed (status / tests)
+bool g_pelvisPlacementOn = false; // pelvis stage of the foot locker (false = the leg tail without it; default off until its pops are resolved)
+uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis stage
 
 LegContext ComputeLegContextLocked(const FeedInput& aIn, float aCapsuleSpeed)
 {
@@ -1811,6 +1813,21 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
         pol.classStop = aCtx.clipClass == steer::kClassStop;
         pol.classIdle = aCtx.clipClass == steer::kClassIdle;
         ApplyFootFeedPolicy(g_footLock, pol);
+        // Pelvis stage (mm/PelvisPlacement.hpp, run by the foot locker after its foot pass): the pelvis moves so that every ankle
+        // target is reachable, then both legs are solved again. Only with ground placement allowed (gate open, no hold, grounded,
+        // stand / crouch / sprint), never on a traversal frame; elsewhere the offset springs back to zero. Off = the previous leg
+        // tail bit for bit. An offset-root teleport drops the offset at once.
+        g_footLock.SetPelvisPlacement(g_pelvisPlacementOn);
+        if (g_pelvisPlacementOn)
+        {
+            const uint64_t tp = g_offsetRoot.Diagnostics().teleports;
+            if (tp != g_pelvisTeleports)
+            {
+                g_pelvisTeleports = tp;
+                g_footLock.ResetPelvis();
+            }
+            g_footLock.SetPelvisAllowed(aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && g_motionFrame.travFrame));
+        }
         // 2026-11-06 start slip: a start clip may let the planted toe drift further (g_slipStartStart) before the soft lock slides
         // (measured offline: planted toe speed of the Start classes -13..-31 % on both bodies, tests/FeedReplayMotion.cpp --footlock).
         // Off (0, or catch-up off / not above the base slip) = the single slip of SetSlip, bit for bit.
