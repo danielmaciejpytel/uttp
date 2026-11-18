@@ -61,6 +61,8 @@ struct Params
     float staleS = 0.2f;    // s, a velocity unchanged for longer than this has no acceleration
     bool anchorFeet = true; // legs: two-bone IK back onto the model-space ankles of the unleaned pose (see Apply)
     float maxExtension = 0.995f, softExtension = 0.97f; // anchor IK reach (FootLocker values)
+    uint8_t coverage = 0;       // Coverage (0 = Default, 1 = Wide); Wide fades the gate in wideGateFadeS
+    float wideGateFadeS = 0.2f; // s, gate fade of the wide coverage
 };
 
 // Native range check (UTPPSetMotionLeanParams): finite and 0 .. 2.
@@ -76,7 +78,40 @@ struct Signals // one per v2 feed
     int direction = ln::kDirF;  // E_MovementDirection
     int curveClip = -1;         // pack CLIP index of the played clip (Disable_AdditiveLeans) or -1
     float clipSeconds = 0.0f;   // time inside that clip
+    // Wide coverage only (Coverage::Wide; ignored by the default gate): weaponAction = a reload / shot / hipfire / weapon action
+    // (weaponBusy without the plain drawn weapon); weaponDrawn = a weapon is in the hands.
+    bool weaponAction = false, weaponDrawn = false;
 };
+
+// Gate coverage of the lean (Params::coverage).
+//   Default: the conservative gate (no crouch, no aiming, no weapon in the hands or weapon action).
+//   Wide:    also with a weapon drawn (body and head), while aiming (body only: the head stays with the aim offset) and while
+//            crouch moving; weapon actions (reload, shot, hipfire), air, slide and blocked frames still close it.
+enum class Coverage : uint8_t
+{
+    Default = 0,
+    Wide = 1,
+};
+
+struct GateWant
+{
+    bool body = false;
+    bool head = false; // before the HasHead check of the runtime
+};
+
+inline GateWant LeanGateWant(Coverage aCoverage, const Signals& aS, bool aVelOk)
+{
+    GateWant w;
+    if (aCoverage == Coverage::Wide)
+    {
+        w.body = !aS.blocked && aS.moving && !aS.air && !aS.weaponAction && !aS.slide && aVelOk;
+        w.head = w.body && aS.head && !aS.aiming;
+        return w;
+    }
+    w.body = !aS.blocked && aS.moving && !aS.crouch && !aS.air && !aS.aiming && !aS.weaponBusy && !aS.slide && aVelOk;
+    w.head = w.body && aS.head;
+    return w;
+}
 
 struct Telemetry
 {
@@ -218,9 +253,12 @@ public:
             m_aLP = 0.0f;
 
         // ---- gates (linear fade)
-        m_want = !aS.blocked && aS.moving && !aS.crouch && !aS.air && !aS.aiming && !aS.weaponBusy && !aS.slide && vOk;
-        m_headWant = m_want && aS.head && m_head >= 0;
-        const float fadeStep = aP.gateFadeS > 1e-4f ? dt / aP.gateFadeS : 1.0f;
+        const bool wide = aP.coverage == static_cast<uint8_t>(Coverage::Wide);
+        const GateWant gw = LeanGateWant(wide ? Coverage::Wide : Coverage::Default, aS, vOk);
+        m_want = gw.body;
+        m_headWant = gw.head && m_head >= 0;
+        const float fadeS = wide ? aP.wideGateFadeS : aP.gateFadeS;
+        const float fadeStep = fadeS > 1e-4f ? dt / fadeS : 1.0f;
         m_gate += std::clamp((m_want ? 1.0f : 0.0f) - m_gate, -fadeStep, fadeStep);
         m_headGate += std::clamp((m_headWant ? 1.0f : 0.0f) - m_headGate, -fadeStep, fadeStep);
         if (m_gate < 1e-4f && !m_want)
