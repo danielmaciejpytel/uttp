@@ -29,6 +29,12 @@
 //                       as the game's feed entry does (motiondriver::FeedAirFromInput); default off: the driver never receives an air feed
 //   --qpc-feed 1        every clock the host reads during a feed (feed and publish stamps, capsule stat ages, command dt) is the recorded
 //                       feed time instead of the wall clock (motionhost::TestSetQpcTicks); default off: wall clock
+//   --neutral-aim 1     neutral aim offset on (motiondriver::SetNeutralAimOffset, the mm.neutralAim setting), set after --settings-log
+//   --aim-world-smooth H  world aim smoothing on at H Hz (motiondriver::SetAimWorldSmoothing, mm.aimWorldSmooth), after --settings-log
+//   --shooter-mode 1    shooter facing on after --settings-log (exposure probe: the recorded sessions ran with it off, and the neutral
+//                       aim offset only acts in a strafe / shooter facing)
+//                       Any of these three adds one AIMOPT line: feeds with a neutral aim offset weight / a world aim smoothing delta.
+//                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -71,6 +77,9 @@
 namespace utpp::motiondriver
 {
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg);
+void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
+bool SetNeutralAimOffset(bool aOn);
+bool SetAimWorldSmoothing(bool aOn, float aHz);
 }
 namespace utpp::motionhost
 {
@@ -162,11 +171,17 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
             continue;
         const std::string name = line.substr(at + 7, open - at - 7);
         std::vector<float> a;
+        std::vector<std::string> toks;
         std::istringstream args(line.substr(open + 1, close - open - 1));
         std::string tok;
         while (std::getline(args, tok, ','))
+        {
             a.push_back(std::strtof(tok.c_str(), nullptr));
+            toks.push_back(tok);
+        }
         const auto arg = [&](size_t i) { return i < a.size() ? a[i] : 0.0f; };
+        // a Bool argument as the script logs it ("true" / "false") or as a number
+        const auto flag = [&](size_t i) { return i < toks.size() && (toks[i].find("true") != std::string::npos || a[i] != 0.0f); };
         bool known = true;
         if (name == "MotionOrientWarp") motiondriver::SetOrientWarp(arg(0) != 0);
         else if (name == "MotionPelvisYawTrim") motiondriver::SetPelvisYawTrim(arg(0));
@@ -186,6 +201,8 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMFootReplant") motionhost::SetFootReplant(static_cast<int32_t>(arg(0)));
         else if (name == "MMKneeFix") motionhost::SetKneeFix(static_cast<int32_t>(arg(0)));
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
+        else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
+        else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
     }
@@ -313,6 +330,8 @@ int main(int argc, char** argv)
     bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
+    int32_t neutralAim = -1, shooterMode = -1; // -1 = not passed (the settings log / build default)
+    float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
     auto& stackOverrides = mm::motionstack::g_testStackOverrides;
@@ -356,7 +375,14 @@ int main(int argc, char** argv)
             qpcFeed = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--motion-log") == 0)
             motionLog = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--neutral-aim") == 0)
+            neutralAim = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--aim-world-smooth") == 0)
+            aimWorldSmoothHz = std::max(0.0f, std::stof(argv[i + 1]));
+        else if (std::strcmp(argv[i], "--shooter-mode") == 0)
+            shooterMode = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
     }
+    const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
     std::unique_ptr<mm::motion::MotionDatabase> db;
     const auto womanPaths = DataPaths(data, "woman");
@@ -476,6 +502,12 @@ int main(int argc, char** argv)
         ApplyLoggedSettings(settingsLog, applied, unknown);
     if (capsuleStats && !settingsLog.empty())
         capsuleStatReplay.ReadLog(settingsLog);
+    if (neutralAim >= 0)
+        motiondriver::SetNeutralAimOffset(neutralAim != 0);
+    if (aimWorldSmoothHz >= 0.0f)
+        motiondriver::SetAimWorldSmoothing(aimWorldSmoothHz > 0.0f, aimWorldSmoothHz);
+    if (shooterMode >= 0)
+        motiondriver::SetShooterMode(shooterMode != 0);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
@@ -844,6 +876,14 @@ int main(int argc, char** argv)
                         static_cast<unsigned long long>(capsuleStatReplay.accelKept),
                         static_cast<unsigned long long>(capsuleStatReplay.decelQueries),
                         static_cast<unsigned long long>(capsuleStatReplay.decelKept));
+        if (aimOptions)
+        {
+            uint64_t neutralFeeds = 0, smoothFeeds = 0;
+            motiondriver::TestAimOptionFeeds(neutralFeeds, smoothFeeds);
+            std::printf("AIMOPT run=%s neutralAim=%d aimWorldSmoothHz=%.2f shooterMode=%d neutralAoFeeds=%llu aimSmoothFeeds=%llu\n", name.c_str(),
+                        neutralAim, aimWorldSmoothHz, shooterMode, static_cast<unsigned long long>(neutralFeeds),
+                        static_cast<unsigned long long>(smoothFeeds));
+        }
         if (airFeed) // only with the option: the scripts refuse a tool that was asked for it and printed no AIRFEED line
             std::printf("AIRFEED run=%s forwarded=%llu withAirFields=%llu\n", name.c_str(), static_cast<unsigned long long>(airFeeds),
                         static_cast<unsigned long long>(airFeedRows));

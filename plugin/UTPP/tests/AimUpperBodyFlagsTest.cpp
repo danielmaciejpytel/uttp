@@ -204,6 +204,32 @@ void NeutralAoTest()
     for (int i = 0; i < 12; ++i)
         b.Step(off, cfg, dt);
     Check(b.Alpha() == 0.0f, "neutral AO: fades out in 0.2 s");
+
+    // Turning the option off (cfg.enabled false) fades the weight out like any other end of the enable rule, no cut.
+    for (int i = 0; i < 30; ++i)
+        b.Step(in, cfg, dt);
+    sf::NeutralAoConfig disabled = cfg;
+    disabled.enabled = false;
+    b.Step(in, disabled, dt);
+    const float firstOff = b.Alpha();
+    Check(firstOff > 0.9f && firstOff < 1.0f, "neutral AO: option off fades (one frame later the weight is still above 0.9)");
+    for (int i = 0; i < 12; ++i)
+        b.Step(in, disabled, dt);
+    Check(b.Alpha() == 0.0f, "neutral AO: option off reaches 0 within the fade time");
+}
+
+// Rest framing dead band of the neutral aim offset pitch: no pitch from the rest framing pitch (-15 deg) up to level, the camera
+// pitch above level, the excess below the rest pitch, continuous at both edges.
+void NeutralAoPitchDeadBandTest()
+{
+    Check(sf::NeutralAoPitchDeadBand(-15.0f) == 0.0f, "neutral AO pitch: the rest framing pitch gives no pitch");
+    Check(sf::NeutralAoPitchDeadBand(-7.0f) == 0.0f, "neutral AO pitch: inside the band no pitch");
+    Check(sf::NeutralAoPitchDeadBand(0.0f) == 0.0f, "neutral AO pitch: level gives no pitch");
+    Check(std::fabs(sf::NeutralAoPitchDeadBand(20.0f) - 20.0f) < 1e-6f, "neutral AO pitch: looking up keeps the camera pitch");
+    Check(std::fabs(sf::NeutralAoPitchDeadBand(-40.0f) + 25.0f) < 1e-6f, "neutral AO pitch: looking down keeps the excess only");
+    Check(std::fabs(sf::NeutralAoPitchDeadBand(-15.01f) + 0.01f) < 1e-4f && std::fabs(sf::NeutralAoPitchDeadBand(0.01f) - 0.01f) < 1e-6f,
+          "neutral AO pitch: continuous at both edges");
+    Check(sf::NeutralAoPitchDeadBand(std::nanf("")) == 0.0f, "neutral AO pitch: NaN gives no pitch");
 }
 } // namespace
 
@@ -212,6 +238,7 @@ int main()
     WorldTargetTest();
     LeanGateTest();
     NeutralAoTest();
+    NeutralAoPitchDeadBandTest();
     std::printf("%s (%d failures)\n", g_fail == 0 ? "PASS" : "FAIL ", g_fail);
     return g_fail == 0 ? 0 : 1;
 }
