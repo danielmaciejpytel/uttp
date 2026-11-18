@@ -555,6 +555,17 @@ inline bool NeutralAoEnabled(const NeutralAoInput& aIn, const NeutralAoConfig& a
     return std::fabs(aIn.aoYawDeg - aIn.prevAoYawDeg) < aCfg.maxDeltaDeg;
 }
 
+// Camera pitch of the neutral aim offset with the rest framing pitch removed (dead band, the melee aim camera branch does the same):
+// from kNeutralAoRestPitchDeg (the camera looking down at V at rest) up to level the spine does not pitch; looking up pitches up by
+// the camera pitch, looking further down pitches down by the excess only. Continuous at both edges. NaN -> 0.
+inline constexpr float kNeutralAoRestPitchDeg = -15.0f;
+inline float NeutralAoPitchDeadBand(float aPitchDeg)
+{
+    if (!std::isfinite(aPitchDeg))
+        return 0.0f;
+    return aPitchDeg - std::clamp(aPitchDeg, kNeutralAoRestPitchDeg, 0.0f);
+}
+
 inline float NeutralAoTargetAlpha(const NeutralAoInput& aIn, const NeutralAoConfig& aCfg)
 {
     if (!NeutralAoEnabled(aIn, aCfg))

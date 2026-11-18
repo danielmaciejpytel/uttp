@@ -421,6 +421,11 @@ constexpr int64_t kShooterModeDrivingStaleNs = 250000000; // 0.25 s: the feed is
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
 std::atomic<int64_t> g_testSteadyNs{-1}; // test targets only (never the DLL): >= 0 replaces the steady clock below (simulated, load independent)
 #endif
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+// test targets only: feeds that requested a neutral aim offset weight / a world aim smoothing delta (TestAimOptionFeeds)
+uint64_t g_testNeutralAoFeeds = 0, g_testAimSmoothFeeds = 0;
+float g_testAoAppliedWeight = 0.0f; // applied aim offset weight of the last evaluation
+#endif
 int64_t SteadyNs()
 {
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -2240,7 +2245,9 @@ bool SetAimWorldSmoothing(bool aOn, float aHz)
 bool SetNeutralAimOffset(bool aOn)
 {
     std::lock_guard lock(g_m);
-    if (aOn != g_neutralAoCfg.enabled)
+    // Turning it off fades the weight out (NeutralAoBlend, target 0 while disabled) instead of cutting it; the frame state is only
+    // cleared when it is turned on with nothing left of an earlier fade.
+    if (aOn && !g_neutralAoCfg.enabled && !(g_neutralAo.Alpha() > 0.0f))
     {
         g_neutralAo.Reset();
         g_neutralAoPrevValid = false;
@@ -2499,6 +2506,17 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
 {
     std::lock_guard lock(g_m);
     g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach};
+}
+void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth)
+{
+    std::lock_guard lock(g_m);
+    aNeutralAo = g_testNeutralAoFeeds;
+    aAimSmooth = g_testAimSmoothFeeds;
+}
+float TestAoAppliedWeight()
+{
+    std::lock_guard lock(g_m);
+    return g_testAoAppliedWeight;
 }
 void TestSetMapStepDownReach(int32_t aOn)
 {
@@ -3153,7 +3171,7 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
     // Neutral aim offset (default off): strafe / shooter facing without aiming, the spine follows the camera. Angles relative to
     // the actor frame here (the camera target point when fresh, else the camera yaw at level pitch); PrepareRootOverlay moves them
     // to the root frame on the live path.
-    if (g_neutralAoCfg.enabled)
+    if (g_neutralAoCfg.enabled || g_neutralAo.Alpha() > 0.0f) // disabled: runs only while the weight fades out
     {
         utpp::mm::strafe::NeutralAoInput n;
         n.strafeFacing = (b.map.shooterModeActive || b.map.h2Active) && !g_trav.active && !g_release;
@@ -3165,7 +3183,10 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
         if (g_cameraTargetValid && RecoilClock() - g_cameraTargetTime <= .25)
             angles = AimAnglesFromModel(g_cameraTarget, ny, np);
         if (angles)
+        {
+            np = utpp::mm::strafe::NeutralAoPitchDeadBand(np); // no downward look at the rest framing pitch
             g_neutralAoPitchDeg = np;
+        }
         else if (std::isfinite(f.cameraYawDeg) && std::isfinite(f.playerYawDeg))
         {
             ny = motionpose::WrapDeg180(f.cameraYawDeg - f.playerYawDeg);
@@ -3186,6 +3207,10 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
             in.neutralAoPitchDeg = np;
         }
     }
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    g_testNeutralAoFeeds += in.neutralAoWeight > 0.0f ? 1u : 0u;
+    g_testAimSmoothFeeds += in.aimSmoothDeltaValid ? 1u : 0u;
+#endif
     // Fix batch 2 (AO): a lost target (haveAim false) no longer ends the aim offset in one frame, MotionPose fades the latched
     // angles out with the Aiming weight. The game-owned upper body (handback) fades the latch out in 0.15 s (not in one frame).
     in.aoSuppress = handback;
@@ -5934,6 +5959,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_aoYaw = info.aoYawDeg;
     g_aoU = info.aoSweepU;
     g_aoW = info.aoWeight;
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    g_testAoAppliedWeight = info.aoAppliedWeight;
+#endif
     TravYawBackLocked(b, dt); // UTPP-MOTION SEAM trav: verifier round 2, handback turn of the last montage root yaw
     g_airDiag.landBypassArmed = bypassArmed;
     g_airDiag.landBypassConsumed = bypassArmed && !b.eval.IgnoreDeficitArmed();

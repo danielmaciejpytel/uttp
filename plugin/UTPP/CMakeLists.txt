@@ -1162,5 +1162,15 @@ if(DEFINED _utpp_mdmotion_data AND EXISTS "${_utpp_mdmotion_data}/utpp_motion_wo
   add_test(NAME utpp_mm_loco_handback_blend_test COMMAND utpp_mm_loco_handback_blend_test "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
 endif()
 
+# ---- optional aim options on the real driver path (world aim smoothing convergence, neutral aim offset weight and fade-out) ----
+if(DEFINED _utpp_mdmotion_data_native)
+  add_executable(utpp_motion_driver_aimoffset_options_test tests/AimOptionsDriverTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+  target_compile_features(utpp_motion_driver_aimoffset_options_test PRIVATE cxx_std_20)
+  target_compile_options(utpp_motion_driver_aimoffset_options_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+  target_compile_definitions(utpp_motion_driver_aimoffset_options_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
+  target_link_libraries(utpp_motion_driver_aimoffset_options_test PRIVATE bcrypt)
+  add_test(NAME utpp_motion_driver_aimoffset_options_test COMMAND utpp_motion_driver_aimoffset_options_test "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+endif()
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)
