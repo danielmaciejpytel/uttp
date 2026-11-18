@@ -52,6 +52,7 @@
 #include "mm/Overlay.hpp"
 #include "mm/OverlayFile.hpp"
 #include "mm/MotionPose.hpp"
+#include "mm/Strafe.hpp" // neutral aim offset blend
 #include "mm/TraversalFile.hpp"
 #include "mm/MotionTraversal.hpp" // UTPP-MOTION SEAM trav
 #include "mm/Dodge.hpp"           // ground dodge clips (sectors, clip clock, loader checks)
@@ -326,6 +327,13 @@ bool g_leanHeadSetting = false; // mm.leanHead: the motion head layer replaces t
 lrt::Params g_leanParams;
 motionpose::WorldAimTargetParams g_worldAimParams; // SetAimWorldSmoothing (default off)
 motionpose::WorldAimTargetFilter g_worldAim;       // world aim direction of the aim offset while on
+// Neutral aim offset (SetNeutralAimOffset, default off): in a strafe / shooter facing without aiming the spine follows the camera
+// through the aim offset (mm/Strafe.hpp NeutralAoBlend). Off: the blend stays reset and OverlayFrameInputs::neutralAoWeight 0.
+utpp::mm::strafe::NeutralAoConfig g_neutralAoCfg;
+utpp::mm::strafe::NeutralAoBlend g_neutralAo;
+float g_neutralAoPrevYawDeg = 0.0f;
+bool g_neutralAoPrevValid = false;
+float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
@@ -2229,6 +2237,19 @@ bool SetAimWorldSmoothing(bool aOn, float aHz)
     return true;
 }
 
+bool SetNeutralAimOffset(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    if (aOn != g_neutralAoCfg.enabled)
+    {
+        g_neutralAo.Reset();
+        g_neutralAoPrevValid = false;
+        g_neutralAoPitchDeg = 0.0f;
+    }
+    g_neutralAoCfg.enabled = aOn;
+    return true;
+}
+
 bool SetLeanCoverage(int32_t aCoverage)
 {
     if (aCoverage != 0 && aCoverage != 1)
@@ -2893,12 +2914,36 @@ bool PrepareRootOverlay(void *opaque, const motionpose::BaseFrameView &base, mot
             return false;
         in.aimYawDeg = aim.yawDeg;
         in.aimPitchDeg = aim.pitchDeg;
+        if (in.aimSmoothDeltaValid)
+        {
+            // world aim smoothing: the smoothed direction in the root frame (one rotation for both directions: the delta holds)
+            in.aimYawDeg = motionpose::WrapDeg180(aim.yawDeg + in.aimSmoothDeltaYawDeg);
+            in.aimPitchDeg = aim.pitchDeg + in.aimSmoothDeltaPitchDeg;
+        }
         // seam C: the barrel loop target is the same actor point in the same frame as the aim angles above (pose frame)
         math::Vec3 visual;
         in.haveAimPointVisual = visualroot::InversePoint(ctx.proposal.Frame(), aimPoint, visual);
         if (in.haveAimPointVisual)
             in.aimPointVisual = visual;
         ctx.aimFromRoot = in.haveAimPointVisual;
+    }
+    if (in.neutralAoWeight > 0.0f)
+    {
+        // neutral aim offset: a far point in the camera direction (actor axes) through the same conversion as the aim angles
+        const float yr = in.neutralAoYawDeg * (3.14159265358979f / 180.0f), pr = in.neutralAoPitchDeg * (3.14159265358979f / 180.0f);
+        constexpr float kFar = 100.0f;
+        math::Vec3 p{-std::sin(yr) * std::cos(pr) * kFar, std::cos(yr) * std::cos(pr) * kFar, kAimOriginZ + std::sin(pr) * kFar};
+        math::Vec3 q = p;
+        if (ctx.proposal.Ahead() != 0.0f)
+            math::Rot2(-ctx.proposal.Ahead(), p.x, p.y, q.x, q.y);
+        visualroot::Aim aim;
+        if (visualroot::ComputeAim(ctx.proposal.Frame(), q, aim, kAimOriginZ))
+        {
+            in.neutralAoYawDeg = aim.yawDeg;
+            in.neutralAoPitchDeg = aim.pitchDeg;
+        }
+        else
+            in.neutralAoWeight = 0.0f;
     }
     ctx.prepared = true;
     return true;
@@ -3096,9 +3141,49 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
             float wy = 0.0f, wp = 0.0f;
             if (g_worldAim.Step(live, live ? f.playerYawDeg + in.aimYawDeg : 0.0f, in.aimPitchDeg, dt, g_worldAimParams, wy, wp) && live)
             {
+                const float rawYaw = in.aimYawDeg, rawPitch = in.aimPitchDeg;
                 in.aimYawDeg = motionpose::RootRelativeYawDeg(wy, f.playerYawDeg);
                 in.aimPitchDeg = wp;
+                in.aimSmoothDeltaValid = true;
+                in.aimSmoothDeltaYawDeg = motionpose::WrapDeg180(in.aimYawDeg - rawYaw);
+                in.aimSmoothDeltaPitchDeg = in.aimPitchDeg - rawPitch;
             }
+        }
+    }
+    // Neutral aim offset (default off): strafe / shooter facing without aiming, the spine follows the camera. Angles relative to
+    // the actor frame here (the camera target point when fresh, else the camera yaw at level pitch); PrepareRootOverlay moves them
+    // to the root frame on the live path.
+    if (g_neutralAoCfg.enabled)
+    {
+        utpp::mm::strafe::NeutralAoInput n;
+        n.strafeFacing = (b.map.shooterModeActive || b.map.h2Active) && !g_trav.active && !g_release;
+        // Aiming does not end the neutral weight: the pose takes the aim target's angles while it drives the Aiming AO and the
+        // AO weight is max(Aiming, neutral), so the strafe <-> aim hand-over keeps the full weight (no dip while both fade).
+        n.aiming = false;
+        float ny = 0.0f, np = 0.0f;
+        bool angles = false;
+        if (g_cameraTargetValid && RecoilClock() - g_cameraTargetTime <= .25)
+            angles = AimAnglesFromModel(g_cameraTarget, ny, np);
+        if (angles)
+            g_neutralAoPitchDeg = np;
+        else if (std::isfinite(f.cameraYawDeg) && std::isfinite(f.playerYawDeg))
+        {
+            ny = motionpose::WrapDeg180(f.cameraYawDeg - f.playerYawDeg);
+            np = g_neutralAoPitchDeg; // a late camera target does not drop the pitch to level
+            angles = true;
+        }
+        n.aoYawDeg = angles ? ny : std::numeric_limits<float>::quiet_NaN();
+        n.prevAoYawDeg = g_neutralAoPrevValid ? g_neutralAoPrevYawDeg : n.aoYawDeg;
+        n.slotWeight = handback ? 1.0f : std::clamp(g_reloadUpperWeight, 0.0f, 1.0f);
+        n.disableAo = 0.0f; // no Disable_AO curve in the database
+        const float w = g_neutralAo.Step(n, g_neutralAoCfg, dt);
+        g_neutralAoPrevValid = angles;
+        g_neutralAoPrevYawDeg = ny;
+        if (w > 0.0f && angles)
+        {
+            in.neutralAoWeight = w;
+            in.neutralAoYawDeg = ny;
+            in.neutralAoPitchDeg = np;
         }
     }
     // Fix batch 2 (AO): a lost target (haveAim false) no longer ends the aim offset in one frame, MotionPose fades the latched

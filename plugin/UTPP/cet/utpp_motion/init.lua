@@ -79,7 +79,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = false, orientWarp = false,
   lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffset = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true,
-  aimWorldSmooth = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard" }
+  aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard" }
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
   leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
@@ -873,6 +873,7 @@ end
 -- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
 M.OPTIONS = {
   { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 0 },
+  { want = "neutralAim", field = "setNeutralAimOffset", native = "UTPPSetMMNeutralAimOffset" },
   { want = "pelvisPlacement", field = "setPelvisPlacement", native = "UTPPSetMMPelvisPlacement" },
   { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
   { want = "stepDownReach", field = "setStepDownReach", native = "UTPPSetMMStepDownReach" },
@@ -1018,6 +1019,10 @@ function M.RegisterSettings(core)
     label = "motion: steady aim while turning (experimental)",
     desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns. Off (default) = the earlier aim.",
     apply = function(v) M.SetOption("aimWorldSmooth", v == true) end })
+  core.Register({ key = "mm.neutralAim", section = "motion", type = "bool", default = false,
+    label = "motion: look with the camera in strafe (experimental)",
+    desc = "While V strafes or holds the shooter facing without aiming, the upper body turns and tilts towards the camera direction. Off (default) = the upper body follows the body.",
+    apply = function(v) M.SetOption("neutralAim", v == true) end })
   core.Register({ key = "mm.pelvisPlacement", section = "motion", type = "bool", default = false,
     label = "motion: pelvis follows the feet (experimental)",
     desc = "Lowers or shifts V's hips a little so that both feet can reach the ground on steps and slopes. Off (default) = the feet are placed without moving the hips.",

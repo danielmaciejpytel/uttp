@@ -105,6 +105,8 @@ public native func UTPPSetMMFarJumpGravity(on: Bool) -> Void
 public native func UTPPSetMotionLeanCoverage(coverage: Int32) -> Bool
 // Aim offset on a filtered world direction of the target (hz = smoothing rate, 0 = exact tracking with the catch-up limit).
 public native func UTPPSetMMAimWorldSmoothing(on: Bool, hz: Float) -> Bool
+// In a strafe / shooter facing without aiming the spine follows the camera through the aim offset (off by default).
+public native func UTPPSetMMNeutralAimOffset(on: Bool) -> Bool
 // the motion set-trav (MotionTraversal): obstacle of a game climb (action 8) / vault (action 9) start, sent once from the
 // ClimbEvents / VaultEvents OnEnter wraps below (only while motion is on). The DLL plans one motion set traversal montage from it
 // (MotionDriver.hpp FeedTraversal); false = rejected input (invalid action / non-finite value).

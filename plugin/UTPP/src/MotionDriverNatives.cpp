@@ -29,6 +29,7 @@ namespace utpp::motiondriver
 // MotionDriver.cpp: optional behaviours (default off)
 bool SetLeanCoverage(int32_t aCoverage);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
+bool SetNeutralAimOffset(bool aOn);
 void SetHandBackBlend(bool aOn);
 void SetStepDownReach(bool aOn);
 void SetFarJumpGravityScale(bool aOn);
@@ -527,6 +528,15 @@ void Native_SetMMAimWorldSmoothing(RED4ext::IScriptable*, RED4ext::CStackFrame* 
     if (aOut)
         *aOut = ok;
 }
+void Native_SetMMNeutralAimOffset(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = SetNeutralAimOffset(on);
+    if (aOut)
+        *aOut = ok;
+}
 void Native_SetMotionLeanCoverage(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     int32_t v = 0;
@@ -703,6 +713,8 @@ void RegisterNatives()
     o5->flags = flags; o5->AddParam("Int32", "coverage"); o5->SetReturnType("Bool"); rtti->RegisterFunction(o5);
     auto* o6 = RED4ext::CGlobalFunction::Create("UTPPSetMMAimWorldSmoothing", "UTPPSetMMAimWorldSmoothing", &Native_SetMMAimWorldSmoothing);
     o6->flags = flags; o6->AddParam("Bool", "on"); o6->AddParam("Float", "hz"); o6->SetReturnType("Bool"); rtti->RegisterFunction(o6);
+    auto* o7 = RED4ext::CGlobalFunction::Create("UTPPSetMMNeutralAimOffset", "UTPPSetMMNeutralAimOffset", &Native_SetMMNeutralAimOffset);
+    o7->flags = flags; o7->AddParam("Bool", "on"); o7->SetReturnType("Bool"); rtti->RegisterFunction(o7);
 }
 
 void Install(const std::wstring& aDllDir)

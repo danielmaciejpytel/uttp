@@ -102,6 +102,16 @@ struct OverlayFrameInputs
     bool capturePoseDiagnostics = false; // mm.trace only: low-rate deltas for composed pose / feminine / AO / hand IK
     float aimYawDeg = 0.0f;   // camera yaw - root yaw, + = to the left (about +Z, the ApplySpineYaw sense)
     float aimPitchDeg = 0.0f; // + = up
+    // Neutral aim offset (strafe / shooter facing without aiming, default off): the spine follows the camera through the aim
+    // offset with this weight. 0 = the aim offset path exactly as without it. Angles relative to the pose frame, as aimYawDeg.
+    float neutralAoWeight = 0.0f;
+    float neutralAoYawDeg = 0.0f;
+    float neutralAoPitchDeg = 0.0f;
+    // World aim smoothing (default off): smoothed minus raw actor-relative aim angles. The root frame path recomputes the angles
+    // from the raw point and adds this, so the smoothed direction survives the switch to the root frame.
+    bool aimSmoothDeltaValid = false;
+    float aimSmoothDeltaYawDeg = 0.0f;
+    float aimSmoothDeltaPitchDeg = 0.0f;
     // fix batch 2 (AO): the game owns the upper body (handback) -> the aim offset is not applied to a target any more and its
     // latched angles fade out in kAoHandbackFadeSeconds (a cut would pop the MM upper body while the handback envelope still
     // publishes its share). A lost target without it (haveAim false) fades out with the Aiming weight (AimSpineYawFilter).
@@ -963,8 +973,8 @@ private:
             // aim pitch plan 2026-10-30 B: closed barrel pitch loop on the sweep input + bounded residual (BarrelPitchLoop.hpp);
             // not engaged (loop off or no aim point, nothing left to fade) = the open-loop aim offset bit for bit
             const bool barrelLoop = BarrelLoopBegin(aIn, info, aDt);
-            ApplyAimOffset(sk, aIn, info, aDt, barrelLoop);
-            if (barrelLoop)
+            const bool aoNeutralOnly = ApplyAimOffset(sk, aIn, info, aDt, barrelLoop);
+            if (barrelLoop && !aoNeutralOnly)
                 ApplyBarrelLoop(sk, aIn, info, aDt, shootActive);
             if (aIn.capturePoseDiagnostics)
                 CaptureStageDelta(aimBefore, *m_lay, info.aimDelta);
@@ -1369,27 +1379,40 @@ private:
     // target is behind the back and the applied yaw moves at most kAoYawRateDegPerSec (no +60 -> -60 jump at +-180); a lost
     // target (haveAim false) keeps its last angles and fades out with the Aiming weight of the machine (alpha = min(a, release),
     // zero within kAoLatchMaxAgeSeconds) instead of ending the whole AO in one frame. aoSuppress (handback) fades it in 0.15 s.
-    void ApplyAimOffset(const ov::Skeleton& aSk, const OverlayFrameInputs& aIn, FrameInfo& aInfo, float aDt, bool aBarrel)
+    // Returns true on a neutral-only frame (the neutral aim offset drives the angles, no aim target): no barrel loop then.
+    bool ApplyAimOffset(const ov::Skeleton& aSk, const OverlayFrameInputs& aIn, FrameInfo& aInfo, float aDt, bool aBarrel)
     {
-        const float a = ov::Clamp01(m_machine.AimingWeight());
-        aInfo.aoWeight = a;
+        const float aimW = ov::Clamp01(m_machine.AimingWeight());
+        aInfo.aoWeight = aimW;
         // The external (traversal montage) base never carries a latch: it had no AO without a target before.
         if (aIn.montageBase && !aIn.haveAim)
         {
             m_aoFilter.Reset();
             m_barrel.ResetApplied(); // the learned biases stay
-            return;
+            return false;
         }
+        // Neutral aim offset: weight 0 leaves every input below as it was. Otherwise the AO weight is the larger of the Aiming
+        // weight and the neutral weight (continuous hand-over both ways, one shared filter), the angles are the aim target's while
+        // one drives the Aiming AO, else the camera's; no barrel bias without a target.
+        const bool neutral = aIn.neutralAoWeight > 0.0f && std::isfinite(aIn.neutralAoWeight);
+        const bool targetLive = aIn.haveAim && aimW > ov::kZeroWeight;
+        const bool neutralOnly = neutral && !targetLive;
+        const float a = neutral ? std::max(aimW, ov::Clamp01(aIn.neutralAoWeight)) : aimW;
+        const bool srcHave = neutralOnly ? true : aIn.haveAim;
+        const float srcYaw = neutralOnly ? aIn.neutralAoYawDeg : aIn.aimYawDeg;
+        const float srcPitch = neutralOnly ? aIn.neutralAoPitchDeg : aIn.aimPitchDeg;
+        if (neutralOnly)
+            aBarrel = false;
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 3
         constexpr float kYawClampDeg = 360.0f; // mutation 3: no clamp
 #else
         constexpr float kYawClampDeg = kAimSpineYawClampDeg;
 #endif
         AimSpineYawFilter::Output ao;
-        const bool have = m_aoFilter.Step(aIn.haveAim, a, aIn.aimYawDeg, aIn.aimPitchDeg, aDt, kYawClampDeg,
+        const bool have = m_aoFilter.Step(srcHave, a, srcYaw, srcPitch, aDt, kYawClampDeg,
                                           aIn.machine.overlay == ov::PoseOverlay::Rifle ? 1 : 0, aIn.aoSuppress, ao);
         if (!have || a <= ov::kZeroWeight)
-            return;
+            return neutralOnly;
         float alpha = ao.release < 1.0f ? std::min(a, ao.release) : a; // = a bit for bit while a target drives the AO
         if (aIn.aoScale < 1.0f)
         {
@@ -1407,7 +1430,7 @@ private:
 #endif
         }
         if (!(alpha > ov::kZeroWeight))
-            return; // the reload has handed the upper body over: no AO, the layered pose stays untouched
+            return neutralOnly; // the reload has handed the upper body over: no AO, the layered pose stays untouched
         aInfo.aoAppliedWeight = alpha;
         aInfo.aoLatched = !ao.live;
         std::memcpy(m_aoPre->b, m_lay->b, sizeof(ov::Xf) * static_cast<size_t>(aSk.n));
@@ -1477,6 +1500,7 @@ private:
         ov::RestoreHandsAfterAO(aSk, *m_aoPre, m_clavL, m_clavR, aInfo.curves, *m_lay);
 #endif
         aInfo.aoApplied = true;
+        return neutralOnly;
     }
 
     // Aim pitch plan 2026-10-30 B (BarrelPitchLoop.hpp). Slots of this frame (overlay x stance of the machine pose keys x
