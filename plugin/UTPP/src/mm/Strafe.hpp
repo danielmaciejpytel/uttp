@@ -517,4 +517,71 @@ inline void ComputeStrafeProfiles(const Database& aDb, std::span<const uint8_t> 
     aOut.avail[kStanceCrouch] = aOut.availGait[kStanceCrouch][kGaitWalk];
 }
 
+// ------------------------------------------------------------------------------------------------ neutral aim offset
+// Optional (NeutralAoConfig::enabled, default off: no caller weight, the AO path is unchanged). While the body holds a strafe /
+// shooter facing WITHOUT aiming, the spine follows the camera through the same AO grid as aiming, with this weight:
+//   enable rule: strafe or shooter facing, not aiming (the Aiming AO has priority), |AO yaw| <= maxYawDeg (110 deg), the upper
+//   body slot (montage / game-owned upper body) below maxSlot (0.5), and |change of the AO yaw in one frame| below maxDeltaDeg
+//   (135 deg: a wrap behind the back disables it for that frame instead of swinging the spine);
+//   alpha = enabled * (1 - Disable_AO curve of the playing clip), faded linearly in fadeS.
+// The barrel correction of the aim offset (AimOffset.hpp) is not applied to the neutral AO (no weapon target).
+struct NeutralAoConfig
+{
+    bool enabled = false;
+    float maxYawDeg = 110.0f;
+    float maxSlot = 0.5f;
+    float maxDeltaDeg = 135.0f;
+    float fadeS = 0.2f;
+};
+
+struct NeutralAoInput
+{
+    bool strafeFacing = false; // strafe mode Active / Exiting, or the shooter facing mode
+    bool aiming = false;       // the Aiming AO owns the spine
+    float aoYawDeg = 0.0f;     // root-relative camera yaw (deg)
+    float prevAoYawDeg = 0.0f; // the same one frame before
+    float slotWeight = 0.0f;   // weight of the game-owned upper body slot (0..1)
+    float disableAo = 0.0f;    // Disable_AO curve of the playing clip (0..1)
+};
+
+inline bool NeutralAoEnabled(const NeutralAoInput& aIn, const NeutralAoConfig& aCfg)
+{
+    if (!aCfg.enabled || !aIn.strafeFacing || aIn.aiming)
+        return false;
+    if (!std::isfinite(aIn.aoYawDeg) || !std::isfinite(aIn.prevAoYawDeg) || !std::isfinite(aIn.slotWeight))
+        return false;
+    if (std::fabs(aIn.aoYawDeg) > aCfg.maxYawDeg || !(aIn.slotWeight < aCfg.maxSlot))
+        return false;
+    return std::fabs(aIn.aoYawDeg - aIn.prevAoYawDeg) < aCfg.maxDeltaDeg;
+}
+
+inline float NeutralAoTargetAlpha(const NeutralAoInput& aIn, const NeutralAoConfig& aCfg)
+{
+    if (!NeutralAoEnabled(aIn, aCfg))
+        return 0.0f;
+    const float d = std::isfinite(aIn.disableAo) ? std::clamp(aIn.disableAo, 0.0f, 1.0f) : 0.0f;
+    return 1.0f - d;
+}
+
+class NeutralAoBlend
+{
+public:
+    void Reset() { m_alpha = 0.0f; }
+    float Alpha() const { return m_alpha; }
+    float Step(const NeutralAoInput& aIn, const NeutralAoConfig& aCfg, float aDt)
+    {
+        const float target = NeutralAoTargetAlpha(aIn, aCfg);
+        if (!(aDt > 0.0f) || !std::isfinite(aDt))
+            return m_alpha;
+        const float step = aCfg.fadeS > 1e-4f ? aDt / aCfg.fadeS : 1.0f;
+        m_alpha += std::clamp(target - m_alpha, -step, step);
+        if (m_alpha < 1e-5f && target <= 0.0f)
+            m_alpha = 0.0f;
+        return m_alpha;
+    }
+
+private:
+    float m_alpha = 0.0f;
+};
+
 } // namespace utpp::mm::strafe

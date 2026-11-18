@@ -290,4 +290,113 @@ private:
     bool m_pitchSlew = false; // the sweep pitch is catching up
     float m_suppressAge = 0.0f; // time spent under a handback
 };
+
+// ------------------------------------------------------------------------------------------------ world aim target smoothing
+// Optional (flag WorldAimTargetParams::enabled, default off: the caller does not use it and the AO path is unchanged).
+// Smoothing the root-relative aim angles makes the spine lag whenever the ROOT turns (a turn in place, a root snap), although the
+// crosshair did not move. This filter smooths the aim direction in WORLD space instead (exponential, smoothHz; 0 = exact) and the
+// caller recomputes the root-relative angles from the smoothed world direction every frame (RootRelativeYawDeg), so a root turn is
+// compensated in the same frame and only camera motion is smoothed. Jumps of the world target (a step above AoJumpDeg(dt) in one
+// frame) are caught up at kAoYawRateDegPerSec / kAoPitchSlewDegPerSec, the band rule of AimSpineYawFilter applied to the world
+// target. A lost target holds the last world direction (the latch of AimSpineYawFilter fades it); the next live frame re-acquires
+// with a catch-up. dt <= 0 is a pass-through that keeps the state.
+struct WorldAimTargetParams
+{
+    bool enabled = false;
+    float smoothHz = 0.0f; // exponential rate of the world aim direction (1/s); 0 = no smoothing (exact tracking)
+};
+
+inline float WrapDeg180(float aDeg)
+{
+    if (!std::isfinite(aDeg))
+        return 0.0f;
+    float r = std::remainder(aDeg, 360.0f);
+    return r <= -180.0f ? r + 360.0f : r;
+}
+
+// Root-relative yaw (deg, + = to the left) of a world yaw for a root of world yaw aRootYawDeg.
+inline float RootRelativeYawDeg(float aWorldYawDeg, float aRootYawDeg) { return WrapDeg180(aWorldYawDeg - aRootYawDeg); }
+
+class WorldAimTargetFilter
+{
+public:
+    void Reset() { *this = WorldAimTargetFilter{}; }
+    bool Valid() const { return m_valid; }
+    float YawDeg() const { return m_yaw; }
+    float PitchDeg() const { return m_pitch; }
+
+    // aLive: a finite world target this frame. Returns true when aYawDeg / aPitchDeg hold a world direction to use.
+    bool Step(bool aLive, float aWorldYawDeg, float aWorldPitchDeg, float aDt, const WorldAimTargetParams& aP, float& aYawDeg,
+              float& aPitchDeg)
+    {
+        const bool live = aLive && std::isfinite(aWorldYawDeg) && std::isfinite(aWorldPitchDeg);
+        if (!live)
+        {
+            if (m_valid)
+                m_lost = true;
+            aYawDeg = m_yaw;
+            aPitchDeg = m_pitch;
+            return m_valid;
+        }
+        if (!m_valid || !(aDt > 0.0f) || !std::isfinite(aDt))
+        {
+            if (!m_valid)
+            {
+                m_valid = true;
+                m_yaw = WrapDeg180(aWorldYawDeg);
+                m_pitch = aWorldPitchDeg;
+            }
+            aYawDeg = m_valid && !(aDt > 0.0f) ? m_yaw : WrapDeg180(aWorldYawDeg);
+            aPitchDeg = m_valid && !(aDt > 0.0f) ? m_pitch : aWorldPitchDeg;
+            return true;
+        }
+        const float dy = WrapDeg180(aWorldYawDeg - m_yaw);
+        const float dp = aWorldPitchDeg - m_pitch;
+        const float jump = AoJumpDeg(aDt);
+        if (m_lost || std::fabs(dy) > jump)
+            m_yawSlew = true;
+        if (m_lost || std::fabs(dp) > jump)
+            m_pitchSlew = true;
+        m_lost = false;
+        const float catchUpDt = std::min(aDt, kAoMaxCatchUpSeconds);
+        const float k = aP.smoothHz > 0.0f ? 1.0f - std::exp(-aP.smoothHz * aDt) : 1.0f;
+        if (m_yawSlew)
+        {
+            const float maxStep = kAoYawRateDegPerSec * catchUpDt;
+            if (std::fabs(dy) <= maxStep)
+            {
+                m_yaw = WrapDeg180(aWorldYawDeg);
+                m_yawSlew = false;
+            }
+            else
+                m_yaw = WrapDeg180(m_yaw + std::copysign(maxStep, dy));
+        }
+        else
+            m_yaw = WrapDeg180(m_yaw + dy * k);
+        if (m_pitchSlew)
+        {
+            const float maxStep = kAoPitchSlewDegPerSec * catchUpDt;
+            if (std::fabs(dp) <= maxStep)
+            {
+                m_pitch = aWorldPitchDeg;
+                m_pitchSlew = false;
+            }
+            else
+                m_pitch += std::copysign(maxStep, dp);
+        }
+        else
+            m_pitch += dp * k;
+        aYawDeg = m_yaw;
+        aPitchDeg = m_pitch;
+        return true;
+    }
+
+private:
+    bool m_valid = false;
+    bool m_lost = false;
+    bool m_yawSlew = false;
+    bool m_pitchSlew = false;
+    float m_yaw = 0.0f;
+    float m_pitch = 0.0f;
+};
 } // namespace utpp::mm::motionpose

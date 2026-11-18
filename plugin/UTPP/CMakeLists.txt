@@ -1145,5 +1145,13 @@ target_compile_options(utpp_motion_adapter_unit_step_down_test PRIVATE ${UTPP_WA
 target_compile_features(utpp_motion_adapter_unit_step_down_test PRIVATE cxx_std_20)
 add_test(NAME utpp_motion_adapter_unit_step_down_test COMMAND utpp_motion_adapter_unit_step_down_test)
 
+# ---- optional aim / upper body behaviours (world aim target smoothing, lean coverage, neutral aim offset; all off by default) ----
+add_executable(utpp_mm_aospineyaw_lean_strafe_flags_test tests/AimUpperBodyFlagsTest.cpp src/mm/AimSpineYawFilter.hpp
+               src/mm/LeanRuntime.hpp src/mm/Strafe.hpp)
+target_include_directories(utpp_mm_aospineyaw_lean_strafe_flags_test PRIVATE src)
+target_compile_options(utpp_mm_aospineyaw_lean_strafe_flags_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_mm_aospineyaw_lean_strafe_flags_test PRIVATE cxx_std_20)
+add_test(NAME utpp_mm_aospineyaw_lean_strafe_flags_test COMMAND utpp_mm_aospineyaw_lean_strafe_flags_test)
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)
