@@ -25,15 +25,26 @@
 #include <algorithm>
 #include <cmath>
 
+#ifndef UTPP_STRIDE_SCALE_FLOOR
+// Shortest stride as a fraction of the clip's own (kScaleFloor); a build may override it for comparison.
+#define UTPP_STRIDE_SCALE_FLOOR 0.75f
+#endif
+
 namespace utpp::mm::stridewarp
 {
-inline constexpr float kScaleFloor = 0.75f;   // shortest stride, fraction of the clip's own
+inline constexpr float kScaleFloor = UTPP_STRIDE_SCALE_FLOOR; // shortest stride, fraction of the clip's own
 inline constexpr float kInterpSpeed = 10.0f;  // 1/s, scale interpolation towards the target
 inline constexpr float kMinRootSpeed = 0.10f; // m/s, root-motion speed below which the clip is not warped
 inline constexpr float kIdentityEps = 1.0e-6f; // |1 - scale| at or below this is treated as no warp
 inline constexpr float kClipFactorMin = 0.85f;  // clip factor range: planted-foot speed over root speed of a clip
 inline constexpr float kClipFactorMax = 1.15f;
 inline constexpr int kClipFactorMinSamples = 6; // planted samples a clip needs for a measured factor (else 1)
+// Yaw fade: a visual root that keeps swinging (a crouched gait sways it in step with the stance foot) moves the planted foot in the world
+// by the rotation alone, which no stride scale absorbs; the warp then adds slide. The smoothed |yaw rate| fades the warp out between
+// these two rates.
+inline constexpr float kYawFadeStart = 0.5236f; // rad/s (30 deg/s), full warp at or below
+inline constexpr float kYawFadeEnd = 1.5708f;   // rad/s (90 deg/s), no warp at or above
+inline constexpr float kYawSmoothing = 4.0f;    // 1/s, smoothing of |yaw rate|
 
 struct Inputs
 {
@@ -43,6 +54,7 @@ struct Inputs
     float clipFactor = 1;   // planted-foot speed over root speed of the clip (ClipFactor)
     float alpha = 1;        // warping curve of the clip at its current time, [0, 1]
     bool allowed = false;   // ground locomotion pick (not air, slide, traversal or vehicle)
+    float yawFade = 1;      // YawFade of the smoothed visual yaw rate, [0, 1]
 };
 
 struct State
@@ -84,7 +96,25 @@ inline float Step(State &state, const Inputs &in) noexcept
         state.scale += (target - state.scale) * (1.0f - std::exp(-kInterpSpeed * in.dt));
     state.scale = std::clamp(state.scale, kScaleFloor, 1.0f);
     const float alpha = std::isfinite(in.alpha) ? std::clamp(in.alpha, 0.0f, 1.0f) : 0.0f;
-    return 1.0f - alpha * (1.0f - state.scale);
+    const float fade = std::isfinite(in.yawFade) ? std::clamp(in.yawFade, 0.0f, 1.0f) : 1.0f;
+    return 1.0f - alpha * fade * (1.0f - state.scale);
+}
+
+// Warp weight for a smoothed |visual yaw rate| (rad/s): 1 up to kYawFadeStart, 0 from kYawFadeEnd, linear between.
+inline float YawFade(float smoothedYawRate) noexcept
+{
+    if (!std::isfinite(smoothedYawRate))
+        return 1.0f;
+    return std::clamp((kYawFadeEnd - std::fabs(smoothedYawRate)) / (kYawFadeEnd - kYawFadeStart), 0.0f, 1.0f);
+}
+
+// Advances the smoothed |yaw rate| (rad/s) from the visual yaw change over dt (radians, any winding); dt <= 0 holds it.
+inline float SmoothYawRate(float smoothed, float yawDelta, float dt) noexcept
+{
+    if (!(dt > 0) || !std::isfinite(dt) || !std::isfinite(yawDelta))
+        return smoothed;
+    const float wrapped = std::remainder(yawDelta, 6.28318531f);
+    return smoothed + (std::fabs(wrapped) / dt - smoothed) * (1.0f - std::exp(-kYawSmoothing * dt));
 }
 
 inline bool IsIdentity(float scale) noexcept
@@ -102,10 +132,16 @@ inline bool Direction(float rootX, float rootY, math::Vec3 &out) noexcept
     return true;
 }
 
+// Offset that scales the ankle target along the horizontal unit direction about the origin (the thigh); zero across the direction.
+inline math::Vec3 WarpOffset(math::Vec3 ankle, math::Vec3 origin, math::Vec3 direction, float scale) noexcept
+{
+    const float along = math::Dot(ankle - origin, direction);
+    return direction * ((scale - 1.0f) * along);
+}
+
 // Ankle target scaled along the horizontal unit direction about the origin (the thigh); the other components are kept.
 inline math::Vec3 WarpPoint(math::Vec3 ankle, math::Vec3 origin, math::Vec3 direction, float scale) noexcept
 {
-    const float along = math::Dot(ankle - origin, direction);
-    return ankle + direction * ((scale - 1.0f) * along);
+    return ankle + WarpOffset(ankle, origin, direction, scale);
 }
 } // namespace utpp::mm::stridewarp

@@ -14,6 +14,15 @@
 // 0 = every signal on the whole-layer weight (default until the per-bone blend factors are settled; a build may override it).
 #define UTPP_BLEND_SIGNAL_MODE 0
 #endif
+#ifndef UTPP_STRIDE_LAYER_FADE
+// 1 = the stride warping part of a layer's foot correction fades on the layer's whole-layer weight (MixTargets); 0 = on the leg weight
+// like the rest of the correction. A build may override it.
+#define UTPP_STRIDE_LAYER_FADE 1
+#endif
+#ifndef UTPP_STRIDE_YAW_FADE
+// 1 = stride warping fades out while the visual root keeps swinging (stridewarp::YawFade); 0 = no yaw fade. A build may override it.
+#define UTPP_STRIDE_YAW_FADE 0
+#endif
 #ifndef UTPP_STRIDE_WARP
 // Default of BlendStack::SetStrideWarp: 1 = shrink-only stride warping of the leg targets (StrideWarp.hpp) on ground locomotion picks,
 // 0 = off (the pose is bit for bit the one without it). A build may override it.
@@ -91,6 +100,7 @@ class BlendStack
 {
   public:
     static constexpr uint32_t kLayers = 4, kCapacity = 6;
+    using StrideOffset = std::array<math::Vec3, 2>; // stride warping offsets of the left / right ankle target, model space
     static constexpr float kFootGateFall = 0.12f; // s, full-scale fall time of the foot height gate
     // Steering of the root yaw (ProcessGraph): spring half-life of the general node and the animation lookahead both nodes extract the
     // authored turn over. The shipped default keeps the previous values (0.2 s / 0.5 s): the reference values were worse on pivots and crouch
@@ -313,6 +323,8 @@ class BlendStack
     {
         m_footGate[0] = m_footGate[1] = m_stanceGate[0] = m_stanceGate[1] = 0.0f;
         m_floorGate = 1.0f;
+        m_strideHeld = 0.0f;
+        m_strideYawValid = false;
         m_count = 0;
         m_collapses = 0;
         m_handBackPending = m_deadHalfLivesPending = false;
@@ -337,6 +349,10 @@ class BlendStack
         m_samples[0] = signals;
         CacheAnkleZ(0);
         m_targets[0] = {};
+        m_strideOffset[0] = {};
+        m_strideAmount[0] = 0.0f;
+        m_strideHeld = 0.0f;
+        m_strideYawValid = false;
         if (m_feetReady && (!m_feetWarp.Sample(pose, 0, m_targets[0]) ||
                             !m_feetWarp.MakeRelative(pose, m_targets[0])))
             return false;
@@ -448,6 +464,9 @@ class BlendStack
                     m_pose[i].swap(m_pose[i - 1]);
                     m_samples[i] = m_samples[i - 1];
                     m_targets[i] = m_targets[i - 1];
+                    m_strideOffset[i] = m_strideOffset[i - 1];
+                    m_strideAmount[i] = m_strideAmount[i - 1];
+                    m_strideDir[i] = m_strideDir[i - 1];
                     m_ankleZ[i] = m_ankleZ[i - 1];
                 }
                 ++m_count;
@@ -504,10 +523,22 @@ class BlendStack
             head.rootApproximate = false;
         }
         m_strideScale = 1.0f;
+        if (m_strideWarp && UTPP_STRIDE_YAW_FADE && m_graph.enabled)
+        {
+            if (m_strideYawValid)
+                m_strideYawRate = stridewarp::SmoothYawRate(m_strideYawRate, m_graph.previousVisualWorldYaw - m_strideLastYaw, dt);
+            m_strideLastYaw = m_graph.previousVisualWorldYaw;
+            m_strideYawValid = true;
+        }
         for (uint32_t i = 0; i < m_count; ++i)
         {
             auto &p = m_players[i];
             p.clock += dt * (i == 0 ? 1 : std::pow(1.1f, float(i + 1)));
+            if (!p.stored || p.deadTail)
+            {
+                m_strideOffset[i] = {}; // a sampled layer warps afresh below; the dead-blended tail is never warped
+                m_strideAmount[i] = 0.0f;
+            }
             if (!p.stored)
             {
                 if (!adapter::SamplePose(*m_db, p.clip, p.time, m_pose[i].data(), m_n))
@@ -519,12 +550,13 @@ class BlendStack
                     // blended with the same leg profile and solved once after pose
                     // blending.
                     const float rootSpeed = std::hypot(m_samples[i].rootX, m_samples[i].rootY); // clip root at its rate
+                    const float rawRootX = m_samples[i].rootX, rawRootY = m_samples[i].rootY;   // before orientation warping
                     if (!m_feetReady || !ProcessGraph(p, m_samples[i], dt) ||
                         !m_feetWarp.Sample(m_pose[i], p.lastOrientationHalfAngle, m_targets[i]) ||
                         !m_poseWarp.Apply(m_pose[i], p.lastOrientationHalfAngle))
                         return false;
                     if (m_strideWarp)
-                        WarpStride(p, i, rootSpeed, dt);
+                        WarpStride(p, i, rootSpeed, rawRootX, rawRootY, dt);
                     if (!m_feetWarp.MakeRelative(m_pose[i], m_targets[i]))
                         return false;
                 }
@@ -537,6 +569,8 @@ class BlendStack
         if (m_count > kLayers + 1)
             Collapse();
         Evaluate();
+        if (m_graph.enabled)
+            LimitStrideRelease(dt);
         if (m_graph.enabled && !m_feetWarp.Apply(m_out, m_outputTargets).applied)
             return false;
         KeepFootHeight(dt);
@@ -804,15 +838,30 @@ class BlendStack
         m_floorInfo.applied = m_feetWarp.Apply(m_out, targets).applied;
 #endif
     }
-    motionFeet::Targets MixTargets(const motionFeet::Targets &a, const motionFeet::Targets &b, const Player &player) const
+    // Mixes the relative corrections of the layers below (a, with their mixed stride offsets sa) with layer b (stride offsets sb) and
+    // writes the mixed stride offsets to outStride (may alias sa or sb). The stride offset part of a correction fades on the layer's
+    // whole-layer weight, the rest on its leg weight: the leg bones fade faster than the body, and a warped outgoing layer's shortening
+    // cut on the leg weight dropped by up to 11 cm in one update, which snapped the knee. Without stride offsets on either side the
+    // mix is the plain leg-weight mix, bit for bit.
+    motionFeet::Targets MixTargets(const motionFeet::Targets &a, const StrideOffset &sa, const motionFeet::Targets &b,
+                                   const StrideOffset &sb, const Player &player, StrideOffset &outStride) const
     {
         motionFeet::Targets out{};
         out.valid = a.valid && b.valid && a.relative && b.relative;
         out.relative = true;
+        StrideOffset stride{};
+        bool strideLeft = false;
         for (uint32_t side = 0; side < 2; ++side)
         {
             const float weight = Alpha(player, m_footBones[side]);
-            out.feet[side].p = math::Lerp(a.feet[side].p, b.feet[side].p, weight);
+            if (!UTPP_STRIDE_LAYER_FADE || (IsZero(sa[side]) && IsZero(sb[side])))
+                out.feet[side].p = math::Lerp(a.feet[side].p, b.feet[side].p, weight);
+            else
+            {
+                stride[side] = math::Lerp(sa[side], sb[side], Alpha(player, -1));
+                out.feet[side].p = math::Lerp(a.feet[side].p - sa[side], b.feet[side].p - sb[side], weight) + stride[side];
+                strideLeft = strideLeft || !IsZero(stride[side]);
+            }
             out.feet[side].q = math::QuatNlerpShortest(a.feet[side].q, b.feet[side].q, weight);
             // These are relative corrections, not absolute ankle trajectories:
             // FK(nlerp(local poses)) is not lerp(FK(each pose)). The latter used
@@ -822,15 +871,22 @@ class BlendStack
             if ((weight < 1 && a.warpWeight > 0) || (weight > 0 && b.warpWeight > 0))
                 out.warpWeight = 1;
         }
+        if (strideLeft)
+            out.warpWeight = 1; // a stride offset still fading out keeps the correction active
+        outStride = stride;
         return out;
     }
+    static bool IsZero(const math::Vec3 &v)
+    {
+        return v.x == 0.0f && v.y == 0.0f && v.z == 0.0f;
+    }
     // Shrink-only stride warping (StrideWarp.hpp) of layer i: its absolute ankle targets (after orientation warping, before they become
-    // corrections) are pulled towards the thighs of its warped pose along its warped root direction, by capsule speed / clip root speed,
+    // corrections) are pulled towards the thighs of its warped pose along its stride direction, by capsule speed / clip root speed,
     // gated by the clip's warping curve and allowed on ground locomotion loops only (an air or slide pick, a traversal montage and a
     // disabled graph never warp). Starts, stops, pivots and transitions are left alone: on recorded sessions warping them made start
     // and pivot slide worse (their warping curve does not mark the parts where the capsule lags the clip). An identity scale leaves the
     // targets untouched.
-    void WarpStride(Player &p, uint32_t i, float rootSpeed, float dt)
+    void WarpStride(Player &p, uint32_t i, float rootSpeed, float rawRootX, float rawRootY, float dt)
     {
         stridewarp::Inputs in;
         in.dt = dt;
@@ -839,12 +895,19 @@ class BlendStack
         in.clipFactor = StrideClipFactor(p.clip);
         in.alpha = m_warpCurve >= 0 ? Curve(p, m_warpCurve) : 1.0f;
         in.allowed = p.strideGround && !p.airFade && IsLoop(p.clip);
+        if (UTPP_STRIDE_YAW_FADE)
+            in.yawFade = stridewarp::YawFade(m_strideYawRate);
         const float scale = stridewarp::Step(p.stride, in);
+        // Stride direction: the clip root turned by the angle orientation warping turned this layer's legs and feet (twice the pose half
+        // angle), not the warped root signal: that one turns by the full target angle at once and swung the shortening sideways by up to
+        // 90 degrees in one update when a turn pick changed the visual root under a warped loop.
+        const float poseAngle = 2.0f * p.lastOrientationHalfAngle;
         if (i == 0)
             m_strideScale = scale;
         math::Vec3 direction;
         if (stridewarp::IsIdentity(scale) || !m_targets[i].valid || m_thighBones[0] < 0 || m_thighBones[1] < 0 ||
-            !stridewarp::Direction(m_samples[i].rootX, m_samples[i].rootY, direction))
+            !stridewarp::Direction(std::cos(poseAngle) * rawRootX - std::sin(poseAngle) * rawRootY,
+                                   std::sin(poseAngle) * rawRootX + std::cos(poseAngle) * rawRootY, direction))
             return;
         for (uint32_t side = 0; side < 2; ++side)
         {
@@ -859,8 +922,12 @@ class BlendStack
                 q = math::QuatNormalize(math::QuatMul(q, m_pose[i][b].q));
             }
             auto &foot = m_targets[i].feet[side].p;
-            foot = stridewarp::WarpPoint(foot, origin, direction, scale);
+            const math::Vec3 offset = stridewarp::WarpOffset(foot, origin, direction, scale);
+            foot = foot + offset;
+            m_strideOffset[i][side] = offset;
         }
+        m_strideAmount[i] = 1.0f - scale;
+        m_strideDir[i] = direction;
         m_targets[i].warpWeight = 1.0f;
     }
     // Clip factor of every loop clip (the clips stride warping applies to): over the frame pairs where a foot's contact is set at both ends,
@@ -1138,9 +1205,21 @@ class BlendStack
         if (m_graph.enabled)
         {
             auto targets = m_targets[last];
+            auto stride = m_strideOffset[last];
             for (int i = int(last) - 1; i >= int(kLayers); --i)
-                targets = MixTargets(targets, m_targets[uint32_t(i)], m_players[uint32_t(i)]);
+                targets = MixTargets(targets, stride, m_targets[uint32_t(i)], m_strideOffset[uint32_t(i)], m_players[uint32_t(i)], stride);
             m_targets[kLayers] = targets;
+            m_strideOffset[kLayers] = stride;
+            float amount = m_strideAmount[last];
+            math::Vec3 along = m_strideDir[last] * amount;
+            for (int i = int(last) - 1; i >= int(kLayers); --i)
+            {
+                const float w = Alpha(m_players[uint32_t(i)], -1);
+                amount = amount + (m_strideAmount[uint32_t(i)] - amount) * w;
+                along = math::Lerp(along, m_strideDir[uint32_t(i)] * m_strideAmount[uint32_t(i)], w);
+            }
+            m_strideAmount[kLayers] = amount;
+            stridewarp::Direction(along.x, along.y, m_strideDir[kLayers]);
         }
         // Static tail signals are snapshots, NOT a faithful native graph root attribute.
         // Consumers must not integrate these as an accepted production root delta.
@@ -1193,9 +1272,58 @@ class BlendStack
         if (m_graph.enabled)
         {
             m_outputTargets = m_targets[m_count - 1];
+            auto stride = m_strideOffset[m_count - 1];
             for (int i = int(m_count) - 2; i >= 0; --i)
-                m_outputTargets = MixTargets(m_outputTargets, m_targets[uint32_t(i)], m_players[uint32_t(i)]);
+                m_outputTargets = MixTargets(m_outputTargets, stride, m_targets[uint32_t(i)], m_strideOffset[uint32_t(i)],
+                                             m_players[uint32_t(i)], stride);
+            float amount = m_strideAmount[m_count - 1];
+            math::Vec3 along = m_strideDir[m_count - 1] * amount;
+            for (int i = int(m_count) - 2; i >= 0; --i)
+            {
+                const float w = Alpha(m_players[uint32_t(i)], -1);
+                amount = amount + (m_strideAmount[uint32_t(i)] - amount) * w;
+                along = math::Lerp(along, m_strideDir[uint32_t(i)] * m_strideAmount[uint32_t(i)], w);
+            }
+            m_strideMixed = amount;
+            if (amount > 0.0f)
+                stridewarp::Direction(along.x, along.y, m_strideHeldDir); // the held part keeps the last mixed direction
         }
+    }
+    // The mixed shortening of the output (1 - stride scale, mixed on the whole-layer weights) may grow at once (each layer's scale already
+    // moves at the interpolation rate) but is released no faster than that rate: a short blend to an unwarped pick (a turn out of a warped
+    // loop) or the pruning of the warped layer would otherwise drop it by up to 11 cm of ankle offset in one update and snap the knee. The
+    // held part shortens the output's own stride: its ankle targets are pulled towards its thighs along the last mixed stride direction.
+    // Without a held part nothing changes.
+    void LimitStrideRelease(float dt)
+    {
+        if (!m_strideWarp || !m_outputTargets.valid || m_thighBones[0] < 0 || m_thighBones[1] < 0)
+        {
+            m_strideHeld = 0.0f;
+            return;
+        }
+        const float keep = std::isfinite(dt) && dt > 0 ? std::exp(-stridewarp::kInterpSpeed * dt) : 1.0f;
+        const float held = std::fmax(m_strideMixed, m_strideHeld * keep);
+        m_strideHeld = held > 1.0e-4f ? held : 0.0f;
+        const float extra = m_strideHeld - m_strideMixed;
+        const math::Vec3 direction = m_strideHeldDir;
+        if (!(extra > 0.0f) || !(math::Dot(direction, direction) > 0.5f))
+            return;
+        for (uint32_t side = 0; side < 2; ++side)
+        {
+            // Model-space thigh and ankle of the mixed pose: FK along the ankle chain.
+            math::Quat q{0, 0, 0, 1};
+            math::Vec3 pos{0, 0, 0}, thigh{0, 0, 0};
+            for (const int32_t b : m_ankleChain[side])
+            {
+                pos = pos + math::QuatRotate(q, m_out[uint32_t(b)].p);
+                q = math::QuatNormalize(math::QuatMul(q, m_out[uint32_t(b)].q));
+                if (b == m_thighBones[side])
+                    thigh = pos;
+            }
+            auto &corr = m_outputTargets.feet[side].p;
+            corr = corr + stridewarp::WarpOffset(pos + corr, thigh, direction, 1.0f - extra);
+        }
+        m_outputTargets.warpWeight = 1.0f;
     }
     const motion::MotionDatabase *m_db = nullptr;
     uint32_t m_n = 0, m_count = 0, m_collapses = 0;
@@ -1236,6 +1364,14 @@ class BlendStack
     bool m_perBoneRoot = (UTPP_BLEND_SIGNAL_MODE & 1) != 0, m_perBoneContacts = (UTPP_BLEND_SIGNAL_MODE & 2) != 0; // SetPerBoneSignals
     std::vector<int32_t> m_hipsChain; // root -> Hips bone indices
     std::array<motionFeet::Targets, kCapacity> m_targets{};
+    std::array<StrideOffset, kCapacity> m_strideOffset{}; // per layer: the stride warping part of its relative correction, see MixTargets
+    std::array<float, kCapacity> m_strideAmount{}; // per layer: its shortening, 1 - effective stride scale (0 = not warped)
+    float m_strideMixed = 0.0f; // shortening of the output mixed on the whole-layer weights (Evaluate)
+    float m_strideHeld = 0.0f;  // shortening of the output after LimitStrideRelease
+    float m_strideYawRate = 0.0f, m_strideLastYaw = 0.0f; // smoothed |visual yaw rate| (rad/s) and the last visual yaw, yaw fade
+    bool m_strideYawValid = false;
+    std::array<math::Vec3, kCapacity> m_strideDir{}; // per layer: its stride direction (WarpStride)
+    math::Vec3 m_strideHeldDir{};                    // last mixed stride direction of the output, for the held shortening
     std::array<std::array<float, 2>, kCapacity> m_ankleZ{}; // per layer: model-space ankle height of its own pose, left / right
     motionFeet::Targets m_outputTargets{};
     // ---- hand-back blend (dead-blended tail) ----
