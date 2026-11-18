@@ -324,6 +324,11 @@ static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "dodge::SampleDodge wr
 bool g_leanSetting = false;
 bool g_leanHeadSetting = false; // mm.leanHead: the motion head layer replaces the head lead while the lean is on
 lrt::Params g_leanParams;
+motionpose::WorldAimTargetParams g_worldAimParams; // SetAimWorldSmoothing (default off)
+motionpose::WorldAimTargetFilter g_worldAim;       // world aim direction of the aim offset while on
+int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
+bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
+bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
 // Slide feed (CET mm.slide -> SetSlide, default OFF; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 reaches the
 // chooser as MovementMode Sliding (+ Stance Crouch, MovementDirection, MovementMode_LastFrame) and the driver lets v2 own the body
@@ -1307,7 +1312,8 @@ std::unique_ptr<Bundle> LoadBundle(Body aBody, const Paths& aPaths)
     // touchdown pose step grew; the r4 game test then showed the ground jump-start clip held for the whole flight (V crouched mid-air). COST (offline
     // JumpPickTest, worst bone, deg per 50 ms within 0.15 s of the touchdown): JO1 33.8 vs 34.6 and JO2 49.7 vs 35.0 for the same flight without the jump-out rules - the fall loop -> heavy
     // land step is larger than the held Start clip's (the test bounds it at +30 deg and at the flight's own worst step, 53.2 / 64.8)
-    const motion::MatcherConfig cfg = ProductionMatcherConfig();
+    motion::MatcherConfig cfg = ProductionMatcherConfig();
+    cfg.farJumpGravityScale = g_farJumpGravityOn;
     r.matcherInit = b->matcher.Init(&b->db, &b->table, cfg, err);
     if (!r.matcherInit)
     {
@@ -1703,6 +1709,8 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
             if (g_bundle->evalOk)
                 g_bundle->eval.SetFeminineShoulders(g_femShoulderM);
                 g_bundle->eval.SetFeminineFigure(g_femFigureOn);
+            if (g_bundle->evalOk && g_handBackBlendReq >= 0)
+                g_bundle->eval.SetHandBackBlend(g_handBackBlendReq != 0);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
@@ -2209,6 +2217,47 @@ bool SetLeanParams(float aScale, float aHeadScale)
     return true;
 }
 
+bool SetAimWorldSmoothing(bool aOn, float aHz)
+{
+    if (!std::isfinite(aHz) || aHz < 0.0f || aHz > 60.0f)
+        return false;
+    std::lock_guard lock(g_m);
+    if (aOn != g_worldAimParams.enabled)
+        g_worldAim.Reset();
+    g_worldAimParams.enabled = aOn;
+    g_worldAimParams.smoothHz = aHz;
+    return true;
+}
+
+bool SetLeanCoverage(int32_t aCoverage)
+{
+    if (aCoverage != 0 && aCoverage != 1)
+        return false;
+    std::lock_guard lock(g_m);
+    g_leanParams.coverage = static_cast<uint8_t>(aCoverage);
+    return true;
+}
+
+void SetHandBackBlend(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_handBackBlendReq = aOn ? 1 : 0;
+    if (g_bundle && g_bundle->evalOk)
+        g_bundle->eval.SetHandBackBlend(aOn);
+}
+
+void SetStepDownReach(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_stepDownReachOn = aOn; // the native also switches the runtime air state (motionhost::SetAirStepDownReach)
+}
+
+void SetFarJumpGravityScale(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_farJumpGravityOn = aOn; // the matcher reads it when the next database loads
+}
+
 bool SetSlide(bool aOn)
 {
     std::lock_guard lock(g_m);
@@ -2422,12 +2471,18 @@ struct TestMapOverrides
 {
     int32_t capsuleSpeedQuery = -1, velocityPredicates = -1;
     float turnInPlaceDeg = std::numeric_limits<float>::quiet_NaN();
+    int32_t stepDownReach = -1;
 };
 TestMapOverrides g_testMapOverrides;
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg)
 {
     std::lock_guard lock(g_m);
-    g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg};
+    g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach};
+}
+void TestSetMapStepDownReach(int32_t aOn)
+{
+    std::lock_guard lock(g_m);
+    g_testMapOverrides.stepDownReach = aOn;
 }
 void TestApplyMapOverrides(adapter::MapConfig& aMc)
 {
@@ -2437,6 +2492,8 @@ void TestApplyMapOverrides(adapter::MapConfig& aMc)
         aMc.velocityPredicates = g_testMapOverrides.velocityPredicates != 0;
     if (std::isfinite(g_testMapOverrides.turnInPlaceDeg))
         aMc.turnInPlaceDeg = g_testMapOverrides.turnInPlaceDeg;
+    if (g_testMapOverrides.stepDownReach >= 0)
+        aMc.stepDownReach = g_testMapOverrides.stepDownReach != 0;
 }
 #endif
 
@@ -3026,6 +3083,23 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
         in.haveAim = AimAnglesFromModel(actorTarget, in.aimYawDeg, in.aimPitchDeg);
         in.haveActorAimPoint = in.haveAim;
         in.actorAimPoint = {actorTarget[0], actorTarget[1], actorTarget[2]};
+    }
+    // World aim target (default off): the aim offset follows a filtered world direction of the target, so a turning body
+    // does not drag the spine off the target; the angles stay relative to the actor frame. The barrel loop keeps the real point.
+    if (g_worldAimParams.enabled)
+    {
+        if (g_release || handback)
+            g_worldAim.Reset();
+        else
+        {
+            const bool live = in.haveAim && std::isfinite(f.playerYawDeg);
+            float wy = 0.0f, wp = 0.0f;
+            if (g_worldAim.Step(live, live ? f.playerYawDeg + in.aimYawDeg : 0.0f, in.aimPitchDeg, dt, g_worldAimParams, wy, wp) && live)
+            {
+                in.aimYawDeg = motionpose::RootRelativeYawDeg(wy, f.playerYawDeg);
+                in.aimPitchDeg = wp;
+            }
+        }
     }
     // Fix batch 2 (AO): a lost target (haveAim false) no longer ends the aim offset in one frame, MotionPose fades the latched
     // angles out with the Aiming weight. The game-owned upper body (handback) fades the latch out in 0.15 s (not in one frame).
@@ -4592,12 +4666,18 @@ void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::M
     sg.slide = g_slideFrame;
     sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_leanSetting;
     sg.head = headOwns;
+    // wide coverage only (the default gate ignores both)
+    sg.weaponAction = g_weaponAction == 2 || g_weaponAction == 8 || g_hipFirePoseNow || g_reloadUpperWeight > 0.0f;
+    sg.weaponDrawn = g_weaponUpperFrame || (aF.haveWeapon && aF.weaponDrawn);
     if (aR.clip >= 0 && static_cast<size_t>(aR.clip) < aB.leanClipMap.size())
     {
         sg.curveClip = aB.leanClipMap[static_cast<size_t>(aR.clip)];
         sg.clipSeconds = aR.clipTime;
     }
     aB.lean.Step(aB.leanPack, g_leanParams, sg, aDt);
+    // wide coverage: the head lead is blocked only while the lean head layer runs (aiming drops the lean head)
+    if (g_leanParams.coverage == static_cast<uint8_t>(lrt::Coverage::Wide))
+        g_leanHeadOwns = headOwns && aB.lean.HeadActive();
     if (aB.lean.Idle())
         return;
     ov::Pose p;
@@ -5180,6 +5260,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     static_assert(utpp::mm::air::kStepDownSeconds == adapter::kGroundDropGraceSeconds && utpp::mm::air::kStepDownDepthM == adapter::kGroundDropStepM &&
                       utpp::mm::air::kStepDownMaxSeconds == adapter::kGroundDropStepMaxS,
                   "the runtime air state and the chooser mapping agree on a step-down");
+    mc.stepDownReach = g_stepDownReachOn; // SetStepDownReach (same switch as the runtime air state)
     mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam
     // the exit window of the gate can close on the first open feed; the grace keeps its own short tail
     g_exitAirTail = aRaw.vehicleExitWindow ? 0.6f : std::fmax(0.0f, g_exitAirTail - std::fmax(aRaw.dt, 0.0f));

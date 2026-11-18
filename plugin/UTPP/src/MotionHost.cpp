@@ -7220,6 +7220,20 @@ void SetAirProbe(bool aOn)
     g_airProbeOn = aOn;
 }
 
+void SetPelvisPlacement(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    g_pelvisPlacementOn = aOn; // read at the next feed
+}
+
+void SetAirStepDownReach(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    air::AirConfig c = g_air.Config();
+    c.stepDownReach = aOn; // same switch as the chooser mapping (motiondriver::SetStepDownReach)
+    g_air.SetConfig(c);
+}
+
 void SetAirRobust(bool aOn)
 {
     std::lock_guard lock(g_mutex);

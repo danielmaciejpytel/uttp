@@ -19,6 +19,21 @@
 #include "MotionDriver.hpp"
 #include "ragdoll/RagdollSlotProbe.hpp" // ragdoll get-up: standing belly reference sign (PelvisTracker)
 
+namespace utpp::motionhost
+{
+void SetPelvisPlacement(bool aOn); // MotionHost.cpp
+void SetAirStepDownReach(bool aOn); // MotionHost.cpp
+}
+namespace utpp::motiondriver
+{
+// MotionDriver.cpp: optional behaviours (default off)
+bool SetLeanCoverage(int32_t aCoverage);
+bool SetAimWorldSmoothing(bool aOn, float aHz);
+void SetHandBackBlend(bool aOn);
+void SetStepDownReach(bool aOn);
+void SetFarJumpGravityScale(bool aOn);
+}
+
 namespace utpp::motiondriver
 {
 namespace
@@ -470,6 +485,58 @@ std::string Narrow(const std::wstring& aW)
 }
 } // namespace
 
+// optional motion behaviours (default off; CET utpp_motion mm.pelvisPlacement, mm.handBackBlend, mm.stepDownReach,
+// mm.farJumpGravity, mm.leanCoverage)
+void Native_SetMMPelvisPlacement(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    motionhost::SetPelvisPlacement(v);
+}
+void Native_SetMMHandBackBlend(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    SetHandBackBlend(v);
+}
+void Native_SetMMStepDownReach(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    SetStepDownReach(v); // chooser mapping
+    motionhost::SetAirStepDownReach(v); // runtime air state: one switch for both
+}
+void Native_SetMMFarJumpGravity(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    SetFarJumpGravityScale(v);
+}
+void Native_SetMMAimWorldSmoothing(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    float hz = 0.0f;
+    RED4ext::GetParameter(aFrame, &on);
+    RED4ext::GetParameter(aFrame, &hz);
+    aFrame->code++;
+    const bool ok = SetAimWorldSmoothing(on, hz);
+    if (aOut)
+        *aOut = ok;
+}
+void Native_SetMotionLeanCoverage(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    int32_t v = 0;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    const bool ok = SetLeanCoverage(v);
+    if (aOut)
+        *aOut = ok;
+}
+
 void RegisterNatives()
 {
     auto* rtti = RED4ext::CRTTISystem::Get();
@@ -623,6 +690,19 @@ void RegisterNatives()
     r4->AddParam("Bool", "hex");
     r4->SetReturnType("String");
     rtti->RegisterFunction(r4);
+    // optional motion behaviours (default off)
+    auto* o1 = RED4ext::CGlobalFunction::Create("UTPPSetMMPelvisPlacement", "UTPPSetMMPelvisPlacement", &Native_SetMMPelvisPlacement);
+    o1->flags = flags; o1->AddParam("Bool", "on"); rtti->RegisterFunction(o1);
+    auto* o2 = RED4ext::CGlobalFunction::Create("UTPPSetMMHandBackBlend", "UTPPSetMMHandBackBlend", &Native_SetMMHandBackBlend);
+    o2->flags = flags; o2->AddParam("Bool", "on"); rtti->RegisterFunction(o2);
+    auto* o3 = RED4ext::CGlobalFunction::Create("UTPPSetMMStepDownReach", "UTPPSetMMStepDownReach", &Native_SetMMStepDownReach);
+    o3->flags = flags; o3->AddParam("Bool", "on"); rtti->RegisterFunction(o3);
+    auto* o4 = RED4ext::CGlobalFunction::Create("UTPPSetMMFarJumpGravity", "UTPPSetMMFarJumpGravity", &Native_SetMMFarJumpGravity);
+    o4->flags = flags; o4->AddParam("Bool", "on"); rtti->RegisterFunction(o4);
+    auto* o5 = RED4ext::CGlobalFunction::Create("UTPPSetMotionLeanCoverage", "UTPPSetMotionLeanCoverage", &Native_SetMotionLeanCoverage);
+    o5->flags = flags; o5->AddParam("Int32", "coverage"); o5->SetReturnType("Bool"); rtti->RegisterFunction(o5);
+    auto* o6 = RED4ext::CGlobalFunction::Create("UTPPSetMMAimWorldSmoothing", "UTPPSetMMAimWorldSmoothing", &Native_SetMMAimWorldSmoothing);
+    o6->flags = flags; o6->AddParam("Bool", "on"); o6->AddParam("Float", "hz"); o6->SetReturnType("Bool"); rtti->RegisterFunction(o6);
 }
 
 void Install(const std::wstring& aDllDir)
