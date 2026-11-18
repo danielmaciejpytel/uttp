@@ -1118,5 +1118,14 @@ if(DEFINED _utpp_nlr_base AND EXISTS "${_utpp_nlr_base}.utppmm" AND EXISTS "${_u
            "${_utpp_nlr_base}.chooser.json")
 endif()
 
+# ---- shrink-only stride warping (mm/StrideWarp.hpp; BlendStack::SetStrideWarp, off by default), 30 / 60 / 144 Hz ----
+if(DEFINED _utpp_mdmotion_data AND EXISTS "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
+  add_executable(utpp_mm_loco_stride_warp_test tests/StrideWarpTest.cpp src/mm/StrideWarp.hpp src/mm/MotionBlendStack.hpp)
+  target_compile_options(utpp_mm_loco_stride_warp_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+  target_compile_features(utpp_mm_loco_stride_warp_test PRIVATE cxx_std_20)
+  target_link_libraries(utpp_mm_loco_stride_warp_test PRIVATE bcrypt)
+  add_test(NAME utpp_mm_loco_stride_warp_test COMMAND utpp_mm_loco_stride_warp_test "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
+endif()
+
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

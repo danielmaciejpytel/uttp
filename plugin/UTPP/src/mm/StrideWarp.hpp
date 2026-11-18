@@ -1,0 +1,95 @@
+// Shrink-only stride warping of the leg targets. Header-only, allocation-free, deterministic.
+//
+// The play rate speeds a clip up to the capsule; what the rate cannot absorb (a clip whose root, at its rate, still moves faster than the
+// capsule) shows as planted feet sliding backwards. Stride warping shortens the step instead: every ankle target is pulled towards the
+// thigh along the root-motion direction by the stride scale
+//   scale = capsule speed / (clip root speed x play rate), clamped to [kScaleFloor, 1]
+// so a planted foot moves backwards in the character frame at capsule speed. The scale never exceeds 1: a clip slower than the capsule
+// keeps its strides (the rate handles that side), the step is never lengthened.
+//
+// Reference behaviour (the stride warping node of the locomotion graph, graph mode):
+//   - scale from the locomotion speed over the root-motion speed, clamped to at most 1, interpolated at 10 / s both ways;
+//   - off (scale 1) when the root-motion speed is below 10 cm/s;
+//   - the node alpha is the clip's warping curve (the same curve that gates orientation warping);
+//   - the feet are scaled along the stride direction about the thigh projected on the floor plane; the pelvis is only pulled down when
+//     the warped legs would over-extend. Shortening moves the feet towards the thighs, the hip-to-ankle distance only shrinks, so the
+//     pull-down never engages on this side and is not modelled here.
+// Differences: the floor is 0.75 instead of 0 (a stride shorter than three quarters bends the knees beyond what the shin and skin
+// helpers carry well), and the interpolation is the frame-rate independent exponential form of the same 10 / s rate.
+#pragma once
+
+#include "MMMath.hpp"
+
+#include <algorithm>
+#include <cmath>
+
+namespace utpp::mm::stridewarp
+{
+inline constexpr float kScaleFloor = 0.75f;   // shortest stride, fraction of the clip's own
+inline constexpr float kInterpSpeed = 10.0f;  // 1/s, scale interpolation towards the target
+inline constexpr float kMinRootSpeed = 0.10f; // m/s, root-motion speed below which the clip is not warped
+inline constexpr float kIdentityEps = 1.0e-6f; // |1 - scale| at or below this is treated as no warp
+
+struct Inputs
+{
+    float dt = 0;           // s
+    float capsuleSpeed = 0; // m/s, horizontal capsule speed
+    float rootSpeed = 0;    // m/s, horizontal clip root speed at the clip's play rate
+    float alpha = 1;        // warping curve of the clip at its current time, [0, 1]
+    bool allowed = false;   // ground locomotion pick (not air, slide, traversal or vehicle)
+};
+
+struct State
+{
+    float scale = 1;        // interpolated stride scale before alpha
+    bool initialized = false;
+};
+
+// Stride scale the clip asks for this frame (before interpolation and alpha); 1 = no warp.
+inline float TargetScale(const Inputs &in) noexcept
+{
+    if (!in.allowed || !std::isfinite(in.capsuleSpeed) || !std::isfinite(in.rootSpeed) || in.rootSpeed < kMinRootSpeed)
+        return 1.0f;
+    const float capsule = std::max(0.0f, in.capsuleSpeed);
+    return std::clamp(capsule / in.rootSpeed, kScaleFloor, 1.0f);
+}
+
+// Advances the layer's stride state and returns the effective scale (alpha applied). The first frame of a layer takes the target
+// directly (a fresh pick fades in through the blend); dt <= 0 holds the state.
+inline float Step(State &state, const Inputs &in) noexcept
+{
+    const float target = TargetScale(in);
+    if (!state.initialized)
+    {
+        state.scale = target;
+        state.initialized = true;
+    }
+    else if (std::isfinite(in.dt) && in.dt > 0)
+        state.scale += (target - state.scale) * (1.0f - std::exp(-kInterpSpeed * in.dt));
+    state.scale = std::clamp(state.scale, kScaleFloor, 1.0f);
+    const float alpha = std::isfinite(in.alpha) ? std::clamp(in.alpha, 0.0f, 1.0f) : 0.0f;
+    return 1.0f - alpha * (1.0f - state.scale);
+}
+
+inline bool IsIdentity(float scale) noexcept
+{
+    return !(std::fabs(1.0f - scale) > kIdentityEps);
+}
+
+// Horizontal unit stride direction from the root velocity in the character frame (x right, y forward); false when it has no length.
+inline bool Direction(float rootX, float rootY, math::Vec3 &out) noexcept
+{
+    const float len = std::hypot(rootX, rootY);
+    if (!std::isfinite(len) || len <= 1.0e-6f)
+        return false;
+    out = math::Vec3{rootX / len, rootY / len, 0.0f};
+    return true;
+}
+
+// Ankle target scaled along the horizontal unit direction about the origin (the thigh); the other components are kept.
+inline math::Vec3 WarpPoint(math::Vec3 ankle, math::Vec3 origin, math::Vec3 direction, float scale) noexcept
+{
+    const float along = math::Dot(ankle - origin, direction);
+    return ankle + direction * ((scale - 1.0f) * along);
+}
+} // namespace utpp::mm::stridewarp
