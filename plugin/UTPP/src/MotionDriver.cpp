@@ -241,7 +241,6 @@ hlead::Params g_hlParams;
 hlead::HeadLead g_hl;
 hlead::Skeleton g_hlSk;
 const void* g_hlSkBundle = nullptr;
-std::chrono::steady_clock::time_point g_hlLastApply{};
 bool g_hlHaveApply = false;
 // Opt-in orientation warp (CET mm.orientWarp -> SetOrientWarp, default OFF): mm/OrientWarp.hpp aligns the pelvis (extra visual
 // root yaw added to the provided root frame of the leg tail) and the torso (twist over Spine .. Spine3 of the tail's pose copy) with

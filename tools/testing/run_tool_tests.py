@@ -161,6 +161,7 @@ REGISTRY = {
     'mmbake/test_travbake_motion.py': {'markers': {'data'}},
     'ragdoll/test_getup_metric.py': {},
     'replay/test_speed_calibration.py': {},
+    'replay/test_gate_eval.py': {},
     'replay/test_slide_replay.py': {
         'markers': {'needs-args'}, 'reason': 'needs --exe <utpp_motion_replay.exe> --db <slide bundle> --feeds <dir>'},
     'retarget/test_ankle_offset_yaw.py': {
