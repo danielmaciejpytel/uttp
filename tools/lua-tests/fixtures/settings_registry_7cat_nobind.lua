@@ -135,7 +135,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
-    ["mm.stickSpeed"] = "\"fixed\"",
+    ["mm.stickSpeed"] = "\"analog\"",
     ["mm.trace"] = "false",
     ["mm.walkSpeed"] = "1.6000000000000001",
     ["mm.weaponUpper"] = "false",
@@ -274,8 +274,7 @@ return {
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "native UTPPSetMotionMinAnalogWalk(0.81999999999999995)",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
-    "native UTPPSetStickSpeedMode(1)",
-    "apply mm.stickSpeed(\"fixed\",\"ok\")",
+    "apply mm.stickSpeed(\"analog\",\"ok\")",
     "native UTPPSetMotionBarrelLoop(true)",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "v2 setLean(true)",
@@ -471,7 +470,7 @@ return {
     "apply mm.bodyYawOffset(4,\"ok\")",
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
-    "apply mm.stickSpeed(\"fixed\",\"ok\")",
+    "apply mm.stickSpeed(\"analog\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
@@ -1774,7 +1773,7 @@ return {
     },
     ["mm.stickSpeed"] = {
       ["choices"] = "fixed,analog",
-      ["default"] = "\"fixed\"",
+      ["default"] = "\"analog\"",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2291,7 +2290,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
-    ["mm.stickSpeed"] = "\"fixed\"",
+    ["mm.stickSpeed"] = "\"analog\"",
     ["mm.trace"] = "false",
     ["mm.walkSpeed"] = "1.6000000000000001",
     ["mm.weaponUpper"] = "false",
@@ -2795,7 +2794,7 @@ return {
     "apply mm.bodyYawOffset(4,\"ok\")",
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
-    "apply mm.stickSpeed(\"fixed\",\"ok\")",
+    "apply mm.stickSpeed(\"analog\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
@@ -2974,7 +2973,7 @@ mm.pelvisYawTrim=2\r\
 mm.bodyYawOffset=4\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
-mm.stickSpeed=fixed\r\
+mm.stickSpeed=analog\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
 mm.leanHead=true\r\
@@ -3434,7 +3433,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
-    ["mm.stickSpeed"] = "\"fixed\"",
+    ["mm.stickSpeed"] = "\"analog\"",
     ["mm.trace"] = "true",
     ["mm.walkSpeed"] = "1.6000000000000001",
     ["mm.weaponUpper"] = "false",
@@ -3559,7 +3558,7 @@ mm.pelvisYawTrim=2\r\
 mm.bodyYawOffset=4\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
-mm.stickSpeed=fixed\r\
+mm.stickSpeed=analog\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
 mm.leanHead=true\r\

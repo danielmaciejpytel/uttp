@@ -53,9 +53,10 @@
 --                  a small stick tilt (native UTPPSetMotionMinAnalogWalk; reds UTPPUpdateAnalogFloor lifts the capsule with one MaxSpeed multiplier
 --                  1 .. 4 = the fraction of the full-stick speed raised to this one, the motion driver gives the prediction the lifted cap). 0 = the
 --                  game's own slow speeds. Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, air: untouched.
---   mm.stickSpeed choice "fixed" (default) / "analog" - stick speed model (script Game.UTPPSetStickSpeedMode 1 / 0; reds
+--   mm.stickSpeed choice "fixed" / "analog" (default) - stick speed model (script Game.UTPPSetStickSpeedMode 1 / 0; reds
 --                  UTPPUpdateStickSpeed). fixed: walk speed below the stick 0.7, run speed from 0.7, the full crouch speed in a crouch,
 --                  the minimum walk speed off while it applies; analog: the game speed follows the stick (the previous behaviour).
+--                  The motion driver gets the same mode (native UTPPSetMotionStickSpeedMode 1 / 0) for its prediction.
 --                  Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, walk toggle, Tier2 Slow, air: untouched.
 --   mm.leanScale float 0 .. 2, default 0.85 (DLL default 1) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
 --   mm.leanHeadScale float 0 .. 2, default 0.9 (DLL default 1) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
@@ -718,6 +719,15 @@ function M.ApplyStickSpeed(api)
     end
     return false
   end
+  -- the motion driver's prediction follows the same model (native UTPPSetMotionStickSpeedMode); a missing native (older DLL) keeps
+  -- the script mode, logged once per change
+  local okN, acceptedN
+  if api and api.setMotionStickSpeed then
+    okN, acceptedN = pcall(api.setMotionStickSpeed, mode)
+  else
+    okN, acceptedN = pcall(function() return Game.UTPPSetMotionStickSpeedMode(mode) end)
+  end
+  if not okN or acceptedN ~= true then log("mm.stickSpeed: motion driver call failed") end
   M.rt.stickSpeedApplied = v
   log("mm.stickSpeed -> " .. v)
   return true
@@ -928,12 +938,12 @@ function M.RegisterSettings(core)
       .. "there, so her feet glided over the ground; 0.82 (default) is the speed of a half-tilted stick. 0 = the game's own speed. "
       .. "Only on foot in third person, standing or crouching; sprinting, aiming and jumping are unchanged.",
     apply = function(v) M.SetMinAnalogWalk(v) end })
-  core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
+  core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "analog",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
     label = "Gamepad stick speed",
-    desc = "Walk or run (default): pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, "
+    desc = "Walk or run: pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, "
       .. "pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the "
-      .. "animations. Follows the stick: her speed changes smoothly with how far the stick is pushed, as in the base game. "
+      .. "animations. Follows the stick (default): her speed changes smoothly with how far the stick is pushed, as in the base game. "
       .. "Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.",
     apply = function(v) M.SetStickSpeed(v) end })
   core.Register({ key = "mm.aimAtCrosshair", section = "animation", type = "bool", default = true,

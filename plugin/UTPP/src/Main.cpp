@@ -2407,6 +2407,17 @@ void Native_SetMotionMinAnalogWalk(RED4ext::IScriptable*, RED4ext::CStackFrame* 
     if (aOut)
         *aOut = ok;
 }
+// ---- stick speed model (motiondriver::SetStickSpeedMode; CET mm.stickSpeed next to the script's UTPPSetStickSpeedMode): 0 analog, 1 fixed
+void Native_SetMotionStickSpeedMode(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    int32_t mode = 0;
+    RED4ext::GetParameter(aFrame, &mode);
+    aFrame->code++;
+    const bool ok = motiondriver::SetStickSpeedMode(mode);
+    LogInfo("UTPPSetMotionStickSpeedMode(%d) -> %d", mode, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // Reds calls it once per locomotion update (UTPPUpdateAnalogFloor): lock-free, no log. Exactly 1.0 unless the floor is on and v2 drives
 // third-person locomotion.
 void Native_MotionAnalogFloorMul(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, float* aOut, int64_t)
@@ -3983,6 +3994,14 @@ void PostRegisterTypes()
         af->AddParam("Bool", "walk");
         af->SetReturnType("Float");
         rtti->RegisterFunction(af);
+    }
+    // Stick speed model (declaration: scripts/utpp.reds UTPPSetMotionStickSpeedMode; keep in sync)
+    {
+        auto* sm = RED4ext::CGlobalFunction::Create("UTPPSetMotionStickSpeedMode", "UTPPSetMotionStickSpeedMode", &Native_SetMotionStickSpeedMode);
+        sm->flags = flags;
+        sm->AddParam("Int32", "mode");
+        sm->SetReturnType("Bool");
+        rtti->RegisterFunction(sm);
     }
 
     // v2 slide camera (read-only getter; keep the declaration in scripts/utpp_motion.reds in sync)

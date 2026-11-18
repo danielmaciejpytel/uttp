@@ -181,6 +181,11 @@ float WalkSpeedTarget();
 bool SetMinAnalogWalk(float aMs);
 float MinAnalogWalkSetting();
 float AnalogFloorMul(float aMoveX, float aMoveY, int32_t aDetailed, bool aWalk);
+// Stick speed model (CET mm.stickSpeed; DLL default 0 = analog): 1 = fixed, the prediction follows the speeds the script holds (walk below
+// the stick 0.7, run from 0.7, crouch in a crouch; mm/MotionAdapter.hpp MapConfig::stickSpeedFixed). False for any other value (nothing
+// changed). Status: stickSpeed=.
+bool SetStickSpeedMode(int aMode);
+int StickSpeedMode();
 // Selection churn guards as a group (CET mm.selectionGuards, developer option, DLL default ON): off = every clip selection guard of the
 // matcher (ChooserMatcher::SetSelectionGuards) and the gait return hold of the speed map (MapConfig::gaitReturnHoldS 0) are off, for A/B tests.
 // Read on every Step, for both bodies and every bundle loaded later. Always true. Status: selGuards=.
