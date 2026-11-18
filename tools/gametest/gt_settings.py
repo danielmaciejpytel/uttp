@@ -52,11 +52,19 @@ SHIPPED_DEFAULTS = {'mm.bodyYawOffsetFemale': 4, 'mm.bodyYawOffsetMale': 0, 'mm.
                     'perspective.scene': False, 'perspective.blend': 0.8, **dict(LOCO_VALUES)}
 
 
-def session_plan(mode: str) -> list[tuple[str, object]]:
-    """[(key, value)] the harness sets after arming for a --settings mode."""
+def session_plan(mode: str, overrides: dict | None = None) -> list[tuple[str, object]]:
+    """[(key, value)] the harness sets after arming for a --settings mode. `overrides` (key -> value) replaces the value of
+    keys already in the plan (an A/B run of one pinned option); a key outside the plan is refused."""
     if mode == SETTINGS_SHIPPED:
-        return [(k, SHIPPED_DEFAULTS[k]) for k, _ in AUTHOR_VALUES if SHIPPED_DEFAULTS.get(k) is not None]
-    return list(AUTHOR_VALUES)
+        plan = [(k, SHIPPED_DEFAULTS[k]) for k, _ in AUTHOR_VALUES if SHIPPED_DEFAULTS.get(k) is not None]
+    else:
+        plan = list(AUTHOR_VALUES)
+    if overrides:
+        unknown = [k for k in overrides if k not in dict(plan)]
+        if unknown:
+            raise ValueError('override of keys outside the session plan: %s' % ', '.join(unknown))
+        plan = [(k, overrides.get(k, v)) for k, v in plan]
+    return plan
 
 
 def _same(a, b) -> bool:

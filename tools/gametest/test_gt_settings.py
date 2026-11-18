@@ -453,6 +453,18 @@ class SessionSettingsTests(unittest.TestCase):
         leans = set(re.findall(r'key\s*=\s*"(mm\.lean\w*)"', text))
         self.assertTrue(leans and leans <= set(gs.LOCO_KEYS), leans)
 
+    def test_plan_overrides(self):
+        base = gs.session_plan('shipped')
+        off = gs.session_plan('shipped', {'mm.strideWarp': False})
+        self.assertEqual([k for k, _ in off], [k for k, _ in base])          # same keys, same order
+        self.assertIs(dict(base)['mm.strideWarp'], True)
+        self.assertIs(dict(off)['mm.strideWarp'], False)
+        self.assertEqual({k: v for k, v in off if k != 'mm.strideWarp'}, {k: v for k, v in base if k != 'mm.strideWarp'})
+        self.assertEqual(gs.session_plan('author', {}), gs.session_plan('author'))
+        with self.assertRaises(ValueError):
+            gs.session_plan('shipped', {'mm.notInThePlan': 1})
+        self.assertEqual([d['key'] for d in gs.differs_from_shipped(dict(off))], ['mm.strideWarp'])
+
     def test_difference_from_shipped(self):
         diff = {d['key']: d for d in gs.differs_from_shipped(dict(gs.session_plan('author')))}
         # the body yaw offset, the pelvis trim, the Shinobi reload animation, third person in scenes and the 1 m shoulder offset

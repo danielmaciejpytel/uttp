@@ -922,7 +922,7 @@ class Night:
         values in force and the ones that differ from the shipped defaults go to the run record (summary.json 'session_settings')."""
         mode = getattr(self.args, 'settings', gs.SETTINGS_AUTHOR)
         values, missed = {}, []
-        keys = [k for k, _ in gs.session_plan(mode)]
+        keys = [k for k, _ in gs.session_plan(mode, session_overrides(self.args))]
         clash = [u for u in (self.cycle.get('unowned_settings') or []) if any(k in str(u) for k in keys)]
         cet_text = str(getattr(self.args, 'cet', '') or '')          # a Set loop over a table is not found by scan_unowned
         clash += [k for k in keys if k in cet_text and k not in clash]
@@ -930,7 +930,7 @@ class Night:
             info['session_settings_conflict'] = clash
             self.log(f'[settings] WARNING: --cet already sets {clash}: the ledger records those values as "previous" and puts them back, '
                      'not the player\'s own; drop those --cet commands when --settings is used')
-        for key, value in gs.session_plan(mode):
+        for key, value in gs.session_plan(mode, session_overrides(self.args)):
             ent = self.settings.apply(self.settings_io(None, guard), key, value, '--settings')
             if ent['state'] == 'applied':
                 values[key] = value
@@ -4667,7 +4667,7 @@ def dry_run(args) -> int:
     print(f'     launch: {args.launch} -> ' + (f'{GAME_EXE_PATH} (cwd {os.path.dirname(GAME_EXE_PATH)})'
                                                  if args.launch == 'exe' else f'Start-Process {STEAM_URL}'))
     print(f'     quit command (CET console): {gn.QUIT_CMD}')
-    print(f'     --settings {args.settings}: ' + ', '.join(f'{k}={v!r}' for k, v in gs.session_plan(args.settings))
+    print(f'     --settings {args.settings}: ' + ', '.join(f'{k}={v!r}' for k, v in gs.session_plan(args.settings, session_overrides(args)))
           + ' (set after arming through the ledger, restored before ExitGame)')
     print(f'     recording safety: pose segments (utpp-pose-*.utpppose), input dump (utpp-feed-*.txt) and mod log from {args.log_dir} '
           'are copied into <run>\\logs between the scenarios, at the end of the scenario phase on every exit path, and after the quit')
@@ -5141,6 +5141,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help='mod settings of the session: author = the author\'s own values (body yaw offset 4 female V / 0 male V, pelvis yaw trim 2, camera '
                         'side 1, Shinobi bonus reload on, first person in scenes off, blend 0.6), set after arming and put back before '
                         'ExitGame; shipped = the registered defaults of the same keys. The run record lists what differs from shipped.')
+    p.add_argument('--stride-warp', default='', choices=['', 'on', 'off'],
+                   help='stride matching (mm.strideWarp) of the session for an A/B run: on | off replaces the pinned value; '
+                        'empty (default) = the pinned value')
     p.add_argument('--animation-pack', default='', choices=[''] + list(gs.PACK_VALUES),
                    help="the mod's animation pack option of the session: utpp | game, set after arming through the same ledger and "
                         'put back before ExitGame; empty (default) = the option is not touched')
@@ -5272,6 +5275,12 @@ def write_body_summary(args, results: list) -> list[str]:
     with open(os.path.join(args.out_root, f'body_summary_{stamp_}.json'), 'w', encoding='utf-8') as f:
         json.dump(digests, f, indent=1, default=str)
     return lines
+
+
+def session_overrides(args) -> dict:
+    """--stride-warp on | off: the pinned session values it replaces (key -> value); empty = none."""
+    sw = str(getattr(args, 'stride_warp', '') or '')
+    return {'mm.strideWarp': sw == 'on'} if sw else {}
 
 
 def main(argv=None) -> int:
