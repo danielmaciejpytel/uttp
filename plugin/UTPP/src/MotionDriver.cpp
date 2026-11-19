@@ -5912,10 +5912,22 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         const bool reloadBeganMoving = g_reloadRootLatch.Step(g_reloadUpperWeight, rootEvaluation.input.movingGround);
         rootEvaluation.input.montage = rootframe::RootMontage(weaponOverlay, g_aimGameUpper, g_aimingNow, g_reloadUpperWeight,
                                                               rootEvaluation.input.movingGround, reloadBeganMoving);
-        // Forward limit along travel (MotionOffsetRoot.hpp item 4): only while the root interpolates on the ground (no slide, no montage).
+        // Forward limit along travel (MotionOffsetRoot.hpp item 5): only while the root interpolates on the ground (no slide, no montage).
+        // Mode 2 also leaves out the turning clips (pivot, moving turn, reface, turn in place), the starts and the crouch: there the
+        // offset keeps the whole radius (it absorbs the capsule's turn), the clips that lead into a stop are bounded.
 #if UTPP_OFFSET_ROOT_FORWARD_LIMIT != 0
+        bool forwardClip = true;
+#if UTPP_OFFSET_ROOT_FORWARD_LIMIT == 2
+        {
+            const uint8_t fc = r.clip >= 0 && static_cast<uint32_t>(r.clip) < b.db.NumClips()
+                                   ? steer::ClassifyClip(b.db.ClipName(static_cast<uint32_t>(r.clip)))
+                                   : steer::kClassTurnInPlace;
+            forwardClip = !steer::IsTurnClass(fc) && fc != steer::kClassTurnInPlace && fc != steer::kClassStart &&
+                          fc != steer::kClassStartSprint && cs.stance == 0;
+        }
+#endif
         rootEvaluation.input.forwardLimit = rootEvaluation.input.movingGround && !rootEvaluation.input.montage && !b.map.slideActive &&
-                                                    cs.movementMode == 0
+                                                    cs.movementMode == 0 && forwardClip
                                                 ? motionRoot::kForwardLimit
                                                 : -1.0f;
 #endif

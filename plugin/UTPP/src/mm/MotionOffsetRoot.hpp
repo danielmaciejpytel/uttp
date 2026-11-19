@@ -27,6 +27,8 @@
 //     capsule velocity may not grow past forwardLimit, and any part beyond it decays with its own half-life (forwardHalflife); the rest
 //     of the leg / capsule mismatch goes to the foot locks during the loop instead of to one pull-back at the stop. Lateral and
 //     trailing offsets (a start, where the capsule leads) are left alone. It runs before the continuity bound, so the bound still holds.
+//     With UTPP_OFFSET_ROOT_FORWARD_LIMIT 2 the driver passes the limit only outside turning and start clips while standing (a turn
+//     keeps the forward offset that absorbs it).
 // (RootMontage.hpp: a reload that began on the spot is not montage once V moves.)
 #pragma once
 #include "MMMath.hpp"
@@ -50,7 +52,8 @@
 #define UTPP_ROOT_FORWARD_MUTATION 0 // 1 = Step::forwardLimit is ignored (the offset may sit forward at the radius): tests must FAIL
 #endif
 #ifndef UTPP_OFFSET_ROOT_FORWARD_LIMIT
-#define UTPP_OFFSET_ROOT_FORWARD_LIMIT 0 // 1 = the driver passes kForwardLimit while moving on the ground (header item 5); 0 = off
+#define UTPP_OFFSET_ROOT_FORWARD_LIMIT 0 // 1 = the driver passes kForwardLimit while moving on the ground (header item 5); 2 = the same, but
+                                         // not in a turning or start clip and not crouched; 0 = off
 #endif
 #ifndef UTPP_OFFSET_ROOT_FORWARD_LIMIT_M
 #define UTPP_OFFSET_ROOT_FORWARD_LIMIT_M .10f // m: value of kForwardLimit (a build may override it for offline comparisons)
