@@ -56,3 +56,13 @@ if(UTPP_MMDB_TEST_FILE)
     add_test(NAME utpp_mm_footlock_flstop_mut1 COMMAND utpp_mm_footlock_flstop_mut1 "${UTPP_MMDB_TEST_FILE}")
     set_tests_properties(utpp_mm_footlock_flstop_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "\\[FAIL\\] [(]s1[)] walk stop, false swing contact: the foot spacing")
 endif()
+# FootLocker standing-stop firm plant (FootLocker::SetStopFirmPlant): UTPP_FLFIRM_MUTATION=1 removes the wait for a firm contact, the short
+# partial contact of tests/StandingStopSupportTest.cpp must then plant the foot.
+if(UTPP_MMDB_TEST_FILE)
+    add_executable(utpp_standing_stop_support_flfirm_mut1 tests/StandingStopSupportTest.cpp src/BaseDatabase.hpp src/mm/FootLocker.hpp)
+    target_compile_features(utpp_standing_stop_support_flfirm_mut1 PRIVATE cxx_std_20)
+    target_compile_options(utpp_standing_stop_support_flfirm_mut1 PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_standing_stop_support_flfirm_mut1 PRIVATE UTPP_FLFIRM_MUTATION=1)
+    add_test(NAME utpp_standing_stop_support_flfirm_mut1 COMMAND utpp_standing_stop_support_flfirm_mut1 "${UTPP_MMDB_TEST_FILE}")
+    set_tests_properties(utpp_standing_stop_support_flfirm_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL firm plant: a short partial contact in a standing stop never locks")
+endif()
