@@ -270,13 +270,20 @@ struct DodgeProbe
     int32_t sector = -1;   // mm::dodge::Sector of the clip shown
     float clipTime = 0.0f; // clip time sampled (s)
     uint32_t clips = 0;    // dodge clips started since the bundle was installed
+    bool alignValid = false;  // the drawn heading turns toward alignYawDeg (mm/Dodge.hpp Frame::alignYawDeg, world deg)
+    float alignYawDeg = 0.0f;
+    float owWeight = 0.0f, owRootDeg = 0.0f; // orientation warp weight / extra root yaw (deg) after this Step
+    // the last tail frame: root yaw (deg) added on top of the offset root's (orientation warp + pelvis yaw trim + body yaw offset) and
+    // the part of it from the configured offsets (pelvis yaw trim + body yaw offset)
+    float extraDeg = 0.0f, presentDeg = 0.0f;
 };
 DodgeProbe TestDodgeProbe();
 #endif
 // Orientation warp (CET mm.orientWarp, default ON; mm/OrientWarp.hpp): while V runs a circle the pelvis (extra visual root yaw on
 // the provided root frame of the leg tail) and the torso (twist over Spine .. Spine3) are brought onto the path of motion instead of
 // the outside of the turn; loop clips on the ground only, no aim / weapon / air / crouch / slide / traversal, weight 0 (bit-identical)
-// for straight running, low speed and non-loop clips. SetOrientWarp always returns true. Status: orientWarp= owW= owRoot= owTorso=;
+// for straight running, low speed and non-loop clips; held unchanged while a ground dodge clip and its hand-back blend play.
+// SetOrientWarp always returns true. Status: orientWarp= owW= owRoot= owTorso=;
 // MMTRACE (only while on or fading): ow=<on>/<weight>/<root deg>/<torso deg>.
 bool SetOrientWarp(bool aOn);
 // Stride warping (CET mm.strideWarp; mm/StrideWarp.hpp, BlendStack::SetStrideWarp; DLL default on): the steps of
