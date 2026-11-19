@@ -46,11 +46,11 @@
 // 0 = off (the pose is bit for bit the one without it). A build may override it.
 #define UTPP_STRIDE_WARP 0
 #endif
-#ifndef UTPP_STEER_ACTIVE_ONLY
-// Default steering mode of the blend stack (BlendStack::SetSteerMode): 0 = general (moving) steering on every live layer, 1 = on the
-// newest layer only, 2 = on the newest layer only with its correction carried through the layer mix (kSteerCarried).
-// SetSteerActiveOnly(true) selects this build's newest-layer mode (2 when this is 2, else 1). A build may override it.
-#define UTPP_STEER_ACTIVE_ONLY 1
+#ifndef UTPP_STEER_MODE
+// Default steering mode of the blend stack (BlendStack::SetSteerMode, switched at run time by the motion driver): 0 = general (moving)
+// steering on every live layer, 1 = on the newest layer only, 2 = on the newest layer only with its correction carried through the
+// layer mix (kSteerCarried). A build may override it.
+#define UTPP_STEER_MODE 1
 #endif
 #ifndef UTPP_STEER_CARRY_MUTATION
 // Test mutation: 1 = kSteerCarried carries nothing (as kSteerNewest), 2 = it also carries a short-way residual beyond kCarryResidual.
@@ -320,27 +320,17 @@ class BlendStack
     {
         return m_perBoneContacts;
     }
-    // General (moving) steering on the newest layer only. On (default UTPP_STEER_ACTIVE_ONLY): an older layer's general steering fades
-    // out over the enable blend once a newer pick covers it (kSteerNewest, or kSteerCarried in a build with UTPP_STEER_ACTIVE_ONLY 2);
-    // off: every live layer steers (kSteerAll). The turn-in-place node is unchanged either way. Safe to switch at any time (each
-    // layer's steering weight fades over the enable blend).
-    void SetSteerActiveOnly(bool on)
-    {
-        m_steerMode = on ? (UTPP_STEER_ACTIVE_ONLY == kSteerCarried ? kSteerCarried : kSteerNewest) : kSteerAll;
-    }
-    bool SteerActiveOnly() const
-    {
-        return m_steerMode != kSteerAll;
-    }
-    // Steering modes (UTPP_STEER_ACTIVE_ONLY). kSteerAll: every live layer steers. kSteerNewest: only the newest layer's general steering
-    // is enabled, as in the reference graph; its correction reaches the output at the layer's fade weight, so the body lags the capsule
-    // through a long fade. kSteerCarried (project policy, not the reference behaviour): as kSteerNewest, and the yaw the newest layer's
+    // Steering modes of the general (moving) steering (default UTPP_STEER_MODE). kSteerAll: every live layer steers. kSteerNewest:
+    // only the newest layer's general steering is enabled, as in the reference graph; its correction reaches the output at the layer's
+    // fade weight, so the body lags the capsule through a long fade. kSteerCarried (project policy, not the reference behaviour): as kSteerNewest, and the yaw the newest layer's
     // general steering adds to its authored yaw (scaled authored turn and spring correction) reaches the output at full weight, while
     // the older layers' authored yaw still fades out under it. Not carried while the target is more than kCarryResidual from the
     // visual root and the newest clip has no authored turn ahead to take the residual side from (see ProcessGraph).
     static constexpr int32_t kSteerAll = 0, kSteerNewest = 1, kSteerCarried = 2;
     static constexpr float kCarryResidual = .75f * math::kPi;
-    // Invalid modes are rejected and leave the current one.
+    // In kSteerNewest / kSteerCarried an older layer's general steering fades out over the enable blend once a newer pick covers it; the
+    // turn-in-place node is unchanged in every mode. Safe to switch at any time (each layer's steering weight fades over the enable
+    // blend). Invalid modes are rejected and leave the current one.
     bool SetSteerMode(int32_t mode)
     {
         if (mode < kSteerAll || mode > kSteerCarried)
@@ -1537,7 +1527,7 @@ class BlendStack
     Signals m_signals{};
     GraphInputs m_graph{};
     float m_steeringHalfLife = kSteeringHalfLifePrevious, m_steeringTargetTime = kSteeringTargetTimePrevious;
-    int32_t m_steerMode = UTPP_STEER_ACTIVE_ONLY == kSteerCarried ? kSteerCarried : UTPP_STEER_ACTIVE_ONLY != 0 ? kSteerNewest : kSteerAll;
+    int32_t m_steerMode = UTPP_STEER_MODE == kSteerCarried ? kSteerCarried : UTPP_STEER_MODE != 0 ? kSteerNewest : kSteerAll;
     int32_t m_orientationCurve = -1;
     int32_t m_warpCurve = -1; // clip warping curve that gates stride warping (see Init)
     int32_t m_thighBones[2]{-1, -1};

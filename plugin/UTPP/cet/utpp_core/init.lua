@@ -102,7 +102,7 @@ M.PACK_FORCED = {
 M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkSpeed", "mm.minWalkSpeed",
-  "mm.strideWarp", "mm.steerActiveOnly", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
+  "mm.strideWarp", "mm.turnSteering", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
@@ -309,6 +309,7 @@ local RETIRED_KEYS = { ["perspective.enforceWithRef"] = true,
 -- default look, both shoulders together, -5 .. 5, default 0): width = 5 - 2 * narrow (2.5 -> 0, 2 -> 1, 0 -> 5, 4 -> -3).
 -- mm.bodyYawOffset (body yaw offset of both bodies, deg) -> mm.bodyYawOffsetFemale (the same value); mm.bodyYawOffsetMale keeps its
 -- default (0). The changed default of the old key (M.DEFAULT_CHANGES, revision 3) applies to the converted value.
+-- mm.steerActiveOnly (turn steering on the active animation only, bool) -> mm.turnSteering (choice): true -> active, false -> all.
 local MIGRATED_KEYS = {
   ["mm.shoulderNarrow"] = { key = "mm.shoulderWidth", convert = function(v)
     local n = tonumber(v)
@@ -319,6 +320,12 @@ local MIGRATED_KEYS = {
     local n = tonumber(v)
     if n == nil or n ~= n or n == math.huge or n == -math.huge then return nil end
     return n
+  end },
+  ["mm.steerActiveOnly"] = { key = "mm.turnSteering", convert = function(v)
+    local t = string.lower(tostring(v))
+    if t == "true" or t == "1" then return "active" end
+    if t == "false" or t == "0" then return "all" end
+    return nil
   end },
 }
 M.MIGRATED_KEYS = MIGRATED_KEYS
@@ -429,7 +436,7 @@ function M.Load(path)
       local okC, nv = pcall(spec.convert, m.raw)
       local def = S.defs[to]
       if okC and nv ~= nil and (def == nil or validate(def, nv) ~= nil) then
-        S.stored[to] = def and encode(def, validate(def, nv)) or string.format("%.4g", nv)
+        S.stored[to] = def and encode(def, validate(def, nv)) or (type(nv) == "number" and string.format("%.4g", nv) or tostring(nv))
         if def then S.values[to] = validate(def, S.stored[to]) end
         M.LogOnce("migrated:" .. m.from, "setting " .. m.from .. "=" .. tostring(m.raw) .. " converted to " .. to .. "=" .. S.stored[to])
       else
@@ -564,13 +571,13 @@ local LAYOUT = {
   --   "Head follows turns" (mm.headLead, registered below: hidden, the lean head layer takes the head) right after it;
   --   "Walk speed (m/s)" (mm.walkSpeed, utpp_motion: capsule speed under the walk toggle) after it, then "Minimum walk
   -- speed (m/s)" (mm.minWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
-  -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less), then "Turn steering: active
-  -- animation only" (mm.steerActiveOnly, utpp_motion: only the newest animation of the blend is steered in moving turns)
+  -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less), then "Turn steering"
+  -- (mm.turnSteering, utpp_motion: which animations of the blend are steered in moving turns)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
                          "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.headLead", "mm.walkSpeed", "mm.minWalkSpeed",
-                         "mm.strideWarp", "mm.steerActiveOnly", "mm.shoulderWidth", "mm.feminineFigure" } },
+                         "mm.strideWarp", "mm.turnSteering", "mm.shoulderWidth", "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
   { "developer", "frame", { "body.impl", "headGuard.impl" } },

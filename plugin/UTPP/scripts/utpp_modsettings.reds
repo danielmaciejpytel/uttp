@@ -18,6 +18,13 @@ public enum UTPPMS_core_diagnosticLogs {
   OnUntilSwitchedOff = 2
 }
 
+// mm.turnSteering: 0 = all, 1 = active, 2 = carried
+public enum UTPPMS_mm_turnSteering {
+  AllAnimations = 0,
+  ActiveAnimation = 1,
+  ActiveAnimationFollowsCloser = 2
+}
+
 // perspective.aiming: 0 = fpp, 1 = tpp
 public enum UTPPMS_perspective_aiming {
   FirstPerson = 0,
@@ -213,14 +220,15 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.description", "Shortens V's steps to her movement speed while she walks, runs or moves crouched, so her feet slide less over the ground. Off = the steps of the animations as they are. Starts, stops, turns, jumps and slides are unchanged. No effect with the Game Animations pack.")
   public let mm_strideWarp: Bool = true;
 
-  // mm.steerActiveOnly
+  // mm.turnSteering
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Camera")
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "16")
-  @runtimeProperty("ModSettings.displayName", "Turn steering: active animation only")
-  @runtimeProperty("ModSettings.description", "While V turns on the move, only the animation that is playing now is turned toward her movement direction; the animations still fading out keep their own path, so her body does not swing the wrong way at the start of a quick turn. Off = every animation still blending in is turned as well (the earlier behaviour). No effect with the Game Animations pack.")
-  public let mm_steerActiveOnly: Bool = true;
+  @runtimeProperty("ModSettings.displayName", "Turn steering")
+  @runtimeProperty("ModSettings.description", "Which animations are turned toward V's movement direction while she turns on the move. Active animation (default): only the animation that is playing now; the animations still fading out keep their own path, so her body does not swing the wrong way at the start of a quick turn. Active animation (follows closer): the same, and her body follows the movement direction more closely while the earlier animations fade out. All animations: every animation still blending in is turned as well (the earlier behaviour). No effect with the Game Animations pack.")
+  @runtimeProperty("ModSettings.displayValues", "\"All animations\", \"Active animation\", \"Active animation (follows closer)\"")
+  public let mm_turnSteering: UTPPMS_mm_turnSteering = UTPPMS_mm_turnSteering.ActiveAnimation;
 
   // mm.shoulderWidth
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -714,7 +722,7 @@ public class UTPPModSettings extends IScriptable {
     s += "camera_zoomUnarmed_enabled=" + UTPPMSBool(this.camera_zoomUnarmed_enabled) + "\n";
     s += "mm_walkSpeed=" + UTPPMSFloat(this.mm_walkSpeed) + "\n";
     s += "mm_strideWarp=" + UTPPMSBool(this.mm_strideWarp) + "\n";
-    s += "mm_steerActiveOnly=" + UTPPMSBool(this.mm_steerActiveOnly) + "\n";
+    s += "mm_turnSteering=" + IntToString(EnumInt(this.mm_turnSteering)) + "\n";
     s += "mm_shoulderWidth=" + UTPPMSFloat(this.mm_shoulderWidth) + "\n";
     s += "mm_feminineFigure=" + UTPPMSBool(this.mm_feminineFigure) + "\n";
     s += "camera_idleOrbit=" + UTPPMSBool(this.camera_idleOrbit) + "\n";

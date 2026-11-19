@@ -91,9 +91,9 @@ local function mock()
       if t.strideError then error("stride warp native failure") end
       return not t.strideReject
     end,
-    setSteerActiveOnly = function(on)
-      t.steer[#t.steer + 1] = on
-      if t.steerError then error("steer active only native failure") end
+    setSteerMode = function(mode)
+      t.steer[#t.steer + 1] = mode
+      if t.steerError then error("steer mode native failure") end
       return not t.steerReject
     end,
     setWalkSpeed = function(ms)
@@ -239,11 +239,14 @@ do
   check("registered mm.strideWarp: bool, on by default, animation section, label 'Stride matching'",
     sw ~= nil and sw.type == "bool" and sw.default == true and sw.section == "animation" and sw.label == "Stride matching"
     and type(sw.desc) == "string" and sw.desc:find("slide less", 1, true) ~= nil)
-  local sa = defs["mm.steerActiveOnly"]
-  check("registered mm.steerActiveOnly: bool, on by default, animation section, label 'Turn steering: active animation only'",
-    sa ~= nil and sa.type == "bool" and sa.default == true and sa.section == "animation"
-    and sa.label == "Turn steering: active animation only" and type(sa.desc) == "string"
-    and sa.desc:find("Off = every animation", 1, true) ~= nil)
+  local ts = defs["mm.turnSteering"]
+  check("registered mm.turnSteering: choice all / active / carried, active by default, animation section, label 'Turn steering'",
+    ts ~= nil and ts.type == "choice" and ts.default == "active" and ts.section == "animation" and ts.label == "Turn steering"
+    and #ts.choices == 3 and ts.choices[1][1] == "all" and ts.choices[2][1] == "active" and ts.choices[3][1] == "carried"
+    and ts.choices[1][2] == "All animations" and ts.choices[2][2] == "Active animation"
+    and ts.choices[3][2] == "Active animation (follows closer)" and type(ts.desc) == "string"
+    and ts.desc:find("All animations: every animation", 1, true) ~= nil)
+  check("the bool key mm.steerActiveOnly is no longer registered", defs["mm.steerActiveOnly"] == nil)
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
@@ -637,25 +640,71 @@ do
   check("rejected strideWarp retries", #t.stride == 4 and t.stride[4] == true and v.rt.optionsApplied.strideWarp == true)
 end
 
--- mm.steerActiveOnly (one of M.OPTIONS; DLL default on): wanted on before any setting, sent before the glue is enabled, then only on a change
+-- mm.turnSteering (one of M.OPTIONS; DLL default mode 1 = active): wanted active before any setting, sent as the mode (all 0, active 1,
+-- carried 2) before the glue is enabled, then only on a change
 do
   local v, t = fresh(), mock()
-  check("steerActiveOnly is wanted on before the setting is applied (the DLL default)", v.want.steerActiveOnly == true)
-  v.SetOption("steerActiveOnly", false, t.api)
-  check("steerActiveOnly while motion is off makes no native call", #t.steer == 0 and v.want.steerActiveOnly == false)
+  check("turnSteering is wanted active before the setting is applied (the DLL default)", v.want.turnSteering == "active")
+  v.SetOption("turnSteering", "all", t.api)
+  check("turnSteering while motion is off makes no native call", #t.steer == 0 and v.want.turnSteering == "all")
   v.SetEnabled(true)
-  check("steerActiveOnly is sent when motion comes on",
-    v.Sync(t.api) == "enabled" and #t.steer == 1 and t.steer[1] == false and #t.calls == 1 and v.rt.optionsApplied.steerActiveOnly == false)
-  check("steady steerActiveOnly is not resent", v.Sync(t.api) == "same" and #t.steer == 1)
-  v.SetOption("steerActiveOnly", true, t.api)
-  check("steerActiveOnly switched on is sent once", #t.steer == 2 and t.steer[2] == true and v.rt.optionsApplied.steerActiveOnly == true)
+  check("turnSteering all is sent as mode 0 when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.steer == 1 and t.steer[1] == 0 and #t.calls == 1 and v.rt.optionsApplied.turnSteering == "all")
+  check("steady turnSteering is not resent", v.Sync(t.api) == "same" and #t.steer == 1)
+  v.SetOption("turnSteering", "carried", t.api)
+  check("turnSteering carried is sent once as mode 2", #t.steer == 2 and t.steer[2] == 2 and v.rt.optionsApplied.turnSteering == "carried")
+  v.SetOption("turnSteering", "active", t.api)
+  check("turnSteering active is sent once as mode 1", #t.steer == 3 and t.steer[3] == 1 and v.rt.optionsApplied.turnSteering == "active")
   t.steerReject = true
-  v.SetOption("steerActiveOnly", false, t.api)
-  check("rejected steerActiveOnly is never acknowledged", #t.steer == 3 and v.rt.optionsApplied.steerActiveOnly == true)
+  v.SetOption("turnSteering", "all", t.api)
+  check("rejected turnSteering is never acknowledged", #t.steer == 4 and v.rt.optionsApplied.turnSteering == "active")
   t.steerReject = false
   v.Sync(t.api)
-  check("rejected steerActiveOnly retries", #t.steer == 4 and t.steer[4] == false and v.rt.optionsApplied.steerActiveOnly == false)
-  check("steerActiveOnly changes do not resend stride matching (sent once with the other options)", #t.stride == 1)
+  check("rejected turnSteering retries", #t.steer == 5 and t.steer[5] == 0 and v.rt.optionsApplied.turnSteering == "all")
+  check("turnSteering changes do not resend stride matching (sent once with the other options)", #t.stride == 1)
+  local defs = {}
+  v.RegisterSettings({ RegisterSection = function() end, Register = function(d) defs[d.key] = d end })
+  defs["mm.turnSteering"].apply("bogus")
+  check("an unknown turnSteering value applies as active (mode 1)", v.want.turnSteering == "active" and t.steer[#t.steer] == 1)
+end
+
+-- migration (utpp_core MIGRATED_KEYS): a stored bool mm.steerActiveOnly becomes mm.turnSteering (true -> active, false -> all), the old
+-- key is dropped from the file; a stored new key wins
+do
+  local tmp = UTPP_MOTION_PATH .. ".steer-migration-test.tmp"
+  local function run(lines)
+    local v, t, core = fresh(), mock(), dofile(UTPP_CORE_PATH)
+    core.sink = function() end
+    core.SETTINGS_FILE = tmp
+    local fh = assert(io.open(tmp, "w"))
+    fh:write("# test\n" .. core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n")
+    for _, l in ipairs(lines) do fh:write(l .. "\n") end
+    fh:close()
+    core.Load(tmp)
+    v.api = t.api
+    v.RegisterSettings(core)
+    v.SetEnabled(true); v.Sync(t.api)
+    core.Save(tmp)
+    local fh2 = assert(io.open(tmp, "r"))
+    local text = fh2:read("*a")
+    fh2:close()
+    os.remove(tmp)
+    return core.Get("mm.turnSteering"), t, text
+  end
+  local m, t, text = run({ "mm.steerActiveOnly=false" })
+  check("migration false -> all, mode 0 sent, file has turnSteering=all and no old key",
+    m == "all" and t.steer[#t.steer] == 0 and text:find("\nmm.turnSteering=all\n", 1, true) ~= nil
+    and text:find("steerActiveOnly", 1, true) == nil)
+  m, t, text = run({ "mm.steerActiveOnly=true" })
+  check("migration true -> active (mode 1 sent), old key dropped", m == "active" and t.steer[#t.steer] == 1
+    and text:find("steerActiveOnly", 1, true) == nil)
+  m, t = run({ "mm.steerActiveOnly=false", "mm.turnSteering=carried" })
+  check("both keys stored: the new key wins (carried, mode 2)", m == "carried" and t.steer[#t.steer] == 2)
+  m, t, text = run({ "mm.steerActiveOnly=maybe" })
+  check("migration of an invalid value: default active, old key dropped", m == "active" and t.steer[#t.steer] == 1
+    and text:find("steerActiveOnly", 1, true) == nil)
+  m, t = run({})
+  check("no stored value: active (mode 1 sent with the options)", m == "active" and t.steer[#t.steer] == 1)
 end
 
 -- mm.aimAtCrosshair (aim pitch plan 2026-10-30): DLL loop (default off) + utpp_camera crosshair point, P only with an ACKNOWLEDGED loop

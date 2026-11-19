@@ -172,15 +172,14 @@ static void SteerModes(const motion::MotionDatabase &db)
 {
     {
         motionstack::BlendStack s;
-        const int32_t on = UTPP_STEER_ACTIVE_ONLY == 2 ? motionstack::BlendStack::kSteerCarried : motionstack::BlendStack::kSteerNewest;
-        s.SetSteerActiveOnly(true);
-        const bool activeOn = s.SteerMode() == on && s.SteerActiveOnly();
-        s.SetSteerActiveOnly(false);
-        const bool activeOff = s.SteerMode() == motionstack::BlendStack::kSteerAll && !s.SteerActiveOnly();
-        const bool carried = s.SetSteerMode(motionstack::BlendStack::kSteerCarried) && s.SteerMode() == 2 && s.SteerActiveOnly();
-        const bool rejected = !s.SetSteerMode(3) && !s.SetSteerMode(-1) && s.SteerMode() == 2;
-        C("steer mode: SetSteerActiveOnly selects the build's newest-layer mode / every layer, SetSteerMode rejects invalid modes",
-          activeOn && activeOff && carried && rejected);
+        const bool buildDefault = s.SteerMode() == UTPP_STEER_MODE;
+        bool each = true;
+        using BS = motionstack::BlendStack;
+        for (const int32_t mode : {BS::kSteerAll, BS::kSteerNewest, BS::kSteerCarried})
+            each = each && s.SetSteerMode(mode) && s.SteerMode() == mode;
+        const bool rejected = !s.SetSteerMode(3) && !s.SetSteerMode(-1) && s.SteerMode() == motionstack::BlendStack::kSteerCarried;
+        C("steer mode: the build default (UTPP_STEER_MODE), every mode selectable at run time, invalid modes rejected",
+          buildDefault && each && rejected);
     }
     // A target 60 deg to the side: the newest layer's correction carried through the fade turns the body further than its fade weight
     // alone, towards what every layer steering gives, without a step in the output yaw rate.

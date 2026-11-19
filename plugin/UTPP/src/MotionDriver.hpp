@@ -285,12 +285,14 @@ bool SetOrientWarp(bool aOn);
 // state of the installed bundle (else the requested one).
 bool SetStrideWarp(bool aOn);
 bool StrideWarp();
-// General steering on the newest layer only (CET mm.steerActiveOnly; BlendStack::SetSteerActiveOnly; DLL default UTPP_STEER_ACTIVE_ONLY
-// = on): while V turns on the move only the newest blend stack layer is steered onto the movement direction; the layers still fading
-// out keep their own path. Off = every live layer is steered. Applied to the installed bundle at once (the steering weights fade, no
-// pose jump) and to every bundle loaded later. Always true. SteerActiveOnly = the state of the installed bundle (else the requested one).
-bool SetSteerActiveOnly(bool aOn);
-bool SteerActiveOnly();
+// Turn steering mode (CET mm.turnSteering; BlendStack::SetSteerMode; DLL default UTPP_STEER_MODE = 1): while V turns on the move the
+// general steering turns 0 = every live blend stack layer, 1 = only the newest layer (the layers still fading out keep their own path),
+// 2 = only the newest layer, its correction carried through the layer mix. Applied to the installed bundle at once (the steering
+// weights fade, no pose jump) and to every bundle loaded later. False = invalid mode (nothing changed). SteerMode = the mode of the
+// installed bundle (else the requested one, else the build default). The ground dodge picks its clip against the actor yaw in modes 1
+// and 2 and against the drawn heading in mode 0 (the drawn heading lags the actor in moving turns once only the newest layer steers).
+bool SetSteerMode(int32_t aMode);
+int32_t SteerMode();
 // Run pelvis yaw trim (CET mm.pelvisYawTrim; mm/OrientWarp.hpp PelvisTrim): aDeg (+ = left, -10..10, default 0) turns the pelvis of
 // the v2 pose while V walks / runs / sprints forward on the ground (chest, head and feet keep their direction; the motion forward
 // loops carry the pelvis ~5 deg to the right, +5 squares it). Not while aiming / weapon drawn / air / crouch / slide / traversal;

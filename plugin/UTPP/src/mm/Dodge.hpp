@@ -17,9 +17,10 @@
 //                 hands back at the clip end or when the body leaves the standing ground state. A forward dodge entered faster
 //                 than Input::forwardClipMaxEntryMps plays Dodge_F_Run when the file has it, else the playing locomotion goes on.
 //
-// Facing while a clip plays (rule, MotionHost BodyYawCommand / MotionSetFrame::dodgeClip): the body turn holds the capsule yaw, so
-// the drawn facing the sector was picked against does not turn toward the input under the clip; the turn toward the movement
-// direction resumes on the hand-back feed (the inertialized hand-back blend, kBlendOutS).
+// Facing the sector is picked against (Input::facingYawDeg, set by the motion driver): the actor yaw, or the drawn heading in the
+// driver's steering mode 0. While a clip plays (rule, MotionHost BodyYawCommand / MotionSetFrame::dodgeClip) the body turn holds the
+// capsule yaw, so the facing does not turn toward the input under the clip; the turn toward the movement direction resumes on the
+// hand-back feed (the inertialized hand-back blend, kBlendOutS).
 //
 // Yaw convention: 0 = +Y, counter-clockwise positive (a velocity (vx, vy) has yaw atan2(-vx, vy); positive = to the left).
 #pragma once

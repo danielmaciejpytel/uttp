@@ -41,7 +41,7 @@ SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # player chose in the menu.
 LOCO_VALUES = (('mm.walkSpeed', 1.6), ('mm.minWalkSpeed', 0.82), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
                ('mm.leanHeadScale', 0.9), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.strideWarp', True),
-               ('mm.steerActiveOnly', True), ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
+               ('mm.turnSteering', 'active'), ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
                ('bodyturn.aimJogSpeed', 3.3), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False))
 LOCO_KEYS = tuple(k for k, _ in LOCO_VALUES)
 AUTHOR_VALUES = (('mm.bodyYawOffsetFemale', 4), ('mm.bodyYawOffsetMale', 0), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),

@@ -1071,7 +1071,7 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   file(TO_NATIVE_PATH "${_utpp_dodge_motion_data}" _utpp_dodge_motion_data_native)
   file(TO_NATIVE_PATH "${UTPP_DODGE_FIXTURE_DIR}" _utpp_dodge_fixture_native)
   file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/data" _utpp_dodge_tracked_native)
-  foreach(_utpp_dd_variant test mut1 mut2 mut3 rate100 rate125 blend080 blend150)
+  foreach(_utpp_dd_variant test mut1 mut2 mut3 mut4 rate100 rate125 blend080 blend150)
     set(_utpp_dd_name utpp_loco_dodge_driver_${_utpp_dd_variant})
     add_executable(${_utpp_dd_name} tests/MotionDriverDodgeTest.cpp src/MotionDriver.cpp src/MotionDriver.hpp src/MotionHost.hpp src/mm/Dodge.hpp
                    src/mm/MotionAdapter.hpp src/mm/MotionPose.hpp src/mm/ChooserMatcher.hpp src/mm/MotionDatabase.hpp src/mm/TraversalFile.hpp)
@@ -1082,6 +1082,7 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   target_compile_definitions(utpp_loco_dodge_driver_mut1 PRIVATE UTPP_DODGE_DRIVER_MUTATION=1)
   target_compile_definitions(utpp_loco_dodge_driver_mut2 PRIVATE UTPP_DODGE_DRIVER_MUTATION=2)
   target_compile_definitions(utpp_loco_dodge_driver_mut3 PRIVATE UTPP_DODGE_GAIT_MUTATION=1)
+  target_compile_definitions(utpp_loco_dodge_driver_mut4 PRIVATE UTPP_DODGE_DRIVER_MUTATION=3)
   target_compile_definitions(utpp_loco_dodge_driver_rate100 PRIVATE UTPP_DODGE_RATE=1.0f)
   target_compile_definitions(utpp_loco_dodge_driver_rate125 PRIVATE UTPP_DODGE_RATE=1.25f)
   target_compile_definitions(utpp_loco_dodge_driver_blend080 PRIVATE UTPP_DODGE_BLEND_IN=0.08f)
@@ -1100,6 +1101,10 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   add_test(NAME utpp_loco_dodge_driver_mut3 COMMAND utpp_loco_dodge_driver_mut3 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
            "${_utpp_dodge_tracked_native}")
   set_tests_properties(utpp_loco_dodge_driver_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*holds its gait through the dodge state")
+  # mutation 4 (the sector picked against the drawn heading in every steering mode) must FAIL the facing check
+  add_test(NAME utpp_loco_dodge_driver_mut4 COMMAND utpp_loco_dodge_driver_mut4 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
+           "${_utpp_dodge_tracked_native}")
+  set_tests_properties(utpp_loco_dodge_driver_mut4 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*show the actor's sector")
 endif()
 
 # ---- pelvis stage of the foot locker (mm/PelvisPlacement.hpp), 30 / 60 / 144 Hz ----
