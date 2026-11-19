@@ -1529,7 +1529,7 @@ public native func UTPPFeedMotionTier2Slow(slow: Bool) -> Void
 // Lock-free (atomic loads). Keep these declarations and the DLL natives (Main.cpp) in sync.
 public native func UTPPSetMotionMinAnalogWalk(metersPerSecond: Float) -> Bool
 public native func UTPPMotionAnalogFloorMul(moveX: Float, moveY: Float, detailed: Int32, walk: Bool) -> Float
-// Stick speed model of the motion driver (CET mm.stickSpeed, called next to UTPPSetStickSpeedMode; DLL default 0 = analog): 1 = fixed, the
+// Stick speed model of the motion driver (CET mm.stickSpeed, called next to UTPPSetStickSpeedMode; DLL default 1 = fixed): 1 = fixed, the
 // prediction follows the speeds UTPPFixedStickWant holds. False for any other value (nothing changed). Keep in sync with Main.cpp.
 public native func UTPPSetMotionStickSpeedMode(mode: Int32) -> Bool
 // ---- AIR HOLD (CET mm.air / mm.airProbe / mm.airSteer) ----

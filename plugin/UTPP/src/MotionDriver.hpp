@@ -147,7 +147,7 @@ void SetShootTransferEnabled(bool aOn); // opt-in Pistol2H Shoot experiment; def
 // of range (nothing changed). Status / MMTRACE: headLead= lead= corr=.
 bool SetHeadLead(bool aOn);
 bool SetHeadLeadParams(float aLeadDeg, float aMaxDeg);
-// Slide feed (CET mm.slide, default OFF; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 (slide, sprint -> crouch) is
+// Slide feed (CET mm.slide, default ON; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 (slide, sprint -> crouch) is
 // fed to the chooser as MovementMode Sliding / Stance Crouch / MovementDirection / MovementMode_LastFrame and v2 owns the body for
 // it (no hold-last-pose behaviour of the v1 gate: no foot contacts, no body-yaw command). Active ONLY when the setting is on AND
 // the loaded bundle's chooser.json declares the "slide" section (databases PSD_Slide_FeetOut / PSD_Slide_KneesOut baked in the
@@ -185,7 +185,7 @@ float WalkSpeedTarget();
 bool SetMinAnalogWalk(float aMs);
 float MinAnalogWalkSetting();
 float AnalogFloorMul(float aMoveX, float aMoveY, int32_t aDetailed, bool aWalk);
-// Stick speed model (CET mm.stickSpeed; DLL default 0 = analog): 1 = fixed, the prediction follows the speeds the script holds (walk below
+// Stick speed model (CET mm.stickSpeed; DLL default 1 = fixed): 1 = fixed, the prediction follows the speeds the script holds (walk below
 // the stick 0.7, run from 0.7, crouch in a crouch; mm/MotionAdapter.hpp MapConfig::stickSpeedFixed). False for any other value (nothing
 // changed). Status: stickSpeed=.
 bool SetStickSpeedMode(int aMode);
@@ -273,13 +273,13 @@ struct DodgeProbe
 };
 DodgeProbe TestDodgeProbe();
 #endif
-// Orientation warp (CET mm.orientWarp, default OFF; mm/OrientWarp.hpp): while V runs a circle the pelvis (extra visual root yaw on
+// Orientation warp (CET mm.orientWarp, default ON; mm/OrientWarp.hpp): while V runs a circle the pelvis (extra visual root yaw on
 // the provided root frame of the leg tail) and the torso (twist over Spine .. Spine3) are brought onto the path of motion instead of
 // the outside of the turn; loop clips on the ground only, no aim / weapon / air / crouch / slide / traversal, weight 0 (bit-identical)
 // for straight running, low speed and non-loop clips. SetOrientWarp always returns true. Status: orientWarp= owW= owRoot= owTorso=;
 // MMTRACE (only while on or fading): ow=<on>/<weight>/<root deg>/<torso deg>.
 bool SetOrientWarp(bool aOn);
-// Stride warping (CET mm.strideWarp; mm/StrideWarp.hpp, BlendStack::SetStrideWarp; DLL default UTPP_STRIDE_WARP = off): the steps of
+// Stride warping (CET mm.strideWarp; mm/StrideWarp.hpp, BlendStack::SetStrideWarp; DLL default on): the steps of
 // ground locomotion loops are shortened to the capsule speed (feet slide less), with the knee limit of the blend stack. Applied to the
 // installed bundle at once (a running warp fades in / out, no pose jump) and to every bundle loaded later. Always true. StrideWarp = the
 // state of the installed bundle (else the requested one).
@@ -326,11 +326,11 @@ std::string BodyYawOffsetReason();
 bool SetBarrelLoop(bool aOn);
 bool SetBarrelAxis(int32_t aAxis);
 bool SetBarrelMuzzle(float aMeters);
-// motion lateral-acceleration lean (CET mm.lean, default OFF; mm/LeanRuntime.hpp on the pack v2\utpp_lean_<body>.bin, loaded
+// motion lateral-acceleration lean (CET mm.lean, default ON; mm/LeanRuntime.hpp on the pack v2\utpp_lean_<body>.bin, loaded
 // optionally on the worker like the traversal file; a missing / invalid pack leaves the bundle fine and the lean unavailable): while V
 // runs / walks on the ground the body leans into the turn (mesh space rotation offset additive on the v2 pose, after the pose evaluator
 // and before the orientation warp and the leg tail). Same gates as the orientation warp (no aim / weapon / air / crouch / slide /
-// traversal), weight 0 (bit-identical) otherwise. SetLeanHead (mm.leanHead, default OFF): the motion head layer replaces the head
+// traversal), weight 0 (bit-identical) otherwise. SetLeanHead (mm.leanHead, default ON): the motion head layer replaces the head
 // lead while on (the two are never summed). SetLeanParams(scale, headScale): amount multipliers 0 .. 2 (default 1 = motion strength);
 // false = NaN / out of range (nothing changed). SetLean / SetLeanHead always return true. Status: lean=<on>/<bundle>/<alpha>/<lat>/<x>/
 // <curve> (bundle: -1 no bundle, 0 pack unavailable, 1 ready) leanHead= leanScale=; MMTRACE (only while on or fading):

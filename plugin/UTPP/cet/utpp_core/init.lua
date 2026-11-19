@@ -352,7 +352,7 @@ S.fileRevision = nil
 -- A fresh install (no settings file) has nothing to reset and shows no message; a file without any stored value gets the
 -- current level without a message. A later version resets the settings again only when this number is raised.
 M.SETTINGS_RESET_KEY = "core.settingsReset"
-M.SETTINGS_RESET = 1
+M.SETTINGS_RESET = 2
 -- written while the message has not been shown yet (the game was closed before a game session started)
 M.RESET_NOTICE_KEY = "core.settingsResetNotice"
 S.fileReset = nil       -- reset level of the file that was read (nil = no file read)

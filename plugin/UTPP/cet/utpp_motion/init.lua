@@ -13,17 +13,18 @@
 --                  from the game + the aim offset (native UTPPSetMotionAimGameUpper; the DLL default is the same, so no
 --                  call is made until the value differs from it).
 --   mm.slide    bool, default true - slide feed (sprint -> crouch slide, PSM LocomotionDetailed 5): the slide
---                  databases play instead of the held pose. Native UTPPSetMotionSlide; the DLL default is off, so no call is made
---                  until the value is true. It only takes effect with a bundle that carries the chooser.json "slide" section
+--                  databases play instead of the held pose. Native UTPPSetMotionSlide (DLL default on; the value is sent once after
+--                  start-up, then on every change). It only takes effect with a bundle that carries the chooser.json "slide" section
 --                  (the status line shows slideBundle=1); with any other bundle it is a harmless no-op.
 --   mm.orientWarp bool, default true - orientation warp of the run circles: pelvis and torso are turned onto the path of motion
---                  instead of the outside of the turn (native UTPPSetMotionOrientWarp; the DLL default is off, so no call is made until
---                  the value is true). Loop clips on the ground only; aim / weapon / air / crouch / slide / traversal and straight
+--                  instead of the outside of the turn (native UTPPSetMotionOrientWarp; DLL default on; the value is sent once after
+--                  start-up, then on every change). Loop clips on the ground only; aim / weapon / air / crouch / slide / traversal and straight
 --                  running are untouched. Shown in Mods > UTPP > Animation.
 --   mm.lean     bool, default true - Lean: V leans into the turn from the lateral acceleration while running / walking on the
---                  ground (native UTPPSetMotionLean; the DLL default is off, so no call is made until the value is true). It needs the
+--                  ground (native UTPPSetMotionLean; DLL default on; the value is sent once after start-up, then on every change). It needs the
 --                  pack motion\utpp_lean_<body>.bin next to the database (status: lean=<on>/<pack 1 = loaded>/...); without it nothing happens.
---   mm.leanHead bool, default true - the head layer replaces the head lead while the lean is on (native UTPPSetMotionLeanHead).
+--   mm.leanHead bool, default true - the head layer replaces the head lead while the lean is on (native UTPPSetMotionLeanHead;
+--                  DLL default on, sent like mm.lean).
 --   mm.shoulderWidth float -5 .. 5, step 0.5, default 0 ("Shoulder width (female V)" in Mod Settings > Camera) - female V
 --                  shoulder width in cm against the current look (both shoulders together; - = narrower, + = wider). It drives the female
 --                  shoulder narrowing of the DLL, in cm per side: narrow = 2.5 - width / 2 (0 -> 2.5 = the DLL default, so no call is made
@@ -41,7 +42,7 @@
 --                  in play; the movement direction is unchanged; off while aiming / during weapon actions (native
 --                  UTPPSetMotionBodyYawOffsets(female, male), both values in one call). Replace mm.bodyYawOffset (one value for both
 --                  bodies): utpp_core moves a stored value to mm.bodyYawOffsetFemale on load; male V starts at 0.
---   mm.strideWarp bool, default true ("Stride matching"; DLL default off, the value is sent with the other M.OPTIONS) - the steps of
+--   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
 --                  without a pose jump (native UTPPSetMMStrideWarp).
@@ -60,10 +61,11 @@
 --                  a small stick tilt (native UTPPSetMotionMinAnalogWalk; reds UTPPUpdateAnalogFloor lifts the capsule with one MaxSpeed multiplier
 --                  1 .. 4 = the fraction of the full-stick speed raised to this one, the motion driver gives the prediction the lifted cap). 0 = the
 --                  game's own slow speeds. Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, air: untouched.
---   mm.stickSpeed choice "fixed" / "analog" (default) - stick speed model (script Game.UTPPSetStickSpeedMode 1 / 0; reds
+--   mm.stickSpeed choice "fixed" (default) / "analog" - stick speed model (script Game.UTPPSetStickSpeedMode 1 / 0; reds
 --                  UTPPUpdateStickSpeed). fixed: walk speed below the stick 0.7, run speed from 0.7, the full crouch speed in a crouch,
 --                  the minimum walk speed off while it applies; analog: the game speed follows the stick (the previous behaviour).
---                  The motion driver gets the same mode (native UTPPSetMotionStickSpeedMode 1 / 0) for its prediction.
+--                  The motion driver gets the same mode (native UTPPSetMotionStickSpeedMode 1 / 0, DLL default 1) for its prediction;
+--                  both are sent for every fresh session.
 --                  Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, walk toggle, Tier2 Slow, air: untouched.
 --   mm.leanScale float 0 .. 2, default 0.85 (DLL default 1) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
 --   mm.leanHeadScale float 0 .. 2, default 0.9 (DLL default 1) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
@@ -82,16 +84,17 @@ local M = { VERSION = "0.1.0" }
 M.SYNC_PERIOD = 1.0    -- s between checks that the glue matches the settings (cheap; no per-frame game call) [P]
 M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown [P]
 
--- wanted state (settings) and what the glue reported last
-M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = false, orientWarp = false,
-  lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
-  feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true,
+-- wanted state (settings) and what the glue reported last; slide / orientWarp / lean / leanHead / stickSpeed / strideWarp start at the DLL defaults
+M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = true, orientWarp = true,
+  lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
+  feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
-  strideWarp = false }
+  strideWarp = true }
+-- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
-  nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
-  leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
-  feminineFigureApplied = true, bodyYawOffsetApplied = { 0, 0 }, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, stickSpeedApplied = "analog", aimPointApplied = nil,
+  nativeOnly = false, aimApplied = true, slideApplied = nil, orientWarpApplied = nil,
+  leanApplied = nil, leanHeadApplied = nil, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
+  feminineFigureApplied = true, bodyYawOffsetApplied = { 0, 0 }, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, stickSpeedApplied = nil, aimPointApplied = nil,
   pistolAutoApplied = nil, selectionGuardsApplied = true, optionsApplied = {}, errors = 0 }
 
 -- no file system paths in the log: a Lua error text names the script file with its full path (user name included); a path in
@@ -219,7 +222,7 @@ function M.Sync(api)
     M.ApplyBodyYawOffset(api)
     M.ApplyWalkSpeed(api)
     M.ApplyMinAnalogWalk(api)
-    M.rt.stickSpeedApplied = "analog" -- what the script system of a fresh session holds
+    M.rt.stickSpeedApplied = nil -- a fresh session: the script system starts in its own mode, the mode is sent to it and to the DLL
     M.ApplyStickSpeed(api)
     M.ApplyBarrelLoop(api)
     M.ApplyLean(api)
@@ -394,7 +397,7 @@ function M.SetAimGameUpper(on, api)
   return M.want.aimGameUpper
 end
 
--- The native is a process-lifetime DLL flag that defaults to off: nothing is called while the wanted value equals what the DLL has.
+-- The native is a process-lifetime DLL flag (default on): sent once while unknown, then only when the wanted value changes.
 function M.ApplySlide(api)
   if not M.want.enabled then return false end
   local v = M.want.slide
@@ -422,7 +425,7 @@ function M.SetSlide(on, api)
   return M.want.slide
 end
 
--- Same contract as the slide: a process-lifetime DLL flag that defaults to off, nothing is called while the wanted value equals it.
+-- Same contract as the slide: a process-lifetime DLL flag (default on), sent once while unknown and then only when the wanted value changes.
 function M.ApplyOrientWarp(api)
   if not M.want.enabled then return false end
   local v = M.want.orientWarp
@@ -819,7 +822,8 @@ function M.SetBarrelLoop(v, api)
   return M.want.barrelLoop
 end
 
--- Lean: three process-lifetime DLL values with defaults (off / off / scale 1); nothing is called while the wanted value equals the DLL default.
+-- Lean: three process-lifetime DLL values (defaults on / on / scale 1); lean and head lean are sent once while unknown, the scales while
+-- they differ from the DLL default; afterwards each only when the wanted value changes.
 local unpackArgs = table.unpack or unpack
 local function leanCall(api, field, native, ...)
   local ok, accepted
@@ -1006,9 +1010,9 @@ function M.RegisterSettings(core)
     apply = function(v) M.SetBodyYawOffsetMale(v) end })
   core.Register({ key = "mm.walkSpeed", section = "animation", type = "float", default = 1.6, min = 0, max = 3.5, step = 0.1,
     label = "Walk speed (m/s)",
-    desc = "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed. The game's own walk toggle is faster than the "
-      .. "walking animations (about 2.7 m/s); 1.6 matches them, so the feet do not slide. 0 = the game's own speed. Only on foot in "
-      .. "third person; sprinting, aiming, crouching and jumping are unchanged.",
+    desc = "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed (default 1.6). The game's own walk "
+      .. "toggle is about 2.7 m/s. 0 = the game's own speed. Only on foot in third person; sprinting, aiming, crouching and "
+      .. "jumping are unchanged.",
     apply = function(v) M.SetWalkSpeed(v) end })
   core.Register({ key = "mm.minWalkSpeed", section = "animation", type = "float", default = 0.82, min = 0, max = 1.6, step = 0.01,
     label = "Minimum walk speed (m/s)",
@@ -1021,12 +1025,12 @@ function M.RegisterSettings(core)
     desc = "Shortens V's steps to her movement speed while she walks, runs or moves crouched, so her feet slide less over the "
       .. "ground. Off = the steps of the animations as they are. Starts, stops, turns, jumps and slides are unchanged.",
     apply = function(v) M.SetOption("strideWarp", v == true) end })
-  core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "analog",
+  core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
     label = "Gamepad stick speed",
-    desc = "Walk or run: pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, "
+    desc = "Walk or run (default): pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, "
       .. "pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the "
-      .. "animations. Follows the stick (default): her speed changes smoothly with how far the stick is pushed, as in the base game. "
+      .. "animations. Follows the stick: her speed changes smoothly with how far the stick is pushed, as in the base game. "
       .. "Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.",
     apply = function(v) M.SetStickSpeed(v) end })
   core.Register({ key = "mm.aimAtCrosshair", section = "animation", type = "bool", default = true,

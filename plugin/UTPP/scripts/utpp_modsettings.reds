@@ -201,7 +201,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "14")
   @runtimeProperty("ModSettings.displayName", "Walk speed (m/s)")
-  @runtimeProperty("ModSettings.description", "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed. The game's own walk toggle is faster than the walking animations (about 2.7 m/s); 1.6 matches them, so the feet do not slide. 0 = the game's own speed. Only on foot in third person; sprinting, aiming, crouching and jumping are unchanged. No effect with the Game Animations pack.")
+  @runtimeProperty("ModSettings.description", "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed (default 1.6). The game's own walk toggle is about 2.7 m/s. 0 = the game's own speed. Only on foot in third person; sprinting, aiming, crouching and jumping are unchanged. No effect with the Game Animations pack.")
   @runtimeProperty("ModSettings.min", "0.0")
   @runtimeProperty("ModSettings.max", "3.5")
   @runtimeProperty("ModSettings.step", "0.1")
@@ -686,10 +686,10 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "6")
   @runtimeProperty("ModSettings.order", "63")
   @runtimeProperty("ModSettings.displayName", "Gamepad stick speed")
-  @runtimeProperty("ModSettings.description", "Walk or run: pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the animations. Follows the stick (default): her speed changes smoothly with how far the stick is pushed, as in the base game. Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.")
+  @runtimeProperty("ModSettings.description", "Walk or run (default): pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the animations. Follows the stick: her speed changes smoothly with how far the stick is pushed, as in the base game. Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.")
   @runtimeProperty("ModSettings.displayValues.WalkOrRun", "Walk or run")
   @runtimeProperty("ModSettings.displayValues.FollowsTheStick", "Follows the stick")
-  public let mm_stickSpeed: UTPPMS_mm_stickSpeed = UTPPMS_mm_stickSpeed.FollowsTheStick;
+  public let mm_stickSpeed: UTPPMS_mm_stickSpeed = UTPPMS_mm_stickSpeed.WalkOrRun;
 
   // camera.zoomUnarmed.fppHandoff
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")

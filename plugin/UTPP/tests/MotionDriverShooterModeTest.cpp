@@ -1798,6 +1798,7 @@ void SlideCase(Rt& rt, float aCamTo)
 
 int main(int argc, char** argv)
 {
+    DriverOptionBaseline();
     if (argc < 5)
     {
         std::printf("usage: shooterMode <motion data dir> <base db> <flick_180_run.feed> <run_arc_left.feed> [--slide <bundle prefix> | --explore <case>]\n");

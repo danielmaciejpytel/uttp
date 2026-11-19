@@ -372,6 +372,21 @@ std::string StatusField(const std::string& aStatus, const char* aKey)
     return aStatus.substr(s, e == std::string::npos ? std::string::npos : e - s);
 }
 
+// The driver options whose DLL defaults follow the shipped settings (lean, head lean, slide, orientation warp and stride warping on,
+// fixed stick speed). The expectations of the tests that call this were measured with these options off: recorded feeds that ran on
+// the analog stick model, comparisons with the utpp_motion_replay adapter path (which has none of the options), off-identity checks
+// and synthetic scenarios tuned without them. The game sends every one of them before it enables the driver. A test that calls this
+// keeps that configuration explicitly; a run that wants an option on sets it itself.
+void DriverOptionBaseline()
+{
+    motiondriver::SetLean(false);
+    motiondriver::SetLeanHead(false);
+    motiondriver::SetSlide(false);
+    motiondriver::SetOrientWarp(false);
+    motiondriver::SetStrideWarp(false);
+    motiondriver::SetStickSpeedMode(0);
+}
+
 // ------------------------------------------------------------------ v1 driver setup (identical before every run)
 std::wstring g_baseDb;
 uint8_t g_rigDummy[16];
@@ -2962,6 +2977,7 @@ int MotionFixChildMain(const std::string& aData, const std::string& aDb, const s
 
 int main(int argc, char** argv)
 {
+    DriverOptionBaseline();
     if (argc == 5 && std::string(argv[1]) == "--motionfix-child")
         return MotionFixChildMain(argv[2], argv[3], argv[4]);
     if (argc == 7 && std::string(argv[1]) == "--scenario")

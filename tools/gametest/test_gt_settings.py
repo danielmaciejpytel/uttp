@@ -411,15 +411,15 @@ class SessionSettingsTests(unittest.TestCase):
     # a player who changed every locomotion setting: the session pins them and puts the player's values back
     PLAYER = {'mm.bodyYawOffsetFemale': 8, 'mm.bodyYawOffsetMale': -3, 'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
               'perspective.scene': True, 'perspective.blend': 0.8,
-              'mm.walkSpeed': 2.4, 'mm.minWalkSpeed': 0.5, 'mm.lean': False, 'mm.leanHead': False, 'mm.leanScale': 1.5,
+              'mm.walkSpeed': 2.4, 'mm.minWalkSpeed': 0.5, 'mm.stickSpeed': 'analog', 'mm.lean': False, 'mm.leanHead': False, 'mm.leanScale': 1.5,
               'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'wide', 'mm.orientWarp': False, 'mm.strideWarp': False, 'mm.footReplant': 'always',
               'bodyturn.aimJog': False,
               'bodyturn.aimJogSpeed': 3.8, 'bodyturn.aimSmooth': False, 'bodyturn.shooterMode': True}
-    LOCO = {'mm.walkSpeed': 1.6, 'mm.minWalkSpeed': 0.82, 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.85,
+    LOCO = {'mm.walkSpeed': 1.6, 'mm.minWalkSpeed': 0.82, 'mm.stickSpeed': 'fixed', 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.85,
             'mm.leanHeadScale': 0.9, 'mm.leanCoverage': 'standard', 'mm.orientWarp': True, 'mm.strideWarp': True,
             'mm.footReplant': 'crouch', 'bodyturn.aimJog': True,
             'bodyturn.aimJogSpeed': 3.3, 'bodyturn.aimSmooth': True, 'bodyturn.shooterMode': False}
-    LOCO_TEXT = ('locomotion walkSpeed=1.6 minWalkSpeed=0.82 lean=true leanHead=true leanScale=0.85 leanHeadScale=0.9 leanCoverage=standard orientWarp=true '
+    LOCO_TEXT = ('locomotion walkSpeed=1.6 minWalkSpeed=0.82 stickSpeed=fixed lean=true leanHead=true leanScale=0.85 leanHeadScale=0.9 leanCoverage=standard orientWarp=true '
                  'strideWarp=true footReplant=crouch aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
 
     def test_plans(self):

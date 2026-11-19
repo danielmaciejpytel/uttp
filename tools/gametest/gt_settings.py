@@ -37,8 +37,10 @@ SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # Locomotion settings pinned in both modes at their registered defaults, so foot slide and gait measurements of different runs
 # compare the same walk speed, lean, orientation warp, stride matching, replant and aim jog; logged at arming (settings_line).
 # Stride matching changes the step length (and so the measured foot slide) of every walk and run: it is pinned so a run always
-# measures the shipped configuration, whatever the player chose in the menu.
-LOCO_VALUES = (('mm.walkSpeed', 1.6), ('mm.minWalkSpeed', 0.82), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
+# measures the shipped configuration, whatever the player chose in the menu. The stick speed model changes the capsule speed of every
+# partial stick the virtual pad gives: pinned for the same reason (a comparison with a run recorded on the analog model passes
+# mm.stickSpeed = 'analog' as an override).
+LOCO_VALUES = (('mm.walkSpeed', 1.6), ('mm.minWalkSpeed', 0.82), ('mm.stickSpeed', 'fixed'), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
                ('mm.leanHeadScale', 0.9), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.strideWarp', True),
                ('mm.footReplant', 'crouch'), ('bodyturn.aimJog', True),
                ('bodyturn.aimJogSpeed', 3.3), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False))

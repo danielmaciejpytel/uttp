@@ -390,6 +390,7 @@ GaitHoldRun RunGaitReturnHoldTimed(float aRampPerS, bool aUneven)
 
 int main(int argc, char** argv)
 {
+    DriverOptionBaseline();
     if (argc < 4)
     {
         std::printf("usage: utpp_mm_loco_churn_test <data dir> <v1 database> <slice dir>\n");

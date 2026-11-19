@@ -131,8 +131,8 @@ local OLD_FILE = "# UTPP settings (utpp_core 0.5.4): key=value, delete a line to
   .. "core.diagnosticLogs=until\nt.flag=false\nt.num=2.5\nt.carried=false\nother.module=42\n"
 local OLD_VALUES = 9
 
-check("the constants: reset level 1, a delay after the message widget is ready, a longer time rule without it, a duration, a text that names the mod",
-  LEVEL == 1 and DELAY >= 1 and FALLBACK >= DELAY + 10 and PROBE.RESET_NOTICE_SECONDS > 0 and type(PROBE.RESET_NOTICE_TEXT) == "string"
+check("the constants: reset level 2 (raised once for 0.2.0), a delay after the message widget is ready, a longer time rule without it, a duration, a text that names the mod",
+  LEVEL == 2 and DELAY >= 1 and FALLBACK >= DELAY + 10 and PROBE.RESET_NOTICE_SECONDS > 0 and type(PROBE.RESET_NOTICE_TEXT) == "string"
   and PROBE.RESET_NOTICE_TEXT:find("Ultimate Third Person Project", 1, true) ~= nil and PROBE.RESET_NOTICE_TEXT:find("\n", 1, true) == nil
   and D_YAW ~= 60 and D_ZOOM ~= 0.3 and D_COLOR ~= "red", PROBE.RESET_NOTICE_TEXT)
 

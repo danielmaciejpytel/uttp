@@ -879,7 +879,8 @@ struct MapConfig
     // the stick 0.7, at the run speed from 0.7 and at the crouch speed in a crouch, FixedStickApplies / FixedStickFraction). true: on that
     // gate the analog modifier (prediction cap) and the input acceleration are those of the held speed, and the minimum analog walk speed
     // is off (the script removes its multiplier there). false (default): the speed follows the stick, nothing changes, bit for bit.
-    // UTPP_STICK_SPEED_FIXED_DEFAULT=1 only serves offline replays of the fixed mode (the shipped build keeps 0).
+    // UTPP_STICK_SPEED_FIXED_DEFAULT=1 only serves offline replays of the fixed mode (this member default stays 0; the motion driver
+    // starts in the fixed mode on its own, MotionDriver.cpp g_stickSpeedFixed).
     bool stickSpeedFixed = UTPP_STICK_SPEED_FIXED_DEFAULT != 0;
     // Internal, set by EffectiveMapConfig only (never by the host): walkMapActive = gameStandPoints[0] is the walk toggle point and the
     // full-stick speed of the stand is that point; gameRunReductionMs = Tier2 Slow, m/s taken off the full-stick stand run speed.

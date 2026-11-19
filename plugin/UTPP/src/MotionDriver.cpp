@@ -243,11 +243,11 @@ hlead::HeadLead g_hl;
 hlead::Skeleton g_hlSk;
 const void* g_hlSkBundle = nullptr;
 bool g_hlHaveApply = false;
-// Opt-in orientation warp (CET mm.orientWarp -> SetOrientWarp, default OFF): mm/OrientWarp.hpp aligns the pelvis (extra visual
+// Orientation warp (CET mm.orientWarp -> SetOrientWarp, default ON like the setting): mm/OrientWarp.hpp aligns the pelvis (extra visual
 // root yaw added to the provided root frame of the leg tail) and the torso (twist over Spine .. Spine3 of the tail's pose copy) with
 // the path of motion while V runs a circle. Step + Measure per v2 feed (StepLocked), applied in FrameLocked. OFF and idle (weight 0,
 // nothing applied): no code path touches the frame, the pose and the root yaw are bit-identical.
-bool g_orientWarpOn = false;
+bool g_orientWarpOn = true;
 owarp::Params g_owParams;
 owarp::OrientWarp g_ow;
 owarp::Skeleton g_owSk;
@@ -320,11 +320,11 @@ float g_sinceDodgeDetailS = 1.0e9f; // seconds since the last feed with the dodg
 // Locomotion's last dodge heading decision (Main.cpp: locomotion::LastDodgeHeading; nullptr offline): diagnostics only
 bool (*g_dodgeHeadingProbe)(uint64_t&, float&, float&, bool&, double&) = nullptr;
 static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "dodge::SampleDodge writes 7 floats per bone");
-// Opt-in motion lean (CET mm.lean -> SetLean, default OFF): mm/LeanRuntime.hpp leans the v2 pose into the turn from the lateral
+// Motion lean (CET mm.lean -> SetLean, default ON like the setting): mm/LeanRuntime.hpp leans the v2 pose into the turn from the lateral
 // acceleration of the feed velocity (Step + Apply per v2 feed on b.pose in StepLocked, before the orientation warp and the leg tail).
 // The state lives in the Bundle. OFF and idle (weight 0): no code path touches the pose, it is bit-identical.
-bool g_leanSetting = false;
-bool g_leanHeadSetting = false; // mm.leanHead: the motion head layer replaces the head lead while the lean is on
+bool g_leanSetting = true;
+bool g_leanHeadSetting = true; // mm.leanHead (default ON like the setting): the motion head layer replaces the head lead while the lean is on
 lrt::Params g_leanParams;
 motionpose::WorldAimTargetParams g_worldAimParams; // SetAimWorldSmoothing (default off)
 motionpose::WorldAimTargetFilter g_worldAim;       // world aim direction of the aim offset while on
@@ -336,15 +336,15 @@ float g_neutralAoPrevYawDeg = 0.0f;
 bool g_neutralAoPrevValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
-int32_t g_strideWarpReq = -1;    // SetStrideWarp: -1 = the build default of the blend stack, else 0 / 1
+int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
-// Slide feed (CET mm.slide -> SetSlide, default OFF; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 reaches the
+// Slide feed (CET mm.slide -> SetSlide, default ON like the setting; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 reaches the
 // chooser as MovementMode Sliding (+ Stance Crouch, MovementDirection, MovementMode_LastFrame) and the driver lets v2 own the body
 // instead of the hold-last-pose path: no foot contacts on slide frames, no body-yaw command (MMDriver Feed asks OwnsSlide). Only when
 // the setting is on AND the active bundle declares the slide section; otherwise every code path is the pre-slide one.
-bool g_slideSetting = false;
+bool g_slideSetting = true;
 // Shooter mode (CET bodyturn.shooterMode -> SetShooterMode, default OFF) and the H2 safeguard (SetH2Guard, default ON; mm/MotionAdapter.hpp MapConfig::
 // shooterMode / h2Strafe). g_shooter_modeLive = the setting AND v2 can run (enabled, no fallback, bundle): the lock-free copy ShooterModeSpeedMul reads.
 bool g_shooter_modeSetting = false;
@@ -368,9 +368,9 @@ std::atomic<bool> g_walkSpeedLive{false};
 // AND v2 can run, refreshed with the walk speed flag (AnalogFloorMul gate).
 std::atomic<float> g_minAnalogWalk{0.0f};
 std::atomic<bool> g_minAnalogWalkLive{false};
-// Fixed stick speed (SetStickSpeedMode, CET mm.stickSpeed; MotionAdapter.hpp MapConfig::stickSpeedFixed): read by every Step; starts at the
-// MapConfig default (analog).
-std::atomic<bool> g_stickSpeedFixed{adapter::MapConfig{}.stickSpeedFixed};
+// Fixed stick speed (SetStickSpeedMode, CET mm.stickSpeed; MotionAdapter.hpp MapConfig::stickSpeedFixed): read by every Step; starts
+// fixed like the setting (the MapConfig member default stays analog for the offline tools).
+std::atomic<bool> g_stickSpeedFixed{true};
 std::atomic<bool> g_tier2Slow{false};
 // Selection churn guards as a group (SetSelectionGuards, CET mm.selectionGuards): read by every Step
 std::atomic<bool> g_selectionGuards{true};

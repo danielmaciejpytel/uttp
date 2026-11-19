@@ -341,6 +341,7 @@ int DumpMain(const std::string& aOut, const std::string& aData, const std::strin
 #ifndef UTPP_DECISIONDUMP_NO_MAIN // tests/MMChurnTest.cpp includes this file for its helpers and has its own main
 int main(int argc, char** argv)
 {
+    DriverOptionBaseline();
     if (argc < 5)
     {
         std::printf("usage: decisiondump <out.txt> <motion data dir> <base db> [--full-feed] [--closed13 <flick_180_run.feed> <run_arc_left.feed>] [feed ...]\n");
