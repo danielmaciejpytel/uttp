@@ -7,7 +7,8 @@
 //   <fixture dir>: utpp_dodge_<body>.utpptrav and the recorded feed windows dodge_feed_woman_a.txt, dodge_feed_woman_b.txt,
 //   dodge_feed_man.txt (31-column feed dump rows around four ground dodges each). A missing file makes the test FAIL.
 // Checks per recording: the pose of a dodge frame is the clip of the sector the driver picked (legs within 3 deg of the clip sample
-// once the entry blend is over) and that sector is the impulse direction relative to the drawn heading; single-frame steps at the
+// once the entry blend is over) and that sector is the impulse direction relative to the actor yaw (with the drawn heading and the
+// actor in different sectors the actor's sector is shown); single-frame steps at the
 // entry and the hand-back stay within 3 cm (hips) / 6 deg (feet, hands) of the clip's own largest step; the same at 30 / 60 / 120 Hz
 // (resampled feeds); without the file (missing or invalid) the output is byte-identical to a replay with a missing file, and frames
 // before the first dodge are byte-identical with and without it; shown clip changes per second over each dodge stay <= 3.0.
@@ -38,6 +39,7 @@ namespace dodge = utpp::mm::dodge;
 namespace
 {
 int g_pass = 0, g_fail = 0;
+int g_splitPicks = 0, g_splitActorOk = 0; // Metrics::splitPicks / splitActorOk over every Analyse call
 void Check(bool aOk, const std::string& aWhat, const std::string& aDetail = {})
 {
     (aOk ? g_pass : g_fail)++;
@@ -373,13 +375,16 @@ struct Episode
 {
     size_t start = 0, end = 0; // first clip frame, hand-back frame
     int32_t sector = -1, firstSector = -1; // shown at the end of the settle window / picked on the impulse feed
-    float expectRel = 0, actorRel = 0;
+    float expectRel = 0, drawnRel = 0, actorRel = 0; // impulse relative to the facing / the drawn heading / the actor (deg)
     int32_t expected = -1;
 };
 
 struct Metrics
 {
     int clips = 0, sectorOk = 0, dodges = 0, outcomeOk = 0;
+    // dodges whose impulse falls in different sectors relative to the drawn heading and to the actor; of them, the outcome of the
+    // actor's sector (its clip, or none for a forward dodge out of a run)
+    int splitPicks = 0, splitActorOk = 0;
     float offsetEnd = 0, offsetEndBase = 0; // visual - capsule at the end of the hand-back blend (largest over the dodges)
     float legMaxDeg = 0, hipsExcess = -1e9f, endsExcess = -1e9f, hipsEntry = 0, hipsExit = 0, endsEntry = 0, endsExit = 0;
     float hipsHeightEntry = 0, hipsHeightExit = 0; // largest single-frame hips height step (m)
@@ -461,11 +466,7 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         // raw velocity of a side press out of a run points 13-24 deg toward the run)
         float ix = 0, iy = 0;
         dodge::ImpulseDirection(aWith[j].vel[0], aWith[j].vel[1], entryVel[0], entryVel[1], ix, iy);
-        dodge::Sector s = dodge::ClassifySector(WrapDeg(std::atan2(-ix, iy) * 57.29578f - aWith[j].rootYawDeg));
-        const bool runOn = s == dodge::Sector::Forward && entry >= 0.5f * (1.6f + 3.85f);
-        if (runOn && aC.HasForwardRun())
-            s = dodge::Sector::ForwardRun;
-        const bool runOnNoClip = runOn && !aC.HasForwardRun();
+        const float pushYaw = std::atan2(-ix, iy) * 57.29578f;
         bool shown = false;
         int32_t sec = -1;
         for (size_t k = i; k < aWith.size() && aWith[k].t - aWith[i].t < 0.15f; ++k)
@@ -475,12 +476,31 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
                 sec = aWith[k].probe.sector;
                 break;
             }
-        const bool ok = runOnNoClip ? !shown : (shown && sec == static_cast<int32_t>(s));
+        // the expected sector of the impulse relative to aFacingDeg and whether the shown outcome matches it
+        const auto expect = [&](float aFacingDeg, dodge::Sector& aS) {
+            aS = dodge::ClassifySector(WrapDeg(pushYaw - aFacingDeg));
+            const bool runOn = aS == dodge::Sector::Forward && entry >= 0.5f * (1.6f + 3.85f);
+            if (runOn && aC.HasForwardRun())
+                aS = dodge::Sector::ForwardRun;
+            return runOn && !aC.HasForwardRun() ? !shown : (shown && sec == static_cast<int32_t>(aS));
+        };
+        // expected: the sector relative to the actor yaw
+        dodge::Sector s = dodge::Sector::None, sDrawn = dodge::Sector::None;
+        const bool ok = expect(aWith[j].yawDeg, s);
         m.outcomeOk += ok ? 1 : 0;
+        (void)expect(aWith[j].rootYawDeg, sDrawn);
+        if (sDrawn != s)
+        {
+            ++m.splitPicks;
+            m.splitActorOk += ok ? 1 : 0;
+        }
         if (aPrint)
-            std::printf("INFO %s dodge at t=%.3f: entry %.2f m/s, impulse sector %s -> %s (%s)\n", aTag.c_str(), aWith[i].t, entry,
+            std::printf("INFO %s dodge at t=%.3f: entry %.2f m/s, impulse sector %s -> %s (%s)%s\n", aTag.c_str(), aWith[i].t, entry,
                         dodge::SectorName(s), shown ? dodge::SectorName(static_cast<dodge::Sector>(sec)) : "no clip (run goes on)",
-                        ok ? "as expected" : "UNEXPECTED");
+                        ok ? "as expected" : "UNEXPECTED",
+                        sDrawn != s ? (std::string(", drawn heading sector ") + dodge::SectorName(sDrawn) + " / actor sector " +
+                                       dodge::SectorName(s)).c_str()
+                                    : "");
     }
     std::vector<float> clipPose(size_t(aDb.bones) * 7);
     std::vector<mm::math::Quat> qs, qc, q0, q1;
@@ -652,7 +672,7 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         m.endsExit = std::fmax(m.endsExit, eOut);
         m.hipsExcess = std::fmax(m.hipsExcess, std::fmax(hIn, hOut) - ownH);
         m.endsExcess = std::fmax(m.endsExcess, std::fmax(eIn, eOut) - ownE);
-        // sector: impulse direction (the feed of the pick) against the drawn heading before that feed
+        // sector: impulse direction (the feed of the pick) against the facing of that feed (the actor yaw)
         // (impulse = velocity minus the kept part of the entry velocity, ImpulseDirection; entry = the feed before the dodge detail
         // when the impulse is already in its first feed, else that first feed - the DodgePlayer rule)
         const Frame& pf = aWith[e.start];
@@ -663,8 +683,8 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         float ix = 0, iy = 0;
         dodge::ImpulseDirection(pf.vel[0], pf.vel[1], ev[0], ev[1], ix, iy);
         const float pushYaw = std::atan2(-ix, iy) * 57.29578f;
-        e.expectRel = WrapDeg(pushYaw - pf.rootYawDeg);
-        e.actorRel = WrapDeg(pushYaw - pf.yawDeg);
+        e.drawnRel = WrapDeg(pushYaw - pf.rootYawDeg);
+        e.actorRel = e.expectRel = WrapDeg(pushYaw - pf.yawDeg);
         e.expected = static_cast<int32_t>(dodge::ClassifySector(e.expectRel));
         if (e.expected == static_cast<int32_t>(dodge::Sector::Forward) && e.firstSector == static_cast<int32_t>(dodge::Sector::ForwardRun))
             e.expected = e.firstSector; // the forward dodge out of a run with Dodge_F_Run loaded
@@ -742,12 +762,14 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         m.changesMax = std::fmax(m.changesMax, changes / (t1 - t0));
         m.changesMaxBase = std::fmax(m.changesMaxBase, changesBase / (t1 - t0));
         if (aPrint)
-            std::printf("INFO %s clip %s at t=%.3f..%.3f: rel to drawn heading %.0f deg (to the actor %.0f) -> expected %s; entry steps hips %.1f cm / ends %.1f deg, "
+            std::printf("INFO %s clip %s at t=%.3f..%.3f: rel to the drawn heading %.0f deg, to the actor %.0f -> expected %s; entry steps hips %.1f cm / ends %.1f deg, "
                         "exit hips %.1f cm / ends %.1f deg (clip own %.1f cm / %.1f deg); hand-back - capsule stop %.3f s\n",
                         aTag.c_str(), dodge::SectorName(static_cast<dodge::Sector>(e.sector)), aWith[e.start].t, aWith[e.end].t,
-                        e.expectRel, e.actorRel, dodge::SectorName(static_cast<dodge::Sector>(e.expected)), hIn * 100.0f, eIn,
+                        e.drawnRel, e.actorRel, dodge::SectorName(static_cast<dodge::Sector>(e.expected)), hIn * 100.0f, eIn,
                         hOut * 100.0f, eOut, ownH * 100.0f, ownE, aWith[e.end].t - aWith[stop].t);
     }
+    g_splitPicks += m.splitPicks;
+    g_splitActorOk += m.splitActorOk;
     return m;
 }
 
@@ -1021,7 +1043,7 @@ int main(int argc, char** argv)
         Check(m.dodges == 4 && m.outcomeOk == m.dodges,
               tag + ": every recorded dodge shows the clip of its sector, or none for a forward dodge out of a run",
               std::to_string(m.outcomeOk) + " / " + std::to_string(m.dodges) + " dodges, " + std::to_string(m.clips) + " clips");
-        Check(m.sectorOk == m.clips, tag + ": each clip is the sector of the impulse relative to the drawn heading",
+        Check(m.sectorOk == m.clips, tag + ": each clip is the sector of the impulse relative to the facing (actor yaw)",
               std::to_string(m.sectorOk) + " / " + std::to_string(m.clips));
         Check(m.legMaxDeg < 3.0f, tag + ": legs follow the picked clip after the entry blend", F("max %.2f deg", m.legMaxDeg));
         Check(m.upperFrames > 0 && m.upperMaxDeg < 1.0f, tag + ": arms and head keep the pose shown before the clip",
@@ -1216,11 +1238,11 @@ int main(int argc, char** argv)
                     const std::vector<Frame> w = Replay(v, db);
                     const Metrics r = Analyse(t, w, b, clips, db, bn, true);
                     Check(r.dodges == 4 && r.outcomeOk == r.dodges && r.sectorOk == r.clips,
-                          t + ": every press shows the clip of the impulse sector relative to the drawn heading, or none for forward out of a run",
+                          t + ": every press shows the clip of the impulse sector relative to the facing, or none for forward out of a run",
                           F("%.0f / %.0f dodges, sectors %.0f / %.0f", r.outcomeOk, r.dodges, r.sectorOk, r.clips));
                     // the stick held left / back had already turned the body: those pushes are forward (the run goes on). The right press comes
-                    // in the middle of the 180 deg turn back from the left press: its sector depends on how far the drawn heading has turned
-                    // (R -69 / -74 deg at the recorded rate, B 147 / 158 at 60 Hz, L 135 / R -94 at 30 Hz; Analyse checks it against the impulse)
+                    // in the middle of the 180 deg turn back from the left press: its sector depends on how far the actor has turned
+                    // (Analyse checks it against the impulse)
                     if (variant == 1)
                         Check(r.clips == 1 && (r.sectorBits & 1u) == 0, t + ": forward / left / back presses go on running (forward relative to the turned body), "
                               "the right press shows one side / back clip", F("%.0f clips, sector bits %.0f", r.clips, r.sectorBits));
@@ -1276,6 +1298,12 @@ int main(int argc, char** argv)
         }
     }
     std::remove(corrupt.c_str());
+    // the facing rule where it matters: over every replay above, the dodges whose impulse is in different sectors relative to the drawn
+    // heading and to the actor show the actor's sector (its clip, or none for a forward dodge out of a run); the recordings have such
+    // dodges in moving turns, so the check cannot pass without one
+    Check(g_splitPicks > 0 && g_splitActorOk == g_splitPicks,
+          "dodges with the drawn heading and the actor in different sectors show the actor's sector",
+          F("%.0f / %.0f dodges", g_splitActorOk, g_splitPicks));
     motiondriver::SetEnabled(false);
     motiondriver::Shutdown();
     std::printf("%s: %d passed, %d failed\n", g_fail ? "FAILED" : "PASSED", g_pass, g_fail);

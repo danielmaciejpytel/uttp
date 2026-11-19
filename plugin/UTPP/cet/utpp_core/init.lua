@@ -296,11 +296,13 @@ end
 -- perspective simplification (nothing reads it).
 -- the own key-binding system was removed: bind.enabled and the 11 bind.<action> strings (exact keys, so a
 -- "bind.*" key of another mod stays). Also skipped when the Mod Settings sync baseline is read (msLoadBase).
+-- mm.turnSteering / mm.steerActiveOnly: the turn steering choice of test builds (one steering behaviour, no option).
 local RETIRED_KEYS = { ["perspective.enforceWithRef"] = true,
   ["bind.enabled"] = true, ["bind.perspective_toggle"] = true, ["bind.shoulder_swap"] = true, ["bind.quick_fpp"] = true,
   ["bind.profile_next"] = true, ["bind.profile_prev"] = true, ["bind.headlook_toggle"] = true,
   ["bind.lootassist_toggle"] = true, ["bind.camera_freelook"] = true, ["bind.camera_zoom_in"] = true,
-  ["bind.camera_zoom_out"] = true, ["bind.loothead_kill"] = true }
+  ["bind.camera_zoom_out"] = true, ["bind.loothead_kill"] = true,
+  ["mm.turnSteering"] = true, ["mm.steerActiveOnly"] = true }
 
 -- keys replaced by a new key with a converted value. Load converts the stored value (when the file has no value of
 -- the new key; a stored new key wins) and drops the old key like a retired one (the next Save no longer writes it; the Mod

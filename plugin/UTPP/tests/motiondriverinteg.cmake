@@ -295,6 +295,19 @@ foreach(_crossfade_test MotionBlendStack PoseLiveCrossfade)
 endforeach()
 add_test(NAME utpp_MotionBlendStack_test COMMAND utpp_MotionBlendStack_test
          "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
+# Mutations of the carried steering (UTPP_STEER_CARRY_MUTATION in src/mm/MotionBlendStack.hpp): 1 = nothing carried, 2 = a short-way
+# residual beyond 135 deg carried too; each must fail its own check.
+foreach(_utpp_carry_mut 1 2)
+    add_executable(utpp_MotionBlendStack_carry_mut${_utpp_carry_mut} tests/MotionBlendStackTest.cpp)
+    target_compile_options(utpp_MotionBlendStack_carry_mut${_utpp_carry_mut} PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_features(utpp_MotionBlendStack_carry_mut${_utpp_carry_mut} PRIVATE cxx_std_20)
+    target_link_libraries(utpp_MotionBlendStack_carry_mut${_utpp_carry_mut} PRIVATE bcrypt)
+    target_compile_definitions(utpp_MotionBlendStack_carry_mut${_utpp_carry_mut} PRIVATE UTPP_STEER_CARRY_MUTATION=${_utpp_carry_mut})
+    add_test(NAME utpp_MotionBlendStack_carry_mut${_utpp_carry_mut} COMMAND utpp_MotionBlendStack_carry_mut${_utpp_carry_mut}
+             "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
+endforeach()
+set_tests_properties(utpp_MotionBlendStack_carry_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL carried steering [+-]60 deg")
+set_tests_properties(utpp_MotionBlendStack_carry_mut2 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL carried steering short way")
 add_test(NAME utpp_PoseLiveCrossfade_test COMMAND utpp_PoseLiveCrossfade_test
          "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm"
          "${_utpp_mdmotion_data}/motion/utpp_overlays_woman.utppov")

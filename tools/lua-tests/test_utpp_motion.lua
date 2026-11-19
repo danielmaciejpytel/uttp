@@ -627,6 +627,37 @@ do
   check("rejected strideWarp retries", #t.stride == 4 and t.stride[4] == true and v.rt.optionsApplied.strideWarp == true)
 end
 
+-- turn steering is one fixed behaviour of the DLL: no option is registered, and the stored keys of the earlier choice
+-- (mm.turnSteering, mm.steerActiveOnly) are retired keys (utpp_core RETIRED_KEYS): dropped on load, not written again
+do
+  local tmp = UTPP_MOTION_PATH .. ".steer-retired-test.tmp"
+  local v, t, core = fresh(), mock(), dofile(UTPP_CORE_PATH)
+  local lines = {}
+  core.sink = function(l) lines[#lines + 1] = tostring(l) end
+  core.SETTINGS_FILE = tmp
+  local fh = assert(io.open(tmp, "w"))
+  fh:write("# test\n" .. core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n"
+    .. "mm.turnSteering=carried\nmm.steerActiveOnly=true\nmm.strideWarp=false\n")
+  fh:close()
+  check("retired turn steering keys: the file loads", core.Load(tmp))
+  v.api = t.api
+  v.RegisterSettings(core)
+  v.SetEnabled(true); v.Sync(t.api)
+  check("retired turn steering keys: no turn steering option is registered",
+    core.settings.defs["mm.turnSteering"] == nil and core.settings.defs["mm.steerActiveOnly"] == nil and v.want.turnSteering == nil)
+  check("retired turn steering keys: not kept in the stored settings, the other keys are read",
+    core.settings.stored["mm.turnSteering"] == nil and core.settings.stored["mm.steerActiveOnly"] == nil
+    and core.Get("mm.strideWarp") == false)
+  core.Save(tmp)
+  local fh2 = assert(io.open(tmp, "r"))
+  local text = fh2:read("*a")
+  fh2:close()
+  os.remove(tmp)
+  check("retired turn steering keys: the saved file has neither key",
+    text:find("turnSteering", 1, true) == nil and text:find("steerActiveOnly", 1, true) == nil
+    and text:find("\nmm.strideWarp=false\n", 1, true) ~= nil, text)
+end
+
 -- mm.aimAtCrosshair (aim pitch plan 2026-10-30): DLL loop (default off) + utpp_camera crosshair point, P only with an ACKNOWLEDGED loop
 do
   local v, t = fresh(), mock()

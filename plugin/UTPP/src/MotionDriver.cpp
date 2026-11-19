@@ -658,7 +658,7 @@ int AirMut() { return UTPP_MOTION_DRIVER_AIR_MUTATION; } // a call, not a consta
 #define UTPP_MOTION_DRIVER_TRAV_MUTATION 0
 #endif
 // Dodge clip mutation builds only (UTPP_DODGE_DRIVER_MUTATION=k); undefined / 0 = production. 1 = the clip is never shown,
-// 2 = the clip's own upper body is shown (no held upper body).
+// 2 = the clip's own upper body is shown (no held upper body), 3 = the sector is picked against the drawn heading (not the actor yaw).
 #ifndef UTPP_DODGE_DRIVER_MUTATION
 #define UTPP_DODGE_DRIVER_MUTATION 0
 #endif
@@ -5016,6 +5016,20 @@ const motion::PoseHistory* VehicleExitHistoryLocked(const Bundle& b, const integ
     return ok ? &history : nullptr;
 }
 
+// Facing (world yaw, degrees) a ground dodge's impulse is classified against (dodge::Input::facingYawDeg, also the push diagnostics):
+// the actor yaw (with only the newest blend layer steered, the drawn heading lags the actor 30 - 60 deg in moving turns).
+float DodgeFacingYawDeg(const Bundle& b, const motionhost::FeedInput& aRaw, bool aRootWanted)
+{
+#if UTPP_DODGE_DRIVER_MUTATION == 3
+    // mutation 3: the drawn (visual) heading while the root frame is wanted
+    return aRootWanted ? b.root.PreviousVisualWorldYaw() / integ::kDegToRad : aRaw.playerYawDeg;
+#else
+    (void)b;
+    (void)aRootWanted;
+    return aRaw.playerYawDeg;
+#endif
+}
+
 bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 {
     g_meleeOwnsBody = aRaw.meleeOwnsBody;
@@ -5683,7 +5697,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     else if (g_trav.noContactLeft > 0.0f)
         g_trav.noContactLeft = std::fmax(0.0f, g_trav.noContactLeft - dt);
     // Ground dodge clip: standing stance on the ground only (a crouch dodge, slide, air or traversal keeps the playing clip). A forward
-    // dodge entered above the walk band keeps the run / sprint clip. The facing is the drawn (visual) heading the clip is shown in.
+    // dodge entered above the walk band keeps the run / sprint clip. The sector is picked against the actor yaw (DodgeFacingYawDeg).
     dodge::Frame dodgeFr{};
     if (b.dodgeOk)
     {
@@ -5700,7 +5714,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
                             !g_trav.active;
         di.velX = std::isfinite(aRaw.velWorld[0]) ? aRaw.velWorld[0] : 0.0f;
         di.velY = std::isfinite(aRaw.velWorld[1]) ? aRaw.velWorld[1] : 0.0f;
-        di.facingYawDeg = rootWanted ? b.root.PreviousVisualWorldYaw() / integ::kDegToRad : aRaw.playerYawDeg;
+        di.facingYawDeg = DodgeFacingYawDeg(b, aRaw, rootWanted);
         // the game's standing walk / run speeds (m/s): faster than halfway between them is a run
         di.forwardClipMaxEntryMps = 0.5f * (mc.gameStandPoints[0] + mc.gameStandPoints[1]);
         dodgeFr = g_dodgeSt.player.Tick(di, b.dodgeClips.length);
@@ -5754,7 +5768,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             ds.pushStart[0] = aRaw.capsulePos[0];
             ds.pushStart[1] = aRaw.capsulePos[1];
             ds.pushCam = f.cameraYawDeg;
-            ds.pushFacing = rootWanted ? b.root.PreviousVisualWorldYaw() / integ::kDegToRad : aRaw.playerYawDeg;
+            ds.pushFacing = DodgeFacingYawDeg(b, aRaw, rootWanted);
             ds.pushPicked = false;
         }
         else if (ds.pushArmed)

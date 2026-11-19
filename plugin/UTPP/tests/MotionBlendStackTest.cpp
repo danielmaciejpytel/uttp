@@ -118,6 +118,101 @@ static void TinyOutgoingWarp(const motion::MotionDatabase &db)
     tiny.Step(M(incoming, .9f, true), 0);
     C("relative correction collapse preserves dt0 ankle continuity", AnkleDifference(db, before.data(), tiny.Output()) < .0001f);
 }
+// Carried steering: a straight run re-picked over a long fade with the target off to one side. The visual root yaw is fed back from
+// the output yaw each step (as the game does). Returns the visual turn progress after `seconds` (rad, towards the target) and the
+// largest step of the output yaw rate between two frames (rad/s); `wideOnly` stops at the first frame the residual is no longer beyond
+// kCarryResidual.
+struct SteerRun
+{
+    float progress = 0, largestRateStep = 0, prediction = 0;
+    bool ok = false;
+};
+static SteerRun RunSteer(const motion::MotionDatabase &db, float targetOffset, float hz, float seconds, bool wideOnly)
+{
+    SteerRun r;
+    const int loop = ClipIndex(db, "M_Neutral_Run_Loop_F");
+    if (loop < 0)
+        return r;
+    const float dt = 1.f / hz;
+    motionstack::BlendStack s;
+    s.Init(db);
+    motionstack::GraphInputs graph;
+    graph.enabled = graph.generalSteering = true;
+    graph.previousVisualWorldYaw = graph.actorWorldYaw = .3f;
+    graph.targetWorldYaw = .3f + targetOffset;
+    s.SetGraphInputs(graph);
+    r.ok = s.Step(M(loop, .2f, false), 0);
+    for (int n = 1; n * dt < .3f && r.ok; ++n) // the first layer runs alone and settles its steering
+    {
+        r.ok = s.Step(M(loop, .2f + n * dt, false), dt);
+        graph.previousVisualWorldYaw = .3f; // held: the first layer only warms up
+        s.SetGraphInputs(graph);
+    }
+    const float start = .55f;
+    root2::Delta ahead;
+    if (root2::Extract(db, loop, start, motionstack::BlendStack::kSteeringTargetTimePrevious, ahead))
+        r.prediction = std::fabs(float(ahead.yaw));
+    r.ok = r.ok && s.Step(M(loop, start, true, .6f), dt);
+    float lastRate = s.OutputSignals().rootYaw;
+    for (int n = 1; n * dt < seconds && r.ok; ++n)
+    {
+        if (wideOnly && std::fabs(math::WrapAngle(graph.targetWorldYaw - graph.previousVisualWorldYaw)) <= motionstack::BlendStack::kCarryResidual)
+            break;
+        graph.previousVisualWorldYaw += s.OutputSignals().rootYaw * dt;
+        s.SetGraphInputs(graph);
+        r.ok = s.Step(M(loop, start + n * dt, false), dt);
+        r.largestRateStep = std::fmax(r.largestRateStep, std::fabs(s.OutputSignals().rootYaw - lastRate));
+        lastRate = s.OutputSignals().rootYaw;
+    }
+    r.progress = (graph.previousVisualWorldYaw - .3f) * (targetOffset < 0 ? -1.f : 1.f);
+    return r;
+}
+// Reference runs of the same scenarios with the newest layer's correction at its fade weight only ("newest") and with every live layer
+// steered ("all"), on utpp_motion_woman.utppmm (deg, deg/s; recorded from the per-layer steering builds before carried steering became
+// the only behaviour). Re-record them when that database changes.
+struct SteerReference
+{
+    float hz, allProgress, newestProgress, newestRateStep, newestShortWay;
+};
+static constexpr SteerReference kSteerReferences[] = {
+    {30.f, 46.0f, 19.6f, 63.2f, 49.40f}, {60.f, 46.3f, 20.5f, 33.9f, 45.04f}, {200.f, 47.4f, 22.3f, 10.7f, 44.57f}};
+static void CarriedSteering(const motion::MotionDatabase &db)
+{
+    constexpr float kDeg = math::kPi / 180.f;
+    // A target 60 deg to the side: the newest layer's correction carried through the fade turns the body further than its fade weight
+    // alone, towards what every layer steering gives, without a step in the output yaw rate.
+    for (const auto &ref : kSteerReferences)
+        for (const float side : {1.f, -1.f})
+        {
+            const float hz = ref.hz, offset = side * math::kPi / 3;
+            const float all = ref.allProgress * kDeg, newest = ref.newestProgress * kDeg;
+            const auto carried = RunSteer(db, offset, hz, .35f, false);
+            std::printf("INFO carried steering %+.0f deg at %.0f Hz: progress carried %.1f deg (reference all %.1f newest %.1f), rate step "
+                        "carried %.1f deg/s (reference newest %.1f)\n",
+                        offset / kDeg, hz, carried.progress / kDeg, ref.allProgress, ref.newestProgress, carried.largestRateStep / kDeg,
+                        ref.newestRateStep);
+            char name[200];
+            std::snprintf(name, sizeof name, "carried steering %+.0f deg at %.0f Hz: the body follows further than the newest layer alone",
+                          offset / kDeg, hz);
+            C(name, carried.ok && carried.progress > newest + 3 * kDeg && std::fabs(carried.progress - all) < std::fabs(newest - all) &&
+                        carried.largestRateStep < (ref.newestRateStep + 30) * kDeg);
+        }
+    // A target about 180 deg away on the short side with no authored turn ahead (straight run): no carry while the residual stays beyond
+    // kCarryResidual, so the body does not swing the short way any further than with the newest layer alone.
+    for (const auto &ref : kSteerReferences)
+        for (const float side : {1.f, -1.f})
+        {
+            const float hz = ref.hz, offset = side * (math::kPi - kDeg);
+            const auto carried = RunSteer(db, offset, hz, .6f, true);
+            std::printf("INFO carried steering short way %+.0f deg at %.0f Hz: short-way progress carried %.2f deg (reference newest %.2f), "
+                        "authored turn ahead %.2f deg\n",
+                        offset / kDeg, hz, carried.progress / kDeg, ref.newestShortWay, carried.prediction / kDeg);
+            char name[200];
+            std::snprintf(name, sizeof name, "carried steering short way %+.0f deg at %.0f Hz: no further short-way swing than the newest layer",
+                          offset / kDeg, hz);
+            C(name, carried.ok && carried.prediction <= kDeg && carried.progress <= (ref.newestShortWay + .1f) * kDeg);
+        }
+}
 int main(int argc, char **argv)
 {
     if (argc != 2)
@@ -375,6 +470,7 @@ int main(int argc, char **argv)
     C("bridge completion reaches incoming endpoint and prunes seed",
       endExact && bridge.Count() == 1 && bridge.StaticTailWeight() == 0 && bridge.RootReliable());
     TinyOutgoingWarp(db);
+    CarriedSteering(db);
     std::printf("%d PASS %d FAIL\n", pass, fail);
     return fail ? 1 : 0;
 }

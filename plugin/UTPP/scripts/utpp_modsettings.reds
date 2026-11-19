@@ -75,7 +75,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "2")
   @runtimeProperty("ModSettings.displayName", "Animation pack")
   @runtimeProperty("ModSettings.description", "Chooses the animations that V uses in third person. Ultimate Third Person Project: the animations of this mod (movement, aiming, reload, melee, vehicles). Game Animations: the animations of the game itself, with the third-person camera, body and crosshair kept; arm and shoulder deformations of the game animations can come back. The change works at once while V stands idle; melee, vehicle and reload animations change at the next weapon draw, vehicle entry or reload. During an action the change waits until it ends.")
-  @runtimeProperty("ModSettings.displayValues", "\"Ultimate Third Person Project\", \"Game Animations\"")
+  @runtimeProperty("ModSettings.displayValues.UltimateThirdPersonProject", "Ultimate Third Person Project")
+  @runtimeProperty("ModSettings.displayValues.GameAnimations", "Game Animations")
   public let animation_pack: UTPPMS_animation_pack = UTPPMS_animation_pack.UltimateThirdPersonProject;
 
   // perspective.impl
@@ -103,7 +104,9 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "5")
   @runtimeProperty("ModSettings.displayName", "Diagnostic logs")
   @runtimeProperty("ModSettings.description", "For reporting a problem. 'On for 5 minutes' switches every UTPP diagnostic log on for 5 minutes of gameplay, then off by itself: switch it on, repeat the problem in the game, then switch it off or wait. A file named utpp-report-(date).txt in red4ext\\logs then lists the files to zip and send to the mod author. 'On until switched off' keeps the logs on, also after a game restart; use it only for long test sessions.")
-  @runtimeProperty("ModSettings.displayValues", "\"Off\", \"On for 5 minutes\", \"On until switched off\"")
+  @runtimeProperty("ModSettings.displayValues.Off", "Off")
+  @runtimeProperty("ModSettings.displayValues.OnFor5Minutes", "On for 5 minutes")
+  @runtimeProperty("ModSettings.displayValues.OnUntilSwitchedOff", "On until switched off")
   public let core_diagnosticLogs: UTPPMS_core_diagnosticLogs = UTPPMS_core_diagnosticLogs.Off;
 
   // camera.distance (view camera.edit.distance)
@@ -277,7 +280,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "22")
   @runtimeProperty("ModSettings.displayName", "Perspective while aiming")
   @runtimeProperty("ModSettings.description", "Aiming a weapon, throwing a grenade or using arm cyberware. Third person (default): over-the-shoulder aiming. First person: the game's first-person aiming.")
-  @runtimeProperty("ModSettings.displayValues", "\"First person\", \"Third person\"")
+  @runtimeProperty("ModSettings.displayValues.FirstPerson", "First person")
+  @runtimeProperty("ModSettings.displayValues.ThirdPerson", "Third person")
   public let perspective_aiming: UTPPMS_perspective_aiming = UTPPMS_perspective_aiming.ThirdPerson;
 
   // perspective.aimingScoped
@@ -287,7 +291,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "23")
   @runtimeProperty("ModSettings.displayName", "Perspective while aiming with a scope")
   @runtimeProperty("ModSettings.description", "Applies to ranged weapons with a scope installed and to sniper / precision rifles, instead of 'Perspective while aiming'. First person: the scope view cannot be shown over the shoulder. Third person: the scope picture is not rendered. Default: first person.")
-  @runtimeProperty("ModSettings.displayValues", "\"First person\", \"Third person\"")
+  @runtimeProperty("ModSettings.displayValues.FirstPerson", "First person")
+  @runtimeProperty("ModSettings.displayValues.ThirdPerson", "Third person")
   public let perspective_aimingScoped: UTPPMS_perspective_aimingScoped = UTPPMS_perspective_aimingScoped.FirstPerson;
 
   // perspective.combat
@@ -297,7 +302,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "24")
   @runtimeProperty("ModSettings.displayName", "Perspective in combat")
   @runtimeProperty("ModSettings.description", "Third person: combat stays in third person (default). First person: combat cuts to first person. Weapons are set separately below.")
-  @runtimeProperty("ModSettings.displayValues", "\"Third person\", \"First person\"")
+  @runtimeProperty("ModSettings.displayValues.ThirdPerson", "Third person")
+  @runtimeProperty("ModSettings.displayValues.FirstPerson", "First person")
   public let perspective_combat: UTPPMS_perspective_combat = UTPPMS_perspective_combat.ThirdPerson;
 
   // perspective.weaponDrawn
@@ -307,7 +313,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "25")
   @runtimeProperty("ModSettings.displayName", "Perspective with a weapon drawn")
   @runtimeProperty("ModSettings.description", "Third person: a weapon in hand stays in third person (default). First person: first person whenever a weapon is in hand.")
-  @runtimeProperty("ModSettings.displayValues", "\"Third person\", \"First person\"")
+  @runtimeProperty("ModSettings.displayValues.ThirdPerson", "Third person")
+  @runtimeProperty("ModSettings.displayValues.FirstPerson", "First person")
   public let perspective_weaponDrawn: UTPPMS_perspective_weaponDrawn = UTPPMS_perspective_weaponDrawn.ThirdPerson;
 
   // mm.shinobiBonusReload
@@ -335,7 +342,11 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "28")
   @runtimeProperty("ModSettings.displayName", "Crosshair colour")
   @runtimeProperty("ModSettings.description", "Colour of the UTPP crosshair's dot and ring. Standard (default): the game's crosshair colour, which also changes over enemies and friends like the game's own crosshair. White, Red, Green, Black: a fixed colour. With Black the shadow and the hit / kill marker turn white so they stay visible.")
-  @runtimeProperty("ModSettings.displayValues", "\"Standard\", \"White\", \"Red\", \"Green\", \"Black\"")
+  @runtimeProperty("ModSettings.displayValues.Standard", "Standard")
+  @runtimeProperty("ModSettings.displayValues.White", "White")
+  @runtimeProperty("ModSettings.displayValues.Red", "Red")
+  @runtimeProperty("ModSettings.displayValues.Green", "Green")
+  @runtimeProperty("ModSettings.displayValues.Black", "Black")
   public let crosshair_color: UTPPMS_crosshair_color = UTPPMS_crosshair_color.Standard;
 
   // melee.fullBody
@@ -676,7 +687,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.order", "63")
   @runtimeProperty("ModSettings.displayName", "Gamepad stick speed")
   @runtimeProperty("ModSettings.description", "Walk or run: pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the animations. Follows the stick (default): her speed changes smoothly with how far the stick is pushed, as in the base game. Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.")
-  @runtimeProperty("ModSettings.displayValues", "\"Walk or run\", \"Follows the stick\"")
+  @runtimeProperty("ModSettings.displayValues.WalkOrRun", "Walk or run")
+  @runtimeProperty("ModSettings.displayValues.FollowsTheStick", "Follows the stick")
   public let mm_stickSpeed: UTPPMS_mm_stickSpeed = UTPPMS_mm_stickSpeed.FollowsTheStick;
 
   // camera.zoomUnarmed.fppHandoff

@@ -4,6 +4,8 @@
 //        utpp_motion_driver_shooter_mode_test <data dir> <v1 db> <flick.feed> <arc.feed> --slide <slide bundle prefix>  (only the slide case, the bundle
 //        must declare the slide section: <prefix>.utppmm + <prefix>.chooser.json)
 //        utpp_motion_driver_shooter_mode_test ... --explore <case>   (development aid: time series of a synthetic case)
+//        utpp_motion_driver_shooter_mode_spin_repeat_test ... --spin-repeat   (only the A6 precondition; the build must define
+//        UTPP_STEER_CARRY_MUTATION=1, see SpinRepeatCase)
 //
 // Every case starts from RestoreDefaults() (SetShooterMode(false), SetH2Guard(true), SetBodyTurn(true)); before the OFF / identity cases the flags are
 // asserted from Status() (shooterMode=0 h2Guard=1): the flags are process-lifetime and would otherwise leak from one case into the next.
@@ -717,16 +719,44 @@ void OpenFeedCase(Rt& rt, const std::vector<FeedFile>& aFeeds, bool aShooterMode
         }
         if (!aShooterMode)
         {
-            // the same feed with the safeguard off still repeats the spin: the case discriminates
+            // the same feed with the safeguard off picks the spin: the safeguard changes the result of this build
             motiondriver::SetH2Guard(false);
             const Run off = RunOnFeed(rt, f);
             const auto offSpins = Picks(rt, off, 0, f.fr.size(), IsSpin);
-            const size_t episodes = eps.size();
-            Check(!eps.empty() && offSpins.size() >= 3 * episodes, tag + f.name + ": without the safeguard the spin is picked again and again (>= 3 per reversal episode)",
-                  std::to_string(offSpins.size()) + " picks in " + std::to_string(episodes) + " episodes");
+            std::printf("INFO %s%s: without the safeguard %zu spin picks in %zu reversal episodes (the repeat precondition: SpinRepeatCase)\n", tag.c_str(),
+                        f.name.c_str(), offSpins.size(), eps.size());
+            Check(offSpins.size() > spins.size(), tag + f.name + ": without the safeguard the spin is picked (the safeguard acts on this feed)",
+                  std::to_string(offSpins.size()) + " picks without, " + std::to_string(spins.size()) + " with the safeguard");
         }
         RestoreDefaults();
     }
+}
+
+// A6 precondition: the recorded feeds reproduce the matcher problem the safeguard exists for - without it the spin is picked again and again. Carried
+// steering (BlendStack::kCarryResidual) feeds back less visual yaw error and so masks part of the repeat (run_arc_left: 7 picks in 3 episodes), so the
+// precondition is measured on the matcher alone: a build without the carried residual (UTPP_STEER_CARRY_MUTATION=1, the newest layer's correction at its
+// fade weight only). The safeguard checks themselves (OpenFeedCase) run on the shipped build.
+void SpinRepeatCase(Rt& rt, const std::vector<FeedFile>& aFeeds)
+{
+#if !defined(UTPP_STEER_CARRY_MUTATION) || UTPP_STEER_CARRY_MUTATION != 1
+    Setup(false, "--spin-repeat needs a build with UTPP_STEER_CARRY_MUTATION=1", "");
+    (void)rt;
+    (void)aFeeds;
+#else
+    const std::string tag = "A6 H2 ";
+    for (const FeedFile& f : aFeeds)
+    {
+        RestoreDefaults();
+        motionhost::SetBodyTurn(false);
+        motiondriver::SetH2Guard(false);
+        const Run off = RunOnFeed(rt, f);
+        const auto offSpins = Picks(rt, off, 0, f.fr.size(), IsSpin);
+        const size_t episodes = ReversalEpisodes(f).size();
+        Check(episodes > 0 && offSpins.size() >= 3 * episodes, tag + f.name + ": without the safeguard the spin is picked again and again (>= 3 per reversal episode)",
+              std::to_string(offSpins.size()) + " picks in " + std::to_string(episodes) + " episodes");
+        RestoreDefaults();
+    }
+#endif
 }
 
 // A3 F-FLICK: running forward, the camera (= capsule) turns aDeg with the stick held - in one feed (a capsule jump) or 180 deg in 0.25 s. The visual root
@@ -1783,8 +1813,12 @@ int main(int argc, char** argv)
             slidePrefix = argv[i + 1];
     }
     bool barrelOnly = false; // --barrel: only A16 (aim pitch seam C), the recorded feeds are not needed
+    bool spinRepeat = false; // --spin-repeat: only the A6 precondition (SpinRepeatCase)
     for (int i = 5; i < argc; ++i)
+    {
         barrelOnly = barrelOnly || std::string(argv[i]) == "--barrel";
+        spinRepeat = spinRepeat || std::string(argv[i]) == "--spin-repeat";
+    }
     const std::string data = argv[1];
     g_baseDb.assign(argv[2], argv[2] + std::strlen(argv[2]));
     motiondriver::Paths pw = DataPaths(data, "woman");
@@ -1880,6 +1914,8 @@ int main(int argc, char** argv)
     // ---------------------------------------------------------------- F-ORBIT-IDLE, F-ORBIT-START, F-TIP-RELEASE
     if (barrelOnly)
         BarrelCase(rt);
+    else if (spinRepeat)
+        SpinRepeatCase(rt, feeds);
     else if (!slidePrefix.empty())
     {
         SlideCase(rt, 90.0f);

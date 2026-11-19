@@ -46,6 +46,11 @@
 // 0 = off (the pose is bit for bit the one without it). A build may override it.
 #define UTPP_STRIDE_WARP 0
 #endif
+#ifndef UTPP_STEER_CARRY_MUTATION
+// Test mutation of the carried steering (BlendStack::kCarryResidual): 1 = nothing is carried (the newest layer's correction reaches the
+// output at its fade weight only), 2 = a short-way residual beyond kCarryResidual is carried too.
+#define UTPP_STEER_CARRY_MUTATION 0
+#endif
 #ifndef UTPP_FOOTSINK_MUTATION
 #define UTPP_FOOTSINK_MUTATION 0
 #endif
@@ -97,6 +102,8 @@ struct Player
     motionSteer::Steering generalSteering, tipSteering;
     motionow::State orientationState;
     float lastSteeredYawRate = 0, lastOrientationHalfAngle = 0;
+    float generalSteerRate = 0; // yaw rate the general steering adds to this layer's own authored yaw (rad/s), see kCarryResidual
+    bool generalCarry = false;  // that steering may be carried through the layer mix (kCarryResidual)
     bool haveSteered = false;
     int cancelStartSupport = -1;
     bool stanceFade = false; // this layer's fade-in is a ground stance change (crouch <-> stand), see KeepFootHeight
@@ -308,6 +315,14 @@ class BlendStack
     {
         return m_perBoneContacts;
     }
+    // Carried steering of the general (moving) steering: only the newest layer's general steering is enabled, as in the reference
+    // graph (an older layer's general steering fades out over the enable blend once a newer pick covers it; the turn-in-place node
+    // steers every layer). The yaw the newest layer's general steering adds to its authored yaw (scaled authored turn and spring
+    // correction) reaches the output at full weight (project policy, not the reference behaviour, where it reaches the output at the
+    // layer's fade weight and the body lags the capsule through a long fade), while the older layers' authored yaw still fades out under
+    // it. Not carried while the target is more than kCarryResidual from the visual root and the newest clip has no authored turn ahead
+    // to take the residual side from (see ProcessGraph).
+    static constexpr float kCarryResidual = .75f * math::kPi;
     float SteeringHalfLife() const
     {
         return m_steeringHalfLife;
@@ -1155,10 +1170,23 @@ class BlendStack
         steering.halfLife = m_steeringHalfLife;
         steering.havePrediction = root2::Extract(*m_db, p.clip, p.time, m_steeringTargetTime, prediction);
         steering.predictedAuthoredYaw = float(prediction.yaw);
-        steering.alpha = p.generalSteering.UpdateEnable(m_graph.generalSteering, dt);
+        steering.alpha = p.generalSteering.UpdateEnable(m_graph.generalSteering && &p == &m_players[0], dt);
         const auto general = p.generalSteering.Update(steering);
         if (!general.valid)
             return false;
+        p.generalSteerRate = math::WrapAngle(general.yawDelta - steering.animationYawDelta) / dt;
+        // Not carried with the target more than kCarryResidual away unless the residual side came from the clip's authored turn ahead
+        // (the steering node takes it from there when the turn is larger than 1 deg; without it an about 180 deg residual is wrapped
+        // the short way, which may be against the turn the clip is about to play).
+        const bool predicted =
+            steering.havePrediction && std::fabs(math::WrapAngle(steering.predictedAuthoredYaw)) > math::kPi / 180.f;
+#if UTPP_STEER_CARRY_MUTATION == 2
+        (void)predicted;
+        p.generalCarry = true;
+#else
+        p.generalCarry =
+            predicted || std::fabs(math::WrapAngle(steering.targetWorldYaw - steering.previousVisualWorldYaw)) <= kCarryResidual;
+#endif
         steering.animationYawDelta = general.yawDelta;
         steering.turnInPlace = true;
         steering.alpha = p.tipSteering.UpdateEnable(m_graph.tipSteering, dt);
@@ -1380,6 +1408,16 @@ class BlendStack
         m_signals = m_samples[m_count - 1];
         for (int i = int(m_count) - 2; i >= 0; --i)
             m_signals = MixLayerSignals(m_signals, m_samples[uint32_t(i)], m_players[uint32_t(i)]);
+#if UTPP_STEER_CARRY_MUTATION != 1
+        if (m_graph.enabled && m_count > 1 && !m_players[0].stored && m_players[0].generalCarry)
+        {
+            // carried steering (kCarryResidual): the newest layer's general steering reaches the output at full weight; the older
+            // layers' authored yaw still fades out under it.
+            const auto &head = m_players[0];
+            const float weight = m_perBoneRoot ? Alpha(head, m_rootBone) : Alpha(head, -1);
+            m_signals.rootYaw += (1.0f - weight) * head.generalSteerRate;
+        }
+#endif
         // A short cancelled start can still contain an older double-support idle
         // layer. Its scalar contact must not carry the non-support foot's old
         // lock through the actual start player's swing. During this admitted

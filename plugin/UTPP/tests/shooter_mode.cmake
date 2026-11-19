@@ -69,6 +69,16 @@ if(DEFINED _utpp_mdmotion_data_native AND UTPP_MMDB_TEST_FILE)
     if(EXISTS "${_utpp_fn_slide_prefix}.utppmm")
         add_test(NAME utpp_motion_driver_shooter_mode_slide_test COMMAND utpp_motion_driver_shooter_mode_test ${_utpp_fn_args} --slide "${_utpp_fn_slide_prefix}")
     endif()
+    # A6 precondition alone (--spin-repeat): without the H2 safeguard the matcher picks the spin again and again on both recorded feeds. Measured
+    # without the carried steering residual (UTPP_STEER_CARRY_MUTATION=1, src/mm/MotionBlendStack.hpp), which masks part of the repeat; the
+    # safeguard checks run on the shipped build above. A positive test: it passes only on PASS lines (exit code 0).
+    add_executable(utpp_motion_driver_shooter_mode_spin_repeat_test tests/MotionDriverShooterModeTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+    target_link_libraries(utpp_motion_driver_shooter_mode_spin_repeat_test PRIVATE bcrypt)
+    target_compile_options(utpp_motion_driver_shooter_mode_spin_repeat_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_motion_driver_shooter_mode_spin_repeat_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
+                               UTPP_MOTION_DRIVER_TEST_TRAV UTPP_STEER_CARRY_MUTATION=1)
+    target_compile_features(utpp_motion_driver_shooter_mode_spin_repeat_test PRIVATE cxx_std_20)
+    add_test(NAME utpp_motion_driver_shooter_mode_spin_repeat_test COMMAND utpp_motion_driver_shooter_mode_spin_repeat_test ${_utpp_fn_args} --spin-repeat)
     # A16 alone (aim pitch plan 2026-10-30 seam C: the barrel loop target in the pose frame, loop off bit-identical, loop on converges): no
     # recorded feed needed, so it runs where the replay feeds are missing too (the full test above also runs A16).
     add_test(NAME utpp_motion_driver_barrel_test COMMAND utpp_motion_driver_shooter_mode_test ${_utpp_fn_args} --barrel)

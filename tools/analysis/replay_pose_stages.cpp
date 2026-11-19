@@ -39,6 +39,8 @@
 //                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
 //   --stride-warp 0|1   stride warping of the blend stack off / on after --settings-log (motiondriver::SetStrideWarp, the mm.strideWarp
 //                       setting; the settings log call MMStrideWarp of later sessions is applied as well); not passed: the log / build default
+//                       The settings log calls MMSteerMode / MMSteerActiveOnly of test builds are ignored (turn steering has no
+//                       option: the newest layer steered, carried through the layer mix).
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -192,6 +194,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MotionBodyYawOffset") motiondriver::SetBodyYawOffset(arg(0));
         else if (name == "MotionBodyYawOffsets") motiondriver::SetBodyYawOffsets(arg(0), arg(1));
         else if (name == "MMStrideWarp") motiondriver::SetStrideWarp(flag(0));
+        else if (name == "MMSteerMode" || name == "MMSteerActiveOnly") {} // turn steering options of test builds: no option now
         else if (name == "MotionLean") motiondriver::SetLean(arg(0) != 0);
         else if (name == "MotionLeanHead") motiondriver::SetLeanHead(arg(0) != 0);
         else if (name == "MotionLeanParams") motiondriver::SetLeanParams(arg(0), arg(1));
