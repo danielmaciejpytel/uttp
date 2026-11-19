@@ -1686,7 +1686,8 @@ void MotionReleaseSteeringLocked() // UTPP-MOTION SEAM
 // then turn against the clip and the planted foot slide. The direction is taken from the authored root turn of the moving turn / pivot
 // clip the search plays (MotionSetFrame::moveTurnSign): from the reversal feed on, the first such clip while the body is still within the
 // long-way window of BodyYawCommand (150 deg) gives it. It is held while the target stays (kReversalTieKeepDeg) until the body is past
-// half of the reversal (from there the shorter way is the clip's way).
+// half of the reversal (from there the shorter way is the clip's way). A standing start does not open a tie: its reface start direction
+// (startTurnDirection) already sets the way of the body turn.
 constexpr float kReversalTieDeg = 5.0f;
 constexpr float kReversalTieKeepDeg = 10.0f;
 void UpdateReversalTieLocked(const MotionSetFrame& aFrame, bool aStick, bool aBodyTurn, bool aAnimLed, float aYaw)
@@ -1703,6 +1704,12 @@ void UpdateReversalTieLocked(const MotionSetFrame& aFrame, bool aStick, bool aBo
     {
         if (!targetKept || std::fabs(e) < 90.0f * kDegToRad)
             g_reversalTieDir = 0;
+        return;
+    }
+    const bool standingStart = aFrame.startTurnDirection != 0 || steer::IsStartSegmentClass(aFrame.clipClass);
+    if (standingStart)
+    {
+        g_reversalTiePending = false;
         return;
     }
     if (g_reversalTiePending && (!targetKept || std::fabs(e) < 150.0f * kDegToRad))
@@ -6256,6 +6263,14 @@ void SetSimClock(SimClockFn aClock)
 void TestSetQpcTicks(int64_t aTicks)
 {
     g_testQpcTicks.store(aTicks, std::memory_order_release);
+}
+void TestReversalTieState(uint64_t* aEpisodes, bool* aPending)
+{
+    std::lock_guard lock(g_mutex);
+    if (aEpisodes)
+        *aEpisodes = g_reversalTies;
+    if (aPending)
+        *aPending = g_reversalTiePending;
 }
 #endif
 

@@ -517,6 +517,8 @@ void SetSimClock(SimClockFn aClock);
 // Tests: every time the host reads (feed and publish stamps, Tick silences, command dt) becomes aTicks in QueryPerformanceCounter units
 // (the real frequency); aTicks < 0 = the real counter again. The test sets it before each step, so results do not depend on the machine load.
 void TestSetQpcTicks(int64_t aTicks);
+// Tests: near-reversal tie state (UpdateReversalTieLocked) - episodes started so far (never reset) and whether a tie waits for a turn clip.
+void TestReversalTieState(uint64_t* aEpisodes, bool* aPending);
 #endif
 bool WantsFeed();
 // Number of vehicle jump-out launches seen so far (the edge that logs 'JUMPOUT vehicle bit released'). Monotonic, never reset: a caller
