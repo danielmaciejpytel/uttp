@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <string>
 #include <vector>
 #ifdef UTPP_FOOTLOCK_HEADER
@@ -197,6 +198,120 @@ static void EligibilityAndSafety(const Database& db, int hz)
           "near-straight unsafe reach keeps ordinary handling and fixed bone lengths");
 }
 
+template<class T> static void FirmPlant(T& f, bool on)
+{
+    if constexpr (requires { f.SetStopFirmPlant(on); })
+        f.SetStopFirmPlant(on);
+}
+
+// Standing-stop firm plant: a stop lock waits for a firm contact instead of capturing a foot that is still landing.
+static void StopFirmPlant(const Database& db, int hz)
+{
+    const float dt = 1.f / hz;
+    const float maxDelay = .10f;
+    auto toe = [](const Fixture& x, std::span<const BoneTransform> pose, int side) {
+        auto p = x.f.ModelSpace(pose, x.f.LockBone(side)).p;
+        float wx = 0, wy = 0;
+        x.f.CharacterToWorld(p, wx, wy);
+        return math::Vec3{wx, wy, p.z};
+    };
+    auto start = [&](Fixture& x, bool firm, bool stop) {
+        FirmPlant(x.f, firm);
+        x.Establish(hz);
+        Policy(x.f, stop, false);
+        for (int i = 0; i < hz / 5; ++i) x.Step(dt, 0, 0, 1); // left foot in swing, right foot supported
+    };
+
+    // 1. a short partial contact (peak 0.6, the blend of a passing clip) never plants the foot
+    bool lockedOn = false, lockedOff = false;
+    {
+        Fixture on(db), off(db);
+        start(on, true, true); start(off, false, true);
+        const int n = int(std::lround(.16f * hz));
+        for (int i = 0; i <= n; ++i)
+        {
+            const float t = i * dt;
+            const float c = t < .06f ? .6f * t / .06f : t < .10f ? .6f : std::max(0.f, .6f * (1.f - (t - .10f) / .06f));
+            on.Step(dt, 0, c, 1); off.Step(dt, 0, c, 1);
+            lockedOn |= on.f.Diagnostics().foot[0].locked;
+            lockedOff |= off.f.Diagnostics().foot[0].locked;
+        }
+        Check(lockedOff, "fixture: a short partial contact plants the foot without the firm plant");
+        Check(!lockedOn && on.f.Diagnostics().stopFirmWaits > 0, "firm plant: a short partial contact in a standing stop never locks");
+    }
+
+    // 2. a landing foot (toe still moving while the contact ramps up) is planted where it comes to rest
+    {
+        Fixture on(db), off(db);
+        start(on, true, true); start(off, false, true);
+        const int ramp = int(std::lround(.15f * hz));
+        float corrOn = 0, corrOff = 0;
+        for (int i = 0; i <= ramp + hz / 2; ++i)
+        {
+            const float u = std::min(1.f, float(i) / ramp);
+            for (Fixture* x : {&on, &off})
+            {
+                x->pose[size_t(x->f.ChainBone(0, 0))].q = X(35.f + 7.f * (1.f - u)); // the toe lands along the walk direction
+                x->Step(dt, 0, u, 1);
+            }
+            corrOn = Planar(on.World(0), toe(on, on.pose, 0));
+            corrOff = Planar(off.World(0), toe(off, off.pose, 0));
+        }
+        std::printf("hz=%d landing stance offset firm=%.2fcm ordinary=%.2fcm\n", hz, corrOn * 100, corrOff * 100);
+        Check(corrOff > .02f, "fixture: an early stop lock holds the landing offset");
+        Check(on.f.Diagnostics().foot[0].locked && corrOn < .008f && on.Protected(),
+              "firm plant: the landing foot locks once firm and holds a small stance offset");
+    }
+
+    // 3. a contact that stays below firm still locks within the bounded wait
+    {
+        Fixture on(db);
+        start(on, true, true);
+        int lockFrame = -1;
+        for (int i = 0; i < hz / 2 && lockFrame < 0; ++i)
+        {
+            on.Step(dt, 0, .7f, 1);
+            if (on.f.Diagnostics().foot[0].locked) lockFrame = i;
+        }
+        const float wait = lockFrame * dt;
+        std::printf("hz=%d plateau 0.7 locked after %.3fs\n", hz, wait);
+        Check(lockFrame > 0 && wait >= maxDelay - dt - 1e-4f && wait <= maxDelay + dt + 1e-4f,
+              "firm plant: a plateau below firm locks after the bounded wait");
+    }
+
+    // 4. outside a standing stop (no stop episode, or a moving capsule) the output is bit-identical with and without it
+    for (int moving = 0; moving < 2; ++moving)
+    {
+        Fixture on(db), off(db);
+        start(on, true, moving == 1); start(off, false, moving == 1);
+        bool same = true;
+        const float v = moving ? .8f : 0.f;
+        for (int i = 0; i < hz / 2; ++i)
+        {
+            const float c = i < hz / 10 ? .6f : i < hz / 5 ? 0.f : std::min(1.f, (i - hz / 5) * 6.f / hz);
+            on.Step(dt, v, c, 1); off.Step(dt, v, c, 1);
+            same &= std::memcmp(on.f.Output().data(), off.f.Output().data(), on.pose.size() * sizeof(BoneTransform)) == 0;
+        }
+        Check(same && on.f.Diagnostics().stopFirmWaits == 0,
+              moving ? "firm plant: a moving capsule in a stop episode is unchanged" : "firm plant: no stop episode, output unchanged");
+    }
+
+    // 5. a firm contact in a standing stop locks on the same frame as without the firm plant
+    {
+        Fixture on(db), off(db);
+        start(on, true, true); start(off, false, true);
+        bool same = true;
+        for (int i = 0; i < hz / 4; ++i)
+        {
+            on.Step(dt, 0, 1, 1); off.Step(dt, 0, 1, 1);
+            same &= on.f.Diagnostics().foot[0].locked == off.f.Diagnostics().foot[0].locked &&
+                    std::memcmp(on.f.Output().data(), off.f.Output().data(), on.pose.size() * sizeof(BoneTransform)) == 0;
+        }
+        Check(same && on.f.Diagnostics().foot[0].locked && on.f.Diagnostics().stopFirmWaits == 0,
+              "firm plant: an already firm contact locks at once");
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2) return 2;
@@ -209,6 +324,7 @@ int main(int argc, char** argv)
     {
         StopAndRelease(db, hz);
         EligibilityAndSafety(db, hz);
+        StopFirmPlant(db, hz);
     }
     std::printf("SUMMARY %d passed %d failed\n", passed, failed);
     return failed ? 1 : 0;

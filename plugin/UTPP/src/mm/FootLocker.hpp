@@ -180,6 +180,16 @@ struct FootPlantReferenceConfig
     }
 };
 
+// Standing-stop firm plant (default on; FootLocker::SetStopFirmPlant, UTPP_FOOT_STOP_FIRM_PLANT=0 builds it off). During an ordinary
+// standing stop (SetStandingStopSupport) on a standing capsule, a foot whose contact has passed onThreshold locks only once the contact is
+// firm (>= kStopFirmContact) or after kStopFirmMaxDelay of contact without it; until then it shows the animated foot. A lock taken at the
+// first contact crossing holds the toe where the clip's foot is still landing, and since a standing stop does not settle, that offset
+// would stay as the stance correction. A partial crossfade contact that never gets firm does not plant at all. Every other path (moving
+// capsule, no stop episode, already firm contact) is unchanged.
+#ifndef UTPP_FOOT_STOP_FIRM_PLANT
+#define UTPP_FOOT_STOP_FIRM_PLANT 1
+#endif
+
 // Critically damped spring towards 0, exact for any step (x: value, v: its rate, w = sqrt(stiffness)).
 inline void SpringCritical(float& aX, float& aV, float aOmega, float aDt)
 {
@@ -271,6 +281,7 @@ struct FootLockDiagnostics
     float maxLift = 0.0f;                       // m, highest step lift since Init / Reset
     uint64_t blendOutLifts = 0;                 // foot updates where the blend-out sink bound lifted the ankle (loco-fix 2026-11-09)
     uint64_t stopSwingReleases = 0;             // standing-stop locks released as a swing contact (loco-stop-knees 2026-11-09)
+    uint64_t stopFirmWaits = 0;                 // standing-stop firm plant: foot updates whose lock waited for a firm contact
     // pelvis stage (SetPelvisPlacement; zero / 0 while it is off)
     math::Vec3 pelvisOffset{};                  // m, pelvis offset applied this update (model space)
     math::Vec3 pelvisTarget{};                  // m, its unfiltered target this update
@@ -286,6 +297,9 @@ public:
     // m, standing stop: a lock still blending in whose animated toe moves this far relative to the planted other foot's animated toe is a
     // swing contact and is released (loco-stop-knees 2026-11-09, see UpdateFoot)
     static constexpr float kStopSwingMax = 0.05f;
+    // standing-stop firm plant (SetStopFirmPlant): contact a stop lock waits for, and the longest wait (s of contact above onThreshold)
+    static constexpr float kStopFirmContact = 0.90f;
+    static constexpr float kStopFirmMaxDelay = 0.10f;
 
     // Finds LeftUpLeg/LeftLeg/LeftFoot and RightUpLeg/RightLeg/RightFoot, verifies the parent chain and allocates the
     // output buffer. Returns false (pass-through, Ready() == false) on failure.
@@ -413,6 +427,9 @@ public:
     {
         m_standingStopSupport = aStop || (aIdle && m_standingStopSupport);
     }
+    // Standing-stop firm plant (see UTPP_FOOT_STOP_FIRM_PLANT). Off = the previous lock onset bit for bit.
+    void SetStopFirmPlant(bool aOn) { m_stopFirmPlant = aOn; }
+    bool StopFirmPlant() const { return m_stopFirmPlant; }
     // loco C1b plant / replant (see FootReplantConfig): replant mode for the next updates (the driver sets it per feed from the
     // stance and the UTPPSetMMFootReplant mask) and the Stops profile (playing clip idle / stop). Off (default) = the 0.5.9 path,
     // bit for bit, for every foot not in a replant step / handover.
@@ -577,6 +594,7 @@ private:
         bool contact = false;
         bool locked = false;
         bool suppressed = false;  // drift unlock: no relock until the contact ends
+        float firmWait = 0.0f;    // s, standing-stop firm plant: contact above onThreshold without a lock yet
         float s = 0.0f;           // linear blend parameter
         float releaseWeight = 1.0f; // weight already baked into delta by the last positional solve
         math::Quat delta[3];      // last IK local rotation deltas (UpLeg, Leg, Foot): local = delta * animated
@@ -1062,7 +1080,20 @@ private:
 
         const float wPrev = Smoothstep(f.s);
         f.targetScale = 1.0f; // set below by the soft-slip bound only
-        if (f.contact && !f.locked && !f.suppressed && !(PlantRefActive() && !(aContact > m_pcfg.contact)))
+        // standing-stop firm plant: a new lock waits for a firm contact (bounded by kStopFirmMaxDelay)
+        bool firmWait = false;
+        if (!f.contact || f.locked)
+            f.firmWait = 0.0f;
+#if !(defined(UTPP_FLFIRM_MUTATION) && UTPP_FLFIRM_MUTATION == 1) // mutation 1: the firm plant never waits
+        else if (m_stopFirmPlant && m_standingStopSupport && m_capsuleSpeed < m_cfg.settleCapsuleSpeed && !f.suppressed &&
+                 !(aContact >= kStopFirmContact) && f.firmWait < kStopFirmMaxDelay)
+        {
+            f.firmWait += aDt;
+            firmWait = true;
+            ++m_diag.stopFirmWaits;
+        }
+#endif
+        if (f.contact && !f.locked && !f.suppressed && !firmWait && !(PlantRefActive() && !(aContact > m_pcfg.contact)))
         {
             math::Vec3 shown = gl.p;
             if (wPrev > 0.0f)
@@ -1454,6 +1485,7 @@ private:
     int m_supportHoldSide = -1;
     bool m_supportHoldEligible = false;
     bool m_standingStopSupport = false;
+    bool m_stopFirmPlant = UTPP_FOOT_STOP_FIRM_PLANT != 0; // standing-stop firm plant (SetStopFirmPlant)
     FootReplantConfig m_rcfg{};
     uint32_t m_nb = 0;
     std::vector<int32_t> m_parents;
