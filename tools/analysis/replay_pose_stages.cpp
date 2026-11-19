@@ -18,6 +18,7 @@
 // reports the reversal searches that received the shown pose.
 // Off-by-default options of the runtime path (each absent = the build default, bit for bit):
 //   --steering h,t      blend stack steering half-life / animation lookahead (s), e.g. 0.4,2.0
+//   --steer-active-only 0|1  general steering of the blend stack on the newest layer only (BlendStack::SetSteerActiveOnly)
 //   --signals N         per-bone root-motion signals: bit 0 root on the Root weight, bit 1 contacts on the leg weights
 //   --pelvis 1          pelvis stage of the foot locker
 //   --capsule-query 1   chooser query trajectory in capsule units
@@ -364,6 +365,8 @@ int main(int argc, char** argv)
             if (!stackOverrides.steering)
                 return 2;
         }
+        else if (std::strcmp(argv[i], "--steer-active-only") == 0)
+            stackOverrides.steerActiveOnly = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--signals") == 0)
             stackOverrides.signalMode = std::atoi(argv[i + 1]) & 3;
         else if (std::strcmp(argv[i], "--pelvis") == 0)

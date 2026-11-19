@@ -72,6 +72,7 @@ struct TestStackOverrides
     float halfLife = 0, targetTime = 0;
     int32_t signalMode = -1; // -1 = the build default, else bit 0 root, bit 1 contacts (SetPerBoneSignals)
     int32_t handBack = -1;   // -1 = the build default or the UTPP_TEST_HANDBACK_BLEND environment value (0 / 1), else SetHandBackBlend
+    int32_t steerActiveOnly = -1; // -1 = the build default, else SetSteerActiveOnly
 };
 inline TestStackOverrides g_testStackOverrides{};
 struct TestSteeringProbe
@@ -203,6 +204,8 @@ class BlendStack
             SetSteering(g_testStackOverrides.halfLife, g_testStackOverrides.targetTime);
         if (g_testStackOverrides.signalMode >= 0)
             SetPerBoneSignals((g_testStackOverrides.signalMode & 1) != 0, (g_testStackOverrides.signalMode & 2) != 0);
+        if (g_testStackOverrides.steerActiveOnly >= 0)
+            SetSteerActiveOnly(g_testStackOverrides.steerActiveOnly != 0);
         if (g_testStackOverrides.handBack >= 0)
             SetHandBackBlend(g_testStackOverrides.handBack != 0);
         else if (const char *e = std::getenv("UTPP_TEST_HANDBACK_BLEND"); e && (e[0] == '0' || e[0] == '1'))
@@ -307,6 +310,16 @@ class BlendStack
     bool PerBoneContacts() const
     {
         return m_perBoneContacts;
+    }
+    // General (moving) steering on the newest layer only. Off (default): every live layer steers. On: an older layer's general steering
+    // fades out over the enable blend once a newer pick covers it, and the turn-in-place node is unchanged.
+    void SetSteerActiveOnly(bool on)
+    {
+        m_steerActiveOnly = on;
+    }
+    bool SteerActiveOnly() const
+    {
+        return m_steerActiveOnly;
     }
     float SteeringHalfLife() const
     {
@@ -1155,7 +1168,7 @@ class BlendStack
         steering.halfLife = m_steeringHalfLife;
         steering.havePrediction = root2::Extract(*m_db, p.clip, p.time, m_steeringTargetTime, prediction);
         steering.predictedAuthoredYaw = float(prediction.yaw);
-        steering.alpha = p.generalSteering.UpdateEnable(m_graph.generalSteering, dt);
+        steering.alpha = p.generalSteering.UpdateEnable(m_graph.generalSteering && (!m_steerActiveOnly || &p == &m_players[0]), dt);
         const auto general = p.generalSteering.Update(steering);
         if (!general.valid)
             return false;
@@ -1470,6 +1483,7 @@ class BlendStack
     Signals m_signals{};
     GraphInputs m_graph{};
     float m_steeringHalfLife = kSteeringHalfLifePrevious, m_steeringTargetTime = kSteeringTargetTimePrevious;
+    bool m_steerActiveOnly = false; // SetSteerActiveOnly
     int32_t m_orientationCurve = -1;
     int32_t m_warpCurve = -1; // clip warping curve that gates stride warping (see Init)
     int32_t m_thighBones[2]{-1, -1};
