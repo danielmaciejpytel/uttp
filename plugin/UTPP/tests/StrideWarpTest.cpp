@@ -9,6 +9,8 @@
 // clip that is not a loop or has too few planted samples), so a crouch loop whose planted feet travel slower than its root shortens less.
 // Knee limit (BlendStack::SetStrideKneeLimit, stridewarp::KneeLimitedScale): a leg is shortened by at least its scale's limit but never
 // so far that its knee folds beyond max(flexion before + margin, free flexion); with the limit off every leg takes the layer's scale.
+// Release of the knee limit (BlendStack::SetStrideLegRelease, stridewarp::LimitLegRelease): a leg's scale falls at most at the release
+// rate, so the shortening the knee limit lets go of is spread over updates; the limit itself (a rising scale) is never delayed.
 #include "../src/mm/MotionBlendStack.hpp"
 #include "../src/mm/StrideWarp.hpp"
 
@@ -159,6 +161,7 @@ struct RunStats
     float overShrink = 0;   // m, largest shortening along the root direction beyond the layer's scale
     float kneeExcess = -1e9f; // rad, largest knee flexion above max(flexion unwarped + margin, free flexion)
     float kneeGain = 0;     // rad, largest knee flexion gain over the unwarped pose
+    float shortStep = 0;    // m, largest frame-to-frame change of a leg's shortening along the root direction
 };
 static float KneeFlex(const std::vector<BoneTransform> &m, int thigh, int knee, int ankle)
 {
@@ -169,7 +172,7 @@ static float KneeFlex(const std::vector<BoneTransform> &m, int thigh, int knee, 
 // crouchMode >= 0 sets the crouched loop mode of the warped stack (SetStrideOptions, no yaw fade, whole-layer fade); -1 keeps the default.
 // kneeLimit: 1 / 0 switches the knee limit of the warped stack on / off (default margin and free flexion); -1 keeps the default.
 static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ratio, bool ground, bool enabled, int crouchMode = -1,
-                    int kneeLimit = -1)
+                    int kneeLimit = -1, int legRelease = -1)
 {
     RunStats r;
     const float dt = 1.0f / float(hz), fps = db.Header().fps;
@@ -181,11 +184,14 @@ static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ra
         on.SetStrideOptions(false, crouchMode, true);
     if (kneeLimit >= 0)
         on.SetStrideKneeLimit(kneeLimit != 0);
+    if (legRelease >= 0)
+        on.SetStrideLegRelease(legRelease != 0);
     const int foot[2]{Bone(db, "LeftFoot"), Bone(db, "RightFoot")}, thigh[2]{Bone(db, "LeftUpLeg"), Bone(db, "RightUpLeg")};
     const int knee[2]{Bone(db, "LeftLeg"), Bone(db, "RightLeg")};
     const auto &c = db.Clip(uint32_t(clip));
     std::vector<BoneTransform> mOff, mOn;
     math::Vec3 lastOff[2]{}, lastOn[2]{};
+    float lastShort[2]{};
     float t = 0.5f;
     for (int k = 0; k < int(0.6f * float(hz)) && r.ok; ++k, t += dt)
     {
@@ -220,6 +226,9 @@ static RunStats Run(const motion::MotionDatabase &db, int clip, int hz, float ra
                 r.kneeExcess = std::fmax(r.kneeExcess, fOn - std::fmax(fOff + stridewarp::kKneeMargin, stridewarp::kKneeFreeFlexion));
             }
             r.lengthened = std::fmax(r.lengthened, std::fabs(alongOn) - std::fabs(alongOff));
+            if (k > 0)
+                r.shortStep = std::fmax(r.shortStep, std::fabs((alongOff - alongOn) - lastShort[s]));
+            lastShort[s] = alongOff - alongOn;
             r.heightError = std::fmax(r.heightError, std::fabs(aOn.z - aOff.z));
             if (k > 0)
             {
@@ -262,6 +271,13 @@ static void Stack(const motion::MotionDatabase &db, int clip, int hz)
     // percent over the unwarped one (2.7 mm of 44.5 mm at 144 Hz), the planted leg is not involved.
     Check(limited.lengthened < 0.001f && limited.heightError < 0.005f && limited.jumpOn <= 1.08f * limited.jumpOff,
           "knee limit on: no lengthening, ankle height kept, largest ankle frame step within 8 % of the unwarped one", hz);
+    // The knee limit lets go of a swinging leg's shortening within a few degrees of its unfolding; the release limit spreads that over
+    // updates (stridewarp::LimitLegRelease): the shortening never steps more than with the release taken at once.
+    const RunStats sudden = Run(db, clip, hz, 0.8f, true, true, -1, 1, 0);
+    std::printf("INFO knee limit release: largest frame step of a leg's shortening, released at once %.2f mm, rate-limited %.2f mm @Hz=%d\n",
+                sudden.shortStep * 1e3f, limited.shortStep * 1e3f, hz);
+    Check(sudden.ok && limited.shortStep <= sudden.shortStep + 1e-4f,
+          "knee limit release: a leg's shortening steps no more per update than with the release taken at once", hz);
     Check(Run(db, clip, hz, 1.2f, true, true).identical, "capsule faster than the clip: pose bit for bit unchanged", hz);
     Check(Run(db, clip, hz, 0.8f, false, true).identical, "non-ground pick: pose bit for bit unchanged", hz);
     const int start = ClipIndex(db, "M_Neutral_Run_Start_F_Lfoot");
@@ -648,6 +664,34 @@ static void KneeSolver(int hz)
           "knee limit: no stride offset or no warp returns the scale unchanged", hz);
 }
 
+// Release of the knee limit (stridewarp::LimitLegRelease): a leg scale falls at most kLegReleaseRate per second, rises at once, holds at
+// dt <= 0, and the full 1 -> floor release takes the same time at every frame rate.
+static void LegReleaseSolver(int hz)
+{
+    const float dt = 1.0f / float(hz);
+    bool fall = true, rise = true;
+    for (float prev = 0.75f; prev <= 1.0f; prev += 0.05f)
+        for (float target = 0.75f; target <= 1.0f; target += 0.05f)
+        {
+            const float s = stridewarp::LimitLegRelease(prev, target, dt);
+            fall = fall && s >= target && s >= prev - stridewarp::kLegReleaseRate * dt - 1e-6f && s <= std::fmax(prev, target) + 1e-6f;
+            if (target >= prev)
+                rise = rise && s == target;
+        }
+    Check(fall, "leg release: the scale falls at most the release rate per second and never below the knee-limited target", hz);
+    Check(rise, "leg release: a rising scale (the knee limit taking over) is followed at once", hz);
+    Check(stridewarp::LimitLegRelease(0.9f, 0.75f, 0.0f) == 0.9f && stridewarp::LimitLegRelease(0.9f, std::nanf(""), dt) == 1.0f,
+          "leg release: dt <= 0 holds the scale, a non-finite target is no warp", hz);
+    float s = 1.0f, time = 0.0f;
+    while (s > stridewarp::kScaleFloor && time < 1.0f)
+    {
+        s = stridewarp::LimitLegRelease(s, stridewarp::kScaleFloor, dt);
+        time += dt;
+    }
+    Check(time <= (1.0f - stridewarp::kScaleFloor) / stridewarp::kLegReleaseRate + dt + 1e-4f,
+          "leg release: the full release reaches the floor within 1 / rate x the range (plus one update)", hz);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2)
@@ -659,6 +703,8 @@ int main(int argc, char **argv)
     for (int hz : {30, 60, 144})
         YawFadeSolver(hz);
     KneeSolver(0);
+    for (int hz : {30, 60, 144})
+        LegReleaseSolver(hz);
     motion::MotionDatabase db;
     std::string error;
     if (!db.LoadFromFile(argv[1], motion::kRigIdentityWoman, error))
