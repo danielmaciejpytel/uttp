@@ -891,6 +891,8 @@ std::array<motion::TrajSample, adapter::kQueryTrajMax> g_traj{};
 bool g_liveHistOn = false;
 motion::LivePoseHistory g_liveHist;
 uint64_t g_liveHistSearches = 0; // searches that read the live history
+bool g_turnFootPhaseOn = false;    // SetTurnFootPhase: the ring is kept for the turn foot-phase re-rank (MatcherConfig::turnFootPhase)
+uint64_t g_turnFootSearches = 0;  // reversal searches that received the shown pose
 bool g_liveHistPushed = false;    // a published pose arrived since the last search (else the ring is not contiguous: reset)
 
 // UTPP-MOTION SEAM trav: one traversal at a time (MotionDriver.hpp TraversalEvent). plan.montage points into the installed
@@ -1923,10 +1925,17 @@ void SetLivePoseHistory(bool aOn)
     g_liveHist.Reset();
 }
 
+void SetTurnFootPhase(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_turnFootPhaseOn = aOn;
+    g_liveHist.Reset();
+}
+
 void RecordPublishedPose(const mm::BoneTransform* aPose, uint32_t aNumBones, float aDt, float aOffX, float aOffY, float aOffYaw)
 {
     std::lock_guard lock(g_m);
-    if (!g_liveHistOn)
+    if (!g_liveHistOn && !g_turnFootPhaseOn)
         return;
     if (!g_bundle || !g_enabled)
     {
@@ -2517,6 +2526,12 @@ uint64_t TestLiveHistorySearches()
 {
     std::lock_guard lock(g_m);
     return g_liveHistSearches;
+}
+
+uint64_t TestTurnFootPhaseSearches()
+{
+    std::lock_guard lock(g_m);
+    return g_turnFootSearches;
 }
 
 DodgeProbe TestDodgeProbe()
@@ -5617,7 +5632,16 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         history = &liveHistory;
         ++g_liveHistSearches;
     }
+    // Turn foot-phase re-rank (MatcherConfig::turnFootPhase): on a reversal the shown pose of the same ring, also with the live history off
+    const motion::PoseHistory* turnShown = history == &liveHistory ? history : nullptr;
+    if (!history && g_turnFootPhaseOn && cs.isPivoting && !reentry && !travHandback && !travDetail &&
+        g_liveHist.Build(dt, g_traj.data(), nt, liveHistory))
+        turnShown = &liveHistory;
+    if (turnShown && cs.isPivoting)
+        ++g_turnFootSearches;
+    b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
+    b.matcher.SetShownPoseHistory(nullptr);
     BudgetStageRecordLocked(r);
     b.startTurn.Selected(r.clip, b.matcher.StartTurnDirection(r.clip));
     g_travProbe.justTraversed = travHandback; // UTPP-MOTION SEAM trav

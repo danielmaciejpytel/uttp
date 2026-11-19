@@ -97,6 +97,9 @@ void SetEnabled(bool aOn);
 // Live pose history (off by default): the host hands over the published pose (database local space, after the leg tail) once per
 // feed with the visual root offset it carries (m, rad); the next search reads it as its pose history (mm/LivePoseHistory.hpp).
 void SetLivePoseHistory(bool aOn);
+// Shown pose for the turn foot-phase re-rank (motion::MatcherConfig::turnFootPhase; off by default): the published pose ring is kept for
+// it even with the live pose history off, and a reversal jump into a moving turn reads it. Off: no ring, no re-rank (offline A/B).
+void SetTurnFootPhase(bool aOn);
 void RecordPublishedPose(const mm::BoneTransform* aPose, uint32_t aNumBones, float aDt, float aOffX, float aOffY, float aOffYaw);
 bool Enabled();
 bool SetRigBody(int32_t aBody);                                             // false = invalid value (ignored)
@@ -249,6 +252,8 @@ struct RootProbe
 RootProbe TestRootProbe();
 // test targets only: searches that read the live pose history.
 uint64_t TestLiveHistorySearches();
+// test targets only: reversal searches that received the shown pose for the turn foot-phase re-rank.
+uint64_t TestTurnFootPhaseSearches();
 // test targets only: the ground dodge clip of the last v2 Step (mm/Dodge.hpp).
 struct DodgeProbe
 {
