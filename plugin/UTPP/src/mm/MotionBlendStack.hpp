@@ -35,6 +35,12 @@
 // (stridewarp::KneeLimitedScale); 0 = both legs take the layer's scale. A build may override it.
 #define UTPP_STRIDE_KNEE_LIMIT 1
 #endif
+#ifndef UTPP_STRIDE_LEG_RELEASE
+// 1 = a leg's stride scale falls (towards a shorter stride) at most stridewarp::kLegReleaseRate per second, so the knee limit lets go
+// of its shortening over a few updates instead of one (stridewarp::LimitLegRelease); 0 = the knee-limited scale at once. A build may
+// override it.
+#define UTPP_STRIDE_LEG_RELEASE 1
+#endif
 #ifndef UTPP_STRIDE_WARP
 // Default of BlendStack::SetStrideWarp: 1 = shrink-only stride warping of the leg targets (StrideWarp.hpp) on ground locomotion picks,
 // 0 = off (the pose is bit for bit the one without it). A build may override it.
@@ -231,6 +237,9 @@ class BlendStack
                 m_strideKneeFree = b * 0.017453293f;
             }
         }
+        // UTPP_TEST_STRIDE_LEG_RELEASE = 0 / 1: the rate-limited release of the knee limit off / on (see stridewarp::LimitLegRelease)
+        if (const char *e = std::getenv("UTPP_TEST_STRIDE_LEG_RELEASE"); e && (e[0] == '0' || e[0] == '1'))
+            m_strideLegRelease = e[0] == '1';
 #endif
         m_handBackFactors = blendprofile::Resolve(blendprofile::kHandBack, m_n, [&](uint32_t b) { return db.BoneName(b); });
         m_deadPrev.resize(m_n);
@@ -348,6 +357,11 @@ class BlendStack
         m_strideKneeLimit = enabled;
         m_strideKneeMargin = std::isfinite(margin) ? std::fmax(margin, 0.0f) : stridewarp::kKneeMargin;
         m_strideKneeFree = std::isfinite(freeFlexion) ? std::fmax(freeFlexion, 0.0f) : stridewarp::kKneeFreeFlexion;
+    }
+    // Rate-limited release of the knee limit (default UTPP_STRIDE_LEG_RELEASE, see stridewarp::LimitLegRelease).
+    void SetStrideLegRelease(bool enabled)
+    {
+        m_strideLegRelease = enabled;
     }
     // A loop clip of the crouched gait (named "_Crouch_"), see UTPP_STRIDE_CROUCH.
     bool StrideCrouchClip(int32_t clip) const
@@ -991,7 +1005,11 @@ class BlendStack
         if (stridewarp::IsIdentity(scale) || !m_targets[i].valid || m_thighBones[0] < 0 || m_thighBones[1] < 0 ||
             !stridewarp::Direction(std::cos(poseAngle) * rawRootX - std::sin(poseAngle) * rawRootY,
                                    std::sin(poseAngle) * rawRootX + std::cos(poseAngle) * rawRootY, direction))
+        {
+            p.stride.leg[0] = p.stride.leg[1] = 1.0f; // not warped in this update: a later warp falls from 1 (LimitLegRelease)
+            p.stride.legValid = true;
             return;
+        }
         for (uint32_t side = 0; side < 2; ++side)
         {
             // Model-space thigh of the warped pose: FK along the ankle chain down to the thigh.
@@ -1008,11 +1026,15 @@ class BlendStack
                 q = math::QuatNormalize(math::QuatMul(q, m_pose[i][b].q));
             }
             auto &foot = m_targets[i].feet[side].p;
-            const float legScale = LegStrideScale(m_pose[i], chain, k, foot, origin, direction, scale);
+            float legScale = LegStrideScale(m_pose[i], chain, k, foot, origin, direction, scale);
+            if (m_strideLegRelease && p.stride.legValid)
+                legScale = stridewarp::LimitLegRelease(p.stride.leg[side], legScale, dt);
+            p.stride.leg[side] = legScale;
             const math::Vec3 offset = stridewarp::WarpOffset(foot, origin, direction, legScale);
             foot = foot + offset;
             m_strideOffset[i][side] = offset;
         }
+        p.stride.legValid = true;
         m_strideAmount[i] = 1.0f - scale;
         m_strideDir[i] = direction;
         m_targets[i].warpWeight = 1.0f;
@@ -1460,6 +1482,7 @@ class BlendStack
     float m_strideCrouchYawStart = stridewarp::kYawFadeStart, m_strideCrouchYawEnd = stridewarp::kYawFadeEnd; // yaw fade of crouched loops
     bool m_strideLayerFade = UTPP_STRIDE_LAYER_FADE != 0; // SetStrideOptions
     bool m_strideKneeLimit = UTPP_STRIDE_KNEE_LIMIT != 0; // LegStrideScale
+    bool m_strideLegRelease = UTPP_STRIDE_LEG_RELEASE != 0; // WarpStride, stridewarp::LimitLegRelease
     float m_strideKneeMargin = stridewarp::kKneeMargin, m_strideKneeFree = stridewarp::kKneeFreeFlexion; // LegStrideScale
     motionPose::Warp m_poseWarp;
     motionFeet::Warp m_feetWarp;

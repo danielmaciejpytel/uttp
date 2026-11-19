@@ -61,6 +61,8 @@ struct State
 {
     float scale = 1;        // interpolated stride scale before alpha
     bool initialized = false;
+    float leg[2] = {1, 1};  // per leg: the scale it took in the last update (after the knee limit and LimitLegRelease), 1 = not warped
+    bool legValid = false;  // leg holds a previous update (the first warped update of a layer takes the knee-limited scale directly)
 };
 
 // Stride scale the clip asks for this frame (before interpolation and alpha); 1 = no warp.
@@ -152,6 +154,29 @@ inline float KneeLimitedScale(float scale, float along, float hipAnkle, float th
         return 1.0f;
     const float sq = 1.0f - room / (along * along);
     return sq > 0.0f ? std::fmax(scale, std::sqrt(sq)) : scale;
+}
+
+// Release of the knee limit. A swinging leg unfolds by up to 5 degrees per update at 200 Hz; when its flexion drops under the free
+// flexion the limit lets go of the whole remaining shortening within one or two updates (the leg scale went 0.97 -> 0.77 in one update
+// on recorded run loops, the ankle target moving 4 cm and the foot popping by 3 to 5 degrees, about 125 ms before the foot lands). A leg
+// scale may therefore fall (towards a shorter stride) at most kLegReleaseRate per second; it rises at once (the knee limit itself is
+// never delayed). At the rate below the full range (1 to the floor) is released within about 30 ms, well before the foot is planted;
+// on recorded sessions the planted-foot slide stayed the same as with the release taken at once.
+#ifndef UTPP_STRIDE_LEG_RELEASE_RATE
+// Largest fall of a leg's stride scale per second (kLegReleaseRate); a build may override it for comparison.
+#define UTPP_STRIDE_LEG_RELEASE_RATE 8.0f
+#endif
+inline constexpr float kLegReleaseRate = UTPP_STRIDE_LEG_RELEASE_RATE; // 1/s, largest fall of a leg's stride scale per second
+
+// Leg scale of this update from the knee-limited target (see KneeLimitedScale) and the leg's previous scale; dt <= 0 holds the fall.
+inline float LimitLegRelease(float previous, float target, float dt) noexcept
+{
+    if (!std::isfinite(target))
+        return 1.0f;
+    if (!std::isfinite(previous))
+        return target;
+    const float fall = std::isfinite(dt) && dt > 0 ? kLegReleaseRate * dt : 0.0f;
+    return std::fmax(target, previous - fall);
 }
 
 inline bool IsIdentity(float scale) noexcept
