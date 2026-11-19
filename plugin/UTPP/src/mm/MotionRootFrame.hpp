@@ -26,6 +26,7 @@ struct Inputs
     bool airFollow = false;       // Shooter mode in the air: bounded follow of the actor at lockMaxRate (MotionOffsetRoot.hpp Step::airFollow)
     bool holdOnGap = false;       // Shooter mode, standing: a frame gap (dt > 0.25 s) keeps the held visual heading instead of reseeding onto the actor
     float offsetAccel = 0;        // m/s^2 translation continuity bound (MotionOffsetRoot.hpp Step::offsetAccel), 0 = off
+    float forwardLimit = -1;      // m forward limit along travel (MotionOffsetRoot.hpp Step::forwardLimit), < 0 = off
     // Turn of the capsule requested for the coming tick (rad). The pose of this feed is drawn with the capsule AFTER the tick's movement:
     // its translation is capsuleDeltaCurrent (velocity x dt) and its yaw actorYaw + capsuleYawAhead. The frame is kept relative to that
     // drawn capsule, so a turn that reaches the actor one feed after the clip turned (a long frame sizes both) adds no step to the
@@ -220,6 +221,7 @@ class Processor
                 step.yawAlignHalfLife = in.yawAlignHalfLife;
                 step.yawAlignMaxRate = in.yawAlignMaxRate;
             }
+            step.forwardLimit = in.forwardLimit;
             if (!p.m_native.Update(step))
                 return false;
             p.m_visual = Wrap(double(p.m_actor) + p.m_native.Yaw());

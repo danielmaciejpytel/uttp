@@ -21,6 +21,12 @@
 //     with the capsule. The animation's own smooth acceleration (starts) is far below the bound and passes unchanged.
 //  4. Yaw alignment (Step::yawAlign, opt-in): an in-place clip drawn in the visual frame (the ground dodge) turns the yaw offset toward
 //     a given target at a bounded rate, so the clip moves along the capsule's travel. Translation is not touched.
+//  5. Forward limit along travel (Step::forwardLimit, opt-in; UTPP_OFFSET_ROOT_FORWARD_LIMIT). In loops the legs cover more ground than the
+//     capsule, so the offset drifts forward until it sits at the radius. At a stop the capsule halts within a feed or two and that forward
+//     offset can only be removed by pulling the visible body back. While moving on the ground the component of the offset along the
+//     capsule velocity may not grow past forwardLimit, and any part beyond it decays with its own half-life (forwardHalflife); the rest
+//     of the leg / capsule mismatch goes to the foot locks during the loop instead of to one pull-back at the stop. Lateral and
+//     trailing offsets (a start, where the capsule leads) are left alone. It runs before the continuity bound, so the bound still holds.
 // (RootMontage.hpp: a reload that began on the spot is not montage once V moves.)
 #pragma once
 #include "MMMath.hpp"
@@ -39,6 +45,15 @@
 #endif
 #ifndef UTPP_ROOT_CONTINUITY_MUTATION
 #define UTPP_ROOT_CONTINUITY_MUTATION 0 // 1 = Step::offsetAccel is ignored (translation steps as before): tests must FAIL
+#endif
+#ifndef UTPP_ROOT_FORWARD_MUTATION
+#define UTPP_ROOT_FORWARD_MUTATION 0 // 1 = Step::forwardLimit is ignored (the offset may sit forward at the radius): tests must FAIL
+#endif
+#ifndef UTPP_OFFSET_ROOT_FORWARD_LIMIT
+#define UTPP_OFFSET_ROOT_FORWARD_LIMIT 0 // 1 = the driver passes kForwardLimit while moving on the ground (header item 5); 0 = off
+#endif
+#ifndef UTPP_OFFSET_ROOT_FORWARD_LIMIT_M
+#define UTPP_OFFSET_ROOT_FORWARD_LIMIT_M .10f // m: value of kForwardLimit (a build may override it for offline comparisons)
 #endif
 
 namespace utpp::mm::motionRoot
@@ -64,6 +79,11 @@ inline constexpr float kMaxOffset = UTPP_OFFSET_ROOT_RADIUS; // m: default radiu
 // reversal by 400+ m/s^2. At 60 fps 20 m/s^2 is 0.6 cm of change per frame; the starts' 0.2 s displacement stays within 0.2 cm of the
 // unbounded law.
 inline constexpr float kOffsetAccel = 20.f;
+// Forward limit along travel (header item 5): metres of offset allowed ahead of the capsule while moving, the half-life of the pull
+// towards it (s) and the capsule speed below which the travel direction is not trusted (m/s).
+inline constexpr float kForwardLimit = UTPP_OFFSET_ROOT_FORWARD_LIMIT_M;
+inline constexpr float kForwardHalflife = .15f;
+inline constexpr float kForwardMinSpeed = .5f;
 struct Step
 {
     float dt = 0;
@@ -95,6 +115,10 @@ struct Step
     // at most yawAlignMaxRate (rad/s) per second. Rotation only; the moving-aim lock keeps priority.
     bool yawAlign = false;
     float yawAlignTarget = 0.f, yawAlignHalfLife = .05f, yawAlignMaxRate = 0.f;
+    // Forward limit along travel (header item 5), metres; < 0 / non-finite = off (the contract). Applies only while translation
+    // interpolates (moving on the ground, no montage) and the capsule moves faster than kForwardMinSpeed.
+    float forwardLimit = -1.f;
+    float forwardHalflife = kForwardHalflife; // s
 };
 struct State
 {
@@ -267,6 +291,30 @@ class OffsetRoot
         next.correction = std::sqrt(dx * dx + dy * dy);
         nx += dx;
         ny += dy;
+#if UTPP_ROOT_FORWARD_MUTATION != 1
+        if (!next.translationRelease && std::isfinite(s.forwardLimit) && s.forwardLimit >= 0)
+        {
+            // header item 5: only the part of the offset ahead of the capsule along its travel is bounded. It may not grow past the limit,
+            // and what the previous offset carried beyond it decays with forwardHalflife (a soft pull alone would settle above the limit
+            // by drift / pull rate while the legs keep outrunning the capsule).
+            const float cx = s.capsuleDeltaCurrent.x, cy = s.capsuleDeltaCurrent.y;
+            const float travel = std::sqrt(cx * cx + cy * cy);
+            if (travel > kForwardMinSpeed * s.dt)
+            {
+                const float ux = cx / travel, uy = cy / travel;
+                float px = 0, py = 0;
+                math::Rot2(-s.capsuleYawDelta, m.x, m.y, px, py); // previous offset in the current axes
+                const float carried = std::fmax(0.f, px * ux + py * uy - s.forwardLimit);
+                const float allowed = s.forwardLimit + carried * (1.f - DampingAlpha(s.forwardHalflife, s.dt));
+                const float ahead = nx * ux + ny * uy;
+                if (ahead > allowed)
+                {
+                    nx -= (ahead - allowed) * ux;
+                    ny -= (ahead - allowed) * uy;
+                }
+            }
+        }
+#endif
 #if UTPP_ROOT_CONTINUITY_MUTATION != 1
         if (std::isfinite(s.offsetAccel) && s.offsetAccel > 0)
             ContinuousStep(s.offsetAccel, s.dt, radius, nx, ny);
