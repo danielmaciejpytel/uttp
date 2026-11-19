@@ -3,14 +3,20 @@
 // phase. The flick follows recorded game flicks (see kFlickGapS): a stop clip is picked in the dead zone and the turn jump replaces it.
 // Feed rates 60, 30 and 200 Hz, both bodies. The same flick is run with the re-rank on and off (motiondriver::SetTurnFootPhase). Checks:
 //  - fixture: every flick picks a moving turn / pivot clip with an authored root turn of at least 90 deg;
+//  - the switch alone decides: with the live pose history on and the re-rank off, no search gets the shown pose and no re-rank runs;
 //  - the reversal search receives the shown pose with the re-rank on, never with it off (TestTurnFootPhaseSearches);
+//  - every flick with the re-rank on is decided by it (TestTurnFootPhaseOutcome: the trajectory winner kept, a re-ranked row picked or a
+//    re-ranked row refused), never with it off; a flick without a picked re-ranked row shows the same turn clip and entry as with it off;
 //  - the turn direction is kept: the authored root turn of the picked clip has the sign of the clip picked with the re-rank off, and the
 //    body turns with the clip and reaches the reversed heading within 1 s;
 //  - foot phase (per body, rate and gait): the turn clip enters on the shown foot phase. Measure: largest world path of one planted toe
 //    (contact >= 0.5, drawn root: capsule + root offset) during 1 s after the flick, summed over the phases. Running, the re-rank must make
-//    it smaller than the trajectory-only pick; sprinting, not larger (the sprint stop often leaves the trajectory winner in place: a later
-//    entry in its clip or a turn outside the steering look-ahead is refused). Single phases may differ either way (run: up to +12 cm seen).
-// Mutant UTPP_TURNFOOT_MUTATION=1 (no re-rank) MUST print "FAIL ... turn clip enters on the shown foot phase".
+//    it smaller than the trajectory-only pick. Sprinting, smaller when a re-ranked row was picked, else equal: at 30 and 60 Hz the sprint
+//    stop leaves the shown pose on the trajectory winner (kept) or the re-ranked row enters later in its clip / turns outside the steering
+//    look-ahead (refused), so the sprint pick there is the trajectory pick by design and only the decision check guards it. Single phases
+//    may differ either way (run: up to +12 cm seen).
+// Mutant UTPP_TURNFOOT_MUTATION=1 (no re-rank) MUST print "FAIL ... turn clip enters on the shown foot phase" (run); it also fails the
+// decision check of every run and sprint flick.
 // Usage: utpp_mm_loco_turn_foot_phase_test <driver-data> <basedb>
 #define main UnusedIntegrationMain
 #include "MotionDriverIntegrationTest.cpp"
@@ -80,19 +86,23 @@ struct FlickRun
     float yawAt1s = 0;     // body yaw 1 s after the flick
     float lockPathCm = 0;  // largest world path of one planted toe during 1 s after the flick, drawn root
     uint64_t searches = 0; // reversal searches that received the shown pose during the run
+    motiondriver::TurnFootOutcome outcome; // re-rank decisions during the run (kept / re-ranked row / refused)
     std::string seq;       // clips shown from 0.2 s before the flick to 1 s after it (fixture diagnostics)
 };
 
-FlickRun RunFlick(const Rig& aRig, const mm::motion::MotionDatabase& aDb, const int32_t aToe[2], float aHz, bool aSprint, float aFlickS, bool aOn)
+FlickRun RunFlick(const Rig& aRig, const mm::motion::MotionDatabase& aDb, const int32_t aToe[2], float aHz, bool aSprint, float aFlickS, bool aOn,
+                  bool aLiveHistory = false)
 {
     FlickRun out;
     motiondriver::SetTurnFootPhase(aOn);
+    motiondriver::SetLivePoseHistory(aLiveHistory);
     if (!ResetBase(aRig))
         return out;
     motionhost::SetOffsetRoot(true);
     motionhost::SetHoldPose(true);
     motiondriver::SetEnabled(true);
     const uint64_t searches0 = motiondriver::TestTurnFootPhaseSearches();
+    const motiondriver::TurnFootOutcome outcome0 = motiondriver::TestTurnFootPhaseOutcome();
     const float dt = 1.0f / aHz;
     const float speed = aSprint ? kSprintSpeed : kRunSpeed, decel = aSprint ? 50.0f : 25.0f;
     const int stand = int(aHz * 0.5f), flick = int(aHz * aFlickS), total = flick + int(aHz * 1.5f);
@@ -222,17 +232,22 @@ FlickRun RunFlick(const Rig& aRig, const mm::motion::MotionDatabase& aDb, const 
     }
     out.lockPathCm = std::fmax(out.lockPathCm, std::fmax(lockPath[0], lockPath[1]));
     out.searches = motiondriver::TestTurnFootPhaseSearches() - searches0;
+    const motiondriver::TurnFootOutcome outcome1 = motiondriver::TestTurnFootPhaseOutcome();
+    out.outcome = {outcome1.kept - outcome0.kept, outcome1.changed - outcome0.changed, outcome1.refused - outcome0.refused};
     out.ok = picked;
-    motiondriver::SetTurnFootPhase(false); // the mod default
+    motiondriver::SetTurnFootPhase(false); // the mod defaults
+    motiondriver::SetLivePoseHistory(false);
     return out;
 }
 
 std::string Describe(const FlickRun& aR)
 {
     char d[512];
-    std::snprintf(d, sizeof d, "%s@%.2f -> %s@%.2f, clip turn %.1f, body turn %.1f, yaw 1 s %.1f, planted toe lock path max %.1f cm, searches %llu",
+    std::snprintf(d, sizeof d, "%s@%.2f -> %s@%.2f, clip turn %.1f, body turn %.1f, yaw 1 s %.1f, planted toe lock path max %.1f cm, searches %llu, re-rank kept %llu / changed %llu / refused %llu",
                   aR.prevName.c_str(), double(aR.prevTime), aR.pickName.c_str(), double(aR.pickTime), double(aR.clipTurnDeg), double(aR.bodyTurnDeg),
-                  double(aR.yawAt1s), double(aR.lockPathCm), static_cast<unsigned long long>(aR.searches));
+                  double(aR.yawAt1s), double(aR.lockPathCm), static_cast<unsigned long long>(aR.searches),
+                  static_cast<unsigned long long>(aR.outcome.kept), static_cast<unsigned long long>(aR.outcome.changed),
+                  static_cast<unsigned long long>(aR.outcome.refused));
     return aR.ok ? std::string(d) : std::string(d) + ", shown clips: " + aR.seq;
 }
 } // namespace
@@ -277,12 +292,22 @@ int main(int argc, char** argv)
         motiondriver::SetEnabled(true);
         motiondriver::Step({}, 0, 1.f / 60);
         motiondriver::WaitLoader();
+        // the switch alone decides: with the live pose history on and the re-rank off, no reversal search gets the shown pose for it
+        for (bool sprint : {false, true})
+        {
+            const FlickRun hist = RunFlick(rig, *db, toe, 60.0f, sprint, 3.5f, false, true);
+            std::printf("INFO %s 60 Hz %s live history, re-rank off: %s\n", bd.body, sprint ? "sprint" : "run", Describe(hist).c_str());
+            Check(hist.searches == 0 && hist.outcome.kept + hist.outcome.changed + hist.outcome.refused == 0,
+                  std::string(bd.body) + (sprint ? " sprint" : " run") + ": live pose history on, re-rank off - no re-rank", Describe(hist));
+        }
         for (float hz : {60.0f, 30.0f, 200.0f})
             for (bool sprint : {false, true})
             {
                 const std::string tag = std::string(bd.body) + " " + std::to_string(int(hz)) + " Hz" + (sprint ? " sprint" : " run");
                 const float cycle = sprint ? 0.62f : 0.72f; // one gait cycle of the loop (s); the offsets cover it
                 float pathOn = 0, pathOff = 0;
+                uint64_t changed = 0;
+                int pickDiffers = 0;
                 for (int k = 0; k < kPhases; ++k)
                 {
                     const float flickS = 3.5f + cycle * float(k) / float(kPhases);
@@ -296,6 +321,16 @@ int main(int argc, char** argv)
                     if (!on.ok || !off.ok)
                         continue;
                     Check(on.searches > 0 && off.searches == 0, pt + ": the reversal search receives the shown pose (re-rank on only)", Describe(on));
+                    const uint64_t decided = on.outcome.kept + on.outcome.changed + on.outcome.refused;
+                    Check(off.outcome.kept + off.outcome.changed + off.outcome.refused == 0,
+                          pt + ": no re-rank with it off", Describe(off));
+                    Check(decided > 0, pt + ": the re-rank decides the reversal pick (kept, changed or refused)", Describe(on));
+                    // a re-rank that never replaced the trajectory winner leaves the pick of the run with it off
+                    Check(on.outcome.changed > 0 || (on.pickName == off.pickName && std::fabs(on.pickTime - off.pickTime) < 1e-4f),
+                          pt + ": a kept / refused re-rank leaves the trajectory pick", Describe(on) + " | " + Describe(off));
+                    changed += on.outcome.changed;
+                    if (on.pickName != off.pickName || std::fabs(on.pickTime - off.pickTime) >= 1e-4f)
+                        ++pickDiffers;
                     Check(on.clipTurnDeg * off.clipTurnDeg > 0.0f, pt + ": turn direction kept (same sign as the trajectory pick)",
                           Describe(on) + " | " + Describe(off));
                     Check(on.clipTurnDeg * on.bodyTurnDeg > 0.0f && std::fabs(WrapT(on.yawAt1s - 180.0f)) <= 20.0f,
@@ -306,8 +341,9 @@ int main(int argc, char** argv)
                 char d[256];
                 std::snprintf(d, sizeof d, "planted toe lock path over %d phases: re-rank %.1f cm, trajectory only %.1f cm", kPhases, double(pathOn),
                               double(pathOff));
-                std::printf("INFO %s %s\n", tag.c_str(), d);
-                Check(sprint ? pathOn <= pathOff : pathOn < pathOff,
+                std::printf("INFO %s %s; re-ranked rows picked %llu, turn picks differing from the trajectory pick %d of %d\n", tag.c_str(), d,
+                            static_cast<unsigned long long>(changed), pickDiffers, kPhases);
+                Check(sprint ? (changed > 0 ? pathOn < pathOff : pathOn == pathOff) : pathOn < pathOff,
                       tag + ": turn clip enters on the shown foot phase (planted toe path vs the trajectory-only pick)", d);
             }
     }

@@ -619,12 +619,13 @@ struct MatcherConfig
     // the pose channels of the query read from the shown pose (SetShownPoseHistory) instead of the database mean. Without it the pick on a
     // database switch (stop / loop -> pivots) had no pose information: the foot (_Lfoot / _Rfoot) and the entry time of the turn were
     // chosen by the trajectory alone, whatever foot was planted or swinging in the shown pose. The turn direction of the trajectory
-    // winner is kept (the body turn follows it). It runs only when the caller hands a shown pose (SetShownPoseHistory); the motion
-    // driver does that only after motiondriver::SetTurnFootPhase(true), off by default. false = off.
+    // winner is kept (the body turn follows it). It runs only when it is on and the caller hands a shown pose (SetShownPoseHistory); the
+    // motion driver switches both with motiondriver::SetTurnFootPhase (off by default, SetTurnFootPhase below). false = off.
+    // The selection guards after the search compare the re-ranked row by its cost under the normal query, as every other candidate.
     // The re-ranked row is refused (the trajectory winner stays) when it enters later in the winner's clip, or when the winner's authored
     // root turn starts within turnFootHorizonS and the row's does not: the procedural steering of the blend stack then predicts no
     // authored turn over its target time and pulls the drawn root the short way round, against the turn.
-    bool turnFootPhase = true;
+    bool turnFootPhase = false;
     // turnFootHorizonS: look-ahead of that authored-turn check (s) = the blend stack's steering target time (MotionBlendStack::
     // SteeringTargetTime, 0.5 s in the mod).
     float turnFootHorizonS = 0.5f;
@@ -711,6 +712,9 @@ struct MatchResult
     float stageSelectUs = 0.0f;
     bool airFallBias = false; // motionfix item 5: the fall bias was applied on this update
     bool cancelledStartSupportAllowed = false;
+    // MatcherConfig::turnFootPhase on this update: 0 = not run, 1 = the re-rank kept the trajectory winner, 2 = the re-ranked row
+    // replaced it, 3 = a different re-ranked row was refused (later entry / turn outside the steering look-ahead)
+    uint8_t turnFootPhase = 0;
 };
 
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -1892,8 +1896,10 @@ public:
                 ClearExcluded(d, 1);
                 m_hist = callerHist;
                 res.rowsEvaluated += r.rowsEvaluated;
+                res.turnFootPhase = 1;
                 if (r.localRow >= 0 && r.localRow != bestRow)
                 {
+                    res.turnFootPhase = 3;
                     const RowRecord& win = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
                     const RowRecord& alt = db.Row(D.firstRow + static_cast<uint32_t>(r.localRow));
                     const uint32_t winClip = db.Entry(win.entry).clip, altClip = db.Entry(alt.entry).clip;
@@ -1912,8 +1918,11 @@ public:
                     const bool turnOut = turnAhead(alt, altClip) <= minTurn && turnAhead(win, winClip) > minTurn;
                     if (!later && !turnOut)
                     {
+                        // the guards below compare bestCost with the continuing cost of the normal query: the row's normal-query cost
+                        BuildQuery(d, true, allowLastPose);
                         bestRow = r.localRow;
-                        bestCost = r.cost;
+                        bestCost = db.RowCost(d, static_cast<uint32_t>(r.localRow), m_query.data()) + alt.costAddend;
+                        res.turnFootPhase = 2;
                     }
                 }
             }
@@ -2208,6 +2217,9 @@ public:
     // Shown pose for the MatcherConfig::turnFootPhase re-rank (the published pose of the last feeds; nullptr = none). Read by the next
     // Update only; the normal search keeps the history given to Update.
     void SetShownPoseHistory(const PoseHistory* aHist) { m_shownHist = aHist; }
+    // MatcherConfig::turnFootPhase at run time (the motion driver's SetTurnFootPhase); takes effect on the next Update.
+    void SetTurnFootPhase(bool aOn) { m_cfg.turnFootPhase = aOn; }
+    bool TurnFootPhase() const { return m_cfg.turnFootPhase; }
 
     // Sets the trajectory / pose history read by BuildQuery outside Update (test access; pointers must stay valid).
     void SetQueryInputs(const TrajSample* aTraj, uint32_t aNumTraj, const PoseHistory* aHist)

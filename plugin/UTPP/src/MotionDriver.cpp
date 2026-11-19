@@ -893,6 +893,7 @@ motion::LivePoseHistory g_liveHist;
 uint64_t g_liveHistSearches = 0; // searches that read the live history
 bool g_turnFootPhaseOn = false;    // SetTurnFootPhase: the ring is kept for the turn foot-phase re-rank (MatcherConfig::turnFootPhase)
 uint64_t g_turnFootSearches = 0;  // reversal searches that received the shown pose
+uint64_t g_turnFootOutcome[4] = {}; // updates by MatchResult::turnFootPhase (0 not run, 1 kept, 2 re-ranked row, 3 refused)
 bool g_liveHistPushed = false;    // a published pose arrived since the last search (else the ring is not contiguous: reset)
 
 // UTPP-MOTION SEAM trav: one traversal at a time (MotionDriver.hpp TraversalEvent). plan.montage points into the installed
@@ -2532,6 +2533,12 @@ uint64_t TestTurnFootPhaseSearches()
 {
     std::lock_guard lock(g_m);
     return g_turnFootSearches;
+}
+
+TurnFootOutcome TestTurnFootPhaseOutcome()
+{
+    std::lock_guard lock(g_m);
+    return {g_turnFootOutcome[1], g_turnFootOutcome[2], g_turnFootOutcome[3]};
 }
 
 DodgeProbe TestDodgeProbe()
@@ -5632,16 +5639,23 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         history = &liveHistory;
         ++g_liveHistSearches;
     }
-    // Turn foot-phase re-rank (MatcherConfig::turnFootPhase): on a reversal the shown pose of the same ring, also with the live history off
-    const motion::PoseHistory* turnShown = history == &liveHistory ? history : nullptr;
-    if (!history && g_turnFootPhaseOn && cs.isPivoting && !reentry && !travHandback && !travDetail &&
-        g_liveHist.Build(dt, g_traj.data(), nt, liveHistory))
-        turnShown = &liveHistory;
-    if (turnShown && cs.isPivoting)
+    // Turn foot-phase re-rank (MatcherConfig::turnFootPhase, SetTurnFootPhase only): on a reversal the shown pose of the same ring, also
+    // with the live history off. Off: no shown pose and the matcher's switch off, whatever the live history does.
+    const motion::PoseHistory* turnShown = nullptr;
+    if (g_turnFootPhaseOn && cs.isPivoting)
+    {
+        if (history == &liveHistory)
+            turnShown = history;
+        else if (!history && !reentry && !travHandback && !travDetail && g_liveHist.Build(dt, g_traj.data(), nt, liveHistory))
+            turnShown = &liveHistory;
+    }
+    if (turnShown)
         ++g_turnFootSearches;
+    b.matcher.SetTurnFootPhase(g_turnFootPhaseOn);
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
     b.matcher.SetShownPoseHistory(nullptr);
+    ++g_turnFootOutcome[r.turnFootPhase & 3];
     BudgetStageRecordLocked(r);
     b.startTurn.Selected(r.clip, b.matcher.StartTurnDirection(r.clip));
     g_travProbe.justTraversed = travHandback; // UTPP-MOTION SEAM trav
