@@ -751,10 +751,19 @@ public:
         m_query.assign(aDb->Header().maxDims + 1, 0.0f);
         m_history.assign(256, HistEntry{});
         m_startTurnDirection.assign(aDb->NumClips(), 0);
+        m_moveTurnSign.assign(aDb->NumClips(), 0);
         m_stanceTransitionDirection.assign(aDb->NumClips(), 0);
         for (uint32_t c = 0; c < aDb->NumClips(); ++c)
         {
             const auto& clip = aDb->Clip(c);
+            if (const uint8_t cls = steer::ClassifyClip(aDb->ClipName(c)); !(clip.flags & kClipLoop) && (steer::IsPivot(cls) || steer::IsMoveTurn(cls)))
+            {
+                double turn = 0;
+                for (uint32_t f = 0; f < clip.numFrames; ++f)
+                    turn += aDb->Root(clip.firstFrame + f).dyaw;
+                if (std::isfinite(turn) && std::fabs(turn) >= math::kPi / 2.0f)
+                    m_moveTurnSign[c] = turn > 0 ? 1 : -1;
+            }
             if (steer::ClassifyClip(aDb->ClipName(c)) == steer::kClassStanceTransition)
             {
                 const int direction = steer::StanceDirOfName(aDb->ClipName(c));
@@ -1049,6 +1058,13 @@ public:
     {
         return aClip >= 0 && static_cast<size_t>(aClip) < m_startTurnDirection.size() ?
             m_startTurnDirection[static_cast<size_t>(aClip)] : 0;
+    }
+    // Authored ROOT turn direction of a moving turn / pivot clip over the whole clip: +1 CCW (left), -1 CW (right); 0 = an invalid clip,
+    // another class or a root turn below 90 deg. The blended root rate of the frame cannot give it (a turn clip entered mid-way can still
+    // swing the other way for a while).
+    int MoveTurnSign(int32_t aClip) const
+    {
+        return aClip >= 0 && static_cast<size_t>(aClip) < m_moveTurnSign.size() ? m_moveTurnSign[static_cast<size_t>(aClip)] : 0;
     }
     // Reset the player/history after a runtime yield. Preserve a consumed stance
     // transition if requested, but close an unconsumed admission window: the
@@ -2884,6 +2900,7 @@ private:
     bool m_ready = false;
     std::vector<uint8_t> m_excluded;
     std::vector<int8_t> m_startTurnDirection;
+    std::vector<int8_t> m_moveTurnSign; // MoveTurnSign
     std::vector<int8_t> m_stanceTransitionDirection; // 0 none, +/-1 destination, 2 unknown (not admitted)
     std::vector<uint8_t> m_fallClip; // motionfix item 5: clip index -> 1 = kAirFallClipNames
     bool m_anyFallClip = false;

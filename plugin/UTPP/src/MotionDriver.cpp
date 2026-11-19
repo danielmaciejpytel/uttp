@@ -6183,7 +6183,10 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     if (airNoContact || g_slideFrame || g_trav.noContactLeft > 0.0f || dodgeNoContact)
         aOut.cancelStartSupport = -1;
     else if (r.clip >= 0 && static_cast<uint32_t>(r.clip) < b.db.NumClips())
+    {
         aOut.clipClass = steer::ClassifyClip(b.db.ClipName(static_cast<uint32_t>(r.clip)));
+        aOut.moveTurnSign = static_cast<int8_t>(b.matcher.MoveTurnSign(r.clip));
+    }
     if (r.database >= 0 && static_cast<uint32_t>(r.database) < b.db.NumDatabases())
     {
         // [P] replant Stops profile on the motion idle / stop databases (v1: clip class idle / stop)

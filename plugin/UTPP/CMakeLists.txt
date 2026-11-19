@@ -1171,6 +1171,22 @@ if(DEFINED _utpp_mdmotion_data_native)
   target_link_libraries(utpp_motion_driver_aimoffset_options_test PRIVATE bcrypt)
   add_test(NAME utpp_motion_driver_aimoffset_options_test COMMAND utpp_motion_driver_aimoffset_options_test "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
 endif()
+# ---- near-reversal tie: a 180 deg stick flip with a residual body yaw of +-0.3 deg turns the body with the turn clip (real host + driver,
+# tests/ReversalTieHostTest.cpp). Mutant REVERSAL_TIE 1 = the body takes the shorter way at the tie; it MUST print its FAIL line.
+if(DEFINED _utpp_mdmotion_data_native)
+  foreach(_v "test;0" "mut1;1")
+    list(GET _v 0 _tag)
+    list(GET _v 1 _mut)
+    add_executable(utpp_bodyturn_reversal_tie_host_${_tag} tests/ReversalTieHostTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+    target_compile_features(utpp_bodyturn_reversal_tie_host_${_tag} PRIVATE cxx_std_20)
+    target_compile_options(utpp_bodyturn_reversal_tie_host_${_tag} PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_bodyturn_reversal_tie_host_${_tag} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV
+                               UTPP_REVERSAL_TIE_MUTATION=${_mut})
+    target_link_libraries(utpp_bodyturn_reversal_tie_host_${_tag} PRIVATE bcrypt)
+    add_test(NAME utpp_bodyturn_reversal_tie_host_${_tag} COMMAND utpp_bodyturn_reversal_tie_host_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+  endforeach()
+  set_tests_properties(utpp_bodyturn_reversal_tie_host_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*body turns with the clip")
+endif()
 
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

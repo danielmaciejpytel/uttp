@@ -1551,6 +1551,12 @@ std::array<BoneTransform, integ::kMaxMMBones> g_motionPoseBuf{}; // UTPP-MOTION 
 bool g_motionStepped = false; // UTPP-MOTION SEAM step already called this feed (inside the matcher block)
 bool g_motionHeldMatcher = false; // UTPP-MOTION SEAM v2 owned a feed since the last v1 matcher update (MotionHandbackLocked)
 int g_motionStartTurnDirection = 0;
+// Near-reversal tie on v2 frames (UpdateReversalTieLocked): +1 / -1 = the body turns the way of the turn clip the motion search plays for
+// a stick reversal within kReversalTieDeg of 180 deg (the long way if needed, BodyYawCommand); 0 = none.
+int g_reversalTieDir = 0;
+bool g_reversalTiePending = false; // a tie reversal waits for the turn clip of the search
+float g_reversalTieTarget = 0.0f;  // target yaw of the episode (rad)
+uint64_t g_reversalTies = 0;      // episodes started (diagnostics)
 uint64_t g_dodgeFacingHolds = 0; // body yaw commands held under a ground dodge clip (MotionSetFrame::dodgeClip)
 uint64_t g_motionHandbacks = 0; // UTPP-MOTION SEAM fresh v1 searches after a v2-owned span (ProbeMotionSeam)
 // UTPP-MOTION SEAM x AIR (merge repair): the AirState reset requested by MotionHandbackLocked is emitted on the next feed; its query bone
@@ -1652,6 +1658,8 @@ void MotionKeepBaseTrajectoryLocked(float aDt, const MatcherInput& aIn) // UTPP-
 void MotionHandbackLocked() // UTPP-MOTION SEAM
 { // UTPP-MOTION SEAM
     g_motionStartTurnDirection = 0;
+    g_reversalTieDir = 0;
+    g_reversalTiePending = false;
     if (!g_motionHeldMatcher) // UTPP-MOTION SEAM
         return; // UTPP-MOTION SEAM
     g_motionHeldMatcher = false; // UTPP-MOTION SEAM
@@ -1673,6 +1681,48 @@ void MotionReleaseSteeringLocked() // UTPP-MOTION SEAM
     ReleaseStartBindLocked(); // UTPP-MOTION SEAM
     g_bodyFollowDir = 0; // UTPP-MOTION SEAM
 } // UTPP-MOTION SEAM
+// Near-reversal tie on a v2 frame. When the stick reverses within kReversalTieDeg of 180 deg, the shorter way of the body turn depends
+// only on a residual yaw of a fraction of a degree, while the motion search picks the 180 deg turn clip by its pose cost; the body could
+// then turn against the clip and the planted foot slide. The direction is taken from the authored root turn of the moving turn / pivot
+// clip the search plays (MotionSetFrame::moveTurnSign): from the reversal feed on, the first such clip while the body is still within the
+// long-way window of BodyYawCommand (150 deg) gives it. It is held while the target stays (kReversalTieKeepDeg) until the body is past
+// half of the reversal (from there the shorter way is the clip's way).
+constexpr float kReversalTieDeg = 5.0f;
+constexpr float kReversalTieKeepDeg = 10.0f;
+void UpdateReversalTieLocked(const MotionSetFrame& aFrame, bool aStick, bool aBodyTurn, bool aAnimLed, float aYaw)
+{
+    if (!g_startTurnOn || !aStick || !aBodyTurn || !aAnimLed || !g_haveTarget)
+    {
+        g_reversalTieDir = 0;
+        g_reversalTiePending = false;
+        return;
+    }
+    const float e = WrapPi(g_targetYaw - aYaw);
+    const bool targetKept = std::fabs(WrapPi(g_targetYaw - g_reversalTieTarget)) <= kReversalTieKeepDeg * kDegToRad;
+    if (g_reversalTieDir != 0)
+    {
+        if (!targetKept || std::fabs(e) < 90.0f * kDegToRad)
+            g_reversalTieDir = 0;
+        return;
+    }
+    if (g_reversalTiePending && (!targetKept || std::fabs(e) < 150.0f * kDegToRad))
+        g_reversalTiePending = false;
+    if (!g_reversalTiePending && std::fabs(e) >= (180.0f - kReversalTieDeg) * kDegToRad)
+    {
+        g_reversalTiePending = true;
+        g_reversalTieTarget = g_targetYaw;
+    }
+#if !defined(UTPP_REVERSAL_TIE_MUTATION) || UTPP_REVERSAL_TIE_MUTATION != 1
+    if (g_reversalTiePending && aFrame.moveTurnSign != 0)
+    {
+        g_reversalTieDir = aFrame.moveTurnSign > 0 ? 1 : -1;
+        g_reversalTiePending = false;
+        ++g_reversalTies;
+    }
+#else
+    (void)aFrame;
+#endif
+}
 // UTPP-MOTION SEAM merge rework (b4): the v2 leg context is the v1 one (ComputeLegContextLocked: conditioned stance, capsule speed,
 // UTPP-MOTION SEAM vz, placement gate, air fields airborne / contactScale and any later field) with the frame-owned fields taken
 // UTPP-MOTION SEAM from the v2 frame: contacts, stops, actual clip class, clip = -1 (v1 clip does not apply), v2 = true (ChestAlign
@@ -2429,6 +2479,8 @@ void ResetRuntimeLocked()
 void ResetDbPlaybackStateLocked()
 {
     g_motionStartTurnDirection = 0;
+    g_reversalTieDir = 0;
+    g_reversalTiePending = false;
     g_turnCommitted = false;
     g_commitSign = 0;
     g_settleSign = 0;
@@ -4997,7 +5049,10 @@ void Feed(const FeedInput& aRawIn)
                 g_stanceUsed = true;
         }
         if (motionf) // UTPP-MOTION SEAM
+        {
             MotionReleaseSteeringLocked(); // UTPP-MOTION SEAM
+            UpdateReversalTieLocked(*motionf, stick, mf.bodyTurn, animLed, yaw);
+        }
         else // UTPP-MOTION SEAM
         UpdateStartBindLocked(stick, mf.bodyTurn, animLed, dt); // 0.5.8
         g_rawAnimRate = motionf ? motionf->rootYawRate : g_matcher.RootYawRate() * rate; // animation time -> real time; UTPP-MOTION SEAM
@@ -6138,6 +6193,15 @@ float BodyYawCommand(float aCurrentYawDeg, float aBaseYawDeg)
     if (g_motionHeldMatcher && g_motionStartTurnDirection != 0 && !g_followFed)
     {
         target = refacestart::ControllerTarget(aCurrentYawDeg * kDegToRad, target, g_motionStartTurnDirection);
+    }
+    else if (g_motionHeldMatcher && g_reversalTieDir != 0 && !g_followFed)
+    {
+        // near-reversal tie (UpdateReversalTieLocked): turn the way of the playing turn clip - aim 179 deg ahead in its direction until
+        // the remaining error is on that side (as the long-way start turn below)
+        const float cur = aCurrentYawDeg * kDegToRad;
+        const float e = WrapPi(g_targetYaw - cur);
+        if (e * float(g_reversalTieDir) < 0.0f && std::fabs(e) >= 150.0f * kDegToRad)
+            target = WrapPi(cur + float(g_reversalTieDir) * 179.0f * kDegToRad);
     }
     else if (g_startBindOn && g_bindSign != 0 && !g_followFed)
     {

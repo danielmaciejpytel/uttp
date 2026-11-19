@@ -628,6 +628,7 @@ struct MotionSetFrame // UTPP-MOTION SEAM
     int startTurnDirection = 0; // current MOTION ordinary reface start, never legacy v1 state
     int cancelStartSupport = -1; // short cancelled-start support: -1 none, 0 left, 1 right
     uint8_t clipClass = 0; // actual current clip class; idle databases can also contain turns
+    int8_t moveTurnSign = 0; // authored root turn of the playing moving turn / pivot clip: +1 left, -1 right, 0 none (ChooserMatcher::MoveTurnSign)
     bool stops = false; // UTPP-MOTION SEAM idle / stop database (replant Stops profile)
     bool travFrame = false;                  // UTPP-MOTION SEAM trav: traversal montage frame (root already
                                              // warped onto the capsule: offset root gets animVel = capVel)
