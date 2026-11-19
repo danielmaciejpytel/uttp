@@ -773,6 +773,113 @@ int main()
             C("continuity: Seed clears the offset velocity", p.Output().vx == 0 && p.Output().vy == 0);
         }
     }
+    // UTPP policy 4: forward limit along travel (Step::forwardLimit, opt-in). A loop whose clip covers more ground than the capsule (legs /
+    // capsule 1.3 at walk, about 2.4 in the analog run gait) drives the offset forward, up to the 0.30 m radius; with the limit the part
+    // ahead of the capsule along its travel settles at the limit. Trailing (a start, the capsule leads) and lateral offsets, slow capsules,
+    // release and the continuity bound are unchanged. -DUTPP_ROOT_FORWARD_MUTATION=1 (limit ignored) MUST fail.
+    {
+        const float limit = motionRoot::kForwardLimit, accel = motionRoot::kOffsetAccel;
+        // One play at hz: capsule velocity cap(t) and clip velocity clip(t) (both {x, y}, m/s, no rotation). Returns every offset.
+        auto play = [&](int hz, double tEnd, float fwd, auto cap, auto clip, XY seed = {0, 0}, bool moving = true) {
+            motionRoot::OffsetRoot r;
+            r.Seed(float(seed.x), float(seed.y), 0);
+            std::vector<XY> out;
+            const int frames = int(std::lround(tEnd * hz));
+            for (int i = 0; i < frames; ++i)
+            {
+                const double t0 = double(i) / hz, t1 = double(i + 1) / hz, mid = .5 * (t0 + t1);
+                motionRoot::Step s;
+                s.dt = float(t1 - t0);
+                s.movingGround = moving;
+                const XY c = cap(mid), a = clip(mid);
+                s.capsuleDeltaCurrent = {float(c.x * (t1 - t0)), float(c.y * (t1 - t0)), 0};
+                s.animationDeltaVisual = {float(a.x * (t1 - t0)), float(a.y * (t1 - t0)), 0};
+                s.offsetAccel = accel;
+                s.forwardLimit = fwd;
+                r.Update(s);
+                out.push_back({r.X(), r.Y()});
+            }
+            return out;
+        };
+        auto same = [](const std::vector<XY> &a, const std::vector<XY> &b) {
+            bool eq = a.size() == b.size();
+            for (size_t i = 0; eq && i < a.size(); ++i)
+                eq = a[i].x == b[i].x && a[i].y == b[i].y;
+            return eq;
+        };
+        // Steady loops (capsule along +y, then along a diagonal): forward part after 2 s of play.
+        struct Loop
+        {
+            const char *name;
+            double speed, ratio, dirX, dirY;
+        };
+        const Loop loops[] = {{"walk 1.3x", 1.5, 1.3, 0, 1}, {"analog run 2.4x", 2.2, 2.4, 0, 1}, {"diagonal walk 1.3x", 1.5, 1.3, .6, .8}};
+        for (const Loop &l : loops)
+        {
+            auto cap = [&](double) { return XY{l.dirX * l.speed, l.dirY * l.speed}; };
+            auto clip = [&](double) { return XY{l.dirX * l.speed * l.ratio, l.dirY * l.speed * l.ratio}; };
+            for (int hz : {30, 60, 144})
+            {
+                const std::vector<XY> off = play(hz, 3.0, -1.f, cap, clip), on = play(hz, 3.0, limit, cap, clip);
+                double offAhead = 0, onAhead = 0;
+                for (size_t i = size_t(2.0 * hz); i < on.size(); ++i)
+                {
+                    offAhead = std::fmax(offAhead, off[i].x * l.dirX + off[i].y * l.dirY);
+                    onAhead = std::fmax(onAhead, on[i].x * l.dirX + on[i].y * l.dirY);
+                }
+                std::printf("forward %s %d Hz: ahead of the capsule after 2 s, off %.1f cm, limit %.0f cm -> %.1f cm\n", l.name, hz, offAhead * 100,
+                            limit * 100, onAhead * 100);
+                C((std::string("forward ") + l.name + ": without the limit the loop sits well beyond it").c_str(), offAhead > limit + .05);
+                C((std::string("forward ") + l.name + ": with the limit the forward part settles within 1 cm of it").c_str(),
+                  onAhead <= limit + .01);
+            }
+        }
+        // Continuity: a loop that enters the limit from the radius (offset seeded 0.29 m forward) changes the offset's velocity by at most
+        // kOffsetAccel per second (plus float tolerance).
+        {
+            auto cap = [](double) { return XY{0, 1.5}; };
+            auto clip = [](double) { return XY{0, 1.95}; };
+            const int hz = 60;
+            const std::vector<XY> on = play(hz, 1.5, limit, cap, clip, {0, .29});
+            double worst = 0, prevVx = 0, prevVy = 0;
+            XY prev = {0, .29};
+            for (size_t i = 0; i < on.size(); ++i)
+            {
+                const double vx = (on[i].x - prev.x) * hz, vy = (on[i].y - prev.y) * hz;
+                worst = std::fmax(worst, std::hypot(vx - prevVx, vy - prevVy) * hz);
+                prevVx = vx, prevVy = vy, prev = on[i];
+            }
+            std::printf("forward continuity: entering the limit from 29 cm, worst acceleration %.2f m/s^2 (bound %.0f), end %.1f cm\n", worst, accel,
+                        on.back().y * 100);
+            C("forward: the continuity bound still holds while the limit pulls", worst <= accel * 1.01 + 1e-3);
+            C("forward: the offset seeded at the radius comes down to the limit", on.back().y <= limit + .01);
+        }
+        // Left alone: a start with the capsule leading (offset behind), a purely lateral drift, a capsule below kForwardMinSpeed, release.
+        {
+            auto capStart = [](double t) { return XY{0, std::clamp(t / .2, 0., 1.) * 3.85}; };
+            auto clipStart = [](double t) { return XY{0, std::clamp(t / .6, 0., 1.) * 3.85}; };
+            const std::vector<XY> start = play(60, 1.0, limit, capStart, clipStart);
+            C("forward: a start with the capsule leading is unchanged (bit identical to off)", same(start, play(60, 1.0, -1.f, capStart, clipStart)));
+            auto capLat = [](double) { return XY{0, 1.5}; };
+            auto clipLat = [](double) { return XY{.4, 1.5}; };
+            const std::vector<XY> lateral = play(60, 2.0, limit, capLat, clipLat, {.05, 0});
+            C("forward: a lateral offset is unchanged (bit identical to off)", same(lateral, play(60, 2.0, -1.f, capLat, clipLat, {.05, 0})));
+            C("forward: the lateral case really drifts sideways", std::fabs(lateral.back().x) > .1);
+            auto capSlow = [](double) { return XY{0, .3}; };
+            auto clipSlow = [](double) { return XY{0, .9}; };
+            const std::vector<XY> slow = play(60, 2.0, limit, capSlow, clipSlow);
+            C("forward: a capsule below the minimum speed is left alone", same(slow, play(60, 2.0, -1.f, capSlow, clipSlow)) && slow.back().y > limit);
+            auto capRel = [](double) { return XY{0, 1.5}; };
+            auto clipRel = [](double) { return XY{0, 1.95}; };
+            C("forward: release (not moving on the ground) is unchanged",
+              same(play(60, 1.0, limit, capRel, clipRel, {0, .25}, false), play(60, 1.0, -1.f, capRel, clipRel, {0, .25}, false)));
+            const float nan = std::numeric_limits<float>::quiet_NaN();
+            auto capW = [](double) { return XY{0, 1.5}; };
+            auto clipW = [](double) { return XY{0, 1.95}; };
+            C("forward: a non-finite limit is off (bit identical)", same(play(60, 2.0, nan, capW, clipW), play(60, 2.0, -1.f, capW, clipW)));
+            C("forward: the Step default is off", motionRoot::Step{}.forwardLimit < 0);
+        }
+    }
     std::printf("%d PASS %d FAIL\n", pass, fail);
     return fail ? 1 : 0;
 }

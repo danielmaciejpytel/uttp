@@ -5885,6 +5885,13 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         const bool reloadBeganMoving = g_reloadRootLatch.Step(g_reloadUpperWeight, rootEvaluation.input.movingGround);
         rootEvaluation.input.montage = rootframe::RootMontage(weaponOverlay, g_aimGameUpper, g_aimingNow, g_reloadUpperWeight,
                                                               rootEvaluation.input.movingGround, reloadBeganMoving);
+        // Forward limit along travel (MotionOffsetRoot.hpp item 4): only while the root interpolates on the ground (no slide, no montage).
+#if UTPP_OFFSET_ROOT_FORWARD_LIMIT != 0
+        rootEvaluation.input.forwardLimit = rootEvaluation.input.movingGround && !rootEvaluation.input.montage && !b.map.slideActive &&
+                                                    cs.movementMode == 0
+                                                ? motionRoot::kForwardLimit
+                                                : -1.0f;
+#endif
         // A live TPP aim request owns visible facing even without a weapon or
         // native upper-body handback. Require the camera heartbeat and current
         // PSM ADS / admitted hipfire intent, not merely a configured overlay.
