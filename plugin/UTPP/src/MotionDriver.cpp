@@ -927,8 +927,17 @@ struct TravRun
     // verifier round 2: root-children yaw (plan root yaw - entity yaw, review major 2) of the last traversal frame; it is applied
     // after Evaluate, so the MM inertializer never sees it: the handback keeps it and turns it back to 0 over kTravBlendOut
     float lastYaw = 0.0f, yawBack = 0.0f, yawBackT = -1.0f; // rad, rad, s since the handback (< 0 = none)
+    uint8_t leadFoot = 0; // foot planted by the shown pose when the event was fed (0 unknown, 1 left, 2 right)
 };
 TravRun g_trav;
+#ifndef UTPP_TRAV_START_WINDOW_DEFAULT
+#define UTPP_TRAV_START_WINDOW_DEFAULT 0
+#endif
+#ifndef UTPP_TRAV_LEAD_FOOT_DEFAULT
+#define UTPP_TRAV_LEAD_FOOT_DEFAULT 0
+#endif
+bool g_travStartWindowOn = UTPP_TRAV_START_WINDOW_DEFAULT != 0; // SetTraversalStartOptions (motiontrav::Config::clampStartWindow)
+bool g_travLeadFootOn = UTPP_TRAV_LEAD_FOOT_DEFAULT != 0;       // SetTraversalStartOptions (motiontrav::Config::leadFootRow)
 TraversalProbe g_travProbe;
 uint64_t g_skipTrav = 0;
 int g_stepDetail = -1; // PSM detail of the last enabled Step (Skip: a yield on the event's detail ends the ownership)
@@ -1143,6 +1152,7 @@ void GetUpEndLocked(const char* aWhy, bool aAborted)
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
 std::string g_testForceMontage; // TestForceTraversal
 bool g_testTravGate = true;
+int32_t g_testTravLeadFoot = -1; // TestSetTraversalLeadFoot
 #endif
 
 Fallback ResolveLocked();
@@ -3629,6 +3639,14 @@ void TravPlanInfoLocked(const motiontrav::GameObstacle& aO, const motiontrav::Ca
                   aO.topPoint.z - aP.landingZ, aC.speed, aO.kind, decision, motiontrav::ToString(aP.result),
                   aP.reason && aP.reason[0] ? aP.reason : "-", aP.montage ? aP.montage->name.c_str() : "-",
                   aTravOk ? "" : " (no traversal data)");
+    if (g_travStartWindowOn || g_travLeadFootOn) // start options on: start frame, event lead foot and the start's foot rank
+    {
+        const size_t used = std::strlen(line);
+        std::snprintf(line + used, sizeof line - used, " start=%d window=%d foot=%d rank=%d", aP.startFrame,
+                      g_travStartWindowOn && aP.montage && !aP.startOutsideWindow && motiontrav::FindStartWindow(aP.montage->name) ? 1 : 0,
+                      aC.leadFoot,
+                      aP.montage ? motiontrav::StartFootRank(*aP.montage, aP.startFrame, aC.leadFoot) : -1);
+    }
     ++g_travProbe.infoLines;
     g_log(line);
 }
@@ -3659,7 +3677,10 @@ void TravPlanLocked(Bundle& b)
     c.speed = e.speed;
     c.airborne = e.airborne;
     c.climbSpeedModifier = e.climbSpeedModifier;
+    c.leadFoot = g_trav.leadFoot;
     motiontrav::Config cfg;
+    cfg.clampStartWindow = g_travStartWindowOn;
+    cfg.leadFootRow = g_travLeadFootOn;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     cfg.forceMontage = g_testForceMontage;
     cfg.gate = g_testTravGate;
@@ -3696,6 +3717,9 @@ void TravPlanLocked(Bundle& b)
     SetVehVaultEvt(o.action == motiontrav::GameAction::Vault && o.kind == 1 && p.result != motiontrav::StartResult::Ok); // vault torso limiter
     g_travProbe.startFrame = p.startFrame;
     g_travProbe.endFrame = p.endFrame;
+    g_travProbe.startOptions = (cfg.clampStartWindow ? 1 : 0) | (cfg.leadFootRow ? 2 : 0);
+    g_travProbe.leadFoot = c.leadFoot;
+    g_travProbe.footRank = p.montage ? motiontrav::StartFootRank(*p.montage, p.startFrame, c.leadFoot) : -1;
     g_travProbe.maxPlanStep = static_cast<float>(p.gatePlanarStep);
     g_travProbe.maxWarpAdded = static_cast<float>(p.gateWarpAdded);
     g_travProbe.climbClass = static_cast<int32_t>(p.climbClass);
@@ -6862,6 +6886,28 @@ bool ApplyToSnapshot(integ::PoseSnapshot& aSnap)
     return false;
 }
 
+// Lead foot of a traversal event: the foot the shown pose has planted (locomotion contacts of the last Step, cleared in the air and on
+// traversal / dodge frames): one contact >= 0.5 and the other below -> 1 left / 2 right, else 0 (both or none planted, no bundle).
+uint8_t LeadFootLocked()
+{
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    if (g_testTravLeadFoot >= 0)
+        return static_cast<uint8_t>(std::min(g_testTravLeadFoot, 2));
+#endif
+    if (!g_bundle)
+        return 0;
+    const auto& s = g_bundle->locomotion.Output();
+    const bool left = s.contact[0] >= 0.5f, right = s.contact[1] >= 0.5f;
+    return left == right ? 0 : (left ? 1 : 2);
+}
+
+void SetTraversalStartOptions(bool aStartWindow, bool aLeadFoot)
+{
+    std::lock_guard lock(g_m);
+    g_travStartWindowOn = aStartWindow;
+    g_travLeadFootOn = aLeadFoot;
+}
+
 // UTPP-MOTION SEAM trav
 bool FeedTraversal(const TraversalEvent& aEv)
 {
@@ -6890,6 +6936,7 @@ bool FeedTraversal(const TraversalEvent& aEv)
         g_trav.ev = aEv;
         g_trav.havePending = true;
         g_trav.age = 0.0f;
+        g_trav.leadFoot = LeadFootLocked(); // the shown pose at the event, not at a later Step that plans a deferred event
         ++g_travProbe.events;
         // task A: plan now when the body's bundle is ready and v2 is not skipping for a global reason, so OwnsTraversal is
         // already set when the next v1 Feed runs its gate; otherwise the next Step that reaches the traversal code plans it
@@ -7474,6 +7521,12 @@ void TestForceTraversal(const std::string& aMontage, bool aGate)
     std::lock_guard lock(g_m);
     g_testForceMontage = aMontage;
     g_testTravGate = aGate;
+}
+
+void TestSetTraversalLeadFoot(int32_t aFoot)
+{
+    std::lock_guard lock(g_m);
+    g_testTravLeadFoot = aFoot;
 }
 
 void TestSetRecoilClock(double aSeconds)

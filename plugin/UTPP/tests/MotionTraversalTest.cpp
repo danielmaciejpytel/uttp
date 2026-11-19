@@ -623,13 +623,13 @@ static void VaultRouting(const DecisionTable& aT, const TraversalFile& aF, const
 // TR-dll identity: with every new key off (old minRate, fixed step limit, no wide vault / low hurdle) the original grid (speeds 0 / 1.5 / 4
 // m/s, original vault cases) must still give exactly the pre-change accepted counts (216 / 126 / 108 / 588 woman, 630 man): the changes are
 // all behind keys and do not touch the old routing.
-// Start window and lead foot (Config::clampStartWindow / leadFootRow, both off by default): over the whole grid (climbs, vaults, low hurdles,
-// wide vaults with their key on)
-//  - every started plan's start time lies inside the montage's sampling range (start frame / fps within [min, max] + 1e-6 s, or, for a
-//    range holding no frame, at most half a frame from its centre) and every started montage has a range entry;
-//  - accepted plans per class are not fewer than with both keys off;
-//  - with a known lead foot, a started montage of the other foot is allowed only when every montage of the lead foot in the same decision
-//    was rejected under the same start rule (checked by planning each of them with forceMontage; an in-window start outranks the foot).
+// Start window and lead foot (Config::clampStartWindow / startWindowFallback / leadFootRow, all off by default): over the whole grid
+// (climbs, vaults, low hurdles, wide vaults with their key on)
+//  - with the window key on, every started plan's start time lies inside the montage's sampling range (start frame / fps within
+//    [min, max] + 1e-6 s, or, for a range holding no frame, at most half a frame from its centre) unless the fallback key marked it;
+//  - accepted plans per class are not fewer than with all keys off for the variants that keep the fallback or only rank by foot;
+//  - with a known lead foot, a start whose planted foot ranks worse (other foot, or neither / both) is allowed only when no other montage
+//    of the same decision gives a better rank under the same start rule (checked by planning each of them with forceMontage).
 static bool StartInWindow(const Plan& aP)
 {
     const StartWindow* w = FindStartWindow(aP.montage->name);
@@ -660,21 +660,28 @@ static void StartWindowAndFoot(const DecisionTable& aT, const TraversalFile& aF,
     for (const Case& c : LowHurdleCases())
         items.push_back({c, 5, false});
     const std::string r(aRig);
-    // variants: 0 keys off, 1 window only (no fallback), 2 window with fallback, 3 / 4 window with fallback + lead foot left / right
-    constexpr int kV = 5;
-    int acc[kV][6] = {}, inWin[kV] = {}, started[kV] = {}, footMatch[kV] = {}, footOther[kV] = {}, footNone[kV] = {}, outside[kV] = {};
-    int otherUnjustified = 0;
+    // variants: 0 keys off, 1 window only (no fallback), 2 window with fallback, 3 / 4 window with fallback + lead foot left / right,
+    // 5 / 6 window only + lead foot left / right, 7 / 8 lead foot left / right without the window
+    constexpr int kV = 9;
+    auto windowOn = [](int v) { return v >= 1 && v <= 6; };
+    auto fallbackOn = [](int v) { return v == 2 || v == 3 || v == 4; };
+    auto footOf = [](int v) { return v < 3 ? 0 : ((v - 3) % 2 == 0 ? 1 : 2); };
+    // the accepted set may not shrink: fallback variants and the foot-only variants (the window-only ones print their loss)
+    auto accCheck = [&](int v) { return fallbackOn(v) || v == 7 || v == 8; };
+    int acc[kV][6] = {}, inWin[kV] = {}, started[kV] = {}, rank[kV][3] = {}, outside[kV] = {};
+    int rowRank[kV][2][3] = {}; // row-order starts (foot key off) ranked against a left / right lead foot, for the report
+    int unjustified = 0;
     std::map<std::string, int> rejects[kV];
     for (const Item& it : items)
         for (int v = 0; v < kV; ++v)
         {
             Config cfg = g_baseCfg;
             cfg.wideVault = it.wide;
-            cfg.clampStartWindow = v > 0;
-            cfg.startWindowFallback = v > 1;
-            cfg.leadFootRow = v > 2;
+            cfg.clampStartWindow = windowOn(v);
+            cfg.startWindowFallback = fallbackOn(v);
+            cfg.leadFootRow = footOf(v) != 0;
             CapsuleState cs = it.c.c;
-            cs.leadFoot = static_cast<uint8_t>(v > 2 ? v - 2 : 0);
+            cs.leadFoot = static_cast<uint8_t>(footOf(v));
             const Plan p = PlanTraversal(aT, aF, it.c.o, cs, GameTweaks{}, cfg);
             if (p.result != StartResult::Ok || !p.montage)
             {
@@ -687,62 +694,72 @@ static void StartWindowAndFoot(const DecisionTable& aT, const TraversalFile& aF,
             const bool in = StartInWindow(p);
             inWin[v] += in ? 1 : 0;
             outside[v] += p.startOutsideWindow ? 1 : 0;
-            Check(!p.startOutsideWindow || v > 1, r + " " + it.c.tag + ": fallback flag without the fallback key");
-            if (v > 0 && !p.startOutsideWindow)
+            Check(!p.startOutsideWindow || fallbackOn(v), r + " " + it.c.tag + ": fallback flag without the fallback key");
+            if (windowOn(v) && !p.startOutsideWindow)
                 Check(in, r + " " + it.c.tag + ": start frame " + std::to_string(p.startFrame) + " of " + p.montage->name +
                               " outside the sampling range");
-            if (v < 3)
-                continue;
-            const uint8_t foot = MontageLeadFoot(p.montage->name);
-            if (foot == 0)
+            if (footOf(v) == 0)
             {
-                ++footNone[v];
+                for (uint8_t lf = 1; lf <= 2; ++lf)
+                    ++rowRank[v][lf - 1][StartFootRank(*p.montage, p.startFrame, lf)];
                 continue;
             }
-            if (foot == cs.leadFoot)
-            {
-                ++footMatch[v];
+            const int rk = StartFootRank(*p.montage, p.startFrame, cs.leadFoot);
+            ++rank[v][rk];
+            if (rk == 0)
                 continue;
-            }
-            ++footOther[v];
+            // a worse-ranked start is allowed only when no montage of the decision gives a better rank under the same start rule
             bool justified = true;
             for (const auto& name : p.decision.montages)
             {
-                if (MontageLeadFoot(name) != cs.leadFoot)
+                if (name == p.montage->name || !aF.Find(name))
                     continue;
                 Config f = cfg;
                 f.leadFootRow = false;
                 f.forceMontage = name;
                 // the same start rule as the chosen plan: in-window plans are compared with in-window plans (the window outranks the foot)
                 f.startWindowFallback = false;
-                f.clampStartWindow = !p.startOutsideWindow;
+                f.clampStartWindow = cfg.clampStartWindow && !p.startOutsideWindow;
                 const Plan q = PlanTraversal(aT, aF, it.c.o, cs, GameTweaks{}, f);
-                justified = justified && q.result != StartResult::Ok;
+                if (q.result == StartResult::Ok && q.montage && StartFootRank(*q.montage, q.startFrame, cs.leadFoot) < rk)
+                    justified = false;
             }
-            otherUnjustified += justified ? 0 : 1;
-            Check(justified, r + " " + it.c.tag + ": other-foot montage " + p.montage->name + " chosen while a lead-foot montage passes");
+            unjustified += justified ? 0 : 1;
+            Check(justified, r + " " + it.c.tag + ": " + p.montage->name + " (foot rank " + std::to_string(rk) +
+                                 ") chosen while a montage with a better start foot passes");
         }
-    const char* vn[kV] = {"keys off", "window only", "window + fallback", "window + fallback + left foot", "window + fallback + right foot"};
+    const char* vn[kV] = {"keys off",
+                          "window only",
+                          "window + fallback",
+                          "window + fallback + left foot",
+                          "window + fallback + right foot",
+                          "window only + left foot",
+                          "window only + right foot",
+                          "left foot",
+                          "right foot"};
     for (int v = 0; v < kV; ++v)
     {
         std::printf("%s start window [%s]: %d started, %d in range (%.1f %%), accepted High %d Mid %d Low %d vault %d wide %d low hurdle %d",
                     aRig, vn[v], started[v], inWin[v], 100.0 * inWin[v] / std::max(started[v], 1), acc[v][0], acc[v][1], acc[v][2],
                     acc[v][3], acc[v][4], acc[v][5]);
-        if (v > 1)
+        if (fallbackOn(v))
             std::printf(", fallback (start past the window) %d", outside[v]);
-        if (v > 2)
-            std::printf(", lead foot %d, other foot %d, no foot %d", footMatch[v], footOther[v], footNone[v]);
+        if (footOf(v) != 0)
+            std::printf(", start foot: lead %d, unknown %d, other %d", rank[v][0], rank[v][1], rank[v][2]);
+        else
+            std::printf(", start foot vs a left / right lead: lead %d / %d, unknown %d / %d, other %d / %d", rowRank[v][0][0],
+                        rowRank[v][1][0], rowRank[v][0][1], rowRank[v][1][1], rowRank[v][0][2], rowRank[v][1][2]);
         std::printf("\n");
-        for (int k = 0; k < 6 && v > 1; ++k)
+        for (int k = 0; k < 6 && accCheck(v); ++k)
             Check(acc[v][k] >= acc[0][k], r + " " + vn[v] + " class " + std::to_string(k) + ": " + std::to_string(acc[v][k]) +
                                                " accepted < " + std::to_string(acc[0][k]) + " with the keys off");
         if (g_diag)
             for (const auto& [k, n] : rejects[v])
                 std::printf("%s start window [%s]: rejected %d x %s\n", aRig, vn[v], n, k.c_str());
-        if (v > 2)
-            Check(footMatch[v] > 0, r + " " + vn[v] + ": no lead-foot montage chosen");
+        if (footOf(v) != 0)
+            Check(rank[v][0] > 0, r + " " + vn[v] + ": no start with the lead foot planted");
     }
-    Check(otherUnjustified == 0, r + ": lead foot ignored while a lead-foot montage passes");
+    Check(unjustified == 0, r + ": lead foot ignored while a montage with a better start foot passes");
 }
 
 static void LegacyIdentity(const DecisionTable& aT, const TraversalFile& aF, const char* aRig, int aRigIdx)

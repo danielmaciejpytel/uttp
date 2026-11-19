@@ -1722,6 +1722,47 @@ int main(int argc, char** argv)
               "8g task A reject: plan Rejected -> false at the event and on every detail-8 Step (trav-yield)",
               "result " + std::to_string(pr.lastResult) + " owns " + std::to_string(rejEvent ? 1 : 0) + " owned " + std::to_string(rejOwned) +
                   " pose " + std::to_string(rejPose) + " skip " + rejSkip);
+        // (b2) traversal start options: the event's lead foot reaches the planner. A walking climb (table decision, gate on) is fed
+        // with the lead foot forced left / right, the lead-foot option off and on (the plan is replaced before it starts); with the
+        // option on the start's foot rank is never worse than the row-order choice and the left foot (row order: other foot) improves.
+        // The live foot (no override) is one of 0 / 1 / 2 and is recorded with the plan.
+        {
+            motiondriver::TestForceTraversal("", true);
+            motiondriver::TraversalEvent we = ClimbEvent(0.6f, 1.0f);
+            we.speed = 1.5f;
+            int32_t rankOff[3] = {-1, -1, -1}, rankOn[3] = {-1, -1, -1}, footSeen[3] = {-1, -1, -1}, opts[3] = {-1, -1, -1};
+            std::string montOff[3], montOn[3];
+            for (int lf = 1; lf <= 2; ++lf)
+                for (int on = 0; on <= 1; ++on)
+                {
+                    motiondriver::SetTraversalStartOptions(false, on != 0);
+                    motiondriver::TestSetTraversalLeadFoot(lf);
+                    (void)motiondriver::FeedTraversal(we);
+                    const motiondriver::TraversalProbe pf = motiondriver::ProbeTraversal();
+                    (on ? rankOn : rankOff)[lf] = pf.footRank;
+                    (on ? montOn : montOff)[lf] = pf.montage;
+                    footSeen[lf] = pf.leadFoot;
+                    if (on)
+                        opts[lf] = pf.startOptions;
+                }
+            motiondriver::TestSetTraversalLeadFoot(-1);
+            motiondriver::SetTraversalStartOptions(true, true);
+            (void)motiondriver::FeedTraversal(we);
+            const motiondriver::TraversalProbe pl = motiondriver::ProbeTraversal();
+            motiondriver::SetTraversalStartOptions(false, false);
+            char fd[400];
+            std::snprintf(fd, sizeof fd, "left: off %s rank %d, on %s rank %d; right: off %s rank %d, on %s rank %d; foot seen %d / %d, "
+                                         "options %d / %d; live foot %d options %d",
+                          montOff[1].c_str(), rankOff[1], montOn[1].c_str(), rankOn[1], montOff[2].c_str(), rankOff[2], montOn[2].c_str(),
+                          rankOn[2], footSeen[1], footSeen[2], opts[1], opts[2], pl.leadFoot, pl.startOptions);
+            Check(footSeen[1] == 1 && footSeen[2] == 2 && opts[1] == 2 && opts[2] == 2 && pl.startOptions == 3 && pl.leadFoot >= 0 &&
+                      pl.leadFoot <= 2,
+                  "trav start options: the event's lead foot and the options reach the plan", fd);
+            Check(rankOn[1] >= 0 && rankOn[2] >= 0 && rankOn[1] <= rankOff[1] && rankOn[2] <= rankOff[2] &&
+                      rankOn[1] + rankOn[2] < rankOff[1] + rankOff[2],
+                  "trav lead foot: the start's foot rank is never worse than row order and better for one foot", fd);
+            motiondriver::TestForceTraversal(mantle, false);
+        }
         // (c) montage missing -> MontageFailed, false
         motiondriver::TestForceTraversal("AM_not_a_montage", false);
         (void)motiondriver::FeedTraversal(ClimbEvent(0.6f, 1.0f));
