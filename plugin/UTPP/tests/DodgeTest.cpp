@@ -270,6 +270,64 @@ int main(int argc, char** argv)
         Expect(same && clock && shown, "30 / 60 / 120 Hz: same clip, clip clock in time (kRate), shown for length / rate within the impulse latency");
     }
 
+    // ---- clip direction: the drawn heading that shows the clip along the impulse (impulse yaw - the sector's centre), the turn from
+    // the drawn heading, the turn cap, the target follows a sector change inside the settle window
+    {
+        const std::array<float, 4> len = {0.4f, 0.4f, 0.4f, 0.4f};
+        const auto vel = [](dodge::Input& aIn, float aYawDeg) {
+            aIn.velX = -std::sin(aYawDeg * 0.0174533f) * 10.0f;
+            aIn.velY = std::cos(aYawDeg * 0.0174533f) * 10.0f;
+        };
+        // standing feed, first dodge feed without velocity, impulse feed along aPushDeg: the pick frame
+        const auto pick = [&](dodge::DodgePlayer& aP, dodge::Input& aIn, float aPushDeg, float aDrawnDeg, float aCapDeg) {
+            aIn = dodge::Input{};
+            aIn.dt = 1.0f / 60.0f;
+            aIn.standingGround = true;
+            aIn.forwardClipMaxEntryMps = 3.5f;
+            aIn.drawnYawDeg = aDrawnDeg;
+            aIn.alignCapDeg = aCapDeg;
+            aP.Tick(aIn, len);
+            aIn.dodgeDetail = true;
+            aP.Tick(aIn, len);
+            vel(aIn, aPushDeg);
+            return aP.Tick(aIn, len);
+        };
+        const auto nearDeg = [](float a, float b) { return std::fabs(dodge::WrapDeg(a - b)) < 0.5f; };
+        dodge::Input in;
+        dodge::DodgePlayer p1, p2, p3, p4, p5, p6, p8, p9;
+        const dodge::Frame a = pick(p1, in, -90.0f, 0.0f, dodge::kAlignCapDeg);
+        const dodge::Frame b = pick(p2, in, -90.0f, 60.0f, dodge::kAlignCapDeg);
+        const dodge::Frame l = pick(p3, in, 120.0f, 0.0f, dodge::kAlignCapDeg);
+        const dodge::Frame bk = pick(p4, in, 180.0f, -20.0f, dodge::kAlignCapDeg);
+        std::printf("     clip direction: R %.1f / turn %.1f, R drawn 60: %.1f / %.1f, L %.1f / %.1f, B %.1f / %.1f\n", double(a.alignYawDeg),
+                    double(a.alignTurnDeg), double(b.alignYawDeg), double(b.alignTurnDeg), double(l.alignYawDeg), double(l.alignTurnDeg),
+                    double(bk.alignYawDeg), double(bk.alignTurnDeg));
+        Expect(a.start && a.sector == Sector::Right && nearDeg(a.alignYawDeg, 0.0f) && nearDeg(a.alignTurnDeg, 0.0f) &&
+                   b.sector == Sector::Right && b.alignValid && nearDeg(b.alignYawDeg, 0.0f) && nearDeg(b.alignTurnDeg, -60.0f) &&
+                   l.sector == Sector::Left && l.alignValid && nearDeg(l.alignYawDeg, 30.0f) && bk.sector == Sector::Back && bk.alignValid &&
+                   nearDeg(bk.alignYawDeg, 0.0f) && nearDeg(bk.alignTurnDeg, 20.0f) && nearDeg(dodge::SectorCentreDeg(Sector::ForwardRun), 0.0f),
+               "clip direction: the drawn heading with the clip along the impulse = impulse yaw - sector centre (R -90, L +90, B 180), turn from the drawn heading");
+        // within the impulse read's own error (kAlignDeadbandDeg) no turn: 0 and 8 deg kept, 12 deg turned
+        const dodge::Frame d8 = pick(p8, in, -90.0f, 8.0f, dodge::kAlignCapDeg);
+        const dodge::Frame d12 = pick(p9, in, -90.0f, 12.0f, dodge::kAlignCapDeg);
+        Expect(!a.alignValid && d8.start && !d8.alignValid && nearDeg(d8.alignTurnDeg, -8.0f) && d12.alignValid && nearDeg(d12.alignTurnDeg, -12.0f),
+               "clip direction: a turn within the impulse read's error (deadband) keeps the drawn heading");
+        const dodge::Frame c = pick(p5, in, -90.0f, 170.0f, dodge::kAlignCapDeg);
+        const dodge::Frame cWide = pick(p6, in, -90.0f, 170.0f, 180.0f);
+        Expect(c.start && c.sector == Sector::Right && !c.alignValid && nearDeg(c.alignTurnDeg, -170.0f) && cWide.alignValid,
+               "clip direction: past the turn cap (a 170 deg reversal) the drawn heading is kept; the cap is the input's");
+        // sector change inside the settle window: R picked, the next feed reads B past the hysteresis -> the target of B
+        dodge::DodgePlayer p7;
+        (void)pick(p7, in, -100.0f, 0.0f, dodge::kAlignCapDeg);
+        in.drawnYawDeg = -10.0f; // the drawn heading turned toward the first target
+        vel(in, -150.0f);
+        const dodge::Frame s = p7.Tick(in, len);
+        const dodge::Frame s2 = p7.Tick(in, len);
+        Expect(s.start && s.sector == Sector::Back && s.alignValid && nearDeg(s.alignYawDeg, 30.0f) && nearDeg(s.alignTurnDeg, 40.0f) && s2.active &&
+                   !s2.start && s2.alignValid && nearDeg(s2.alignYawDeg, 30.0f),
+               "clip direction: a sector change in the settle window sets the new sector's target; later clip feeds keep it");
+    }
+
     // ---- leaving the standing ground state hands back at once
     {
         dodge::DodgePlayer p;

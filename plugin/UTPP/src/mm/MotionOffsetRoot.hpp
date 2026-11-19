@@ -19,6 +19,8 @@
 //     17 cm in one frame, and the 0.30 m radius stopped it dead. With offsetAccel the change of the offset's velocity is bounded per
 //     second and its outward speed is braked to zero at the radius (v <= sqrt(2 a (R - r))); the rest of a capsule jump moves the body
 //     with the capsule. The animation's own smooth acceleration (starts) is far below the bound and passes unchanged.
+//  4. Yaw alignment (Step::yawAlign, opt-in): an in-place clip drawn in the visual frame (the ground dodge) turns the yaw offset toward
+//     a given target at a bounded rate, so the clip moves along the capsule's travel. Translation is not touched.
 // (RootMontage.hpp: a reload that began on the spot is not montage once V moves.)
 #pragma once
 #include "MMMath.hpp"
@@ -89,6 +91,10 @@ struct Step
     float offsetAccel = 0.f;
     // Radius of the translation offset (m). Non-finite / negative = kMaxOffset; 0 = the visual root stays on the capsule.
     float maxOffset = kMaxOffset;
+    // Yaw alignment (header item 4): the yaw offset moves toward yawAlignTarget (rad, visual minus capsule) at half-life yawAlignHalfLife,
+    // at most yawAlignMaxRate (rad/s) per second. Rotation only; the moving-aim lock keeps priority.
+    bool yawAlign = false;
+    float yawAlignTarget = 0.f, yawAlignHalfLife = .05f, yawAlignMaxRate = 0.f;
 };
 struct State
 {
@@ -292,6 +298,14 @@ class OffsetRoot
                                                      -maxRate * s.dt, maxRate * s.dt);
                 next.yaw = m.yaw + correction; // ADS while moving: the root follows the actor at once (the capsule turn is not subtracted)
             }
+        }
+        else if (s.yawAlign && std::isfinite(s.yawAlignTarget) && std::isfinite(s.yawAlignMaxRate) && s.yawAlignMaxRate > 0)
+        {
+            // from the accumulated offset (the visual heading kept in the world, as below) toward the target, the world turn bounded
+            const float base = math::WrapAngle(m.yaw + s.animationYawDelta - s.capsuleYawDelta);
+            const float lim = s.yawAlignMaxRate * s.dt;
+            const float step = std::clamp(math::WrapAngle(s.yawAlignTarget - base) * DampingAlpha(s.yawAlignHalfLife, s.dt), -lim, lim);
+            next.yaw = math::WrapAngle(base + step);
         }
         else if (s.airFollow && std::isfinite(s.lockMaxRate) && s.lockMaxRate > 0)
         {

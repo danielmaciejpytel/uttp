@@ -1045,7 +1045,7 @@ add_executable(utpp_loco_dodge_test tests/DodgeTest.cpp src/mm/Dodge.hpp src/mm/
 target_compile_features(utpp_loco_dodge_test PRIVATE cxx_std_20)
 target_compile_options(utpp_loco_dodge_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_loco_dodge_test COMMAND utpp_loco_dodge_test ${_utpp_dodge_args})
-foreach(_utpp_dodge_mut 1 2 3 4 5 6)
+foreach(_utpp_dodge_mut 1 2 3 4 5 6 7)
   add_executable(utpp_loco_dodge_mut${_utpp_dodge_mut} tests/DodgeTest.cpp src/mm/Dodge.hpp)
   target_compile_features(utpp_loco_dodge_mut${_utpp_dodge_mut} PRIVATE cxx_std_20)
   target_compile_options(utpp_loco_dodge_mut${_utpp_dodge_mut} PRIVATE ${UTPP_WARNINGS} /EHsc)
@@ -1058,10 +1058,12 @@ set_tests_properties(utpp_loco_dodge_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FA
 set_tests_properties(utpp_loco_dodge_mut4 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL rejected: a database bone without a pose bone")
 set_tests_properties(utpp_loco_dodge_mut5 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL impulse read on the recorded first impulse feeds")
 set_tests_properties(utpp_loco_dodge_mut6 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL corrected push, facing forward")
+set_tests_properties(utpp_loco_dodge_mut7 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL clip direction: past the turn cap")
 # Dodge clips through the motion driver on recorded dodges (fixtures derived from local recordings: not shipped, live in Build/test-data;
 # the tests exist only where they do). Driver mutations 1 (the clip is never shown) and 2 (the clip's own upper body is shown) must
 # FAIL. The rate builds (EXCLUDE_FROM_ALL) print
-# the measurements at clip rates 1.0 / 1.25 and entry blends 0.08 / 0.15 s for comparison with the default.
+# the measurements at clip rates 1.0 / 1.25 and entry blends 0.08 / 0.15 s for comparison with the default; align_hl10 (clip direction
+# turn at half-life 0.10 s) and align_off (no clip direction turn) likewise.
 set(UTPP_DODGE_FIXTURE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../Build/test-data/dodge" CACHE PATH "Dodge clips + recorded dodge feed windows")
 set(_utpp_dodge_motion_data "${CMAKE_CURRENT_SOURCE_DIR}/../../../Data")
 if(UTPP_MOTION_DB_TEST_FILE)
@@ -1071,7 +1073,7 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   file(TO_NATIVE_PATH "${_utpp_dodge_motion_data}" _utpp_dodge_motion_data_native)
   file(TO_NATIVE_PATH "${UTPP_DODGE_FIXTURE_DIR}" _utpp_dodge_fixture_native)
   file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/data" _utpp_dodge_tracked_native)
-  foreach(_utpp_dd_variant test mut1 mut2 mut3 mut4 rate100 rate125 blend080 blend150)
+  foreach(_utpp_dd_variant test mut1 mut2 mut3 mut4 mut5 mut6 rate100 rate125 blend080 blend150 align_hl10 align_off)
     set(_utpp_dd_name utpp_loco_dodge_driver_${_utpp_dd_variant})
     add_executable(${_utpp_dd_name} tests/MotionDriverDodgeTest.cpp src/MotionDriver.cpp src/MotionDriver.hpp src/MotionHost.hpp src/mm/Dodge.hpp
                    src/mm/MotionAdapter.hpp src/mm/MotionPose.hpp src/mm/ChooserMatcher.hpp src/mm/MotionDatabase.hpp src/mm/TraversalFile.hpp)
@@ -1083,12 +1085,16 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   target_compile_definitions(utpp_loco_dodge_driver_mut2 PRIVATE UTPP_DODGE_DRIVER_MUTATION=2)
   target_compile_definitions(utpp_loco_dodge_driver_mut3 PRIVATE UTPP_DODGE_GAIT_MUTATION=1)
   target_compile_definitions(utpp_loco_dodge_driver_mut4 PRIVATE UTPP_DODGE_DRIVER_MUTATION=3)
+  target_compile_definitions(utpp_loco_dodge_driver_mut5 PRIVATE UTPP_DODGE_DRIVER_MUTATION=4)
+  target_compile_definitions(utpp_loco_dodge_driver_mut6 PRIVATE UTPP_DODGE_DRIVER_MUTATION=5)
+  target_compile_definitions(utpp_loco_dodge_driver_align_hl10 PRIVATE UTPP_DODGE_ALIGN_HALF_LIFE=0.10f)
+  target_compile_definitions(utpp_loco_dodge_driver_align_off PRIVATE UTPP_DODGE_ALIGN=0)
   target_compile_definitions(utpp_loco_dodge_driver_rate100 PRIVATE UTPP_DODGE_RATE=1.0f)
   target_compile_definitions(utpp_loco_dodge_driver_rate125 PRIVATE UTPP_DODGE_RATE=1.25f)
   target_compile_definitions(utpp_loco_dodge_driver_blend080 PRIVATE UTPP_DODGE_BLEND_IN=0.08f)
   target_compile_definitions(utpp_loco_dodge_driver_blend150 PRIVATE UTPP_DODGE_BLEND_IN=0.15f)
   set_target_properties(utpp_loco_dodge_driver_rate100 utpp_loco_dodge_driver_rate125 utpp_loco_dodge_driver_blend080 utpp_loco_dodge_driver_blend150
-                        PROPERTIES EXCLUDE_FROM_ALL TRUE)
+                        utpp_loco_dodge_driver_align_hl10 utpp_loco_dodge_driver_align_off PROPERTIES EXCLUDE_FROM_ALL TRUE)
   # third argument: the tracked scenario presses (tests/data/dodge_push_<body>.feed); mutation 3 (no dodge gait hold) must FAIL
   add_test(NAME utpp_loco_dodge_driver_test COMMAND utpp_loco_dodge_driver_test "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
            "${_utpp_dodge_tracked_native}")
@@ -1105,6 +1111,14 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   add_test(NAME utpp_loco_dodge_driver_mut4 COMMAND utpp_loco_dodge_driver_mut4 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
            "${_utpp_dodge_tracked_native}")
   set_tests_properties(utpp_loco_dodge_driver_mut4 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*show the actor's sector")
+  # mutation 5 (the drawn heading is not turned toward the clip direction) must FAIL the clip direction check, mutation 6 (no turn cap)
+  # the turn cap check
+  add_test(NAME utpp_loco_dodge_driver_mut5 COMMAND utpp_loco_dodge_driver_mut5 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
+           "${_utpp_dodge_tracked_native}")
+  set_tests_properties(utpp_loco_dodge_driver_mut5 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*clips within the turn cap move along the impulse")
+  add_test(NAME utpp_loco_dodge_driver_mut6 COMMAND utpp_loco_dodge_driver_mut6 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
+           "${_utpp_dodge_tracked_native}")
+  set_tests_properties(utpp_loco_dodge_driver_mut6 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*past the turn cap keep the drawn heading")
 endif()
 
 # ---- pelvis stage of the foot locker (mm/PelvisPlacement.hpp), 30 / 60 / 144 Hz ----

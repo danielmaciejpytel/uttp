@@ -658,9 +658,15 @@ int AirMut() { return UTPP_MOTION_DRIVER_AIR_MUTATION; } // a call, not a consta
 #define UTPP_MOTION_DRIVER_TRAV_MUTATION 0
 #endif
 // Dodge clip mutation builds only (UTPP_DODGE_DRIVER_MUTATION=k); undefined / 0 = production. 1 = the clip is never shown,
-// 2 = the clip's own upper body is shown (no held upper body), 3 = the sector is picked against the drawn heading (not the actor yaw).
+// 2 = the clip's own upper body is shown (no held upper body), 3 = the sector is picked against the drawn heading (not the actor yaw),
+// 4 = the drawn heading is not turned toward the clip direction, 5 = the clip direction turn has no cap.
 #ifndef UTPP_DODGE_DRIVER_MUTATION
 #define UTPP_DODGE_DRIVER_MUTATION 0
+#endif
+// Clip direction of the ground dodge (mm/Dodge.hpp Frame::alignYawDeg): 1 = while the clip plays the drawn heading turns (rotation only)
+// toward the heading that shows the clip along the impulse, within dodge::kAlignCapDeg; 0 = the drawn heading is kept.
+#ifndef UTPP_DODGE_ALIGN
+#define UTPP_DODGE_ALIGN 1
 #endif
 // UTPP-MOTION SEAM motionfix: mutation builds only (UTPP_MOTION_DRIVER_FIX_MUTATION=k); undefined / 0 = production.
 // 1 the Locomotion world target is not forwarded to MotionFeed (pre-fix: mv rotated by the camera yaw), 2 the MOTION trace ignores
@@ -5715,6 +5721,10 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         di.velX = std::isfinite(aRaw.velWorld[0]) ? aRaw.velWorld[0] : 0.0f;
         di.velY = std::isfinite(aRaw.velWorld[1]) ? aRaw.velWorld[1] : 0.0f;
         di.facingYawDeg = DodgeFacingYawDeg(b, aRaw, rootWanted);
+        di.drawnYawDeg = b.root.PreviousVisualWorldYaw() / integ::kDegToRad;
+#if UTPP_DODGE_DRIVER_MUTATION == 5
+        di.alignCapDeg = 360.0f; // mutation 5: no cap
+#endif
         // the game's standing walk / run speeds (m/s): faster than halfway between them is a run
         di.forwardClipMaxEntryMps = 0.5f * (mc.gameStandPoints[0] + mc.gameStandPoints[1]);
         dodgeFr = g_dodgeSt.player.Tick(di, b.dodgeClips.length);
@@ -5739,15 +5749,18 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         // in over dodge::kBlendOutS
         if (g_trace && g_log && ((dodgeFr.active && dodgeFr.start) || dodgeFr.handback))
         {
-            char line[192];
+            char line[256];
             if (dodgeFr.handback)
                 std::snprintf(line, sizeof line, "UTPP MOTIONDODGE end t=%.3f blend=%.2f", static_cast<double>(g_traceClock + dt),
                               static_cast<double>(dodge::kBlendOutS));
-            else
-                std::snprintf(line, sizeof line, "UTPP MOTIONDODGE start t=%.3f sector=%s push=%.1f rel=%.1f facing=%.1f entry=%.2f",
+            else // drawn = the drawn heading at the start, turn = toward the clip direction, align = 1 when turned (within the cap)
+                std::snprintf(line, sizeof line,
+                              "UTPP MOTIONDODGE start t=%.3f sector=%s push=%.1f rel=%.1f facing=%.1f entry=%.2f drawn=%.1f turn=%.1f align=%d",
                               static_cast<double>(g_traceClock + dt), dodge::SectorName(dodgeFr.sector),
                               static_cast<double>(g_dodgeSt.pushPick.pushYawDeg), static_cast<double>(g_dodgeSt.pushPick.pushRelDeg),
-                              static_cast<double>(di.facingYawDeg), static_cast<double>(g_dodgeSt.pushPick.entrySpeed));
+                              static_cast<double>(di.facingYawDeg), static_cast<double>(g_dodgeSt.pushPick.entrySpeed),
+                              static_cast<double>(di.drawnYawDeg), static_cast<double>(dodgeFr.alignTurnDeg),
+                              UTPP_DODGE_ALIGN != 0 && UTPP_DODGE_DRIVER_MUTATION != 4 && dodgeFr.alignValid ? 1 : 0);
             g_log(line);
         }
     }
@@ -5922,6 +5935,17 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             (shooterModeRest && cs.movementMode == 0 && (cs.stance == 0 || cs.stance == 1) && !b.map.slideActive);
 #endif
         rootEvaluation.input.restTurnPlaying = graph.tipSteering; // the current database is a TurnInPlace one: its clip owns the yaw
+#if UTPP_DODGE_ALIGN != 0 && UTPP_DODGE_DRIVER_MUTATION != 4
+        // ground dodge clip: the drawn heading turns toward the clip direction (mm/Dodge.hpp Frame::alignYawDeg; the moving-aim lock of
+        // ADS / Shooter mode keeps priority in the offset root)
+        if (dodgeFr.active && dodgeFr.alignValid)
+        {
+            rootEvaluation.input.yawAlign = true;
+            rootEvaluation.input.yawAlignWorld = dodgeFr.alignYawDeg * integ::kDegToRad;
+            rootEvaluation.input.yawAlignHalfLife = dodge::kAlignHalfLifeS;
+            rootEvaluation.input.yawAlignMaxRate = dodge::kAlignMaxRateDeg * integ::kDegToRad;
+        }
+#endif
         rootEvaluation.haveActorAim = in.haveAim && in.haveActorAimPoint;
         rootEvaluation.actorAim = in.actorAimPoint;
         in.preOverlay = &PrepareRootOverlay;
