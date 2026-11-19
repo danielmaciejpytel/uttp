@@ -9,6 +9,9 @@
 //  - 60 Hz: the planted toe path over the turn stays bounded: largest world path of one planted toe (drawn root: capsule + root offset)
 //    during 1 s after the flick <= 200 cm running / 400 cm sprinting. This fixture reverses the capsule at 60 m/s^2, so even a turn that agrees
 //    with its clip leaves a long path (64-340 cm here); a body turning against the clip measured 232-267 cm running and 500-529 cm sprinting.
+// Standing start at exactly 180 deg (body yaw 0, stick to 180 from standstill), same rates, both bodies: the tie stays out of a standing
+// start (no tie episode, no pending tie during 1 s after the press), the body turns the way of the reface start
+// (MotionSetFrame::startTurnDirection) and reaches the target heading within 1 s.
 // Mutant UTPP_REVERSAL_TIE_MUTATION=1 (the body turn takes the shorter way at the tie) MUST print "FAIL ... body turns with the clip".
 // Usage: utpp_bodyturn_reversal_tie_host_test <driver-data> <basedb>
 #define main UnusedIntegrationMain
@@ -26,6 +29,7 @@ struct TieFrame
 {
     bool have = false, root = false;
     uint8_t clipClass = 0;
+    int startDir = 0; // reface start direction of the frame (+1 left, -1 right, 0 none; traversal frames ignored)
     float off[3] = {0, 0, 0}; // root offset of the drawn root (x, y in m, capsule axes; yaw in rad)
 };
 TieFrame g_tf;
@@ -34,6 +38,7 @@ bool TieFrameHook(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost
     const bool ok = WFrame(aBaseGameIndex, aBaseBones, aOut);
     g_tf.have = ok;
     g_tf.clipClass = ok ? aOut.clipClass : 0;
+    g_tf.startDir = ok && !aOut.travFrame ? aOut.startTurnDirection : 0;
     g_tf.root = ok && aOut.providedRoot;
     g_tf.off[0] = g_tf.root ? aOut.rootOffsetX : 0.0f;
     g_tf.off[1] = g_tf.root ? aOut.rootOffsetY : 0.0f;
@@ -195,6 +200,96 @@ TieRun RunTie(const Rig& aRig, const mm::motion::MotionDatabase& aDb, const int3
     out.ok = true;
     return out;
 }
+struct StandRun
+{
+    bool ok = false;
+    int startDir = 0;          // first reface start direction seen after the press (+1 left, -1 right)
+    bool startSegment = false; // a start segment clip class was shown during 1 s after the press
+    uint64_t tiesBefore = 0, tiesAfter = 0;
+    bool pendingSeen = false; // a pending tie was seen during 1 s after the press
+    float bodyTurnDeg = 0;    // unwrapped body yaw change from the press until the error is below 20 deg (deg, + = left)
+    float yawAt1s = 0;        // body yaw 1 s after the press
+};
+
+StandRun RunStandingStart(const Rig& aRig, float aHz)
+{
+    StandRun out;
+    if (!ResetBase(aRig))
+        return out;
+    motionhost::SetOffsetRoot(true);
+    motionhost::SetHoldPose(true);
+    motiondriver::SetEnabled(true);
+    const float dt = 1.0f / aHz;
+    const float speed = 3.85f;
+    const int press = int(aHz * 1.5f), total = press + int(aHz * 1.5f);
+    motionhost::FeedInput f;
+    f.tppActive = true;
+    f.haveAir = true;
+    f.onGround = true;
+    f.distToGround = 0;
+    f.psmBlock = mm::integ::kPsmWeaponKnown;
+    float yaw = 0, vx = 0, vy = 0;
+    bool turnDone = false;
+    for (int i = 0; i < total; ++i)
+    {
+        const bool moving = i >= press;
+        const float target = 180.0f; // camera yaw 0, body yaw exactly 0: the stick is pressed straight behind
+        const float dvx = (moving ? -std::sin(target * kDegT) * speed : 0.0f) - vx, dvy = (moving ? std::cos(target * kDegT) * speed : 0.0f) - vy;
+        const float dv = std::hypot(dvx, dvy), lim = 8.0f * dt;
+        if (dv > lim)
+        {
+            vx += dvx * lim / dv;
+            vy += dvy * lim / dv;
+        }
+        else
+        {
+            vx += dvx;
+            vy += dvy;
+        }
+        f.dt = dt;
+        f.velWorld[0] = vx;
+        f.velWorld[1] = vy;
+        f.move[0] = 0;
+        f.move[1] = moving ? 1.0f : 0.0f;
+        f.cameraYawDeg = 0;
+        f.haveTarget = moving;
+        f.targetYawDeg = target;
+        f.locoState = mm::integ::kLocoStand;
+        f.yawAheadDeg = std::numeric_limits<float>::quiet_NaN();
+        float cmdStep = 0;
+        if (motionhost::BodyTurnActive())
+            cmdStep = WrapT(motionhost::BodyYawCommand(yaw, yaw) - yaw);
+        f.playerYawDeg = yaw;
+        if (i == press)
+            motionhost::TestReversalTieState(&out.tiesBefore, nullptr);
+        motiondriver::FeedAirFromInput(f);
+        g_log = {};
+        g_tf = {};
+        motionhost::Feed(f);
+        if (moving && i < press + int(aHz * 1.0f))
+        {
+            bool pending = false;
+            motionhost::TestReversalTieState(nullptr, &pending);
+            out.pendingSeen = out.pendingSeen || pending;
+            if (out.startDir == 0 && g_tf.startDir != 0)
+                out.startDir = g_tf.startDir;
+            out.startSegment = out.startSegment || (g_tf.have && mm::steer::IsStartSegmentClass(g_tf.clipClass));
+        }
+        if (moving && !turnDone)
+        {
+            out.bodyTurnDeg += cmdStep;
+            turnDone = std::fabs(WrapT(180.0f - (yaw + cmdStep))) < 20.0f;
+        }
+        yaw = WrapT(yaw + cmdStep); // game order: the command is applied after the feed
+        if (i == press + int(aHz * 1.0f))
+        {
+            out.yawAt1s = yaw;
+            motionhost::TestReversalTieState(&out.tiesAfter, nullptr);
+        }
+    }
+    out.ok = true;
+    return out;
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -257,6 +352,22 @@ int main(int argc, char** argv)
                 if (hz == 60.0f)
                     Check(r.lockPathCm <= (sprint ? 400.0f : 200.0f), tag + ": planted toe lock path over the turn bounded (200 / 400 cm)", d);
             }
+        for (float hz : {60.0f, 30.0f, 200.0f})
+        {
+            const StandRun r = RunStandingStart(rig, hz);
+            char d[384];
+            std::snprintf(d, sizeof d,
+                          "%.0f Hz standing start 180 deg: start direction %+d, start segment shown %d, tie episodes %llu -> %llu, pending seen %d, "
+                          "body turn %.1f deg, yaw 1 s after the press %.1f deg",
+                          double(hz), r.startDir, int(r.startSegment), static_cast<unsigned long long>(r.tiesBefore),
+                          static_cast<unsigned long long>(r.tiesAfter), int(r.pendingSeen), double(r.bodyTurnDeg), double(r.yawAt1s));
+            std::printf("INFO %s %s\n", bd.body, d);
+            const std::string tag = std::string(bd.body) + " " + std::to_string(int(hz)) + " Hz standing start 180";
+            Check(r.ok && r.startDir != 0, tag + ": fixture - a reface start with a turn direction plays after the press", d);
+            Check(r.tiesAfter == r.tiesBefore && !r.pendingSeen, tag + ": no reversal tie in a standing start", d);
+            Check(float(r.startDir) * r.bodyTurnDeg > 0.0f, tag + ": body turns the way of the reface start", d);
+            Check(std::fabs(WrapT(r.yawAt1s - 180.0f)) <= 20.0f, tag + ": the body reaches the target heading within 1 s", d);
+        }
     }
     motiondriver::SetEnabled(false);
     motiondriver::Shutdown();
