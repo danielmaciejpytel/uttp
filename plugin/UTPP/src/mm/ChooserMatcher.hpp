@@ -614,6 +614,21 @@ struct MatcherConfig
     // otherwise handed the finished turn to a loop one to seven feeds before the next tap picked the next turn (two changes for one
     // tap). 0 = the commit ends at the turn end.
     float turnCommitTailS = 0.2f;
+    // turnFootPhase: a jump into a moving turn / pivot clip (steer::IsPivot / IsMoveTurn with an authored root turn, MoveTurnSign) on a
+    // reversal while moving on the stand ground is re-ranked inside the winner's database among the rows of the same turn direction, with
+    // the pose channels of the query read from the shown pose (SetShownPoseHistory) instead of the database mean. Without it the pick on a
+    // database switch (stop / loop -> pivots) had no pose information: the foot (_Lfoot / _Rfoot) and the entry time of the turn were
+    // chosen by the trajectory alone, whatever foot was planted or swinging in the shown pose. The turn direction of the trajectory
+    // winner is kept (the body turn follows it). It runs only when it is on and the caller hands a shown pose (SetShownPoseHistory); the
+    // motion driver switches both with motiondriver::SetTurnFootPhase (off by default, SetTurnFootPhase below). false = off.
+    // The selection guards after the search compare the re-ranked row by its cost under the normal query, as every other candidate.
+    // The re-ranked row is refused (the trajectory winner stays) when it enters later in the winner's clip, or when the winner's authored
+    // root turn starts within turnFootHorizonS and the row's does not: the procedural steering of the blend stack then predicts no
+    // authored turn over its target time and pulls the drawn root the short way round, against the turn.
+    bool turnFootPhase = false;
+    // turnFootHorizonS: look-ahead of that authored-turn check (s) = the blend stack's steering target time (MotionBlendStack::
+    // SteeringTargetTime, 0.5 s in the mod).
+    float turnFootHorizonS = 0.5f;
     // downshiftDeferS: for this long after any gait downshift while moving (seconds) the edge does not interrupt the playing clip (it is
     // delivered once afterwards) and a Run_to_Walk transition is not picked over the continuing clip. A stick falling through the Walk
     // band to a release showed the transition for one feed before the Stop; a release within this time picks its Stop directly. A
@@ -641,6 +656,10 @@ struct MatcherConfig
 #endif
 #ifndef UTPP_FOOTSINK_MUTATION
 #define UTPP_FOOTSINK_MUTATION 0
+#endif
+// Offline mutation switch of MatcherConfig::turnFootPhase (TurnFootPhaseTest builds a mutated copy): 1 = no re-rank of the turn jump.
+#ifndef UTPP_TURNFOOT_MUTATION
+#define UTPP_TURNFOOT_MUTATION 0
 #endif
 
 struct BlendRequest
@@ -693,6 +712,9 @@ struct MatchResult
     float stageSelectUs = 0.0f;
     bool airFallBias = false; // motionfix item 5: the fall bias was applied on this update
     bool cancelledStartSupportAllowed = false;
+    // MatcherConfig::turnFootPhase on this update: 0 = not run, 1 = the re-rank kept the trajectory winner, 2 = the re-ranked row
+    // replaced it, 3 = a different re-ranked row was refused (later entry / turn outside the steering look-ahead)
+    uint8_t turnFootPhase = 0;
 };
 
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -1849,6 +1871,63 @@ public:
             }
         }
         res.searched = true;
+        // MatcherConfig::turnFootPhase: re-rank a moving turn / pivot jump on a reversal by the shown pose, same turn direction only
+#if UTPP_TURNFOOT_MUTATION != 1
+        if (m_cfg.turnFootPhase && m_shownHist && m_shownHist->numSamples >= 2 && bestDb >= 0 && !bestIsCont &&
+            !aForce && aState.isPivoting && aState.movementMode == 0 && aState.movementState == 1 && aState.stance == 0)
+        {
+            const uint32_t d = static_cast<uint32_t>(bestDb);
+            const DatabaseRecord& D = db.Db(d);
+            const int sign = MoveTurnSign(static_cast<int32_t>(db.Entry(db.Row(D.firstRow + static_cast<uint32_t>(bestRow)).entry).clip));
+            if (sign != 0)
+            {
+                const PoseHistory* const callerHist = m_hist;
+                m_hist = m_shownHist;
+                BuildQuery(d, true, allowLastPose);
+                MarkExcluded(d, startTurnDirection);
+                for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+                {
+                    const EntryRecord& en = db.Entry(e);
+                    if (en.numRows && MoveTurnSign(static_cast<int32_t>(en.clip)) != sign)
+                        std::memset(m_excluded.data() + (en.firstRow - D.firstRow), 1, en.numRows);
+                }
+                const MotionSearchResult r = m_cfg.useAabb ? db.SearchAabb(d, m_query.data(), m_excluded.data())
+                                                           : db.SearchLinear(d, m_query.data(), m_excluded.data());
+                ClearExcluded(d, 1);
+                m_hist = callerHist;
+                res.rowsEvaluated += r.rowsEvaluated;
+                res.turnFootPhase = 1;
+                if (r.localRow >= 0 && r.localRow != bestRow)
+                {
+                    res.turnFootPhase = 3;
+                    const RowRecord& win = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
+                    const RowRecord& alt = db.Row(D.firstRow + static_cast<uint32_t>(r.localRow));
+                    const uint32_t winClip = db.Entry(win.entry).clip, altClip = db.Entry(alt.entry).clip;
+                    // authored root turn from the row's frame over the steering look-ahead (rad)
+                    const auto turnAhead = [&](const RowRecord& aRow, uint32_t aClip) {
+                        const MotionClipRecord& cl = db.Clip(aClip);
+                        const float fps = db.Header().fps > 0.0f ? db.Header().fps : 30.0f;
+                        const uint32_t end = std::min(aRow.frame + static_cast<uint32_t>(m_cfg.turnFootHorizonS * fps + 0.5f), cl.firstFrame + cl.numFrames);
+                        double sum = 0.0;
+                        for (uint32_t f = aRow.frame; f < end; ++f)
+                            sum += db.Root(f).dyaw;
+                        return static_cast<float>(std::fabs(sum));
+                    };
+                    const float minTurn = math::kPi / 180.0f; // the steering's prediction threshold (1 deg)
+                    const bool later = altClip == winClip && alt.frame > win.frame;
+                    const bool turnOut = turnAhead(alt, altClip) <= minTurn && turnAhead(win, winClip) > minTurn;
+                    if (!later && !turnOut)
+                    {
+                        // the guards below compare bestCost with the continuing cost of the normal query: the row's normal-query cost
+                        BuildQuery(d, true, allowLastPose);
+                        bestRow = r.localRow;
+                        bestCost = db.RowCost(d, static_cast<uint32_t>(r.localRow), m_query.data()) + alt.costAddend;
+                        res.turnFootPhase = 2;
+                    }
+                }
+            }
+        }
+#endif
         const auto tSelect = std::chrono::steady_clock::now();
         res.stageQueryUs = std::chrono::duration<float, std::micro>(queryTime).count();
         res.stageSearchUs = std::chrono::duration<float, std::micro>(tSelect - tSearch - queryTime).count();
@@ -2134,6 +2213,13 @@ public:
     // Raw (un-normalized) query of database d built by the last BuildQuery (test access).
     const float* RawQuery() const { return m_raw.data(); }
     const float* NormalizedQuery() const { return m_query.data(); }
+
+    // Shown pose for the MatcherConfig::turnFootPhase re-rank (the published pose of the last feeds; nullptr = none). Read by the next
+    // Update only; the normal search keeps the history given to Update.
+    void SetShownPoseHistory(const PoseHistory* aHist) { m_shownHist = aHist; }
+    // MatcherConfig::turnFootPhase at run time (the motion driver's SetTurnFootPhase); takes effect on the next Update.
+    void SetTurnFootPhase(bool aOn) { m_cfg.turnFootPhase = aOn; }
+    bool TurnFootPhase() const { return m_cfg.turnFootPhase; }
 
     // Sets the trajectory / pose history read by BuildQuery outside Update (test access; pointers must stay valid).
     void SetQueryInputs(const TrajSample* aTraj, uint32_t aNumTraj, const PoseHistory* aHist)
@@ -3003,6 +3089,7 @@ private:
     const TrajSample* m_traj = nullptr;
     uint32_t m_numTraj = 0;
     const PoseHistory* m_hist = nullptr;
+    const PoseHistory* m_shownHist = nullptr; // SetShownPoseHistory
 };
 
 } // namespace utpp::mm::motion

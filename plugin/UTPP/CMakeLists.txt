@@ -1187,6 +1187,22 @@ if(DEFINED _utpp_mdmotion_data_native)
   endforeach()
   set_tests_properties(utpp_bodyturn_reversal_tie_host_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*body turns with the clip")
 endif()
+# ---- turn foot phase: a 180 deg stick flip at each point of the run / sprint cycle picks its turn clip by the shown pose, same turn
+# direction (real host + driver, tests/TurnFootPhaseTest.cpp). Mutant TURNFOOT 1 = no re-rank; it MUST print its FAIL line.
+if(DEFINED _utpp_mdmotion_data_native)
+  foreach(_v "test;0" "mut1;1")
+    list(GET _v 0 _tag)
+    list(GET _v 1 _mut)
+    add_executable(utpp_mm_loco_turn_foot_phase_${_tag} tests/TurnFootPhaseTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+    target_compile_features(utpp_mm_loco_turn_foot_phase_${_tag} PRIVATE cxx_std_20)
+    target_compile_options(utpp_mm_loco_turn_foot_phase_${_tag} PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_mm_loco_turn_foot_phase_${_tag} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV
+                               UTPP_TURNFOOT_MUTATION=${_mut})
+    target_link_libraries(utpp_mm_loco_turn_foot_phase_${_tag} PRIVATE bcrypt)
+    add_test(NAME utpp_mm_loco_turn_foot_phase_${_tag} COMMAND utpp_mm_loco_turn_foot_phase_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+  endforeach()
+  set_tests_properties(utpp_mm_loco_turn_foot_phase_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*turn clip enters on the shown foot phase")
+endif()
 
 # ---- ctest labels (area / mutation / base / slow); keep this LAST so every test above is labelled ----
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/labels.cmake)

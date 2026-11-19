@@ -14,6 +14,8 @@
 // --body man replays with the male motion database and rig (default: woman); the clip dump (--clips) is always the woman database.
 // --history 1 turns the live pose history on (mm/LivePoseHistory.hpp; default off as in the game): the published pose after the leg
 // tail is fed back to the next search through the same host hook the game uses.
+// --turn-foot-phase 0|1 switches the turn foot-phase re-rank (MatcherConfig::turnFootPhase; default off as in the game); a TURNFOOT line
+// reports the reversal searches that received the shown pose.
 // Off-by-default options of the runtime path (each absent = the build default, bit for bit):
 //   --steering h,t      blend stack steering half-life / animation lookahead (s), e.g. 0.4,2.0
 //   --signals N         per-bone root-motion signals: bit 0 root on the Root weight, bit 1 contacts on the leg weights
@@ -332,6 +334,7 @@ int main(int argc, char** argv)
     float from = -1e30f, to = 1e30f;
     std::string settingsLog;
     bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
+    int turnFootPhase = -1; // -1 = build default
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1; // -1 = not passed (the settings log / build default)
@@ -353,6 +356,8 @@ int main(int argc, char** argv)
             man = std::strcmp(argv[i + 1], "man") == 0;
         else if (std::strcmp(argv[i], "--history") == 0)
             liveHistory = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--turn-foot-phase") == 0)
+            turnFootPhase = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--steering") == 0)
         {
             stackOverrides.steering = std::sscanf(argv[i + 1], "%f,%f", &stackOverrides.halfLife, &stackOverrides.targetTime) == 2;
@@ -518,6 +523,8 @@ int main(int argc, char** argv)
         motiondriver::SetStrideWarp(strideWarp != 0);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
+    if (turnFootPhase >= 0)
+        motiondriver::SetTurnFootPhase(turnFootPhase != 0);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
     motionhost::TestSetPelvisPlacement(pelvis);
     // --qpc-feed: feed time t -> QueryPerformanceCounter ticks (offset by 1 s so the first stamp is not 0, which the host reads as unset)
@@ -876,6 +883,7 @@ int main(int argc, char** argv)
                     name.c_str(), secs, clipChanges / std::max(1e-6, secs), ikCorrMax, pct(corrCm, 0.95), turns,
                     turns ? procTurnsSum / turns : 0.0, capSum > 0 ? procSum / capSum : 0.0, pct(feedUs, 0.5), pct(feedUs, 0.95),
                     static_cast<unsigned long long>(liveHistorySearches));
+        std::printf("TURNFOOT run=%s searches=%llu\n", name.c_str(), static_cast<unsigned long long>(motiondriver::TestTurnFootPhaseSearches()));
         if (capsuleStats)
             std::printf("CAPSTAT run=%s loggedSamples=%llu logSegments=%llu accelQueries=%llu accelModifierChanges=%llu decelQueries=%llu decelModifierChanges=%llu\n",
                         name.c_str(), static_cast<unsigned long long>(capsuleStatReplay.logged),
