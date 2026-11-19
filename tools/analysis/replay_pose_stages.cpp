@@ -39,6 +39,11 @@
 //                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
 //   --stride-warp 0|1   stride warping of the blend stack off / on after --settings-log (motiondriver::SetStrideWarp, the mm.strideWarp
 //                       setting; the settings log call MMStrideWarp of later sessions is applied as well); not passed: the log / build default
+//   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
+//                       mm.stickSpeed setting; the settings log call MotionStickSpeedMode of later sessions is applied as well)
+//                       With --settings-log, the driver first gets the values a game session held before its first setting call in
+//                       builds whose defaults were off (lean, head lean, slide, orientation warp, stride warping off, analog stick),
+//                       then the logged calls: an older log without one of these calls replays as recorded with any build default.
 //                       The settings log calls MMSteerMode / MMSteerActiveOnly of test builds are ignored (turn steering has no
 //                       option: the newest layer steered, carried through the layer mix).
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
@@ -202,6 +207,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MotionWalkSpeed") motiondriver::SetWalkSpeed(arg(0));
         else if (name == "MotionMinAnalogWalk") motiondriver::SetMinAnalogWalk(arg(0));
         else if (name == "MotionSlide") motiondriver::SetSlide(arg(0) != 0);
+        else if (name == "MotionStickSpeedMode") motiondriver::SetStickSpeedMode(static_cast<int>(arg(0)));
         else if (name == "MotionBarrelLoop") motiondriver::SetBarrelLoop(arg(0) != 0);
         else if (name == "MotionShooterMode") motiondriver::SetShooterMode(arg(0) != 0);
         else if (name == "MMTurnRateParams") motionhost::SetTurnRateParams(arg(0), arg(1));
@@ -215,6 +221,18 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else known = false;
         (known ? aApplied : aUnknown) += 1;
     }
+}
+// The driver state of a recorded session before its first logged setting call: the settings whose game logs only carry a call when
+// the value differed from the earlier DLL defaults (off / analog). Applied before the log so the replay does not depend on the build's
+// own defaults.
+void ApplyLogBaseline()
+{
+    motiondriver::SetLean(false);
+    motiondriver::SetLeanHead(false);
+    motiondriver::SetSlide(false);
+    motiondriver::SetOrientWarp(false);
+    motiondriver::SetStrideWarp(false);
+    motiondriver::SetStickSpeedMode(0);
 }
 // --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped
 FILE* g_motionLog = nullptr;
@@ -340,7 +358,7 @@ int main(int argc, char** argv)
     int turnFootPhase = -1; // -1 = build default
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
-    int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1; // -1 = not passed (the settings log / build default)
+    int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -395,6 +413,8 @@ int main(int argc, char** argv)
             shooterMode = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stride-warp") == 0)
             strideWarp = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--stick-speed") == 0)
+            stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -513,7 +533,10 @@ int main(int argc, char** argv)
         return 4;
     int applied = 0, unknown = 0;
     if (!settingsLog.empty())
+    {
+        ApplyLogBaseline();
         ApplyLoggedSettings(settingsLog, applied, unknown);
+    }
     if (capsuleStats && !settingsLog.empty())
         capsuleStatReplay.ReadLog(settingsLog);
     if (neutralAim >= 0)
@@ -524,6 +547,8 @@ int main(int argc, char** argv)
         motiondriver::SetShooterMode(shooterMode != 0);
     if (strideWarp >= 0)
         motiondriver::SetStrideWarp(strideWarp != 0);
+    if (stickSpeed >= 0)
+        motiondriver::SetStickSpeedMode(stickSpeed);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     if (turnFootPhase >= 0)

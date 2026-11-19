@@ -127,6 +127,7 @@ DodgeRun RunDodge(const Rig& aRig, float aHz)
 
 int main(int argc, char** argv)
 {
+    DriverOptionBaseline();
     if (argc < 4)
     {
         std::puts("usage DodgeFacingHostTest <driver-data> <basedb> <utpp_dodge_woman.utpptrav> [<utpp_dodge_man.utpptrav>]");

@@ -143,7 +143,7 @@ return {
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stepDownReach"] = "false",
-    ["mm.stickSpeed"] = "\"analog\"",
+    ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "false",
     ["mm.walkSpeed"] = "1.6000000000000001",
@@ -293,12 +293,14 @@ return {
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
     "apply mm.strideWarp(true,\"ok\")",
-    "apply mm.stickSpeed(\"analog\",\"ok\")",
+    "native UTPPSetStickSpeedMode(1)",
+    "native UTPPSetMotionStickSpeedMode(1)",
+    "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "native UTPPSetMotionBarrelLoop(true)",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "v2 setLean(true)",
-    "apply mm.lean(true,\"ok\")",
     "v2 setLeanHead(true)",
+    "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
     "v2 setLeanParams(0.84999999999999998,1)",
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
@@ -498,7 +500,7 @@ return {
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
-    "apply mm.stickSpeed(\"analog\",\"ok\")",
+    "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
@@ -1876,7 +1878,7 @@ return {
     },
     ["mm.stickSpeed"] = {
       ["choices"] = "fixed,analog",
-      ["default"] = "\"analog\"",
+      ["default"] = "\"fixed\"",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2409,7 +2411,7 @@ return {
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stepDownReach"] = "false",
-    ["mm.stickSpeed"] = "\"analog\"",
+    ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "false",
     ["mm.walkSpeed"] = "1.6000000000000001",
@@ -2934,7 +2936,7 @@ return {
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
-    "apply mm.stickSpeed(\"analog\",\"ok\")",
+    "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
@@ -3041,7 +3043,7 @@ return {
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
 core.defaultsRevision=3\r\
-core.settingsReset=1\r\
+core.settingsReset=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -3122,7 +3124,7 @@ mm.bodyYawOffsetMale=0\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
-mm.stickSpeed=analog\r\
+mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
 mm.leanHead=true\r\
@@ -3606,7 +3608,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stepDownReach"] = "false",
-    ["mm.stickSpeed"] = "\"analog\"",
+    ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "true",
     ["mm.walkSpeed"] = "1.6000000000000001",
@@ -3653,7 +3655,7 @@ vehicle.jumpOutSidePush=true\r\
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
 core.defaultsRevision=3\r\
-core.settingsReset=1\r\
+core.settingsReset=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
 animation.pack=utpp\r\
@@ -3734,7 +3736,7 @@ mm.bodyYawOffsetMale=0\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
-mm.stickSpeed=analog\r\
+mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
 mm.leanHead=true\r\

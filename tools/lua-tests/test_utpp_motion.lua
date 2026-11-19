@@ -215,8 +215,8 @@ do
     mw ~= nil and mw.type == "float" and mw.default == 0.82 and mw.min == 0 and mw.max == 1.6 and mw.step == 0.01
     and mw.section == "animation" and #mw.label <= 38 and type(mw.desc) == "string", mw and mw.label)
   local ss = defs["mm.stickSpeed"]
-  check("registered mm.stickSpeed: choice fixed / analog, default analog, animation section, label <= 38 chars",
-    ss ~= nil and ss.type == "choice" and ss.default == "analog" and type(ss.choices) == "table" and #ss.choices == 2
+  check("registered mm.stickSpeed: choice fixed / analog, default fixed, animation section, label <= 38 chars",
+    ss ~= nil and ss.type == "choice" and ss.default == "fixed" and type(ss.choices) == "table" and #ss.choices == 2
     and ss.choices[1][1] == "fixed" and ss.choices[2][1] == "analog" and ss.section == "animation" and #ss.label <= 38
     and type(ss.desc) == "string", ss and ss.label)
   local bo = defs["mm.bodyYawOffsetFemale"]
@@ -514,28 +514,36 @@ do
   check("minAnalogWalk is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.minWalk == 1 and t.minWalk[1] == 0.82)
 end
 
--- mm.stickSpeed: the script system of a game session starts in analog (0) -> no call until the wanted mode differs; fixed = 1;
--- a fresh session (new glue) resends the mode; a rejected call (no session yet) is retried, a thrown one counted
+-- mm.stickSpeed: the mode is sent to the script system and the motion driver for every fresh session (the script starts in its own
+-- mode, the DLL in its default), then only when the wanted mode changes; fixed = 1; a rejected call (no session yet) is retried,
+-- a thrown one counted
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("stickSpeed default before registration (analog): enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.stick == 0)
-  v.SetStickSpeed("fixed", t.api)
-  check("stickSpeed fixed is sent once as 1", #t.stick == 1 and t.stick[1] == 1 and v.rt.stickSpeedApplied == "fixed")
+  check("stickSpeed before registration (fixed, the DLL default): enabling motion sends it once to the script and the motion driver",
+    v.Sync(t.api) == "enabled" and #t.stick == 1 and t.stick[1] == 1 and #t.motionStick == 1 and t.motionStick[1] == 1
+    and v.rt.stickSpeedApplied == "fixed")
   check("steady stickSpeed is not resent", v.Sync(t.api) == "same" and #t.stick == 1)
-  t.enabled = false
-  check("stickSpeed is resent for a fresh glue session", v.Sync(t.api) == "enabled" and #t.stick == 2 and t.stick[2] == 1)
   v.SetStickSpeed("analog", t.api)
-  check("stickSpeed analog is sent as 0", #t.stick == 3 and t.stick[3] == 0 and v.want.stickSpeed == "analog")
+  check("stickSpeed analog is sent as 0", #t.stick == 2 and t.stick[2] == 0 and v.want.stickSpeed == "analog"
+    and #t.motionStick == 2 and t.motionStick[2] == 0)
+  t.enabled = false
+  check("analog is resent for a fresh glue session (the script starts in its own mode)", v.Sync(t.api) == "enabled"
+    and #t.stick == 3 and t.stick[3] == 0 and #t.motionStick == 3 and t.motionStick[3] == 0)
+  v.SetStickSpeed("fixed", t.api)
+  check("stickSpeed fixed is sent once as 1", #t.stick == 4 and t.stick[4] == 1 and v.rt.stickSpeedApplied == "fixed")
+  t.enabled = false
+  check("stickSpeed is resent for a fresh glue session", v.Sync(t.api) == "enabled" and #t.stick == 5 and t.stick[5] == 1)
+  v.SetStickSpeed("analog", t.api)
   v.SetStickSpeed("bogus", t.api)
-  check("unknown stickSpeed value -> fixed", #t.stick == 4 and t.stick[4] == 1 and v.want.stickSpeed == "fixed")
+  check("unknown stickSpeed value -> fixed", #t.stick == 7 and t.stick[7] == 1 and v.want.stickSpeed == "fixed")
   t.stickReject = true
   v.SetStickSpeed("analog", t.api)
   local errors0 = v.rt.errors
-  check("rejected stickSpeed is never acknowledged and not counted", v.rt.stickSpeedApplied == "fixed" and #t.stick == 5 and v.rt.errors == errors0)
+  check("rejected stickSpeed is never acknowledged and not counted", v.rt.stickSpeedApplied == "fixed" and #t.stick == 8 and v.rt.errors == errors0)
   t.stickReject = false
   v.Sync(t.api)
-  check("rejected stickSpeed retries", v.rt.stickSpeedApplied == "analog" and #t.stick == 6 and t.stick[6] == 0)
+  check("rejected stickSpeed retries", v.rt.stickSpeedApplied == "analog" and #t.stick == 9 and t.stick[9] == 0)
   t.stickError = true
   v.SetStickSpeed("fixed", t.api)
   check("thrown stickSpeed call is never acknowledged and is counted", v.rt.stickSpeedApplied == "analog" and v.rt.errors == errors0 + 1)
@@ -552,19 +560,20 @@ do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
   v.Sync(t.api)
-  v.SetStickSpeed("fixed", t.api)
-  check("stickSpeed fixed goes to the motion driver as 1 with the script", #t.motionStick == 1 and t.motionStick[1] == 1 and #t.stick == 1)
+  check("the first sync sends fixed to the motion driver as 1 with the script", #t.motionStick == 1 and t.motionStick[1] == 1 and #t.stick == 1)
   v.SetStickSpeed("analog", t.api)
   check("stickSpeed analog goes to the motion driver as 0", #t.motionStick == 2 and t.motionStick[2] == 0)
-  t.stickReject = true
   v.SetStickSpeed("fixed", t.api)
-  check("a rejected script call sends nothing to the motion driver", #t.motionStick == 2 and v.rt.stickSpeedApplied == "analog")
+  check("stickSpeed fixed goes to the motion driver as 1 with the script", #t.motionStick == 3 and t.motionStick[3] == 1 and #t.stick == 3)
+  t.stickReject = true
+  v.SetStickSpeed("analog", t.api)
+  check("a rejected script call sends nothing to the motion driver", #t.motionStick == 3 and v.rt.stickSpeedApplied == "fixed")
   t.stickReject = false
   t.motionStickError = true
   local errors0 = v.rt.errors
   v.Sync(t.api)
   check("a missing stick speed native keeps the script mode acknowledged, not counted",
-    v.rt.stickSpeedApplied == "fixed" and #t.motionStick == 3 and v.rt.errors == errors0)
+    v.rt.stickSpeedApplied == "analog" and #t.motionStick == 4 and v.rt.errors == errors0)
 end
 end
 
@@ -731,17 +740,19 @@ do
   check("camera retry: the point goes off", t.camOn == false and v.rt.aimPointApplied == false)
 end
 
--- mm.orientWarp: same contract as the slide - default off makes no native call (the DLL default is off); true is sent once after v2 is on
+-- mm.orientWarp: same contract as the slide - the DLL value is unknown at start (DLL default on), so the wanted value (on before
+-- registration) is sent once after v2 is on, then only when it changes
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("orientWarp default off: enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.orient == 0)
-  check("orientWarp default off: steady sync makes no call", v.Sync(t.api) == "same" and #t.orient == 0)
-  v.SetOrientWarp(true, t.api)
-  check("orientWarp on is sent once", #t.orient == 1 and t.orient[1] == true and v.rt.orientWarpApplied == true)
+  check("orientWarp unknown DLL value: enabling motion sends on once", v.Sync(t.api) == "enabled" and #t.orient == 1
+    and t.orient[1] == true and v.rt.orientWarpApplied == true)
   check("steady orientWarp on is not resent", v.Sync(t.api) == "same" and #t.orient == 1)
   v.SetOrientWarp(false, t.api)
   check("orientWarp off is sent when it differs from the DLL", #t.orient == 2 and t.orient[2] == false and v.rt.orientWarpApplied == false)
+  check("steady orientWarp off is not resent", v.Sync(t.api) == "same" and #t.orient == 2)
+  v.SetOrientWarp(true, t.api)
+  check("orientWarp on is sent again when it differs", #t.orient == 3 and t.orient[3] == true and v.rt.orientWarpApplied == true)
 end
 do
   local v, t = fresh(), mock()
@@ -797,17 +808,20 @@ do
   check("selectionGuards call retries until accepted", v.rt.selectionGuardsApplied == true and #t.guards == 4 and t.guards[4] == true)
 end
 
--- mm.lean / leanHead / leanScale: same contract as the slide - the defaults (off / off / 1.0) make no native call at all
+-- mm.lean / leanHead / leanScale: same contract as the slide - lean and head lean are unknown at start (DLL default on) and the
+-- wanted values (on before registration) are sent once; the scales (DLL default 1.0) only when they differ
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("lean defaults: enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.lean == 0 and #t.leanHead == 0 and #t.leanParams == 0)
-  check("lean defaults: steady sync makes no call", v.Sync(t.api) == "same" and #t.lean == 0 and #t.leanHead == 0 and #t.leanParams == 0)
-  v.SetLean(true, t.api)
-  check("lean on is sent once", #t.lean == 1 and t.lean[1] == true and v.rt.leanApplied == true)
-  check("steady lean on is not resent", v.Sync(t.api) == "same" and #t.lean == 1)
-  v.SetLeanHead(true, t.api)
-  check("leanHead on is sent once", #t.leanHead == 1 and t.leanHead[1] == true and v.rt.leanHeadApplied == true)
+  check("lean unknown DLL value: enabling motion sends lean and head lean on once, no params call",
+    v.Sync(t.api) == "enabled" and #t.lean == 1 and t.lean[1] == true and #t.leanHead == 1 and t.leanHead[1] == true
+    and #t.leanParams == 0 and v.rt.leanApplied == true and v.rt.leanHeadApplied == true)
+  check("lean: steady sync makes no call", v.Sync(t.api) == "same" and #t.lean == 1 and #t.leanHead == 1 and #t.leanParams == 0)
+  v.SetLean(false, t.api)
+  check("lean off is sent once", #t.lean == 2 and t.lean[2] == false and v.rt.leanApplied == false)
+  check("steady lean off is not resent", v.Sync(t.api) == "same" and #t.lean == 2)
+  v.SetLeanHead(false, t.api)
+  check("leanHead off is sent once", #t.leanHead == 2 and t.leanHead[2] == false and v.rt.leanHeadApplied == false)
   v.SetLeanScale(0.6, t.api)
   check("leanScale 0.6 sends (0.6, 1.0) once (head amount is independent)", #t.leanParams == 1 and t.leanParams[1][1] == 0.6 and t.leanParams[1][2] == 1.0)
   check("steady leanScale is not resent", v.Sync(t.api) == "same" and #t.leanParams == 1)
@@ -820,7 +834,8 @@ do
   v.SetLeanScale(-1, t.api)
   check("leanScale -1 clamps to 0", v.want.leanScale == 0 and #t.leanParams == 4 and t.leanParams[4][1] == 0 and t.leanParams[4][2] == 1.0)
   v.SetLean(false, t.api)
-  check("lean off is sent when it differs from the DLL", #t.lean == 2 and t.lean[2] == false and v.rt.leanApplied == false)
+  v.SetLean(true, t.api)
+  check("lean on is sent when it differs from the DLL", #t.lean == 3 and t.lean[3] == true and v.rt.leanApplied == true)
 end
 -- mm.leanHeadScale: second argument of the single UTPPSetMotionLeanParams(scale, headScale) call; default 1.0 never inherits leanScale
 do
@@ -889,17 +904,19 @@ do
   check("lean setting alone never calls the native while motion is off", #t.lean == before)
 end
 
--- mm.slide: default off makes no native call at all (the DLL default is off); true is sent once after v2 is on
+-- mm.slide: the DLL value is unknown at start (DLL default on): the wanted value (on before registration) is sent once after v2 is on,
+-- then only when it changes
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("slide default off: enabling motion makes no slide call", v.Sync(t.api) == "enabled" and #t.slide == 0)
-  check("slide default off: steady sync makes no slide call", v.Sync(t.api) == "same" and #t.slide == 0)
-  v.SetSlide(true, t.api)
-  check("slide on is sent once", #t.slide == 1 and t.slide[1] == true and v.rt.slideApplied == true)
+  check("slide unknown DLL value: enabling motion sends on once", v.Sync(t.api) == "enabled" and #t.slide == 1
+    and t.slide[1] == true and v.rt.slideApplied == true)
   check("steady slide on is not resent", v.Sync(t.api) == "same" and #t.slide == 1)
   v.SetSlide(false, t.api)
   check("slide off is sent when it differs from the DLL", #t.slide == 2 and t.slide[2] == false and v.rt.slideApplied == false)
+  check("steady slide off is not resent", v.Sync(t.api) == "same" and #t.slide == 2)
+  v.SetSlide(true, t.api)
+  check("slide on is sent again when it differs", #t.slide == 3 and t.slide[3] == true and v.rt.slideApplied == true)
 end
 do
   local v, t = fresh(), mock()

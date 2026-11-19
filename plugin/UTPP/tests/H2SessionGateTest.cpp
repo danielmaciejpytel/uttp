@@ -430,6 +430,7 @@ std::vector<Pick> RunFull(const Rig& aRig, const std::vector<Row>& rows, const S
 
 int main(int argc, char** argv)
 {
+    DriverOptionBaseline();
     if (argc < 5)
     {
         std::printf("usage: h2session <motion data dir> <base db> <session feed> <sidecar> [--no-driver]\n");

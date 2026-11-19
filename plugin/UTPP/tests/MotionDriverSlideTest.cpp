@@ -262,11 +262,12 @@ int main(int argc, char** argv)
     const bool rangeOk = SlideDbRange(slide.files.chooser, dbLo, dbHi) && dbLo >= 0;
     Check(rangeOk, "slide.databases of the slide chooser", std::to_string(dbLo) + ".." + std::to_string(dbHi));
 
-    // ---- defaults: off, nothing owned
+    // ---- defaults: setting on (like mm.slide), nothing owned without a bundle
     motiondriver::SetDataDir(data + "\\does-not-exist");
-    Check(!motiondriver::SlideSetting() && !motiondriver::OwnsSlide(5) && !motiondriver::SlideBundleDeclared(), "default: slide off, not owned, no bundle");
+    Check(motiondriver::SlideSetting() && !motiondriver::OwnsSlide(5) && !motiondriver::SlideBundleDeclared(), "default: slide setting on, not owned, no bundle");
     // UTPPSlideOwned (SlideHandlingActive): the lock-free flag behind the GetCameraYaw wrap; false = vanilla camera exit
     Check(!motiondriver::SlideHandlingActive(), "default: SlideHandlingActive false");
+    Check(motiondriver::SetSlide(false) && !motiondriver::SlideSetting() && !motiondriver::OwnsSlide(5), "setting off without a bundle: OwnsSlide false");
     Check(motiondriver::SetSlide(true) && motiondriver::SlideSetting() && !motiondriver::OwnsSlide(5), "setting on without a bundle / motion off: OwnsSlide false");
     Check(!motiondriver::SlideHandlingActive(), "setting on without a bundle / motion off: SlideHandlingActive false");
     Check(motiondriver::SetSlide(false) && !motiondriver::SlideSetting(), "setting off again");
