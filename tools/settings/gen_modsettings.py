@@ -12,7 +12,8 @@ standard menu projection becomes one redscript class, UTPPModSettings, with one 
   * field name = key with every character other than a letter or a digit replaced by "_" (utpp_core uses the same rule:
     M.ModSettingsField); the field names are also the keys of Mod Settings' user.ini, so they must stay stable;
   * types: bool -> Bool, float -> Float, int -> Int32 (min / max / step), choice -> one enum per option (values 0..n-1 in
-    the registry's choice order); any other type fails;
+    the registry's choice order, each member's label as its own ModSettings.displayValues.<member> property); any other
+    type fails;
   * labels, descriptions and defaults are the registry's.
 
 Usage: python -I tools/settings/gen_modsettings.py           write the file
@@ -231,10 +232,10 @@ def render(reg):
             w("  public let %s: %s = %s;" % (f, "Float" if is_float else "Int32", num(default, is_float)))
         elif t == "choice":
             ename, members = it["enum"]
-            # display names in enum order, in the list form used by the framework author's own mods (one property; the enum
-            # member names stay readable as a last resort)
-            w('  @runtimeProperty("ModSettings.displayValues", "%s")'
-              % reds_text(", ".join('"%s"' % clabel for _, _, _, clabel in members), key))
+            # display name of every enum member: one ModSettings.displayValues.<member> property each (the form the Mod
+            # Settings framework reads; a member without one shows its enum member name)
+            for m, _, _, clabel in members:
+                w('  @runtimeProperty("ModSettings.displayValues.%s", "%s")' % (m, reds_text(clabel, key)))
             dm = [m for m, _, cid, _ in members if cid == it["default"]]
             if not dm:
                 raise SystemExit(f"{key}: default {it['default']!r} is not a choice")
@@ -263,7 +264,32 @@ def render(reg):
     w("  }")
     w("}")
     w("")
-    return "\n".join(out), len(items), cats
+    text = "\n".join(out)
+    check_display_values(text)
+    return text, len(items), cats
+
+
+def check_display_values(text):
+    """Every member of every option enum has exactly one ModSettings.displayValues.<member> property on its field, and no
+    other displayValues form is present (the framework shows the enum member name for a member without one)."""
+    enums = {name: re.findall(r"^\s*(\w+) = \d+", body, re.M)
+             for name, body in re.findall(r"^public enum (\w+) \{\n(.*?)\n\}", text, re.M | re.S)}
+    bad = [ln.strip() for ln in text.split("\n")
+           if "ModSettings.displayValues" in ln and not re.match(r'\s*@runtimeProperty\("ModSettings\.displayValues\.\w+", ', ln)]
+    if bad:
+        raise SystemExit(f"displayValues not in the per-member form: {bad[0]}")
+    for block in text.split("\n\n"):
+        field = re.search(r"^\s*public let \w+: (\w+) = ", block, re.M)
+        shown = re.findall(r'"ModSettings\.displayValues\.(\w+)"', block)
+        if not field or field.group(1) not in enums:
+            if shown:
+                raise SystemExit(f"displayValues on a field that is not an option enum: {shown}")
+            continue
+        members = enums.pop(field.group(1))
+        if sorted(shown) != sorted(members):
+            raise SystemExit(f"{field.group(1)}: displayValues for {shown}, enum members {members}")
+    if enums:
+        raise SystemExit(f"option enums without a field: {sorted(enums)}")
 
 
 def main():
