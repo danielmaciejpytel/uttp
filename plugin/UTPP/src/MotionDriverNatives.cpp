@@ -559,19 +559,6 @@ void Native_SetMMStrideWarp(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame,
     if (aOut)
         *aOut = ok;
 }
-// turn steering mode (CET utpp_motion mm.turnSteering: 0 every animation, 1 the active one (DLL default), 2 the active one carried;
-// CET sends its value; false = invalid mode). Logged in the setting-call form the offline replay applies ("UTPPSet<Name>(<args>) ->
-// <result>").
-void Native_SetMMSteerMode(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
-{
-    int32_t mode = 0;
-    RED4ext::GetParameter(aFrame, &mode);
-    aFrame->code++;
-    const bool ok = SetSteerMode(mode);
-    pluginlog::LogInfo("UTPPSetMMSteerMode(%d) -> %d", static_cast<int>(mode), ok ? 1 : 0);
-    if (aOut)
-        *aOut = ok;
-}
 // body yaw offset per body (CET utpp_motion mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale): deg, + = left, -20..20 each
 void Native_SetMotionBodyYawOffsets(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -758,8 +745,6 @@ void RegisterNatives()
     auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMotionBodyYawOffsets", "UTPPSetMotionBodyYawOffsets", &Native_SetMotionBodyYawOffsets);
     o9->flags = flags; o9->AddParam("Float", "female"); o9->AddParam("Float", "male"); o9->SetReturnType("Bool");
     rtti->RegisterFunction(o9);
-    auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMSteerMode", "UTPPSetMMSteerMode", &Native_SetMMSteerMode);
-    o10->flags = flags; o10->AddParam("Int32", "mode"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);
 }
 
 void Install(const std::wstring& aDllDir)

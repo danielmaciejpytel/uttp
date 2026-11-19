@@ -665,17 +665,17 @@ if not WRITE then
     -- then Minimum walk speed; 2026-11-09 (user K5): Shoulder width (female V) last
     -- 2026-11-13: Run pelvis yaw trim, Body yaw offset and Minimum walk speed are hidden in 0.1.0 (level "hidden", layout place kept)
     -- 2026-11-18: Body yaw offset is one option per body (female V, male V, both hidden); Stride matching (player level) after
-    -- Minimum walk speed; 2026-11-19: Turn steering (player level) after Stride matching (mm.turnSteering since the same day)
-    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Turn steering, Shoulder width, Feminine figure, then the advanced camera options",
+    -- Minimum walk speed
+    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Shoulder width, Feminine figure, then the advanced camera options",
       placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffsetFemale") == "hidden/frame/60"
       and placeOf("mm.bodyYawOffsetMale") == "hidden/frame/70" and placeOf("mm.headLead") == "hidden/frame/80"
       and placeOf("mm.walkSpeed") == "player/frame/90" and placeOf("mm.minWalkSpeed") == "hidden/frame/100"
-      and placeOf("mm.strideWarp") == "player/frame/110" and placeOf("mm.turnSteering") == "player/frame/120"
-      and placeOf("mm.shoulderWidth") == "player/frame/130" and placeOf("mm.feminineFigure") == "player/frame/140"
-      and placeOf("camera.idleOrbit") == "advanced/frame/150",
+      and placeOf("mm.strideWarp") == "player/frame/110"
+      and placeOf("mm.shoulderWidth") == "player/frame/120" and placeOf("mm.feminineFigure") == "player/frame/130"
+      and placeOf("camera.idleOrbit") == "advanced/frame/140",
       placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.bodyYawOffsetFemale") .. " " .. placeOf("mm.bodyYawOffsetMale") .. " "
         .. placeOf("mm.walkSpeed") .. " " .. placeOf("mm.minWalkSpeed") .. " " .. placeOf("mm.strideWarp") .. " "
-        .. placeOf("mm.turnSteering") .. " " .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
+        .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
     -- 2026-10-30 aim pitch plan: "Weapon aims at crosshair point" (mm.aimAtCrosshair, utpp_motion) after the crosshair colour, player level
     -- 2026-11-09: Melee full body / Melee aim tilt (player level) after Weapon aims at crosshair point
     check("layout: Combat = crosshair colour, then Weapon aims at crosshair point, Melee full body, Melee aim tilt, then the advanced combat options",

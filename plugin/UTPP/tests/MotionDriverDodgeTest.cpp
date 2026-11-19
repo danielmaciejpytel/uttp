@@ -7,8 +7,8 @@
 //   <fixture dir>: utpp_dodge_<body>.utpptrav and the recorded feed windows dodge_feed_woman_a.txt, dodge_feed_woman_b.txt,
 //   dodge_feed_man.txt (31-column feed dump rows around four ground dodges each). A missing file makes the test FAIL.
 // Checks per recording: the pose of a dodge frame is the clip of the sector the driver picked (legs within 3 deg of the clip sample
-// once the entry blend is over) and that sector is the impulse direction relative to the actor yaw (the drawn heading in steering
-// mode 0; with the two in different sectors the actor's sector is shown); single-frame steps at the
+// once the entry blend is over) and that sector is the impulse direction relative to the actor yaw (with the drawn heading and the
+// actor in different sectors the actor's sector is shown); single-frame steps at the
 // entry and the hand-back stay within 3 cm (hips) / 6 deg (feet, hands) of the clip's own largest step; the same at 30 / 60 / 120 Hz
 // (resampled feeds); without the file (missing or invalid) the output is byte-identical to a replay with a missing file, and frames
 // before the first dodge are byte-identical with and without it; shown clip changes per second over each dodge stay <= 3.0.
@@ -189,7 +189,6 @@ std::vector<Row> Resample(const std::vector<Row>& aRows, float aHz)
 struct Frame
 {
     float t = 0, dt = 0, speed = 0, velYawDeg = 0, yawDeg = 0, rootYawDeg = 0, cap[3] = {}, vel[2] = {};
-    float facingYawDeg = 0; // facing of the dodge sector: the actor yaw (yawDeg); the drawn heading (rootYawDeg) in steering mode 0
     bool applied = false, dodgeFeed = false;
     motiondriver::DodgeProbe probe;
     float offset[3] = {}; // visual - capsule (x, y m, yaw rad), capsule axes
@@ -292,7 +291,6 @@ std::vector<Frame> Replay(const std::vector<Row>& aRows, const Db& aDb)
         fr.vel[1] = r.v[1];
         fr.yawDeg = r.yaw;
         fr.rootYawDeg = rootYawBefore;
-        fr.facingYawDeg = motiondriver::SteerMode() == 0 ? rootYawBefore : r.yaw;
         fr.cap[0] = r.cap[0];
         fr.cap[1] = r.cap[1];
         fr.cap[2] = r.cap[2];
@@ -486,23 +484,23 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
                 aS = dodge::Sector::ForwardRun;
             return runOn && !aC.HasForwardRun() ? !shown : (shown && sec == static_cast<int32_t>(aS));
         };
-        dodge::Sector s = dodge::Sector::None, sDrawn = dodge::Sector::None, sActor = dodge::Sector::None;
-        const bool ok = expect(aWith[j].facingYawDeg, s);
+        // expected: the sector relative to the actor yaw
+        dodge::Sector s = dodge::Sector::None, sDrawn = dodge::Sector::None;
+        const bool ok = expect(aWith[j].yawDeg, s);
         m.outcomeOk += ok ? 1 : 0;
         (void)expect(aWith[j].rootYawDeg, sDrawn);
-        const bool actorOk = expect(aWith[j].yawDeg, sActor);
-        if (sDrawn != sActor)
+        if (sDrawn != s)
         {
             ++m.splitPicks;
-            m.splitActorOk += actorOk ? 1 : 0;
+            m.splitActorOk += ok ? 1 : 0;
         }
         if (aPrint)
             std::printf("INFO %s dodge at t=%.3f: entry %.2f m/s, impulse sector %s -> %s (%s)%s\n", aTag.c_str(), aWith[i].t, entry,
                         dodge::SectorName(s), shown ? dodge::SectorName(static_cast<dodge::Sector>(sec)) : "no clip (run goes on)",
                         ok ? "as expected" : "UNEXPECTED",
-                        sDrawn != sActor ? (std::string(", drawn heading sector ") + dodge::SectorName(sDrawn) + " / actor sector " +
-                                            dodge::SectorName(sActor)).c_str()
-                                         : "");
+                        sDrawn != s ? (std::string(", drawn heading sector ") + dodge::SectorName(sDrawn) + " / actor sector " +
+                                       dodge::SectorName(s)).c_str()
+                                    : "");
     }
     std::vector<float> clipPose(size_t(aDb.bones) * 7);
     std::vector<mm::math::Quat> qs, qc, q0, q1;
@@ -674,8 +672,7 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         m.endsExit = std::fmax(m.endsExit, eOut);
         m.hipsExcess = std::fmax(m.hipsExcess, std::fmax(hIn, hOut) - ownH);
         m.endsExcess = std::fmax(m.endsExcess, std::fmax(eIn, eOut) - ownE);
-        // sector: impulse direction (the feed of the pick) against the facing of that feed (the actor yaw; the drawn heading before that
-        // feed in steering mode 0)
+        // sector: impulse direction (the feed of the pick) against the facing of that feed (the actor yaw)
         // (impulse = velocity minus the kept part of the entry velocity, ImpulseDirection; entry = the feed before the dodge detail
         // when the impulse is already in its first feed, else that first feed - the DodgePlayer rule)
         const Frame& pf = aWith[e.start];
@@ -686,9 +683,8 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         float ix = 0, iy = 0;
         dodge::ImpulseDirection(pf.vel[0], pf.vel[1], ev[0], ev[1], ix, iy);
         const float pushYaw = std::atan2(-ix, iy) * 57.29578f;
-        e.expectRel = WrapDeg(pushYaw - pf.facingYawDeg);
         e.drawnRel = WrapDeg(pushYaw - pf.rootYawDeg);
-        e.actorRel = WrapDeg(pushYaw - pf.yawDeg);
+        e.actorRel = e.expectRel = WrapDeg(pushYaw - pf.yawDeg);
         e.expected = static_cast<int32_t>(dodge::ClassifySector(e.expectRel));
         if (e.expected == static_cast<int32_t>(dodge::Sector::Forward) && e.firstSector == static_cast<int32_t>(dodge::Sector::ForwardRun))
             e.expected = e.firstSector; // the forward dodge out of a run with Dodge_F_Run loaded
@@ -1047,7 +1043,7 @@ int main(int argc, char** argv)
         Check(m.dodges == 4 && m.outcomeOk == m.dodges,
               tag + ": every recorded dodge shows the clip of its sector, or none for a forward dodge out of a run",
               std::to_string(m.outcomeOk) + " / " + std::to_string(m.dodges) + " dodges, " + std::to_string(m.clips) + " clips");
-        Check(m.sectorOk == m.clips, tag + ": each clip is the sector of the impulse relative to the facing (actor; drawn heading in steering mode 0)",
+        Check(m.sectorOk == m.clips, tag + ": each clip is the sector of the impulse relative to the facing (actor yaw)",
               std::to_string(m.sectorOk) + " / " + std::to_string(m.clips));
         Check(m.legMaxDeg < 3.0f, tag + ": legs follow the picked clip after the entry blend", F("max %.2f deg", m.legMaxDeg));
         Check(m.upperFrames > 0 && m.upperMaxDeg < 1.0f, tag + ": arms and head keep the pose shown before the clip",
@@ -1305,13 +1301,9 @@ int main(int argc, char** argv)
     // the facing rule where it matters: over every replay above, the dodges whose impulse is in different sectors relative to the drawn
     // heading and to the actor show the actor's sector (its clip, or none for a forward dodge out of a run); the recordings have such
     // dodges in moving turns, so the check cannot pass without one
-    if (motiondriver::SteerMode() != 0)
-        Check(g_splitPicks > 0 && g_splitActorOk == g_splitPicks,
-              "dodges with the drawn heading and the actor in different sectors show the actor's sector",
-              F("%.0f / %.0f dodges", g_splitActorOk, g_splitPicks));
-    else
-        std::printf("INFO steering mode 0: the sector is relative to the drawn heading (%d dodges with the drawn heading and the actor in "
-                    "different sectors)\n", g_splitPicks);
+    Check(g_splitPicks > 0 && g_splitActorOk == g_splitPicks,
+          "dodges with the drawn heading and the actor in different sectors show the actor's sector",
+          F("%.0f / %.0f dodges", g_splitActorOk, g_splitPicks));
     motiondriver::SetEnabled(false);
     motiondriver::Shutdown();
     std::printf("%s: %d passed, %d failed\n", g_fail ? "FAILED" : "PASSED", g_pass, g_fail);

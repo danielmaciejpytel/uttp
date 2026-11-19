@@ -337,7 +337,6 @@ bool g_neutralAoPrevValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
 int32_t g_strideWarpReq = -1;    // SetStrideWarp: -1 = the build default of the blend stack, else 0 / 1
-int32_t g_steerModeReq = -1;     // SetSteerMode: -1 = the build default of the blend stack, else 0 / 1 / 2
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
@@ -659,7 +658,7 @@ int AirMut() { return UTPP_MOTION_DRIVER_AIR_MUTATION; } // a call, not a consta
 #define UTPP_MOTION_DRIVER_TRAV_MUTATION 0
 #endif
 // Dodge clip mutation builds only (UTPP_DODGE_DRIVER_MUTATION=k); undefined / 0 = production. 1 = the clip is never shown,
-// 2 = the clip's own upper body is shown (no held upper body), 3 = the sector is picked against the drawn heading in every steering mode.
+// 2 = the clip's own upper body is shown (no held upper body), 3 = the sector is picked against the drawn heading (not the actor yaw).
 #ifndef UTPP_DODGE_DRIVER_MUTATION
 #define UTPP_DODGE_DRIVER_MUTATION 0
 #endif
@@ -1734,8 +1733,6 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
                 g_bundle->eval.SetHandBackBlend(g_handBackBlendReq != 0);
             if (g_bundle->evalOk && g_strideWarpReq >= 0)
                 g_bundle->eval.SetStrideWarp(g_strideWarpReq != 0);
-            if (g_bundle->evalOk && g_steerModeReq >= 0)
-                g_bundle->eval.SetSteerMode(g_steerModeReq);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
@@ -2321,25 +2318,6 @@ bool StrideWarp()
     if (g_bundle && g_bundle->evalOk)
         return g_bundle->eval.StrideWarp();
     return g_strideWarpReq >= 0 ? g_strideWarpReq != 0 : UTPP_STRIDE_WARP != 0;
-}
-
-bool SetSteerMode(int32_t aMode)
-{
-    if (aMode < motionstack::BlendStack::kSteerAll || aMode > motionstack::BlendStack::kSteerCarried)
-        return false;
-    std::lock_guard lock(g_m);
-    g_steerModeReq = aMode;
-    if (g_bundle && g_bundle->evalOk)
-        g_bundle->eval.SetSteerMode(aMode); // each layer's steering weight fades over the enable blend (MotionBlendStack.hpp)
-    return true;
-}
-
-int32_t SteerMode()
-{
-    std::lock_guard lock(g_m);
-    if (g_bundle && g_bundle->evalOk)
-        return g_bundle->eval.SteerMode();
-    return g_steerModeReq >= 0 ? g_steerModeReq : UTPP_STEER_MODE;
 }
 
 void SetStepDownReach(bool aOn)
@@ -5039,15 +5017,17 @@ const motion::PoseHistory* VehicleExitHistoryLocked(const Bundle& b, const integ
 }
 
 // Facing (world yaw, degrees) a ground dodge's impulse is classified against (dodge::Input::facingYawDeg, also the push diagnostics):
-// the actor yaw, except in steering mode 0 with the root frame wanted, where it is the drawn (visual) heading (the earlier rule).
+// the actor yaw (with only the newest blend layer steered, the drawn heading lags the actor 30 - 60 deg in moving turns).
 float DodgeFacingYawDeg(const Bundle& b, const motionhost::FeedInput& aRaw, bool aRootWanted)
 {
 #if UTPP_DODGE_DRIVER_MUTATION == 3
-    const bool drawn = aRootWanted; // mutation 3: the drawn heading in every steering mode
+    // mutation 3: the drawn (visual) heading while the root frame is wanted
+    return aRootWanted ? b.root.PreviousVisualWorldYaw() / integ::kDegToRad : aRaw.playerYawDeg;
 #else
-    const bool drawn = aRootWanted && b.eval.SteerMode() == motionstack::BlendStack::kSteerAll;
+    (void)b;
+    (void)aRootWanted;
+    return aRaw.playerYawDeg;
 #endif
-    return drawn ? b.root.PreviousVisualWorldYaw() / integ::kDegToRad : aRaw.playerYawDeg;
 }
 
 bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
@@ -5717,9 +5697,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     else if (g_trav.noContactLeft > 0.0f)
         g_trav.noContactLeft = std::fmax(0.0f, g_trav.noContactLeft - dt);
     // Ground dodge clip: standing stance on the ground only (a crouch dodge, slide, air or traversal keeps the playing clip). A forward
-    // dodge entered above the walk band keeps the run / sprint clip. The sector is picked against the actor yaw while only the newest
-    // layer is steered (SteerMode 1 / 2: the drawn heading lags the actor 30 - 60 deg in moving turns there), against the drawn (visual)
-    // heading in SteerMode 0 (DodgeFacingYawDeg).
+    // dodge entered above the walk band keeps the run / sprint clip. The sector is picked against the actor yaw (DodgeFacingYawDeg).
     dodge::Frame dodgeFr{};
     if (b.dodgeOk)
     {

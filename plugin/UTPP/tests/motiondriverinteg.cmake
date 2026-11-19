@@ -295,7 +295,7 @@ foreach(_crossfade_test MotionBlendStack PoseLiveCrossfade)
 endforeach()
 add_test(NAME utpp_MotionBlendStack_test COMMAND utpp_MotionBlendStack_test
          "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
-# Mutations of the carried steering mode (UTPP_STEER_CARRY_MUTATION in src/mm/MotionBlendStack.hpp): 1 = nothing carried, 2 = a short-way
+# Mutations of the carried steering (UTPP_STEER_CARRY_MUTATION in src/mm/MotionBlendStack.hpp): 1 = nothing carried, 2 = a short-way
 # residual beyond 135 deg carried too; each must fail its own check.
 foreach(_utpp_carry_mut 1 2)
     add_executable(utpp_MotionBlendStack_carry_mut${_utpp_carry_mut} tests/MotionBlendStackTest.cpp)

@@ -46,14 +46,9 @@
 // 0 = off (the pose is bit for bit the one without it). A build may override it.
 #define UTPP_STRIDE_WARP 0
 #endif
-#ifndef UTPP_STEER_MODE
-// Default steering mode of the blend stack (BlendStack::SetSteerMode, switched at run time by the motion driver): 0 = general (moving)
-// steering on every live layer, 1 = on the newest layer only, 2 = on the newest layer only with its correction carried through the
-// layer mix (kSteerCarried). A build may override it.
-#define UTPP_STEER_MODE 1
-#endif
 #ifndef UTPP_STEER_CARRY_MUTATION
-// Test mutation: 1 = kSteerCarried carries nothing (as kSteerNewest), 2 = it also carries a short-way residual beyond kCarryResidual.
+// Test mutation of the carried steering (BlendStack::kCarryResidual): 1 = nothing is carried (the newest layer's correction reaches the
+// output at its fade weight only), 2 = a short-way residual beyond kCarryResidual is carried too.
 #define UTPP_STEER_CARRY_MUTATION 0
 #endif
 #ifndef UTPP_FOOTSINK_MUTATION
@@ -107,8 +102,8 @@ struct Player
     motionSteer::Steering generalSteering, tipSteering;
     motionow::State orientationState;
     float lastSteeredYawRate = 0, lastOrientationHalfAngle = 0;
-    float generalSteerRate = 0; // yaw rate the general steering adds to this layer's own authored yaw (rad/s), see kSteerCarried
-    bool generalCarry = false;  // that steering may be carried through the layer mix (kSteerCarried)
+    float generalSteerRate = 0; // yaw rate the general steering adds to this layer's own authored yaw (rad/s), see kCarryResidual
+    bool generalCarry = false;  // that steering may be carried through the layer mix (kCarryResidual)
     bool haveSteered = false;
     int cancelStartSupport = -1;
     bool stanceFade = false; // this layer's fade-in is a ground stance change (crouch <-> stand), see KeepFootHeight
@@ -320,28 +315,14 @@ class BlendStack
     {
         return m_perBoneContacts;
     }
-    // Steering modes of the general (moving) steering (default UTPP_STEER_MODE). kSteerAll: every live layer steers. kSteerNewest:
-    // only the newest layer's general steering is enabled, as in the reference graph; its correction reaches the output at the layer's
-    // fade weight, so the body lags the capsule through a long fade. kSteerCarried (project policy, not the reference behaviour): as kSteerNewest, and the yaw the newest layer's
-    // general steering adds to its authored yaw (scaled authored turn and spring correction) reaches the output at full weight, while
-    // the older layers' authored yaw still fades out under it. Not carried while the target is more than kCarryResidual from the
-    // visual root and the newest clip has no authored turn ahead to take the residual side from (see ProcessGraph).
-    static constexpr int32_t kSteerAll = 0, kSteerNewest = 1, kSteerCarried = 2;
+    // Carried steering of the general (moving) steering: only the newest layer's general steering is enabled, as in the reference
+    // graph (an older layer's general steering fades out over the enable blend once a newer pick covers it; the turn-in-place node
+    // steers every layer). The yaw the newest layer's general steering adds to its authored yaw (scaled authored turn and spring
+    // correction) reaches the output at full weight (project policy, not the reference behaviour, where it reaches the output at the
+    // layer's fade weight and the body lags the capsule through a long fade), while the older layers' authored yaw still fades out under
+    // it. Not carried while the target is more than kCarryResidual from the visual root and the newest clip has no authored turn ahead
+    // to take the residual side from (see ProcessGraph).
     static constexpr float kCarryResidual = .75f * math::kPi;
-    // In kSteerNewest / kSteerCarried an older layer's general steering fades out over the enable blend once a newer pick covers it; the
-    // turn-in-place node is unchanged in every mode. Safe to switch at any time (each layer's steering weight fades over the enable
-    // blend). Invalid modes are rejected and leave the current one.
-    bool SetSteerMode(int32_t mode)
-    {
-        if (mode < kSteerAll || mode > kSteerCarried)
-            return false;
-        m_steerMode = mode;
-        return true;
-    }
-    int32_t SteerMode() const
-    {
-        return m_steerMode;
-    }
     float SteeringHalfLife() const
     {
         return m_steeringHalfLife;
@@ -1189,7 +1170,7 @@ class BlendStack
         steering.halfLife = m_steeringHalfLife;
         steering.havePrediction = root2::Extract(*m_db, p.clip, p.time, m_steeringTargetTime, prediction);
         steering.predictedAuthoredYaw = float(prediction.yaw);
-        steering.alpha = p.generalSteering.UpdateEnable(m_graph.generalSteering && (m_steerMode == kSteerAll || &p == &m_players[0]), dt);
+        steering.alpha = p.generalSteering.UpdateEnable(m_graph.generalSteering && &p == &m_players[0], dt);
         const auto general = p.generalSteering.Update(steering);
         if (!general.valid)
             return false;
@@ -1428,10 +1409,10 @@ class BlendStack
         for (int i = int(m_count) - 2; i >= 0; --i)
             m_signals = MixLayerSignals(m_signals, m_samples[uint32_t(i)], m_players[uint32_t(i)]);
 #if UTPP_STEER_CARRY_MUTATION != 1
-        if (m_steerMode == kSteerCarried && m_graph.enabled && m_count > 1 && !m_players[0].stored && m_players[0].generalCarry)
+        if (m_graph.enabled && m_count > 1 && !m_players[0].stored && m_players[0].generalCarry)
         {
-            // kSteerCarried: the newest layer's general steering reaches the output at full weight; the older layers' authored yaw
-            // still fades out under it.
+            // carried steering (kCarryResidual): the newest layer's general steering reaches the output at full weight; the older
+            // layers' authored yaw still fades out under it.
             const auto &head = m_players[0];
             const float weight = m_perBoneRoot ? Alpha(head, m_rootBone) : Alpha(head, -1);
             m_signals.rootYaw += (1.0f - weight) * head.generalSteerRate;
@@ -1527,7 +1508,6 @@ class BlendStack
     Signals m_signals{};
     GraphInputs m_graph{};
     float m_steeringHalfLife = kSteeringHalfLifePrevious, m_steeringTargetTime = kSteeringTargetTimePrevious;
-    int32_t m_steerMode = UTPP_STEER_MODE == kSteerCarried ? kSteerCarried : UTPP_STEER_MODE != 0 ? kSteerNewest : kSteerAll;
     int32_t m_orientationCurve = -1;
     int32_t m_warpCurve = -1; // clip warping curve that gates stride warping (see Init)
     int32_t m_thighBones[2]{-1, -1};

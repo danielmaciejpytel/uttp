@@ -1101,7 +1101,7 @@ if(EXISTS "${UTPP_DODGE_FIXTURE_DIR}/dodge_feed_man.txt")
   add_test(NAME utpp_loco_dodge_driver_mut3 COMMAND utpp_loco_dodge_driver_mut3 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
            "${_utpp_dodge_tracked_native}")
   set_tests_properties(utpp_loco_dodge_driver_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*holds its gait through the dodge state")
-  # mutation 4 (the sector picked against the drawn heading in every steering mode) must FAIL the facing check
+  # mutation 4 (the sector picked against the drawn heading instead of the actor yaw) must FAIL the facing check
   add_test(NAME utpp_loco_dodge_driver_mut4 COMMAND utpp_loco_dodge_driver_mut4 "${_utpp_dodge_motion_data_native}" "${_utpp_dodge_fixture_native}"
            "${_utpp_dodge_tracked_native}")
   set_tests_properties(utpp_loco_dodge_driver_mut4 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*show the actor's sector")
