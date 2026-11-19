@@ -2553,6 +2553,8 @@ DodgeProbe TestDodgeProbe()
     DodgeProbe p = g_dodgeProbe;
     p.loaded = g_bundle && g_bundle->dodgeOk;
     p.clips = g_dodgeSt.clips;
+    p.owWeight = g_ow.Weight();
+    p.owRootDeg = g_ow.RootDeg();
     return p;
 }
 #endif
@@ -4759,6 +4761,16 @@ void OrientWarpStepLocked(Bundle& aB, const adapter::MotionFeed& aF, int32_t aCl
     sg.crouch = adapter::PsmCrouchStance(aF.psmDetailed) || g_slideFrame;
     sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_orientWarpOn || !aB.rootFrameValid || !loopClip || !g_owSk.ok || // off: fades out first
                  aB.map.shooterModeActive || aB.map.h2Active; // the Strafe modes hold the root on the actor: nothing to warp towards the path
+#if !defined(UTPP_DODGE_FACING_MUTATION) || UTPP_DODGE_FACING_MUTATION != 2 // mutation 2: the warp keeps running under the clip
+    // ground dodge clip and its hand-back blend (mm/Dodge.hpp): the impulse swings the velocity, which reads as a circle turn whenever
+    // the motion search underneath sits on a loop clip. The drawn heading holds under the clip, so the warp holds its weight, root yaw
+    // and torso twist (no Step / Measure) until the hand-back ends; from there it runs as before.
+    if (g_dodgeSt.frame || g_dodgeSt.noContactLeft > 0.0f)
+    {
+        g_ow.Hold();
+        return;
+    }
+#endif
     g_ow.Step(g_owParams, sg, aDt);
     const float rootYawDeg = aB.rootFrameValid ? aB.rootFrame.Frame().yaw / integ::kDegToRad : 0.0f;
     static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "pose layout: p.xyz q.xyzw");
@@ -5829,6 +5841,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_dodgeProbe.handback = dodgeFr.handback;
     g_dodgeProbe.sector = static_cast<int32_t>(dodgeFr.sector);
     g_dodgeProbe.clipTime = dodgeFr.clipTime;
+    g_dodgeProbe.alignValid = dodgeFr.active && dodgeFr.alignValid;
+    g_dodgeProbe.alignYawDeg = dodgeFr.alignYawDeg;
 #endif
     g_last = r;
     g_selDiag.gait = cs.gait;
@@ -6232,6 +6246,10 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
         const float body = g_bo.Deg(BodyOffsetDegLocked(b));
         if (body != 0.0f)
             aOut.rootOffsetYaw += body * integ::kDegToRad;
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        g_dodgeProbe.extraDeg = static_cast<float>((static_cast<double>(aOut.rootOffsetYaw) - static_cast<double>(root.yaw)) / integ::kDegToRad);
+        g_dodgeProbe.presentDeg = trim + body;
+#endif
     }
     const auto& signals = b.locomotion.Output();
     aOut.contact[0] = signals.contact[0];

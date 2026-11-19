@@ -46,7 +46,8 @@
 //                       lead. The head is not touched: HeadLead (applied later on the published pose) keeps measuring the head against
 //                       the path, so the neck twist shrinks by what the torso now takes.
 //   Gates (driver)      off for aiming, weapon actions (reload / shot / hipfire), a drawn weapon, air, crouch, slide, traversal and
-//                       release, and when the root frame of the host is not in use (no provided root yaw to add to).
+//                       release, and when the root frame of the host is not in use (no provided root yaw to add to). While a
+//                       ground dodge clip and its hand-back blend play, the driver holds every output (Hold).
 // OFF (setting) never constructs a call: the pose path is bit-identical. ON with w = 0 (straight running, idle, start / stop, aim,
 // reload) returns exactly 0 / 0 and leaves the pose untouched.
 
@@ -220,6 +221,11 @@ public:
         m_dp = 0.0f; m_tau = 0.0f;
         m_tel = Telemetry{};
     }
+
+    // Instead of Step + Measure for a feed whose motion is not the path (the caller's hold, e.g. a ground dodge clip): every output
+    // (weight, root yaw, torso twist) and the filters keep their values; the next Step starts the heading rate from its own feed, so no
+    // rate is read across the held feeds.
+    void Hold() { m_havePrev = false; }
 
     // Feed rate. aDt in seconds (non-finite or <= 0: nothing advances).
     void Step(const Params& aP, const Signals& aS, float aDt)
