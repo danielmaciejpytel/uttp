@@ -337,6 +337,7 @@ bool g_neutralAoPrevValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
 int32_t g_strideWarpReq = -1;    // SetStrideWarp: -1 = the build default of the blend stack, else 0 / 1
+int32_t g_steerActiveOnlyReq = -1; // SetSteerActiveOnly: -1 = the build default of the blend stack, else 0 / 1
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
@@ -1733,6 +1734,8 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
                 g_bundle->eval.SetHandBackBlend(g_handBackBlendReq != 0);
             if (g_bundle->evalOk && g_strideWarpReq >= 0)
                 g_bundle->eval.SetStrideWarp(g_strideWarpReq != 0);
+            if (g_bundle->evalOk && g_steerActiveOnlyReq >= 0)
+                g_bundle->eval.SetSteerActiveOnly(g_steerActiveOnlyReq != 0);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
@@ -2318,6 +2321,23 @@ bool StrideWarp()
     if (g_bundle && g_bundle->evalOk)
         return g_bundle->eval.StrideWarp();
     return g_strideWarpReq >= 0 ? g_strideWarpReq != 0 : UTPP_STRIDE_WARP != 0;
+}
+
+bool SetSteerActiveOnly(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_steerActiveOnlyReq = aOn ? 1 : 0;
+    if (g_bundle && g_bundle->evalOk)
+        g_bundle->eval.SetSteerActiveOnly(aOn); // each layer's steering weight fades over the enable blend (MotionBlendStack.hpp)
+    return true;
+}
+
+bool SteerActiveOnly()
+{
+    std::lock_guard lock(g_m);
+    if (g_bundle && g_bundle->evalOk)
+        return g_bundle->eval.SteerActiveOnly();
+    return g_steerActiveOnlyReq >= 0 ? g_steerActiveOnlyReq != 0 : UTPP_STEER_ACTIVE_ONLY != 0;
 }
 
 void SetStepDownReach(bool aOn)

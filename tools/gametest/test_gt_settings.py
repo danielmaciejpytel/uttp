@@ -412,15 +412,15 @@ class SessionSettingsTests(unittest.TestCase):
     PLAYER = {'mm.bodyYawOffsetFemale': 8, 'mm.bodyYawOffsetMale': -3, 'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
               'perspective.scene': True, 'perspective.blend': 0.8,
               'mm.walkSpeed': 2.4, 'mm.minWalkSpeed': 0.5, 'mm.lean': False, 'mm.leanHead': False, 'mm.leanScale': 1.5,
-              'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'wide', 'mm.orientWarp': False, 'mm.strideWarp': False, 'mm.footReplant': 'always',
-              'bodyturn.aimJog': False,
+              'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'wide', 'mm.orientWarp': False, 'mm.strideWarp': False, 'mm.steerActiveOnly': False,
+              'mm.footReplant': 'always', 'bodyturn.aimJog': False,
               'bodyturn.aimJogSpeed': 3.8, 'bodyturn.aimSmooth': False, 'bodyturn.shooterMode': True}
     LOCO = {'mm.walkSpeed': 1.6, 'mm.minWalkSpeed': 0.82, 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.85,
             'mm.leanHeadScale': 0.9, 'mm.leanCoverage': 'standard', 'mm.orientWarp': True, 'mm.strideWarp': True,
-            'mm.footReplant': 'crouch', 'bodyturn.aimJog': True,
+            'mm.steerActiveOnly': True, 'mm.footReplant': 'crouch', 'bodyturn.aimJog': True,
             'bodyturn.aimJogSpeed': 3.3, 'bodyturn.aimSmooth': True, 'bodyturn.shooterMode': False}
     LOCO_TEXT = ('locomotion walkSpeed=1.6 minWalkSpeed=0.82 lean=true leanHead=true leanScale=0.85 leanHeadScale=0.9 leanCoverage=standard orientWarp=true '
-                 'strideWarp=true footReplant=crouch aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
+                 'strideWarp=true steerActiveOnly=true footReplant=crouch aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
 
     def test_plans(self):
         self.assertEqual(dict(gs.session_plan('author')),
@@ -560,6 +560,36 @@ class SessionSettingsTests(unittest.TestCase):
         args = night.build_parser().parse_args(['--out-root', 'unused', '--animation-pack', 'game'])
         self.assertEqual(args.animation_pack, 'game')
         self.assertEqual(night.build_parser().parse_args(['--out-root', 'unused']).animation_pack, '')
+
+    def test_session_override_switches(self):
+        import night
+        parse = night.build_parser().parse_args
+        self.assertEqual(night.session_overrides(parse(['--out-root', 'unused'])), {})
+        self.assertEqual(night.session_overrides(parse(['--out-root', 'unused', '--stride-warp', 'off'])), {'mm.strideWarp': False})
+        self.assertEqual(night.session_overrides(parse(['--out-root', 'unused', '--steer-active-only', 'off'])),
+                         {'mm.steerActiveOnly': False})
+        self.assertEqual(night.session_overrides(parse(['--out-root', 'unused', '--steer-active-only', 'on'])),
+                         {'mm.steerActiveOnly': True})
+        both = night.session_overrides(parse(['--out-root', 'unused', '--stride-warp', 'on', '--steer-active-only', 'off']))
+        self.assertEqual(both, {'mm.strideWarp': True, 'mm.steerActiveOnly': False})
+        with self.assertRaises(SystemExit):                                  # only on | off
+            parse(['--out-root', 'unused', '--steer-active-only', 'maybe'])
+        # every switch replaces a pinned key of both plans; the other keys keep their values
+        for mode in gs.SETTINGS_MODES:
+            base = dict(gs.session_plan(mode))
+            plan = dict(gs.session_plan(mode, both))
+            self.assertIs(plan['mm.steerActiveOnly'], False)
+            self.assertIs(plan['mm.strideWarp'], True)
+            self.assertEqual({k: v for k, v in plan.items() if k != 'mm.steerActiveOnly'},
+                             {k: v for k, v in base.items() if k != 'mm.steerActiveOnly'})
+        self.assertEqual([d['key'] for d in gs.differs_from_shipped(dict(gs.session_plan('shipped', both)))], ['mm.steerActiveOnly'])
+        # the session applies the override through the ledger and puts the player's value back
+        n, io = self.make_night('shipped', dict(self.PLAYER))
+        n.args.steer_active_only = 'off'
+        n.apply_session_settings(None, {})
+        self.assertIs(io.store['mm.steerActiveOnly'], False)
+        self.assertEqual(n.settings.restore_all(io, 'test')['failed'], [])
+        self.assertEqual(io.store, self.PLAYER)
 
     def test_the_summary_line_reaches_the_body_summary(self):
         import gt_session

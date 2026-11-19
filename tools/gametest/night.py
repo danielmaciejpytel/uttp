@@ -5144,6 +5144,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--stride-warp', default='', choices=['', 'on', 'off'],
                    help='stride matching (mm.strideWarp) of the session for an A/B run: on | off replaces the pinned value; '
                         'empty (default) = the pinned value')
+    p.add_argument('--steer-active-only', default='', choices=['', 'on', 'off'],
+                   help='turn steering on the active animation only (mm.steerActiveOnly) of the session for an A/B run: on | off '
+                        'replaces the pinned value; empty (default) = the pinned value')
     p.add_argument('--animation-pack', default='', choices=[''] + list(gs.PACK_VALUES),
                    help="the mod's animation pack option of the session: utpp | game, set after arming through the same ledger and "
                         'put back before ExitGame; empty (default) = the option is not touched')
@@ -5277,10 +5280,18 @@ def write_body_summary(args, results: list) -> list[str]:
     return lines
 
 
+# on | off switches of pinned session settings for A/B runs: argument attribute -> setting key
+SESSION_SWITCHES = (('stride_warp', 'mm.strideWarp'), ('steer_active_only', 'mm.steerActiveOnly'))
+
+
 def session_overrides(args) -> dict:
-    """--stride-warp on | off: the pinned session values it replaces (key -> value); empty = none."""
-    sw = str(getattr(args, 'stride_warp', '') or '')
-    return {'mm.strideWarp': sw == 'on'} if sw else {}
+    """--stride-warp / --steer-active-only on | off: the pinned session values they replace (key -> value); empty = none."""
+    out = {}
+    for attr, key in SESSION_SWITCHES:
+        v = str(getattr(args, attr, '') or '')
+        if v:
+            out[key] = v == 'on'
+    return out
 
 
 def main(argv=None) -> int:

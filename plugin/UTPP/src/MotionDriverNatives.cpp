@@ -559,6 +559,18 @@ void Native_SetMMStrideWarp(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame,
     if (aOut)
         *aOut = ok;
 }
+// general steering on the newest layer only (CET utpp_motion mm.steerActiveOnly; the DLL default is on, CET sends its value). Logged in
+// the setting-call form the offline replay applies ("UTPPSet<Name>(<args>) -> <result>").
+void Native_SetMMSteerActiveOnly(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = SetSteerActiveOnly(on);
+    pluginlog::LogInfo("UTPPSetMMSteerActiveOnly(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // body yaw offset per body (CET utpp_motion mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale): deg, + = left, -20..20 each
 void Native_SetMotionBodyYawOffsets(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -745,6 +757,8 @@ void RegisterNatives()
     auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMotionBodyYawOffsets", "UTPPSetMotionBodyYawOffsets", &Native_SetMotionBodyYawOffsets);
     o9->flags = flags; o9->AddParam("Float", "female"); o9->AddParam("Float", "male"); o9->SetReturnType("Bool");
     rtti->RegisterFunction(o9);
+    auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMSteerActiveOnly", "UTPPSetMMSteerActiveOnly", &Native_SetMMSteerActiveOnly);
+    o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);
 }
 
 void Install(const std::wstring& aDllDir)

@@ -476,6 +476,9 @@ public:
     // Stride warping of ground locomotion loops (blend stack switch, safe at any time; the runtime option of the driver)
     void SetStrideWarp(bool aOn) { m_stack.SetStrideWarp(aOn); }
     bool StrideWarp() const { return m_stack.StrideWarp(); }
+    // General steering on the newest blend stack layer only (blend stack switch, safe at any time; the runtime option of the driver)
+    void SetSteerActiveOnly(bool aOn) { m_stack.SetSteerActiveOnly(aOn); }
+    bool SteerActiveOnly() const { return m_stack.SteerActiveOnly(); }
     void SetGraphInputs(const motionstack::GraphInputs &input)
     {
         m_stack.SetGraphInputs(input);

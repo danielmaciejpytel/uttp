@@ -285,6 +285,12 @@ bool SetOrientWarp(bool aOn);
 // state of the installed bundle (else the requested one).
 bool SetStrideWarp(bool aOn);
 bool StrideWarp();
+// General steering on the newest layer only (CET mm.steerActiveOnly; BlendStack::SetSteerActiveOnly; DLL default UTPP_STEER_ACTIVE_ONLY
+// = on): while V turns on the move only the newest blend stack layer is steered onto the movement direction; the layers still fading
+// out keep their own path. Off = every live layer is steered. Applied to the installed bundle at once (the steering weights fade, no
+// pose jump) and to every bundle loaded later. Always true. SteerActiveOnly = the state of the installed bundle (else the requested one).
+bool SetSteerActiveOnly(bool aOn);
+bool SteerActiveOnly();
 // Run pelvis yaw trim (CET mm.pelvisYawTrim; mm/OrientWarp.hpp PelvisTrim): aDeg (+ = left, -10..10, default 0) turns the pelvis of
 // the v2 pose while V walks / runs / sprints forward on the ground (chest, head and feet keep their direction; the motion forward
 // loops carry the pelvis ~5 deg to the right, +5 squares it). Not while aiming / weapon drawn / air / crouch / slide / traversal;

@@ -45,6 +45,10 @@
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
 --                  without a pose jump (native UTPPSetMMStrideWarp).
+--   mm.steerActiveOnly bool, default true ("Turn steering: active animation only"; DLL default on, the value is sent with the other
+--                  M.OPTIONS) - while V turns on the move only the newest animation of the blend is steered onto the movement
+--                  direction; the animations still fading out keep their own path. Off = every blended animation is steered (the
+--                  earlier behaviour). Switching it fades without a pose jump (native UTPPSetMMSteerActiveOnly).
 --   mm.aimAtCrosshair bool, default true (DLL default off; in game: muzzle slot +Y = weapon entity +Y, barrel vs shot
 --                  pitch error median 4.8 deg / p90 10.9 off -> 0.2-0.6 / p90 1.3 on, Kyubi + pistol) - "Weapon aims at crosshair point":
 --                  the DLL barrel
@@ -87,7 +91,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   lean = false, leanHead = false, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "analog", selectionGuards = true,
   aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
-  strideWarp = false }
+  strideWarp = false, steerActiveOnly = true }
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = false, orientWarpApplied = false,
   leanApplied = false, leanHeadApplied = false, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
@@ -891,7 +895,7 @@ function M.SetLeanHeadScale(v, api)
   return M.want.leanHeadScale
 end
 
--- Optional motion behaviours, all off in the DLL by default (their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
+-- Optional motion behaviours (off in the DLL by default except steerActiveOnly; their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
 -- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
 M.OPTIONS = {
   { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 0 },
@@ -903,6 +907,7 @@ M.OPTIONS = {
   { want = "leanCoverage", field = "setLeanCoverage", native = "UTPPSetMotionLeanCoverage",
     arg = function(v) return v == "wide" and 1 or 0 end },
   { want = "strideWarp", field = "setStrideWarp", native = "UTPPSetMMStrideWarp" },
+  { want = "steerActiveOnly", field = "setSteerActiveOnly", native = "UTPPSetMMSteerActiveOnly" },
 }
 function M.ApplyOptions(api)
   if not M.want.enabled then return false end
@@ -1021,6 +1026,12 @@ function M.RegisterSettings(core)
     desc = "Shortens V's steps to her movement speed while she walks, runs or moves crouched, so her feet slide less over the "
       .. "ground. Off = the steps of the animations as they are. Starts, stops, turns, jumps and slides are unchanged.",
     apply = function(v) M.SetOption("strideWarp", v == true) end })
+  core.Register({ key = "mm.steerActiveOnly", section = "animation", type = "bool", default = true,
+    label = "Turn steering: active animation only",
+    desc = "While V turns on the move, only the animation that is playing now is turned toward her movement direction; the "
+      .. "animations still fading out keep their own path, so her body does not swing the wrong way at the start of a quick turn. "
+      .. "Off = every animation still blending in is turned as well (the earlier behaviour).",
+    apply = function(v) M.SetOption("steerActiveOnly", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "analog",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
     label = "Gamepad stick speed",

@@ -18,7 +18,6 @@
 // reports the reversal searches that received the shown pose.
 // Off-by-default options of the runtime path (each absent = the build default, bit for bit):
 //   --steering h,t      blend stack steering half-life / animation lookahead (s), e.g. 0.4,2.0
-//   --steer-active-only 0|1  general steering of the blend stack on the newest layer only (BlendStack::SetSteerActiveOnly)
 //   --signals N         per-bone root-motion signals: bit 0 root on the Root weight, bit 1 contacts on the leg weights
 //   --pelvis 1          pelvis stage of the foot locker
 //   --capsule-query 1   chooser query trajectory in capsule units
@@ -40,6 +39,10 @@
 //                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
 //   --stride-warp 0|1   stride warping of the blend stack off / on after --settings-log (motiondriver::SetStrideWarp, the mm.strideWarp
 //                       setting; the settings log call MMStrideWarp of later sessions is applied as well); not passed: the log / build default
+//   --steer-active-only 0|1  (on by default, unlike the options above and below) general steering of the blend stack on every live
+//                       layer (0) / on the newest layer only (1) after
+//                       --settings-log (motiondriver::SetSteerActiveOnly, the mm.steerActiveOnly setting; the settings log call
+//                       MMSteerActiveOnly of later sessions is applied as well); not passed: the log / build default (on)
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -193,6 +196,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MotionBodyYawOffset") motiondriver::SetBodyYawOffset(arg(0));
         else if (name == "MotionBodyYawOffsets") motiondriver::SetBodyYawOffsets(arg(0), arg(1));
         else if (name == "MMStrideWarp") motiondriver::SetStrideWarp(flag(0));
+        else if (name == "MMSteerActiveOnly") motiondriver::SetSteerActiveOnly(flag(0));
         else if (name == "MotionLean") motiondriver::SetLean(arg(0) != 0);
         else if (name == "MotionLeanHead") motiondriver::SetLeanHead(arg(0) != 0);
         else if (name == "MotionLeanParams") motiondriver::SetLeanParams(arg(0), arg(1));
@@ -338,7 +342,7 @@ int main(int argc, char** argv)
     int turnFootPhase = -1; // -1 = build default
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
-    int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1; // -1 = not passed (the settings log / build default)
+    int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, steerActiveOnly = -1; // -1 = not passed (the settings log / build default)
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -366,7 +370,7 @@ int main(int argc, char** argv)
                 return 2;
         }
         else if (std::strcmp(argv[i], "--steer-active-only") == 0)
-            stackOverrides.steerActiveOnly = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+            steerActiveOnly = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--signals") == 0)
             stackOverrides.signalMode = std::atoi(argv[i + 1]) & 3;
         else if (std::strcmp(argv[i], "--pelvis") == 0)
@@ -524,6 +528,8 @@ int main(int argc, char** argv)
         motiondriver::SetShooterMode(shooterMode != 0);
     if (strideWarp >= 0)
         motiondriver::SetStrideWarp(strideWarp != 0);
+    if (steerActiveOnly >= 0)
+        motiondriver::SetSteerActiveOnly(steerActiveOnly != 0);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     if (turnFootPhase >= 0)

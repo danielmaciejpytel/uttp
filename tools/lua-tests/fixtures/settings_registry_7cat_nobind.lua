@@ -142,6 +142,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.steerActiveOnly"] = "true",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"analog\"",
     ["mm.strideWarp"] = "true",
@@ -292,7 +293,9 @@ return {
     "native UTPPSetMMFarJumpGravity(false)",
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
+    "native UTPPSetMMSteerActiveOnly(true)",
     "apply mm.strideWarp(true,\"ok\")",
+    "apply mm.steerActiveOnly(true,\"ok\")",
     "apply mm.stickSpeed(\"analog\",\"ok\")",
     "native UTPPSetMotionBarrelLoop(true)",
     "apply mm.aimAtCrosshair(true,\"ok\")",
@@ -498,6 +501,7 @@ return {
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
+    "apply mm.steerActiveOnly(true,\"ok\")",
     "apply mm.stickSpeed(\"analog\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -1866,6 +1870,14 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
+    ["mm.steerActiveOnly"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["mm.stepDownReach"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -2408,6 +2420,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.steerActiveOnly"] = "true",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"analog\"",
     ["mm.strideWarp"] = "true",
@@ -2568,6 +2581,7 @@ return {
     "mm.walkSpeed",
     "mm.minWalkSpeed",
     "mm.strideWarp",
+    "mm.steerActiveOnly",
     "mm.stickSpeed",
     "mm.aimAtCrosshair",
     "mm.lean",
@@ -2756,6 +2770,7 @@ return {
     "mm.walkSpeed",
     "mm.minWalkSpeed",
     "mm.strideWarp",
+    "mm.steerActiveOnly",
     "mm.stickSpeed",
     "mm.aimAtCrosshair",
     "mm.lean",
@@ -2934,6 +2949,7 @@ return {
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
+    "apply mm.steerActiveOnly(true,\"ok\")",
     "apply mm.stickSpeed(\"analog\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -3122,6 +3138,7 @@ mm.bodyYawOffsetMale=0\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
+mm.steerActiveOnly=true\r\
 mm.stickSpeed=analog\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
@@ -3267,6 +3284,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.walkSpeed",
       "mm.minWalkSpeed",
       "mm.strideWarp",
+      "mm.steerActiveOnly",
       "mm.stickSpeed",
       "mm.aimAtCrosshair"
     },
@@ -3605,6 +3623,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.steerActiveOnly"] = "true",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"analog\"",
     ["mm.strideWarp"] = "true",
@@ -3734,6 +3753,7 @@ mm.bodyYawOffsetMale=0\r\
 mm.walkSpeed=1.6\r\
 mm.minWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
+mm.steerActiveOnly=true\r\
 mm.stickSpeed=analog\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
@@ -3892,6 +3912,7 @@ other.module=42\r\
     "/utpp/animation|switch|mm.feminineFigure",
     "/utpp/animation|float|mm.walkSpeed",
     "/utpp/animation|switch|mm.strideWarp",
+    "/utpp/animation|switch|mm.steerActiveOnly",
     "/utpp/animation|selector|mm.stickSpeed",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",
     "/utpp/bodyturn|switch|bodyturn.turnRate",

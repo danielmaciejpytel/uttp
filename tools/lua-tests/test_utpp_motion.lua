@@ -11,7 +11,7 @@ local function fresh()
 end
 local function mock()
   local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    stride = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
+    stride = {}, steer = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -90,6 +90,11 @@ local function mock()
       t.stride[#t.stride + 1] = on
       if t.strideError then error("stride warp native failure") end
       return not t.strideReject
+    end,
+    setSteerActiveOnly = function(on)
+      t.steer[#t.steer + 1] = on
+      if t.steerError then error("steer active only native failure") end
+      return not t.steerReject
     end,
     setWalkSpeed = function(ms)
       t.walk[#t.walk + 1] = ms
@@ -234,6 +239,11 @@ do
   check("registered mm.strideWarp: bool, on by default, animation section, label 'Stride matching'",
     sw ~= nil and sw.type == "bool" and sw.default == true and sw.section == "animation" and sw.label == "Stride matching"
     and type(sw.desc) == "string" and sw.desc:find("slide less", 1, true) ~= nil)
+  local sa = defs["mm.steerActiveOnly"]
+  check("registered mm.steerActiveOnly: bool, on by default, animation section, label 'Turn steering: active animation only'",
+    sa ~= nil and sa.type == "bool" and sa.default == true and sa.section == "animation"
+    and sa.label == "Turn steering: active animation only" and type(sa.desc) == "string"
+    and sa.desc:find("Off = every animation", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
@@ -625,6 +635,27 @@ do
   t.strideReject = false
   v.Sync(t.api)
   check("rejected strideWarp retries", #t.stride == 4 and t.stride[4] == true and v.rt.optionsApplied.strideWarp == true)
+end
+
+-- mm.steerActiveOnly (one of M.OPTIONS; DLL default on): wanted on before any setting, sent before the glue is enabled, then only on a change
+do
+  local v, t = fresh(), mock()
+  check("steerActiveOnly is wanted on before the setting is applied (the DLL default)", v.want.steerActiveOnly == true)
+  v.SetOption("steerActiveOnly", false, t.api)
+  check("steerActiveOnly while motion is off makes no native call", #t.steer == 0 and v.want.steerActiveOnly == false)
+  v.SetEnabled(true)
+  check("steerActiveOnly is sent when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.steer == 1 and t.steer[1] == false and #t.calls == 1 and v.rt.optionsApplied.steerActiveOnly == false)
+  check("steady steerActiveOnly is not resent", v.Sync(t.api) == "same" and #t.steer == 1)
+  v.SetOption("steerActiveOnly", true, t.api)
+  check("steerActiveOnly switched on is sent once", #t.steer == 2 and t.steer[2] == true and v.rt.optionsApplied.steerActiveOnly == true)
+  t.steerReject = true
+  v.SetOption("steerActiveOnly", false, t.api)
+  check("rejected steerActiveOnly is never acknowledged", #t.steer == 3 and v.rt.optionsApplied.steerActiveOnly == true)
+  t.steerReject = false
+  v.Sync(t.api)
+  check("rejected steerActiveOnly retries", #t.steer == 4 and t.steer[4] == false and v.rt.optionsApplied.steerActiveOnly == false)
+  check("steerActiveOnly changes do not resend stride matching (sent once with the other options)", #t.stride == 1)
 end
 
 -- mm.aimAtCrosshair (aim pitch plan 2026-10-30): DLL loop (default off) + utpp_camera crosshair point, P only with an ACKNOWLEDGED loop
