@@ -16,11 +16,20 @@
 //   DodgePlayer   per feed: arms on the dodge's first feed, picks the clip on the impulse feed, runs the clip clock at kRate,
 //                 hands back at the clip end or when the body leaves the standing ground state. A forward dodge entered faster
 //                 than Input::forwardClipMaxEntryMps plays Dodge_F_Run when the file has it, else the playing locomotion goes on.
+//   SectorCentreDeg / Frame::alignYawDeg  the clip direction: the world heading the drawn body takes so that the clip shown moves
+//                 along the impulse (impulse yaw - the sector's centre); valid when the turn from the drawn heading is above
+//                 kAlignDeadbandDeg and within Input::alignCapDeg (kAlignCapDeg); otherwise the drawn heading is kept (no turn on the
+//                 impulse read's own error, no spin past the cap).
 //
 // Facing the sector is picked against (Input::facingYawDeg, set by the motion driver): the actor yaw. While a clip plays (rule,
 // MotionHost BodyYawCommand / MotionSetFrame::dodgeClip) the body turn holds the capsule yaw, so the facing does not turn toward the
 // input under the clip; the turn toward the movement direction resumes on the hand-back feed (the inertialized hand-back blend,
 // kBlendOutS).
+//
+// Clip direction (Frame::alignYawDeg): the clips are in place and drawn in the visual frame, which lags the actor in moving turns
+// (only the newest blend layer steers), so a clip picked against the actor can point far away from the travel in the shown frame.
+// The motion driver turns the visual frame (rotation only, the offset root's yaw) toward alignYawDeg while the clip plays, at
+// half-life kAlignHalfLifeS and at most kAlignMaxRateDeg per second.
 //
 // Yaw convention: 0 = +Y, counter-clockwise positive (a velocity (vx, vy) has yaw atan2(-vx, vy); positive = to the left).
 #pragma once
@@ -40,7 +49,7 @@ namespace utpp::mm::dodge
 // Test mutations: 0 / undefined = production. 1 no hysteresis at the sector borders, 2 the clip clock counts feeds instead of
 // time, 3 the clip is picked on the dodge's first feed (old velocity), 4 the loader accepts a clip with a missing pose bone,
 // 5 the pick reads the capsule velocity as it is (the kept part of the entry velocity is not removed), 6 a forward dodge from a run
-// never plays Dodge_F_Run.
+// never plays Dodge_F_Run, 7 the clip direction has no turn cap.
 #ifndef UTPP_DODGE_MUTATION
 #define UTPP_DODGE_MUTATION 0
 #endif
@@ -91,6 +100,18 @@ inline constexpr float kMaxStepS = 0.1f;       // one feed counts for at most th
 // k = 0.45 - 0.73; without removing it the first impulse feed of a side press read 24 deg (Female left: 103.4 vs push 79.0) and
 // 14 deg (right: 64.6) off the push, with it 8 and 2 deg.
 inline constexpr float kEntryKeep = 0.5f;
+// Clip direction (Frame::alignYawDeg): largest turn of the drawn heading toward the travel-aligned heading (a larger one is a stick
+// reversal against a lagging drawn heading: no turn), the half-life and the rate bound of the turn. The half-life fits the shortest
+// clips (Dodge_F about 0.20 s of feed time). UTPP_DODGE_ALIGN_HALF_LIFE overrides it in measurement builds only.
+inline constexpr float kAlignCapDeg = 90.0f;
+// Smallest turn that is made: the impulse read (ImpulseDirection, kEntryKeep above) is up to about 8 deg off the push, so a smaller
+// difference between the drawn heading and the target is within the read's own error and the drawn heading is kept.
+inline constexpr float kAlignDeadbandDeg = 10.0f;
+#ifndef UTPP_DODGE_ALIGN_HALF_LIFE
+#define UTPP_DODGE_ALIGN_HALF_LIFE 0.05f
+#endif
+inline constexpr float kAlignHalfLifeS = UTPP_DODGE_ALIGN_HALF_LIFE;
+inline constexpr float kAlignMaxRateDeg = 540.0f;
 
 // Impulse direction on a dodge feed (world velocity minus the kept part of the entry velocity); aOutX / aOutY = that vector.
 inline void ImpulseDirection(float aVelX, float aVelY, float aEntryX, float aEntryY, float& aOutX, float& aOutY)
@@ -138,6 +159,18 @@ inline Sector ClassifySector(float aRelDeg, Sector aPrev = Sector::None, float a
     if (std::fabs(a) >= 135.0f)
         return Sector::Back;
     return a > 0.0f ? Sector::Left : Sector::Right;
+}
+
+// Direction of a clip's travel relative to the body (degrees, the ClassifySector convention): F / F_Run 0, L +90, R -90, B 180.
+inline float SectorCentreDeg(Sector s)
+{
+    switch (Direction(s))
+    {
+    case Sector::Left: return 90.0f;
+    case Sector::Right: return -90.0f;
+    case Sector::Back: return 180.0f;
+    default: return 0.0f;
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ data
@@ -330,6 +363,8 @@ struct Input
     float velX = 0.0f, velY = 0.0f; // capsule velocity (world, m/s)
     float facingYawDeg = 0.0f;      // the body's facing (world yaw, degrees)
     float forwardClipMaxEntryMps = 0.0f; // a forward dodge entered faster than this: Dodge_F_Run when loaded, else the run goes on
+    float drawnYawDeg = 0.0f;            // the drawn (visual) heading of the previous feed (world yaw, degrees)
+    float alignCapDeg = kAlignCapDeg;    // largest turn of the drawn heading toward Frame::alignYawDeg
 };
 
 struct Frame
@@ -344,6 +379,11 @@ struct Frame
     bool pick = false;
     Sector pickSector = Sector::None;
     float pushYawDeg = 0.0f, pushRelDeg = 0.0f, entrySpeed = 0.0f;
+    // clip direction (active feeds): world heading of the drawn body with the shown clip along the impulse, the turn from the drawn
+    // heading when it was set (the pick or a sector change), and whether that turn is made (above kAlignDeadbandDeg, within
+    // Input::alignCapDeg)
+    bool alignValid = false;
+    float alignYawDeg = 0.0f, alignTurnDeg = 0.0f;
 };
 
 class DodgePlayer
@@ -450,9 +490,13 @@ public:
             m_sector = s;
             m_clipTime = 0.0f;
             m_sinceStart = 0.0f;
+            SetAlign(pushYaw, aIn);
             out.active = out.start = true;
             out.sector = s;
             out.clipTime = 0.0f;
+            out.alignValid = m_alignValid;
+            out.alignYawDeg = m_alignYaw;
+            out.alignTurnDeg = m_alignTurn;
             return out;
         }
         if (m_playing && m_sinceStart < kSettleS && aIn.dodgeDetail && speed >= kMinImpulseMps)
@@ -466,12 +510,26 @@ public:
             {
                 m_sector = s;
                 out.start = true; // a new clip: inertialized again
+                SetAlign(pushYaw, aIn);
             }
         }
         return Continue(out, dt, aLength);
     }
 
 private:
+    // the clip direction of the current sector for the impulse yaw aPushYaw, against the drawn heading of this feed
+    void SetAlign(float aPushYaw, const Input& aIn)
+    {
+        m_alignYaw = WrapDeg(aPushYaw - SectorCentreDeg(m_sector));
+        m_alignTurn = WrapDeg(m_alignYaw - aIn.drawnYawDeg);
+        const float cap = std::isfinite(aIn.alignCapDeg) ? aIn.alignCapDeg : kAlignCapDeg;
+#if UTPP_DODGE_MUTATION == 7
+        (void)cap;
+        m_alignValid = std::isfinite(aIn.drawnYawDeg) && std::fabs(m_alignTurn) > kAlignDeadbandDeg;
+#else
+        m_alignValid = std::isfinite(aIn.drawnYawDeg) && std::fabs(m_alignTurn) > kAlignDeadbandDeg && std::fabs(m_alignTurn) <= cap;
+#endif
+    }
     Frame Continue(Frame aOut, float aDt, const std::array<float, kClipCount>& aLength)
     {
         if (!m_playing)
@@ -495,12 +553,17 @@ private:
         aOut.active = true;
         aOut.sector = m_sector;
         aOut.clipTime = m_clipTime;
+        aOut.alignValid = m_alignValid;
+        aOut.alignYawDeg = m_alignYaw;
+        aOut.alignTurnDeg = m_alignTurn;
         return aOut;
     }
 
     bool m_prevDetail = false, m_armed = false, m_playing = false;
     float m_armedT = 0.0f, m_entrySpeed = 0.0f, m_lastSpeed = 0.0f, m_clipTime = 0.0f, m_sinceStart = 0.0f;
     float m_entryVel[2] = {0.0f, 0.0f}, m_lastVel[2] = {0.0f, 0.0f};
+    float m_alignYaw = 0.0f, m_alignTurn = 0.0f;
+    bool m_alignValid = false;
     Sector m_sector = Sector::None;
 };
 } // namespace utpp::mm::dodge

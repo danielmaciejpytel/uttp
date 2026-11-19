@@ -13,6 +13,10 @@
 // (resampled feeds); without the file (missing or invalid) the output is byte-identical to a replay with a missing file, and frames
 // before the first dodge are byte-identical with and without it; shown clip changes per second over each dodge stay <= 3.0.
 // Prints (INFO): visual - capsule offset with / without the clips, planted-foot slide, hand-back time vs the capsule stop.
+// Clip direction over every replay (ClipDir): above the deadband and within the turn cap the shown clip moves along the impulse in the
+// shown frame (the drawn heading turns toward it while the clip plays), within the deadband and past the cap the drawn heading is kept,
+// the turn stays within the cap and the rate bound;
+// driver mutations 5 (no turn) and 6 (no cap) must FAIL.
 
 #include <algorithm>
 #include <array>
@@ -40,6 +44,16 @@ namespace
 {
 int g_pass = 0, g_fail = 0;
 int g_splitPicks = 0, g_splitActorOk = 0; // Metrics::splitPicks / splitActorOk over every Analyse call
+// Clip direction in the shown frame, per clip over every Analyse call. err = |impulse yaw - (drawn heading + the shown sector's centre)|
+// (deg) after the feed's step: on the first clip feed, at the end of the entry blend, mid-clip, on the last clip feed and the mean over
+// the clip feeds (weighted by dt). turn = the turn from the drawn heading before the clip to the travel-aligned heading (impulse yaw -
+// centre); drawnTurn = the drawn heading's turn from before the clip to the last clip feed; rate = its largest per-feed rate (deg/s);
+// cross = largest |drawn heading of the next feed - (actor yaw + yaw offset) of this feed| (the shown frame read two ways).
+struct ClipDir
+{
+    float pickErr = 0, blendErr = 0, midErr = 0, endErr = 0, meanErr = 0, turnDeg = 0, drawnTurnDeg = 0, rateDegS = 0, slideCm = 0, crossDeg = 0;
+};
+std::vector<ClipDir> g_clipDirs;
 void Check(bool aOk, const std::string& aWhat, const std::string& aDetail = {})
 {
     (aOk ? g_pass : g_fail)++;
@@ -745,6 +759,45 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
                 cr.travelM += std::hypot(aWith[i].cap[0] - aWith[i - 1].cap[0], aWith[i].cap[1] - aWith[i - 1].cap[1]);
             m.clipReports.push_back(cr);
         }
+        // clip direction in the shown frame (ClipDir)
+        ClipDir cd;
+        {
+            const auto shownYaw = [&](size_t i) { return aWith[i].yawDeg + aWith[i].offset[2] * 57.29578f; };
+            const auto err = [&](size_t i) {
+                return std::fabs(WrapDeg(pushYaw - shownYaw(i) - dodge::SectorCentreDeg(static_cast<dodge::Sector>(aWith[i].probe.sector))));
+            };
+            cd.turnDeg = WrapDeg(pushYaw - dodge::SectorCentreDeg(static_cast<dodge::Sector>(e.firstSector)) - pf.rootYawDeg);
+            cd.slideCm = m.clipReports.back().slideCm;
+            size_t last = e.start, blend = e.start;
+            float sum = 0.0f, wsum = 0.0f, prev = pf.rootYawDeg;
+            for (size_t i = e.start; i < e.end; ++i)
+            {
+                if (!aWith[i].probe.active)
+                    continue;
+                last = i;
+                if (aWith[i].t - aWith[e.start].t < dodge::kBlendInS - 1e-4f)
+                    blend = i;
+                sum += err(i) * aWith[i].dt;
+                wsum += aWith[i].dt;
+                cd.rateDegS = std::fmax(cd.rateDegS, std::fabs(WrapDeg(shownYaw(i) - prev)) / std::fmax(aWith[i].dt, 1e-4f));
+                prev = shownYaw(i);
+                if (i + 1 < aWith.size())
+                    cd.crossDeg = std::fmax(cd.crossDeg, std::fabs(WrapDeg(aWith[i + 1].rootYawDeg - shownYaw(i))));
+            }
+            if (blend + 1 <= last && aWith[blend + 1].probe.active)
+                ++blend; // the first clip feed at or past the entry blend
+            size_t mid = e.start;
+            for (size_t i = e.start; i <= last; ++i)
+                if (aWith[i].t - aWith[e.start].t <= 0.5f * (aWith[last].t - aWith[e.start].t) + 1e-4f)
+                    mid = i;
+            cd.pickErr = err(e.start);
+            cd.blendErr = err(blend);
+            cd.midErr = err(mid);
+            cd.endErr = err(last);
+            cd.meanErr = wsum > 0.0f ? sum / wsum : cd.pickErr;
+            cd.drawnTurnDeg = WrapDeg(shownYaw(last) - pf.rootYawDeg);
+            g_clipDirs.push_back(cd);
+        }
         // hand-back vs the capsule stop (speed < 0.5 m/s after the dodge)
         size_t stop = e.start;
         while (stop + 1 < aWith.size() && aWith[stop].speed >= 0.5f)
@@ -763,10 +816,12 @@ Metrics Analyse(const std::string& aTag, const std::vector<Frame>& aWith, const 
         m.changesMaxBase = std::fmax(m.changesMaxBase, changesBase / (t1 - t0));
         if (aPrint)
             std::printf("INFO %s clip %s at t=%.3f..%.3f: rel to the drawn heading %.0f deg, to the actor %.0f -> expected %s; entry steps hips %.1f cm / ends %.1f deg, "
-                        "exit hips %.1f cm / ends %.1f deg (clip own %.1f cm / %.1f deg); hand-back - capsule stop %.3f s\n",
+                        "exit hips %.1f cm / ends %.1f deg (clip own %.1f cm / %.1f deg); hand-back - capsule stop %.3f s; shown err pick %.0f blend %.0f "
+                        "mid %.0f end %.0f mean %.0f deg, turn %.0f deg, drawn turn %.0f deg, rate max %.0f deg/s, slide %.1f cm\n",
                         aTag.c_str(), dodge::SectorName(static_cast<dodge::Sector>(e.sector)), aWith[e.start].t, aWith[e.end].t,
                         e.drawnRel, e.actorRel, dodge::SectorName(static_cast<dodge::Sector>(e.expected)), hIn * 100.0f, eIn,
-                        hOut * 100.0f, eOut, ownH * 100.0f, ownE, aWith[e.end].t - aWith[stop].t);
+                        hOut * 100.0f, eOut, ownH * 100.0f, ownE, aWith[e.end].t - aWith[stop].t, cd.pickErr, cd.blendErr, cd.midErr,
+                        cd.endErr, cd.meanErr, cd.turnDeg, cd.drawnTurnDeg, cd.rateDegS, cd.slideCm);
     }
     g_splitPicks += m.splitPicks;
     g_splitActorOk += m.splitActorOk;
@@ -1304,6 +1359,60 @@ int main(int argc, char** argv)
     Check(g_splitPicks > 0 && g_splitActorOk == g_splitPicks,
           "dodges with the drawn heading and the actor in different sectors show the actor's sector",
           F("%.0f / %.0f dodges", g_splitActorOk, g_splitPicks));
+    // the clip direction in the shown frame over every replay above (ClipDir): clips whose turn is within the cap / past it
+    {
+        int within = 0, past = 0, within45 = 0, small = 0;
+        float worstMean = 0.0f, worstEnd = 0.0f, worstTurnPast = 0.0f, worstTurn = 0.0f, worstRate = 0.0f, cross = 0.0f;
+        float worstSmall = 0.0f, worstSmallTurn = 0.0f; // within the deadband: largest error (mean / end) and drawn turn
+        for (const ClipDir& c : g_clipDirs)
+        {
+            cross = std::fmax(cross, c.crossDeg);
+            worstRate = std::fmax(worstRate, c.rateDegS);
+            worstTurn = std::fmax(worstTurn, std::fabs(c.drawnTurnDeg));
+            if (std::fabs(c.turnDeg) <= dodge::kAlignDeadbandDeg)
+            {
+                ++small;
+                worstSmall = std::fmax(worstSmall, std::fmax(c.meanErr, c.endErr));
+                worstSmallTurn = std::fmax(worstSmallTurn, std::fabs(c.drawnTurnDeg));
+            }
+            else if (std::fabs(c.turnDeg) <= dodge::kAlignCapDeg)
+            {
+                ++within;
+                within45 += c.midErr > 45.0f ? 1 : 0;
+                worstMean = std::fmax(worstMean, c.meanErr);
+                worstEnd = std::fmax(worstEnd, c.endErr);
+            }
+            else
+            {
+                ++past;
+                worstTurnPast = std::fmax(worstTurnPast, std::fabs(c.drawnTurnDeg));
+            }
+        }
+        std::printf("INFO clip direction over %zu clips: %d within the %.0f deg deadband (worst error %.1f deg, largest drawn turn %.1f deg), %d turned "
+                    "up to the %.0f deg cap (mid-clip error > 45 deg: %d, worst mean %.1f deg, worst end %.1f deg), %d past it (largest drawn turn %.1f deg); "
+                    "largest drawn turn %.1f deg, largest rate %.0f deg/s; shown frame cross-check %.2f deg\n",
+                    g_clipDirs.size(), small, static_cast<double>(dodge::kAlignDeadbandDeg), worstSmall, worstSmallTurn, within,
+                    static_cast<double>(dodge::kAlignCapDeg), within45, worstMean, worstEnd, past, worstTurnPast, worstTurn, worstRate, cross);
+        // the drawn heading is read after each feed's step (actor yaw + yaw offset): the next feed's drawn heading must agree
+        Check(!g_clipDirs.empty() && cross < 0.05f, "clip direction: the shown frame (actor yaw + yaw offset) is the next feed's drawn heading",
+              F("%.0f clips, largest difference %.3f deg", static_cast<double>(g_clipDirs.size()), cross));
+        // within the cap the clip moves along the impulse in the shown frame once the drawn heading has turned (without the turn the
+        // recordings have 56 such clips more than 45 deg off at mid-clip, worst mean 77 deg)
+        Check(within > 0 && within45 == 0 && worstMean <= 25.0f && worstEnd <= 10.0f,
+              "clip direction: clips within the turn cap move along the impulse in the shown frame (turn above the deadband; mid-clip <= 45 deg, "
+              "mean over the clip <= 25 deg, last clip feed <= 10 deg)",
+              F("%.0f clips, mid-clip > 45 deg %.0f, worst mean %.1f deg, worst end %.1f deg", within, within45, worstMean, worstEnd));
+        // within the deadband (the impulse read's own error) the drawn heading is kept and the clip stays within it of the impulse
+        Check(small > 0 && worstSmall <= dodge::kAlignDeadbandDeg + 3.0f,
+              "clip direction: clips within the deadband stay within it of the impulse (mean / last clip feed <= deadband + 3 deg)",
+              F("%.0f clips, worst %.1f deg (deadband %.0f)", small, worstSmall, static_cast<double>(dodge::kAlignDeadbandDeg)));
+        // past the cap (stick reversals against a lagging drawn heading) the drawn heading is kept; no clip turns more than the cap
+        Check(past > 0 && worstTurnPast <= 5.0f && worstTurn <= dodge::kAlignCapDeg,
+              "clip direction: clips past the turn cap keep the drawn heading, no clip turns it more than the cap",
+              F("%.0f past the cap, their largest drawn turn %.1f deg; largest drawn turn %.1f deg", past, worstTurnPast, worstTurn));
+        Check(worstRate <= dodge::kAlignMaxRateDeg + 5.0f, "clip direction: the drawn heading turns at most the bounded rate",
+              F("largest %.0f deg/s (bound %.0f)", worstRate, static_cast<double>(dodge::kAlignMaxRateDeg)));
+    }
     motiondriver::SetEnabled(false);
     motiondriver::Shutdown();
     std::printf("%s: %d passed, %d failed\n", g_fail ? "FAILED" : "PASSED", g_pass, g_fail);

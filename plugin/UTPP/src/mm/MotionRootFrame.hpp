@@ -31,6 +31,10 @@ struct Inputs
     // drawn capsule, so a turn that reaches the actor one feed after the clip turned (a long frame sizes both) adds no step to the
     // drawn heading. 0 = the drawn yaw is the fed yaw.
     float capsuleYawAhead = 0;
+    // Yaw alignment (MotionOffsetRoot.hpp Step::yawAlign): the drawn heading turns toward the world yaw yawAlignWorld (rad) at half-life
+    // yawAlignHalfLife (s), at most yawAlignMaxRate (rad/s).
+    bool yawAlign = false;
+    float yawAlignWorld = 0, yawAlignHalfLife = .05f, yawAlignMaxRate = 0;
 };
 enum class Reseed
 {
@@ -209,6 +213,13 @@ class Processor
             step.lockMaxRate = in.lockMaxRate;
             step.airFollow = in.airFollow;
             step.offsetAccel = in.offsetAccel;
+            if (in.yawAlign && std::isfinite(in.yawAlignWorld))
+            {
+                step.yawAlign = true;
+                step.yawAlignTarget = Wrap(double(in.yawAlignWorld) - double(p.m_actor)); // relative to the drawn capsule
+                step.yawAlignHalfLife = in.yawAlignHalfLife;
+                step.yawAlignMaxRate = in.yawAlignMaxRate;
+            }
             if (!p.m_native.Update(step))
                 return false;
             p.m_visual = Wrap(double(p.m_actor) + p.m_native.Yaw());
