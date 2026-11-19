@@ -95,7 +95,7 @@ struct CapsuleState
     double speed = 0;             // horizontal linear speed, m/s
     bool airborne = false;        // Locomotion == 5 / dodgeAir / fall
     double climbSpeedModifier = 1; // gamedataStatType.ClimbSpeedModifier (<= 0 -> 1 as in LT:2746-2749)
-    uint8_t leadFoot = 0;          // foot in front at the start (locomotion foot phase): 0 unknown, 1 left, 2 right (Config::leadFootRow)
+    uint8_t leadFoot = 0;          // foot planted at the event (contacts of the shown pose): 0 unknown (both / none), 1 left, 2 right (Config::leadFootRow)
 };
 
 struct Config
@@ -151,9 +151,11 @@ struct Config
     // seconds from the montage start; frames whose time lies in [min, max], or the frame nearest to the range when none does).
     // A montage without an entry keeps the full search. Default off: the old search runs from frame 0 to the FrontLedge window start.
     bool clampStartWindow = false;
-    // Lead foot: with CapsuleState::leadFoot known, the decision's montages whose name ends in the matching foot ("Lfoot" / "Rfoot")
-    // are tried first (row order kept inside each group); the first candidate whose plan passes the gate wins, and when every candidate
-    // is rejected the row-order choice's rejection is returned, so the accepted set can only grow. Default off (row order only).
+    // Lead foot: with CapsuleState::leadFoot known, every montage of the decision is planned and the accepted plans are ranked by the
+    // foot the montage has planted at its planned start frame (kStartContacts): the same foot first, then an unknown / both / no foot
+    // planted, then the other foot (row order inside each rank). The name suffix ("Lfoot" / "Rfoot") is not used: it names the foot
+    // planted at the montage start, and the planned start usually lies one step later. When every candidate is rejected the
+    // row-order choice's rejection is returned, so the accepted set can only grow. Default off (row order only).
     bool leadFootRow = false;
     // With clampStartWindow: when every in-window plan is rejected by the gate, plan again with the full start search (the start may then
     // lie past the window; Plan::startOutsideWindow), so the accepted set is never smaller than without the window.
@@ -367,6 +369,82 @@ inline bool StartWindowFrames(const TravMontage& aM, int& aFirst, int& aLast)
     return true;
 }
 
+// Foot contact spans of the montage sources (contact curves > 0.5, seconds from the montage start; spans and gaps shorter than one
+// 30 fps frame removed), from 0 to the montage's start window max + kStartContactTailS. Montages without a row have no contact data.
+struct StartContact
+{
+    const char* montage;
+    uint8_t foot; // 1 left, 2 right
+    double fromS, toS;
+};
+inline constexpr double kStartContactTailS = 0.6;
+inline constexpr StartContact kStartContacts[] = {
+    {"AM_M_Neutral_Traversal_Vault_1_0_stand_F_Lfoot", 1, 0.0000, 0.2667},
+    {"AM_M_Neutral_Traversal_Vault_1_0_stand_F_Lfoot", 2, 0.0000, 0.2333},
+    {"AM_M_Neutral_Traversal_Vault_1_0_run_F_Lfoot", 1, 0.0000, 0.0500},
+    {"AM_M_Neutral_Traversal_Vault_1_0_run_F_Lfoot", 2, 0.3167, 0.4000},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Rfoot", 1, 0.2667, 0.7333},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Rfoot", 2, 0.0000, 0.2333},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Rfoot", 2, 0.8167, 1.0667},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Lfoot", 1, 0.0000, 0.2833},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Lfoot", 1, 0.6333, 0.7000},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_walk_F_Lfoot", 2, 0.3167, 0.6667},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_run_F_Rfoot", 1, 0.2500, 0.3667},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_run_F_Rfoot", 2, 0.0000, 0.0667},
+    {"AM_M_Neutral_Traversal_Mantle_1_0_run_F_Lfoot", 2, 0.2667, 0.4333},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Rfoot", 1, 0.0000, 0.2833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Rfoot", 1, 0.6833, 0.8167},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Rfoot", 2, 0.3000, 0.8000},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Lfoot", 1, 0.0000, 0.2833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Lfoot", 1, 0.6167, 0.7500},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_V2_Lfoot", 2, 0.3000, 0.6833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Rfoot", 1, 0.3167, 0.9000},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Rfoot", 2, 0.0000, 0.3000},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Rfoot", 2, 0.8833, 1.2000},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Lfoot", 1, 0.0000, 0.2833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Lfoot", 1, 0.7833, 0.9833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_walk_F_Lfoot", 2, 0.3000, 0.7333},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Rfoot", 1, 0.0000, 0.0833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Rfoot", 1, 0.5833, 0.6833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Rfoot", 2, 0.3000, 0.3833},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Lfoot", 1, 0.3000, 0.3667},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Lfoot", 2, 0.0000, 0.0500},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Lfoot", 2, 0.5833, 0.7000},
+    {"AM_M_Neutral_Traversal_Hurdle_1_0_run_F_Rfoot", 1, 0.2333, 0.3000},
+};
+
+// Feet planted at a montage frame (kStartContacts): 0 unknown (no contact data for the montage, or the frame lies past the covered
+// range), 1 left only, 2 right only, 3 both, 4 none.
+inline uint8_t StartPlantedFoot(const TravMontage& aM, int aFrame)
+{
+    const StartWindow* w = FindStartWindow(aM.name);
+    if (!w || aM.fps <= 0)
+        return 0;
+    const double t = static_cast<double>(aFrame) / aM.fps;
+    bool known = false, left = false, right = false;
+    for (const StartContact& c : kStartContacts)
+    {
+        if (aM.name != c.montage)
+            continue;
+        known = true;
+        if (t >= c.fromS - 1e-6 && t <= c.toS + 1e-6)
+            (c.foot == 1 ? left : right) = true;
+    }
+    if (!known || t > w->maxS + kStartContactTailS + 1e-6)
+        return 0;
+    return left && right ? 3 : (left ? 1 : (right ? 2 : 4));
+}
+
+// Lead-foot rank of a planned start (Config::leadFootRow): 0 the lead foot is the montage's only planted foot at the start frame,
+// 1 unknown / both / none planted, 2 the other foot only.
+inline int StartFootRank(const TravMontage& aM, int aStartFrame, uint8_t aLeadFoot)
+{
+    const uint8_t f = StartPlantedFoot(aM, aStartFrame);
+    if (aLeadFoot == 0 || f == 0 || f > 2)
+        return 1;
+    return f == aLeadFoot ? 0 : 2;
+}
+
 // Lead foot of a montage from its name suffix: 1 "Lfoot", 2 "Rfoot", 0 none.
 inline uint8_t MontageLeadFoot(const std::string& aName)
 {
@@ -479,30 +557,35 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
     };
     if (aCfg.leadFootRow && aC.leadFoot != 0 && aCfg.forceMontage.empty())
     {
-        // lead foot: matching-foot montages first (row order inside each group), first plan that passes the gate wins
+        // lead foot: every usable montage planned; the accepted plan with the best start-frame foot rank wins (row order breaks ties)
         std::vector<std::string> rowOrder;
         for (const auto& name : p.decision.montages)
             if (usable(name))
                 rowOrder.push_back(name);
         if (!rowOrder.empty())
         {
-            std::vector<std::string> order;
-            for (const auto& name : rowOrder)
-                if (MontageLeadFoot(name) == aC.leadFoot)
-                    order.push_back(name);
-            for (const auto& name : rowOrder)
-                if (MontageLeadFoot(name) != aC.leadFoot)
-                    order.push_back(name);
             Config sub = aCfg;
             sub.leadFootRow = false;
-            for (const auto& name : order)
+            Plan best;
+            int bestRank = 3;
+            for (const auto& name : rowOrder)
             {
                 sub.forceMontage = name;
                 Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub);
-                q.decision = p.decision;
-                if (q.result == StartResult::Ok)
-                    return q;
+                if (q.result != StartResult::Ok || !q.montage)
+                    continue;
+                const int rank = StartFootRank(*q.montage, q.startFrame, aC.leadFoot);
+                if (rank < bestRank)
+                {
+                    best = std::move(q);
+                    best.decision = p.decision;
+                    bestRank = rank;
+                    if (rank == 0)
+                        break;
+                }
             }
+            if (bestRank < 3)
+                return best;
             sub.forceMontage = rowOrder.front(); // every candidate rejected: the row-order choice's rejection
             Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub);
             q.decision = p.decision;

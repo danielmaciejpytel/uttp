@@ -587,6 +587,10 @@ inline constexpr int32_t kObstacleVehicle = 1;     // VehicleObject
 inline constexpr int32_t kObstacleOtherEntity = 2; // any other entity
 inline constexpr float kTravEventMaxAge = 0.5f; // [P] s of feed time an event waits for its PSM detail
 bool FeedTraversal(const TraversalEvent& aEv); // false = invalid action / non-finite input (ignored)
+// Traversal start options (motiontrav::Config::clampStartWindow / leadFootRow) for the next plans; both default off (build switches
+// UTPP_TRAV_START_WINDOW_DEFAULT / UTPP_TRAV_LEAD_FOOT_DEFAULT). The lead foot is the foot the shown pose has planted when the event
+// is fed (one contact >= 0.5, the other below; else unknown).
+void SetTraversalStartOptions(bool aStartWindow, bool aLeadFoot);
 // UTPP-MOTION SEAM trav (task A, agreed with the runtime session): true while v2 owns the current Climb 8 / Vault 9
 // episode, i.e. it accepted a traversal plan for it. Lock-free (one std::atomic<bool> load, no v2 mutex): the v1 gate
 // ('travRelease', runtime side) calls it inside MMDriver Feed under the v1 g_mutex, before v2's Step of that feed.
@@ -641,6 +645,9 @@ struct TraversalProbe // tests / status
     char reason[16] = {};
     int32_t kind = 0;
     uint64_t infoLines = 0;
+    // start options of the last plan (bit 0 start window, bit 1 lead foot), the lead foot of its event (0 unknown, 1 left, 2 right) and
+    // the foot rank of its start (motiontrav::StartFootRank: 0 lead foot planted, 1 unknown, 2 other foot; -1 no montage)
+    int32_t startOptions = 0, leadFoot = 0, footRank = -1;
 };
 TraversalProbe ProbeTraversal();
 
@@ -733,6 +740,8 @@ bool RagdollRecoverActive();       // section 5: the post-ragdoll window (also u
 // test targets only (never the DLL): the next plans use motiontrav::Config::forceMontage = aMontage (empty = decision table) and
 // Config::gate = aGate; plays one specific montage through the real path (trav: all 34 playable)
 void TestForceTraversal(const std::string& aMontage, bool aGate);
+// test targets only: the lead foot of the next fed events (0 / 1 / 2) instead of the shown pose's contacts; < 0 = the contacts again
+void TestSetTraversalLeadFoot(int32_t aFoot);
 // test targets only (never the DLL): the clock of the authored recoil (shot pulse window, clip time, admission ramp, camera target age)
 // becomes a simulated one, aSeconds >= 0 (< 0 = the QPC wall clock again), advanced by TestAdvanceRecoilClock. Makes the recoil tests
 // independent of the machine load.
