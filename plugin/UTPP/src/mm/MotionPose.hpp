@@ -1412,8 +1412,10 @@ private:
         constexpr float kYawClampDeg = kAimSpineYawClampDeg;
 #endif
         AimSpineYawFilter::Output ao;
+        // world aim target (default off): the angles were recomputed from the world direction for this root, the jump band ran on it
+        const bool worldTracked = !neutralOnly && aIn.aimSmoothDeltaValid;
         const bool have = m_aoFilter.Step(srcHave, a, srcYaw, srcPitch, aDt, kYawClampDeg,
-                                          aIn.machine.overlay == ov::PoseOverlay::Rifle ? 1 : 0, aIn.aoSuppress, ao);
+                                          aIn.machine.overlay == ov::PoseOverlay::Rifle ? 1 : 0, aIn.aoSuppress, ao, worldTracked);
         if (!have || a <= ov::kZeroWeight)
             return neutralOnly;
         float alpha = ao.release < 1.0f ? std::min(a, ao.release) : a; // = a bit for bit while a target drives the AO

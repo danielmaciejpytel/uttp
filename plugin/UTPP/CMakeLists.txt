@@ -1171,6 +1171,15 @@ target_include_directories(utpp_mm_aospineyaw_lean_strafe_flags_test PRIVATE src
 target_compile_options(utpp_mm_aospineyaw_lean_strafe_flags_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 target_compile_features(utpp_mm_aospineyaw_lean_strafe_flags_test PRIVATE cxx_std_20)
 add_test(NAME utpp_mm_aospineyaw_lean_strafe_flags_test COMMAND utpp_mm_aospineyaw_lean_strafe_flags_test)
+# mutation 19: world-tracked aim angles still run the root-relative jump band; it MUST print a FAIL line
+add_executable(utpp_mm_aospineyaw_lean_strafe_flags_mut19 tests/AimUpperBodyFlagsTest.cpp src/mm/AimSpineYawFilter.hpp
+               src/mm/LeanRuntime.hpp src/mm/Strafe.hpp)
+target_include_directories(utpp_mm_aospineyaw_lean_strafe_flags_mut19 PRIVATE src)
+target_compile_options(utpp_mm_aospineyaw_lean_strafe_flags_mut19 PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_mm_aospineyaw_lean_strafe_flags_mut19 PRIVATE cxx_std_20)
+target_compile_definitions(utpp_mm_aospineyaw_lean_strafe_flags_mut19 PRIVATE UTPP_POSEV2_AO_MUTATION=19)
+add_test(NAME utpp_mm_aospineyaw_lean_strafe_flags_mut19 COMMAND utpp_mm_aospineyaw_lean_strafe_flags_mut19)
+set_tests_properties(utpp_mm_aospineyaw_lean_strafe_flags_mut19 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL ")
 
 # ---- blend profile table and dead-blended hand-back (mm/BlendProfile.hpp; BlendStack::SetHandBackBlend, off by default) ----
 if(DEFINED _utpp_mdmotion_data AND EXISTS "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
@@ -1189,6 +1198,13 @@ if(DEFINED _utpp_mdmotion_data_native)
   target_compile_definitions(utpp_motion_driver_aimoffset_options_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
   target_link_libraries(utpp_motion_driver_aimoffset_options_test PRIVATE bcrypt)
   add_test(NAME utpp_motion_driver_aimoffset_options_test COMMAND utpp_motion_driver_aimoffset_options_test "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+  # world aim target in aim turns (90 deg pans, a teleport with a still crosshair): barrel error and spine steps, option off vs on
+  add_executable(utpp_motion_driver_aimoffset_world_turn_test tests/AimWorldTurnTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+  target_compile_features(utpp_motion_driver_aimoffset_world_turn_test PRIVATE cxx_std_20)
+  target_compile_options(utpp_motion_driver_aimoffset_world_turn_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+  target_compile_definitions(utpp_motion_driver_aimoffset_world_turn_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
+  target_link_libraries(utpp_motion_driver_aimoffset_world_turn_test PRIVATE bcrypt)
+  add_test(NAME utpp_motion_driver_aimoffset_world_turn_test COMMAND utpp_motion_driver_aimoffset_world_turn_test "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
 endif()
 # ---- near-reversal tie: a 180 deg stick flip with a residual body yaw of +-0.3 deg turns the body with the turn clip (real host + driver,
 # tests/ReversalTieHostTest.cpp). Mutant REVERSAL_TIE 1 = the body takes the shorter way at the tie; it MUST print its FAIL line.
