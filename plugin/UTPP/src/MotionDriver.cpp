@@ -5952,7 +5952,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 #endif
         rootEvaluation.input.forwardLimit = rootEvaluation.input.movingGround && !rootEvaluation.input.montage && !b.map.slideActive &&
                                                     cs.movementMode == 0 && forwardClip
-                                                ? motionRoot::kForwardLimit
+                                                ? motionRoot::kForwardLimitDriver
                                                 : -1.0f;
 #endif
         // A live TPP aim request owns visible facing even without a weapon or
