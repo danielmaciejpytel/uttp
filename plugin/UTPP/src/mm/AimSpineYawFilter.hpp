@@ -23,7 +23,8 @@
 // at once; 10 = every live frame is rate limited (the first version: fast tracking lags behind the crosshair); 11 = the
 // pitch of a returning target is followed at once (sweep jump); 12 = a restart (weapon class, long frame) resets the filter;
 // 15 = the jump size is a constant 45 deg per frame (low frame rates limit the camera again); 14 = aoScale only hides the
-// latched AO, it does not use it up (a cancelled reload brings it back).
+// latched AO, it does not use it up (a cancelled reload brings it back); 19 = angles from the world aim target still run the
+// root-relative jump band (a recentred root leaves the spine behind the still crosshair).
 #include <algorithm>
 #include <cmath>
 
@@ -110,9 +111,18 @@ public:
     // identifies the weapon class (a change starts a catch-up, the filter is kept). aSuppress: the game owns the upper body, the
     // target is ignored and the latched angles fade out in kAoHandbackFadeSeconds. Returns true when the angles of aOut are to
     // be applied (with the weight min(aWeight, aOut.release)); false = no AO this frame.
+    // aWorldTracked: the angles come from the world aim target (WorldAimTargetFilter, which already catches up jumps of the target in
+    // world space) and were recomputed for this frame's root. A step of them is then a turn of the root, which the angles compensate in
+    // the same frame: no jump band on them (the side change of the clamp, a re-acquire after the latch, a weapon class change and a
+    // gap still catch up).
     bool Step(bool aHaveAim, float aWeight, float aRawYawDeg, float aRawPitchDeg, float aDt, float aClampDeg,
-              int aContext, bool aSuppress, Output& aOut)
+              int aContext, bool aSuppress, Output& aOut, bool aWorldTracked = false)
     {
+#if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 19
+        aWorldTracked = false; // mutation 19: world-tracked angles still run the root-relative jump band
+#endif
+        const bool rootJumpBand = !aWorldTracked;
+        (void)rootJumpBand; // unused in the mutation builds that return early
         const bool live = aHaveAim && !aSuppress && std::isfinite(aRawYawDeg) && std::isfinite(aRawPitchDeg);
         const float clampedRaw = std::max(-aClampDeg, std::min(aClampDeg, aRawYawDeg));
         if (!(aDt > 0.0f) || !std::isfinite(aDt))
@@ -192,7 +202,7 @@ public:
                 if (sideChange || std::fabs(d) > jumpDeg) // mutation 9: a returning target is followed at once
                     m_yawSlew = true;
 #else
-                if (m_latched || sideChange || std::fabs(d) > jumpDeg) // a jump, or the target returns after the latch
+                if (m_latched || sideChange || (rootJumpBand && std::fabs(d) > jumpDeg)) // a jump, or the target returns after the latch
                     m_yawSlew = true;
 #endif
                 if (m_yawSlew)
@@ -215,7 +225,7 @@ public:
 #elif defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 11
                 m_pitchSlew = false; // mutation 11: the pitch follows the target at once, also after the latch (sweep jump)
 #else
-                if (m_latched || std::fabs(dp) > jumpDeg)
+                if (m_latched || (rootJumpBand && std::fabs(dp) > jumpDeg))
                     m_pitchSlew = true;
 #endif
                 if (m_pitchSlew)
@@ -299,7 +309,8 @@ private:
 // compensated in the same frame and only camera motion is smoothed. Jumps of the world target (a step above AoJumpDeg(dt) in one
 // frame) are caught up at kAoYawRateDegPerSec / kAoPitchSlewDegPerSec, the band rule of AimSpineYawFilter applied to the world
 // target. A lost target holds the last world direction (the latch of AimSpineYawFilter fades it); the next live frame re-acquires
-// with a catch-up. dt <= 0 is a pass-through that keeps the state.
+// with a catch-up. dt <= 0 is a pass-through that keeps the state. The root-relative angles taken from it reach AimSpineYawFilter
+// marked world tracked: a recentred root (a reseed after a teleport) moves them at once, as the crosshair did not move.
 struct WorldAimTargetParams
 {
     bool enabled = false;

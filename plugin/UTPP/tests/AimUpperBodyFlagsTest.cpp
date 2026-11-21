@@ -1,6 +1,7 @@
 // Optional aim / upper body behaviours (all default off):
 //   1. WorldAimTargetFilter (mm/AimSpineYawFilter.hpp): smoothing the aim direction in world space keeps the root-relative AO exact
-//      while the root turns, the same smoothing on the root-relative angles lags;
+//      while the root turns, the same smoothing on the root-relative angles lags; AimSpineYawFilter takes world-tracked angles
+//      without the root-relative jump band (mutation UTPP_POSEV2_AO_MUTATION 19 keeps the band: it MUST print a FAIL line);
 //   2. LeanGateWant (mm/LeanRuntime.hpp): the default coverage is the former gate for every signal combination; the wide coverage
 //      opens with a drawn weapon (body + head), while aiming (body only) and crouch moving, and stays closed for weapon actions;
 //   3. NeutralAoBlend (mm/Strafe.hpp): the enable rule of the neutral aim offset and its fade.
@@ -104,6 +105,49 @@ void WorldTargetTest()
     float hy = 0.0f, hp = 0.0f;
     Check(fj.Step(false, 0.0f, 0.0f, dt, p, hy, hp) && hy == wy, "world filter: a lost target holds the last direction");
     Check(fj.Step(true, -50.0f, 0.0f, 0.0f, p, hy, hp) && hy == wy, "world filter: dt 0 keeps the state");
+}
+
+// AimSpineYawFilter with world-tracked angles (the world aim target ran the jump band already): a step of the root-relative angles
+// caused by the root (a recentred root under a still crosshair) is followed in the same frame; the side change of the clamp behind
+// the back and the re-acquire after a latch still catch up at the AO rate. Mutation 19 runs the root-relative jump band anyway.
+void WorldTrackedSpineTest()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float clampDeg = 60.0f;
+    const float maxStep = mp::kAoYawRateDegPerSec * dt + 1e-3f;
+    mp::AimSpineYawFilter::Output o;
+    // root recentred by 55 deg in one frame: 50 -> -5 (yaw) and pitch 10 -> -45 (a near-vertical target re-expressed)
+    const auto rootStep = [&](bool aWorld, float& aYawAfter, float& aPitchAfter) {
+        mp::AimSpineYawFilter f;
+        for (int i = 0; i < 10; ++i)
+            f.Step(true, 1.0f, 50.0f, 10.0f, dt, clampDeg, 0, false, o, aWorld);
+        f.Step(true, 1.0f, -5.0f, -45.0f, dt, clampDeg, 0, false, o, aWorld);
+        aYawAfter = o.yawDeg;
+        aPitchAfter = o.pitchDeg;
+    };
+    float yW = 0.0f, pW = 0.0f, yR = 0.0f, pR = 0.0f;
+    rootStep(true, yW, pW);
+    rootStep(false, yR, pR);
+    std::printf("  root step 55 deg: world-tracked yaw %.2f pitch %.2f, root-relative band yaw %.2f pitch %.2f\n", yW, pW, yR, pR);
+    Check(std::fabs(yW + 5.0f) < 1e-3f && std::fabs(pW + 45.0f) < 1e-3f, "world-tracked angles follow a root step in the same frame");
+    Check(std::fabs(yR - 50.0f) <= maxStep && std::fabs(yR - 50.0f) > 1.0f, "control: without it the jump band catches the step up");
+
+    // side change behind the back (+100 -> -100 over one frame) is still caught up at the AO rate
+    mp::AimSpineYawFilter fs;
+    for (int i = 0; i < 10; ++i)
+        fs.Step(true, 1.0f, 100.0f, 0.0f, dt, clampDeg, 0, false, o, true);
+    const float before = o.yawDeg;
+    fs.Step(true, 1.0f, -100.0f, 0.0f, dt, clampDeg, 0, false, o, true);
+    Check(std::fabs(o.yawDeg - before) <= maxStep && o.yawDeg > 0.0f, "world-tracked: the clamp side change still catches up");
+
+    // re-acquire after a lost target (latched) still catches up
+    mp::AimSpineYawFilter fl;
+    for (int i = 0; i < 10; ++i)
+        fl.Step(true, 1.0f, 40.0f, 0.0f, dt, clampDeg, 0, false, o, true);
+    fl.Step(false, 1.0f, 0.0f, 0.0f, dt, clampDeg, 0, false, o, true);
+    const float latched = o.yawDeg;
+    fl.Step(true, 1.0f, -40.0f, 0.0f, dt, clampDeg, 0, false, o, true);
+    Check(std::fabs(o.yawDeg - latched) <= maxStep, "world-tracked: a re-acquire after the latch still catches up");
 }
 
 void LeanGateTest()
@@ -236,6 +280,7 @@ void NeutralAoPitchDeadBandTest()
 int main()
 {
     WorldTargetTest();
+    WorldTrackedSpineTest();
     LeanGateTest();
     NeutralAoTest();
     NeutralAoPitchDeadBandTest();

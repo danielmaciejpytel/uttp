@@ -32,10 +32,15 @@
 //   --qpc-feed 1        every clock the host reads during a feed (feed and publish stamps, capsule stat ages, command dt) is the recorded
 //                       feed time instead of the wall clock (motionhost::TestSetQpcTicks); default off: wall clock
 //   --neutral-aim 1     neutral aim offset on (motiondriver::SetNeutralAimOffset, the mm.neutralAim setting), set after --settings-log
-//   --aim-world-smooth H  world aim smoothing on at H Hz (motiondriver::SetAimWorldSmoothing, mm.aimWorldSmooth), after --settings-log
+//   --aim-world-smooth H  world aim target on, smoothed at H Hz (motiondriver::SetAimWorldSmoothing, mm.aimWorldSmooth; the script sends
+//                       0 = no smoothing), after --settings-log
 //   --shooter-mode 1    shooter facing on after --settings-log (exposure probe: the recorded sessions ran with it off, and the neutral
 //                       aim offset only acts in a strafe / shooter facing)
 //                       Any of these three adds one AIMOPT line: feeds with a neutral aim offset weight / a world aim smoothing delta.
+//   --aim-camera P      feed the camera and aim targets the script sends (the dumps do not record them): every feed a level point 60 m
+//                       along the recorded camera yaw, the aim target while the PSM upper body is Aim; overlay inputs pose P with a
+//                       drawn weapon (0 Default, 1 Rifle, 2 Pistol1H, 3 Pistol2H; the weapon is not recorded), Aiming / Ready / Relaxed
+//                       from the PSM; mm.aimGameUpper false (the script default). No camera pitch in the dumps: level only. One AIMCAM line.
 //                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
 //   --stride-warp 0|1   stride warping of the blend stack off / on after --settings-log (motiondriver::SetStrideWarp, the mm.strideWarp
 //                       setting; the settings log call MMStrideWarp of later sessions is applied as well); not passed: the log / build default
@@ -360,6 +365,8 @@ int main(int argc, char** argv)
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
+    int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
+    uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
     auto& stackOverrides = mm::motionstack::g_testStackOverrides;
@@ -415,6 +422,8 @@ int main(int argc, char** argv)
             strideWarp = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stick-speed") == 0)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--aim-camera") == 0)
+            aimCameraPose = std::atoi(argv[i + 1]);
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -542,13 +551,16 @@ int main(int argc, char** argv)
     if (neutralAim >= 0)
         motiondriver::SetNeutralAimOffset(neutralAim != 0);
     if (aimWorldSmoothHz >= 0.0f)
-        motiondriver::SetAimWorldSmoothing(aimWorldSmoothHz > 0.0f, aimWorldSmoothHz);
+        motiondriver::SetAimWorldSmoothing(true, aimWorldSmoothHz); // 0 Hz = on without smoothing, as the script sends it
     if (shooterMode >= 0)
         motiondriver::SetShooterMode(shooterMode != 0);
     if (strideWarp >= 0)
         motiondriver::SetStrideWarp(strideWarp != 0);
     if (stickSpeed >= 0)
         motiondriver::SetStickSpeedMode(stickSpeed);
+    int32_t lastAimCameraPose = -1, lastAimCameraState = -1;
+    if (aimCameraPose >= 0)
+        motiondriver::SetAimGameUpper(false); // the script setting mm.aimGameUpper (default false); the DLL default is true
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     if (turnFootPhase >= 0)
@@ -630,6 +642,26 @@ int main(int argc, char** argv)
             motiondriver::FeedAirFromInput(inputs[i]);
             ++airFeeds;
             airFeedRows += inputs[i].haveAir ? 1 : 0;
+        }
+        if (aimCameraPose >= 0)
+        {
+            // the camera / aim target the script feeds every frame: a level point 60 m along the recorded camera yaw (actor axes)
+            const bool drawn = (inputs[i].psmBlock & integ::kPsmWeaponDrawn) != 0;
+            const bool aim = integ::PsmUpperBodyOf(inputs[i].psmBlock) == integ::kPsmUpperBodyAim;
+            const int32_t pose = drawn ? aimCameraPose : 0, state = aim ? 2 : (drawn ? 1 : 0);
+            if (pose != lastAimCameraPose || state != lastAimCameraState)
+            {
+                motiondriver::SetOverlayInputs(pose, state, false, false);
+                lastAimCameraPose = pose;
+                lastAimCameraState = state;
+            }
+            const float rel = std::remainder(inputs[i].cameraYawDeg - inputs[i].playerYawDeg, 360.0f) * 0.017453292519943f;
+            const float point[3] = {-std::sin(rel) * 60.0f, std::cos(rel) * 60.0f, 1.4f};
+            const bool finite = std::isfinite(point[0]) && std::isfinite(point[1]);
+            motiondriver::SetCameraTarget(true, finite, point);
+            motiondriver::SetAimTarget(aim, aim && finite, point);
+            ++aimCameraFeeds;
+            aimCameraAimFeeds += aim ? 1 : 0;
         }
         g_motionLogT = rows[i].t;
         const auto feed0 = std::chrono::steady_clock::now();
@@ -920,6 +952,9 @@ int main(int argc, char** argv)
                         static_cast<unsigned long long>(capsuleStatReplay.accelKept),
                         static_cast<unsigned long long>(capsuleStatReplay.decelQueries),
                         static_cast<unsigned long long>(capsuleStatReplay.decelKept));
+        if (aimCameraPose >= 0)
+            std::printf("AIMCAM run=%s pose=%d feeds=%llu aimFeeds=%llu\n", name.c_str(), aimCameraPose,
+                        static_cast<unsigned long long>(aimCameraFeeds), static_cast<unsigned long long>(aimCameraAimFeeds));
         if (aimOptions)
         {
             uint64_t neutralFeeds = 0, smoothFeeds = 0;
