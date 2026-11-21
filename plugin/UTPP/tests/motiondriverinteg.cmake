@@ -92,6 +92,27 @@ foreach(_rm "OWNER_MUTATION=1;foreign" "OWNER_MUTATION=2;is played: the last lea
     add_test(NAME utpp_CameraTargetRoot_mut_${_tag} COMMAND utpp_CameraTargetRoot_mut_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
     set_tests_properties(utpp_CameraTargetRoot_mut_${_tag} PROPERTIES PASS_REGULAR_EXPRESSION "FAIL .*${_what}")
 endforeach()
+# Rest turn-in-place vs its footwork-less fallback on the recorded rest offsets, real host, both bodies (tests/RestFallbackShareTest.cpp).
+# The mutant never admits the rest turn-in-place and MUST fail the share check.
+foreach(_rs "share" "share_mut_resttip;UTPP_REST_TURN_MUTATION=1")
+    list(GET _rs 0 _tag)
+    list(LENGTH _rs _rs_n)
+    add_executable(utpp_rest_offset_${_tag} tests/RestFallbackShareTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+    target_compile_features(utpp_rest_offset_${_tag} PRIVATE cxx_std_20)
+    target_compile_options(utpp_rest_offset_${_tag} PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_rest_offset_${_tag} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
+    if(_rs_n GREATER 1)
+        list(GET _rs 1 _def)
+        target_compile_definitions(utpp_rest_offset_${_tag} PRIVATE ${_def})
+    endif()
+    target_link_libraries(utpp_rest_offset_${_tag} PRIVATE bcrypt)
+    foreach(_body woman man)
+        add_test(NAME utpp_rest_offset_${_tag}_${_body} COMMAND utpp_rest_offset_${_tag} "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}" ${_body})
+        if(_rs_n GREATER 1)
+            set_tests_properties(utpp_rest_offset_${_tag}_${_body} PROPERTIES PASS_REGULAR_EXPRESSION "FAIL .*the fallback carries")
+        endif()
+    endforeach()
+endforeach()
 # The coming tick's body turn derived by the real host from its last body yaw command, in the game's order and with the command applied
 # before the feed (tests/BodyTurnAheadHostTest.cpp).
 add_executable(utpp_bodyturn_ahead_host_test tests/BodyTurnAheadHostTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
