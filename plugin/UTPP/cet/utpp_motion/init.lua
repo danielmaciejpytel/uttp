@@ -88,7 +88,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
   strideWarp = true }
 -- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -898,7 +898,7 @@ end
 -- Optional motion behaviours, all off in the DLL by default (their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
 -- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
 M.OPTIONS = {
-  { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 0 },
+  { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 12 },
   { want = "neutralAim", field = "setNeutralAimOffset", native = "UTPPSetMMNeutralAimOffset" },
   { want = "pelvisPlacement", field = "setPelvisPlacement", native = "UTPPSetMMPelvisPlacement" },
   { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
@@ -1054,9 +1054,9 @@ function M.RegisterSettings(core)
     label = "motion: lean head amount",
     desc = "Amount of the head lean (1 = full strength, applies to the head layer only; lean amount scales the torso).",
     apply = function(v) M.SetLeanHeadScale(v) end })
-  core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = false,
-    label = "motion: steady aim while turning (experimental)",
-    desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns. Off (default) = the earlier aim.",
+  core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = true,
+    label = "motion: steady aim while turning",
+    desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns and short camera jerks do not jolt the body. On (default); off = the earlier aim.",
     apply = function(v) M.SetOption("aimWorldSmooth", v == true) end })
   core.Register({ key = "mm.neutralAim", section = "motion", type = "bool", default = false,
     label = "motion: look with the camera in strafe (experimental)",

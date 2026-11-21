@@ -102,7 +102,7 @@ return {
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
-    ["mm.aimWorldSmooth"] = "false",
+    ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
@@ -284,7 +284,7 @@ return {
     "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
     "native UTPPSetMotionMinAnalogWalk(0.81999999999999995)",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
-    "native UTPPSetMMAimWorldSmoothing(false,0)",
+    "native UTPPSetMMAimWorldSmoothing(true,12)",
     "native UTPPSetMMNeutralAimOffset(false)",
     "native UTPPSetMMPelvisPlacement(false)",
     "native UTPPSetMMHandBackBlend(false)",
@@ -306,7 +306,7 @@ return {
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "v2 setLeanParams(0.84999999999999998,0.90000000000000002)",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
-    "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
@@ -506,7 +506,7 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
-    "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
@@ -1524,7 +1524,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.aimWorldSmooth"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2370,7 +2370,7 @@ return {
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
-    ["mm.aimWorldSmooth"] = "false",
+    ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
@@ -2942,7 +2942,7 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
-    "apply mm.aimWorldSmooth(false,\"ok\")",
+    "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
@@ -3130,7 +3130,7 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=0.85\r\
 mm.leanHeadScale=0.9\r\
-mm.aimWorldSmooth=false\r\
+mm.aimWorldSmooth=true\r\
 mm.neutralAim=false\r\
 mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
@@ -3567,7 +3567,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
     ["mm.aimUpperFade"] = "true",
-    ["mm.aimWorldSmooth"] = "false",
+    ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"hold\"",
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
@@ -3742,7 +3742,7 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.9\r\
-mm.aimWorldSmooth=false\r\
+mm.aimWorldSmooth=true\r\
 mm.neutralAim=false\r\
 mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
