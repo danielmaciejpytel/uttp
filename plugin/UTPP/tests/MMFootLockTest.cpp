@@ -21,6 +21,7 @@
 
 #include "../src/BaseDatabase.hpp"
 #include "../src/mm/FootLocker.hpp"
+#include "../src/mm/StanceGuard.hpp"
 #include "../src/mm/BaseMatcher.hpp"
 
 using namespace utpp::mm;
@@ -1797,6 +1798,116 @@ static Result Run(const Database& db, std::span<const BoneTransform> aPose, int 
 }
 } // namespace firm
 
+// Knee swivel pole of the stance guard (StanceGuardConfig::poleMode): (sp0) pelvis forward is the default and the mode range is
+// checked; (sp1) with the pelvis (and the legs under it) yawed away from the capsule forward, the pelvis pole keeps each knee
+// closer to the pelvis forward than the capsule pole, and every mode gives a finite pose.
+static void SectionSwivelPole(const Database& db)
+{
+    StanceGuardConfig cfg{};
+    Expect("(sp0) pelvis forward pole by default", cfg.poleMode == 1, Fmt("poleMode %.0f", double(cfg.poleMode)));
+    bool rangeOk = true;
+    for (int m = -1; m <= 3; ++m)
+    {
+        StanceGuardConfig c = cfg;
+        c.poleMode = m;
+        rangeOk = rangeOk && StanceGuard::Valid(c) == (m >= 0 && m <= 2);
+    }
+    Expect("(sp0) pole modes 0..2 valid, others rejected", rangeOk);
+    FootLocker fl;
+    if (!fl.Init(db))
+    {
+        Expect("(sp1) FootLocker init", false);
+        return;
+    }
+    int32_t hip[2] = {-1, -1}, knee[2] = {-1, -1}, ankle[2] = {-1, -1};
+    for (uint32_t b = 0; b < db.NumBones(); ++b)
+    {
+        const std::string_view n = db.BoneName(b);
+        for (int s = 0; s < 2; ++s)
+        {
+            const char* pre = s == 0 ? "Left" : "Right";
+            if (n == std::string(pre) + "UpLeg") hip[s] = int32_t(b);
+            if (n == std::string(pre) + "Leg") knee[s] = int32_t(b);
+            if (n == std::string(pre) + "Foot") ankle[s] = int32_t(b);
+        }
+    }
+    if (hip[0] < 0 || hip[1] < 0 || knee[0] < 0 || knee[1] < 0 || ankle[0] < 0 || ankle[1] < 0 || db.BoneParent(uint32_t(hip[0])) < 0)
+    {
+        Expect("(sp1) leg bones found", false);
+        return;
+    }
+    const int32_t pelvis = db.BoneParent(uint32_t(hip[0]));
+    // standing walk-like frame: both contacts, the more bent leg most bent (the swivel fades out for a straight leg)
+    std::vector<BoneTransform> pose(db.NumBones()), best(db.NumBones());
+    double bestBend = -1.0;
+    for (uint32_t fr = 0; fr < db.NumFrames(); fr += 3)
+    {
+        if (db.Contacts(fr)[0] < 0.5f || db.Contacts(fr)[1] < 0.5f)
+            continue;
+        FramePose(db, fr, pose);
+        double bend = 1e9;
+        for (int s = 0; s < 2; ++s)
+        {
+            const math::Vec3 h = fl.ModelSpace(pose, hip[s]).p, k = fl.ModelSpace(pose, knee[s]).p, a = fl.ModelSpace(pose, ankle[s]).p;
+            bend = std::min(bend, double(legik::Len(k - h) + legik::Len(a - k) - legik::Len(a - h)));
+        }
+        if (bend > bestBend && bend < 0.06)
+            bestBend = bend, best = pose;
+    }
+    if (bestBend < 0.01)
+    {
+        Expect("(sp1) a standing frame with bent knees", false, Fmt("bend %.3f m", bestBend));
+        return;
+    }
+    // knee offset from the hip-ankle line vs the pelvis forward (perpendicular to the hip joint line, horizontal): mean angle, deg
+    auto kneeError = [&](std::span<const BoneTransform> aPose) {
+        const math::Vec3 hl = fl.ModelSpace(aPose, hip[1]).p - fl.ModelSpace(aPose, hip[0]).p;
+        math::Vec3 fwd{-hl.y, hl.x, 0.0f};
+        fwd = fwd * (1.0f / legik::Len(fwd));
+        double err = 0.0;
+        for (int s = 0; s < 2; ++s)
+        {
+            const math::Vec3 h = fl.ModelSpace(aPose, hip[s]).p, k = fl.ModelSpace(aPose, knee[s]).p, a = fl.ModelSpace(aPose, ankle[s]).p;
+            math::Vec3 ax = a - h;
+            ax = ax * (1.0f / legik::Len(ax));
+            const math::Vec3 off = (k - h) - ax * math::Dot(k - h, ax), pole = fwd - ax * math::Dot(fwd, ax);
+            const double c = double(math::Dot(off, pole)) / (double(legik::Len(off)) * double(legik::Len(pole)) + 1e-9);
+            err += std::acos(std::max(-1.0, std::min(1.0, c))) * double(kRad2Deg) * 0.5;
+        }
+        return err;
+    };
+    for (const float yawDeg : {-35.0f, 35.0f})
+    {
+        std::vector<BoneTransform> in = best;
+        const float h = 0.5f * yawDeg / kRad2Deg;
+        in[size_t(pelvis)].q = math::QuatMul(math::Quat{0.0f, 0.0f, std::sin(h), std::cos(h)}, in[size_t(pelvis)].q);
+        double e[3] = {};
+        bool finite = true;
+        for (int m = 0; m <= 2; ++m)
+        {
+            StanceGuardConfig c = cfg;
+            c.poleMode = m;
+            StanceGuard sg;
+            if (!sg.Init(db, c))
+            {
+                finite = false;
+                continue;
+            }
+            for (int i = 0; i < 60; ++i)
+                sg.Apply(in, -1.0f, -1.0f, 1.0f / 60.0f);
+            const auto out = sg.Output();
+            for (const BoneTransform& b : out)
+                finite = finite && std::isfinite(b.p.x) && std::isfinite(b.p.y) && std::isfinite(b.p.z) && std::isfinite(b.q.w);
+            e[m] = kneeError(out);
+        }
+        const std::string tag = Fmt(" (pelvis yaw %.0f deg)", double(yawDeg));
+        Expect(("(sp1) every pole mode gives a finite pose" + tag).c_str(), finite);
+        Expect(("(sp1) pelvis pole keeps the knees nearer the pelvis forward than the capsule pole" + tag).c_str(), e[1] + 1.0 < e[0],
+               Fmt("knee vs pelvis forward: capsule pole %.1f deg, pelvis pole %.1f deg, foot pole %.1f deg (input %.1f deg)", e[0], e[1],
+                   e[2], kneeError(in)));
+    }
+}
+
 static void SectionFirmFeet(const Database& db)
 {
     FootLocker probe;
@@ -2223,6 +2334,7 @@ int main(int argc, char** argv)
     SectionStopSwing(); // loco-stop-knees 2026-11-09
     SectionPlantReference(db);
     SectionFirmFeet(db);
+    SectionSwivelPole(db);
 
     std::printf("SUMMARY: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

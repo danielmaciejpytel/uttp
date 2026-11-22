@@ -1505,7 +1505,9 @@ uint64_t RunDigest(const Run& aR)
 // belongs to the former 800-clip bake and was NOT re-derived on a pre-seam-C build.
 // Re-recorded 2026-11-15 (shoulder girdle width bound on standing two-handed poses, shared hand shift up to 4 cm): the previous
 // 0xbe0d68357f289848 is reproduced bit for bit (5/5 PASS) by a build with -DUTPP_CLAVLIMIT_MUTATION=6 (the bound never acts).
-constexpr uint64_t kBarrelLoopOffDigest = 0x51231925325c38e5ull;
+// Re-recorded 2026-11-22 (knee swivel pole = pelvis forward by default): the previous 0x51231925325c38e5 is reproduced bit for bit
+// by a build with StanceGuardConfig::poleMode 0 (the capsule forward pole).
+constexpr uint64_t kBarrelLoopOffDigest = 0x22670b666a274b99ull;
 void BarrelCase(Rt& rt)
 {
     RestoreDefaults();

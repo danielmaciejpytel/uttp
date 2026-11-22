@@ -601,6 +601,10 @@ void SetCurationMoving(bool aOn);
 bool SetSteerGap(float aGapDeg);
 // Stance-width guard (default on, 5 cm): each ankle at least aMinHalfWidthCm (0..30) from the pelvis midline.
 bool SetStanceGuard(bool aOn, float aMinHalfWidthCm);
+// Knee swivel pole of the stance guard (StanceGuardConfig::poleMode): 0 = capsule forward, 1 = pelvis forward (default),
+// 2 = the leg's own foot forward. False = out of range, previous kept. C++ API (tools, tests).
+bool SetStancePoleMode(int32_t aMode);
+int32_t StancePoleMode();
 
 // ---- Phase 5.3c-3 (0.3.7), default on; off = 0.3.6 ----
 // Animation root velocity turned towards the capsule velocity for the offset root (max angle deg, 0..180, default 60).

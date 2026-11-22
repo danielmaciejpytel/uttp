@@ -6111,6 +6111,25 @@ bool SetStanceGuard(bool aOn, float aMinHalfWidthCm)
     return true;
 }
 
+bool SetStancePoleMode(int32_t aMode)
+{
+    StanceGuardConfig c = g_stanceCfg;
+    c.poleMode = aMode;
+    if (!StanceGuard::Valid(c))
+        return false;
+    std::lock_guard lock(g_mutex);
+    g_stanceCfg = c;
+    if (g_stanceGuard.Ready())
+        g_stanceGuard.SetConfig(c);
+    return true;
+}
+
+int32_t StancePoleMode()
+{
+    std::lock_guard lock(g_mutex);
+    return g_stanceCfg.poleMode;
+}
+
 bool SetSteerGap(float aGapDeg)
 {
     if (!std::isfinite(aGapDeg) || aGapDeg < 0.0f || aGapDeg > 180.0f)

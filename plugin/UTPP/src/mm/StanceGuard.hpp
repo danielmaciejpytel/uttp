@@ -45,6 +45,9 @@ struct StanceGuardConfig
     float kneeMinHalf = 0.045f;  // m, knee distance from the midline kept by the swivel (reference knees ~9.4 cm apart)
     float contactOn = 0.5f;      // contact above = planted
     float pushRate = 0.8f;       // m/s, rate of change of the push during the swing
+    // knee swivel pole: 0 = character +Y (the capsule forward), 1 = pelvis forward (perpendicular to the hip joint line),
+    // 2 = the leg's own foot forward (ankle -> toe, horizontal). 1 / 2 fall back to 0 when the direction is degenerate.
+    int32_t poleMode = 1;
 };
 
 struct StanceGuardDiagnostics
@@ -88,6 +91,14 @@ public:
             if (m_parents[size_t(m_chain[s][1])] != m_chain[s][0] || m_parents[size_t(m_chain[s][2])] != m_chain[s][1] ||
                 m_parents[size_t(m_chain[s][0])] < 0)
                 return false;
+        static constexpr std::string_view kToes[2] = {"LeftToeBase", "RightToeBase"};
+        for (int s = 0; s < 2; ++s)
+        {
+            m_toe[s] = -1;
+            for (uint32_t b = 0; b < nb; ++b)
+                if (aDb.BoneName(b) == kToes[s]) // a descendant of the foot (not its direct child in the game rig)
+                    m_toe[s] = static_cast<int32_t>(b);
+        }
         m_cfg = aCfg;
         m_out.assign(nb, BoneTransform{});
         m_ok = true;
@@ -134,7 +145,8 @@ public:
                c.contactOn > 0.0f && c.contactOn < 1.0f && std::isfinite(c.pushRate) && c.pushRate > 0.0f && c.pushRate <= 10.0f &&
                std::isfinite(c.swivelWeight) && c.swivelWeight >= 0.0f && c.swivelWeight <= 1.0f && std::isfinite(c.maxSwivel) &&
                c.maxSwivel >= 0.0f && c.maxSwivel <= 1.6f && std::isfinite(c.kneeMinHalf) && c.kneeMinHalf >= 0.0f &&
-               c.kneeMinHalf <= 0.3f && std::isfinite(c.smoothTime) && c.smoothTime >= 0.0f && c.smoothTime <= 1.0f;
+               c.kneeMinHalf <= 0.3f && std::isfinite(c.smoothTime) && c.smoothTime >= 0.0f && c.smoothTime <= 1.0f &&
+               c.poleMode >= 0 && c.poleMode <= 2;
     }
     bool SetConfig(const StanceGuardConfig& c)
     {
@@ -270,7 +282,8 @@ public:
                     continue;
                 axis = axis * (1.0f / al);
                 math::Vec3 off = (gb.p - ga.p) - axis * math::Dot(gb.p - ga.p, axis);
-                math::Vec3 pole = math::Vec3{0.0f, 1.0f, 0.0f} - axis * axis.y;
+                const math::Vec3 fwd = PoleForward(s);
+                math::Vec3 pole = fwd - axis * math::Dot(axis, fwd);
                 const float ol = std::sqrt(math::Dot(off, off)), pl = std::sqrt(math::Dot(pole, pole));
                 if (m_cfg.smoothTime > 0.0f)
                 {
@@ -447,8 +460,29 @@ private:
         return g;
     }
 
+    // horizontal forward direction of the knee swivel pole (model space), see StanceGuardConfig::poleMode
+    math::Vec3 PoleForward(int aSide) const
+    {
+        math::Vec3 f{0.0f, 0.0f, 0.0f};
+        if (m_cfg.poleMode == 1)
+        {
+            const math::Vec3 hl = Model(m_chain[1][0]).p - Model(m_chain[0][0]).p;
+            f = math::Vec3{-hl.y, hl.x, 0.0f};
+        }
+        else if (m_cfg.poleMode == 2 && m_toe[aSide] >= 0)
+        {
+            const math::Vec3 d = Model(m_toe[aSide]).p - Model(m_chain[aSide][2]).p;
+            f = math::Vec3{d.x, d.y, 0.0f};
+        }
+        const float l = std::sqrt(f.x * f.x + f.y * f.y);
+        if (!(l > 1e-3f) || !std::isfinite(l))
+            return math::Vec3{0.0f, 1.0f, 0.0f};
+        return f * (1.0f / l);
+    }
+
     bool m_ok = false;
     StanceGuardConfig m_cfg{};
+    int32_t m_toe[2] = {-1, -1};
     std::vector<int32_t> m_parents;
     std::vector<BoneTransform> m_out;
     int32_t m_chain[2][3] = {{-1, -1, -1}, {-1, -1, -1}};

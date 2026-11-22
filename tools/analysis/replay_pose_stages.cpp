@@ -49,6 +49,8 @@
 //   --overlay-inertial-switch 0|1  inertialized overlay switch off / on after --settings-log (motiondriver::SetOverlayInertialSwitch,
 //                       the mm.overlayInertialSwitch setting; the settings log call MMOverlayInertialSwitch is applied as well); it acts on
 //                       overlay changes only, so a replay without --aim-camera (overlay always Default) is unchanged by it
+//   --swivel-pole 0|1|2 knee swivel pole of the stance guard: capsule forward / pelvis forward (build default) / foot forward
+//                       (motionhost::SetStancePoleMode)
 //   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
 //                       mm.stickSpeed setting; the settings log call MotionStickSpeedMode of later sessions is applied as well)
 //   --firm-feet 0|1     firm feet in turns and stops off / on after --settings-log (motionhost::SetFirmFeet, the mm.firmFeet setting;
@@ -440,6 +442,7 @@ int main(int argc, char** argv)
     float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f;
     int32_t turnRate = -1;                     // -1 = not passed
     float turnRateMax = -1.0f;                 // < 0 = not passed
+    int32_t swivelPole = -1;                   // -1 = not passed
     int32_t overlayInertialSwitch = -1;                                          // -1 = not passed
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
@@ -544,6 +547,8 @@ int main(int argc, char** argv)
             capsuleForecast = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--forecast-dump") == 0)
             forecastDump = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--swivel-pole") == 0)
+            swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
             leanPack = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
     }
@@ -710,6 +715,8 @@ int main(int argc, char** argv)
         motiondriver::SetAimGameUpper(false); // the script setting mm.aimGameUpper (default false, the DLL default too)
     if (aimGameUpper >= 0)
         motiondriver::SetAimGameUpper(aimGameUpper != 0);
+    if (swivelPole >= 0 && !motionhost::SetStancePoleMode(swivelPole))
+        return 2;
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     if (turnFootPhase >= 0)
