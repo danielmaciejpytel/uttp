@@ -14,7 +14,7 @@ set(_utpp_label_areas
   input     "native_input|p1_stance_latency|dualwield_psm"
   melee     "melee"
 )
-set(_utpp_label_slow "^utpp_(mm_loco_test(_.*)?|motion_driver_integ_test|motion_driver_hipfire_weapons_.*|motion_driver_hipraise_.*|motion_driver_recoil_(profile|series|exit|switch|reach)_.*|mm_vehexit_loco_.*|motion_driver_shooter_mode_.*|CameraTargetRoot_.*|FeminineWidthConsistency_.*|reload_rifle_domain_.*|mm_motion_pose_.*)$")
+set(_utpp_label_slow "^utpp_(mm_loco_test(_.*)?|motion_driver_integ_test|motion_driver_hipfire_weapons_.*|motion_driver_hipraise_.*|motion_driver_recoil_(profile|series|exit|switch|reach)_.*|mm_vehexit_loco_.*|motion_driver_shooter_mode_.*|CameraTargetRoot_.*|rest_offset_.*|FeminineWidthConsistency_.*|reload_rifle_domain_.*|mm_motion_pose_.*)$")
 
 get_property(_utpp_all_tests DIRECTORY PROPERTY TESTS)
 list(LENGTH _utpp_label_areas _utpp_la_n)

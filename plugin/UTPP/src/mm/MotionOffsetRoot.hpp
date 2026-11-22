@@ -52,11 +52,14 @@
 #define UTPP_ROOT_FORWARD_MUTATION 0 // 1 = Step::forwardLimit is ignored (the offset may sit forward at the radius): tests must FAIL
 #endif
 #ifndef UTPP_OFFSET_ROOT_FORWARD_LIMIT
-#define UTPP_OFFSET_ROOT_FORWARD_LIMIT 0 // 1 = the driver passes kForwardLimit while moving on the ground (header item 5); 2 = the same, but
-                                         // not in a turning or start clip and not crouched; 0 = off
+#define UTPP_OFFSET_ROOT_FORWARD_LIMIT 2 // 1 = the driver passes kForwardLimitDriver while moving on the ground (header item 5); 2 = the same,
+                                         // but not in a turning or start clip and not crouched (the default); 0 = off
 #endif
 #ifndef UTPP_OFFSET_ROOT_FORWARD_LIMIT_M
 #define UTPP_OFFSET_ROOT_FORWARD_LIMIT_M .10f // m: value of kForwardLimit (a build may override it for offline comparisons)
+#endif
+#ifndef UTPP_OFFSET_ROOT_FORWARD_LIMIT_DRIVER_M
+#define UTPP_OFFSET_ROOT_FORWARD_LIMIT_DRIVER_M .18f // m: the limit the driver passes (measured on recorded stops: walk stop overshoot 15 -> 8 cm)
 #endif
 
 namespace utpp::mm::motionRoot
@@ -85,6 +88,7 @@ inline constexpr float kOffsetAccel = 20.f;
 // Forward limit along travel (header item 5): metres of offset allowed ahead of the capsule while moving, the half-life of the pull
 // towards it (s) and the capsule speed below which the travel direction is not trusted (m/s).
 inline constexpr float kForwardLimit = UTPP_OFFSET_ROOT_FORWARD_LIMIT_M;
+inline constexpr float kForwardLimitDriver = UTPP_OFFSET_ROOT_FORWARD_LIMIT_DRIVER_M;
 inline constexpr float kForwardHalflife = .15f;
 inline constexpr float kForwardMinSpeed = .5f;
 struct Step

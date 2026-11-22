@@ -222,8 +222,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "16")
   @runtimeProperty("ModSettings.displayName", "Firm feet in turns and stops")
-  @runtimeProperty("ModSettings.description", "Keeps V's planted feet fixed on the ground while she turns at walking pace, turns on the spot or stops, so they slide less. Her legs stretch or bend a little more to reach the planted feet (never beyond what the leg can reach). Off (default) = the feet may slip a little to follow the animations. No effect with the Game Animations pack.")
-  public let mm_firmFeet: Bool = false;
+  @runtimeProperty("ModSettings.description", "Keeps V's planted feet fixed on the ground while she turns at walking pace, turns on the spot or stops, so they slide less. Her legs stretch or bend a little more to reach the planted feet (never beyond what the leg can reach). On (default); off = the feet may slip a little to follow the animations. No effect with the Game Animations pack.")
+  public let mm_firmFeet: Bool = true;
 
   // mm.shoulderWidth
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")

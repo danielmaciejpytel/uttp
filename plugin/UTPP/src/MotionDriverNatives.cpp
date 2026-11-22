@@ -33,7 +33,9 @@ bool SetAimWorldSmoothing(bool aOn, float aHz);
 bool SetNeutralAimOffset(bool aOn);
 void SetHandBackBlend(bool aOn);
 void SetStepDownReach(bool aOn);
+void SetCapsuleForecast(bool aOn);
 void SetFarJumpGravityScale(bool aOn);
+bool SetOverlayInertialSwitch(bool aOn);
 }
 
 namespace utpp::motiondriver
@@ -511,6 +513,15 @@ void Native_SetMMStepDownReach(RED4ext::IScriptable*, RED4ext::CStackFrame* aFra
     SetStepDownReach(v); // chooser mapping
     motionhost::SetAirStepDownReach(v); // runtime air state: one switch for both
 }
+// capsule forecast for turning and partial-stick starts (MapConfig::capsuleForecast; CET utpp_motion mm.capsuleForecast, default off)
+void Native_SetMMCapsuleForecast(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    SetCapsuleForecast(v);
+    pluginlog::LogInfo("UTPPSetMMCapsuleForecast(%d) -> 1", v ? 1 : 0);
+}
 void Native_SetMMFarJumpGravity(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     bool v = false;
@@ -559,7 +570,19 @@ void Native_SetMMStrideWarp(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame,
     if (aOut)
         *aOut = ok;
 }
-// firm feet in turns and stops (CET utpp_motion mm.firmFeet; DLL default off). Logged in the setting-call form the offline replay applies.
+// inertialized overlay switch (CET utpp_motion mm.overlayInertialSwitch; default off). Logged in the setting-call form the offline
+// replay applies.
+void Native_SetMMOverlayInertialSwitch(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = SetOverlayInertialSwitch(on);
+    pluginlog::LogInfo("UTPPSetMMOverlayInertialSwitch(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
+// firm feet in turns and stops (CET utpp_motion mm.firmFeet; DLL default on). Logged in the setting-call form the offline replay applies.
 void Native_SetMMFirmFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     bool on = false;
@@ -743,6 +766,8 @@ void RegisterNatives()
     o2->flags = flags; o2->AddParam("Bool", "on"); rtti->RegisterFunction(o2);
     auto* o3 = RED4ext::CGlobalFunction::Create("UTPPSetMMStepDownReach", "UTPPSetMMStepDownReach", &Native_SetMMStepDownReach);
     o3->flags = flags; o3->AddParam("Bool", "on"); rtti->RegisterFunction(o3);
+    auto* o3b = RED4ext::CGlobalFunction::Create("UTPPSetMMCapsuleForecast", "UTPPSetMMCapsuleForecast", &Native_SetMMCapsuleForecast);
+    o3b->flags = flags; o3b->AddParam("Bool", "on"); rtti->RegisterFunction(o3b);
     auto* o4 = RED4ext::CGlobalFunction::Create("UTPPSetMMFarJumpGravity", "UTPPSetMMFarJumpGravity", &Native_SetMMFarJumpGravity);
     o4->flags = flags; o4->AddParam("Bool", "on"); rtti->RegisterFunction(o4);
     auto* o5 = RED4ext::CGlobalFunction::Create("UTPPSetMotionLeanCoverage", "UTPPSetMotionLeanCoverage", &Native_SetMotionLeanCoverage);
@@ -756,8 +781,11 @@ void RegisterNatives()
     auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMotionBodyYawOffsets", "UTPPSetMotionBodyYawOffsets", &Native_SetMotionBodyYawOffsets);
     o9->flags = flags; o9->AddParam("Float", "female"); o9->AddParam("Float", "male"); o9->SetReturnType("Bool");
     rtti->RegisterFunction(o9);
-    auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMFirmFeet", "UTPPSetMMFirmFeet", &Native_SetMMFirmFeet);
+    auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMOverlayInertialSwitch", "UTPPSetMMOverlayInertialSwitch",
+                                                 &Native_SetMMOverlayInertialSwitch);
     o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);
+    auto* o11 = RED4ext::CGlobalFunction::Create("UTPPSetMMFirmFeet", "UTPPSetMMFirmFeet", &Native_SetMMFirmFeet);
+    o11->flags = flags; o11->AddParam("Bool", "on"); o11->SetReturnType("Bool"); rtti->RegisterFunction(o11);
 }
 
 void Install(const std::wstring& aDllDir)

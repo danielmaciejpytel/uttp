@@ -432,7 +432,7 @@ std::string CrouchExcludeTags();
 // reason=radius|clamp|tidy|handover, feet line phase S + " replant= active= liftL= liftR="; status feet segment replant= ... .
 bool SetFootReplant(int32_t aMask);
 int32_t FootReplantMask();
-// Firm feet in turns and stops (CET mm.firmFeet, default off; mm/FootLocker.hpp FirmFeetConfig): upright (stand / sprint stance) on the
+// Firm feet in turns and stops (CET mm.firmFeet, default on; mm/FootLocker.hpp FirmFeetConfig): upright (stand / sprint stance) on the
 // ground at up to the latch speed, a planted foot with a firm contact in a turn, pivot, reface, turn in place or stop clip stays fixed
 // in the world up to the hold limit (instead of the soft slip start), lowered by the leg reach and knee fold limits; the contact end
 // releases it through the blend-out, a standing capsule after those clips hands the hold back at the hand-back speed. Off = the previous

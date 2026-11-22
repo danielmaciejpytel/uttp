@@ -102,6 +102,8 @@ public native func UTPPSetMMPelvisPlacement(on: Bool) -> Void
 public native func UTPPSetMMHandBackBlend(on: Bool) -> Void
 public native func UTPPSetMMStepDownReach(on: Bool) -> Void
 public native func UTPPSetMMFarJumpGravity(on: Bool) -> Void
+// Predicted start path at the applied capsule acceleration also for turning and partial-stick starts (off by default).
+public native func UTPPSetMMCapsuleForecast(on: Bool) -> Void
 public native func UTPPSetMotionLeanCoverage(coverage: Int32) -> Bool
 // Aim offset on a filtered world direction of the target (hz = smoothing rate, 0 = exact tracking with the catch-up limit).
 public native func UTPPSetMMAimWorldSmoothing(on: Bool, hz: Float) -> Bool
@@ -111,9 +113,14 @@ public native func UTPPSetMMNeutralAimOffset(on: Bool) -> Bool
 // to the movement speed so the feet slide less; switching it fades in / out without a pose jump. Always true. Keep this declaration
 // and the DLL native (MotionDriverNatives.cpp) in sync: a declared native without registration breaks the scripts.
 public native func UTPPSetMMStrideWarp(on: Bool) -> Bool
-// Firm feet in turns and stops (DLL default off; CET setting mm.firmFeet): a planted foot stays fixed on the ground through turns and
+// Firm feet in turns and stops (DLL default on; CET setting mm.firmFeet): a planted foot stays fixed on the ground through turns and
 // stops (larger leg correction, limited by the leg reach and knee bend). Always true. Keep in sync with MotionDriverNatives.cpp.
 public native func UTPPSetMMFirmFeet(on: Bool) -> Bool
+// Inertialized weapon pose switch (DLL default off; CET setting mm.overlayInertialSwitch): drawing, holstering or changing the weapon
+// class swaps the weapon pose at once and blends the body without overshoot (arms and hands relative to the chest over 0.2 s; legs,
+// pelvis and root over 0.4 s). Always true. Keep in sync with
+// MotionDriverNatives.cpp.
+public native func UTPPSetMMOverlayInertialSwitch(on: Bool) -> Bool
 // Body yaw offset per body (motion poses; CET settings mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale, DLL default 0 / 0): the value of
 // the body in use turns the whole character by deg (+ = left, -20..20) about its visual root; the movement direction is unchanged; off
 // while aiming / during weapon actions. False = NaN / out of range (nothing changed). Keep in sync with MotionDriverNatives.cpp.

@@ -191,7 +191,7 @@ struct FootPlantReferenceConfig
 #define UTPP_FOOT_STOP_FIRM_PLANT 1
 #endif
 
-// Firm feet in turns and stops (option, default off; FootLocker::SetFirmFeet / SetFirmHold). While the driver reports a turn or stop clip
+// Firm feet in turns and stops (option, DLL default on; FootLocker::SetFirmFeet / SetFirmHold). While the driver reports a turn or stop clip
 // (SetFirmHold) or an ordinary standing stop runs, a planted foot of the soft-slip path whose contact is firm (>= kStopFirmContact) is
 // latched (a new latch only on a capsule at or below `latchSpeed`: running turns keep the soft slip, their larger hold bent the knee skin):
 // until that contact ends the lock point stays fixed in the world up to `limit` from the animated toe (the soft slip starts there

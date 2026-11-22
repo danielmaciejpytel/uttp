@@ -42,11 +42,14 @@
 --                  in play; the movement direction is unchanged; off while aiming / during weapon actions (native
 --                  UTPPSetMotionBodyYawOffsets(female, male), both values in one call). Replace mm.bodyYawOffset (one value for both
 --                  bodies): utpp_core moves a stored value to mm.bodyYawOffsetFemale on load; male V starts at 0.
+--   mm.capsuleForecast bool, default false (DLL default off) - the predicted path of the movement also ramps at the game's own
+--                  acceleration when V starts away from the facing, with a partly tilted stick or while the camera turns (the
+--                  straight full-stick start already does); developer option (native UTPPSetMMCapsuleForecast).
 --   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
 --                  without a pose jump (native UTPPSetMMStrideWarp).
---   mm.firmFeet bool, default false ("Firm feet in turns and stops"; DLL default off, the value is sent with the other M.OPTIONS) - a
+--   mm.firmFeet bool, default true ("Firm feet in turns and stops"; DLL default on, the value is sent with the other M.OPTIONS) - a
 --                  planted foot stays fixed on the ground through turns, pivots, turns in place and stops instead of slipping after the
 --                  animation (at walking pace and below); the leg correction may grow up to 30 cm, limited by the leg reach and knee
 --                  bend (native UTPPSetMMFirmFeet).
@@ -92,8 +95,8 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
-  strideWarp = true, firmFeet = false }
+  aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
+  strideWarp = true, overlayInertialSwitch = false, firmFeet = true }
 -- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = nil, orientWarpApplied = nil,
@@ -902,16 +905,18 @@ end
 -- Optional motion behaviours, all off in the DLL by default (their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
 -- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
 M.OPTIONS = {
-  { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 0 },
+  { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 12 },
   { want = "neutralAim", field = "setNeutralAimOffset", native = "UTPPSetMMNeutralAimOffset" },
   { want = "pelvisPlacement", field = "setPelvisPlacement", native = "UTPPSetMMPelvisPlacement" },
   { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
   { want = "stepDownReach", field = "setStepDownReach", native = "UTPPSetMMStepDownReach" },
   { want = "farJumpGravity", field = "setFarJumpGravity", native = "UTPPSetMMFarJumpGravity" },
+  { want = "capsuleForecast", field = "setCapsuleForecast", native = "UTPPSetMMCapsuleForecast" },
   { want = "leanCoverage", field = "setLeanCoverage", native = "UTPPSetMotionLeanCoverage",
     arg = function(v) return v == "wide" and 1 or 0 end },
   { want = "strideWarp", field = "setStrideWarp", native = "UTPPSetMMStrideWarp" },
   { want = "firmFeet", field = "setFirmFeet", native = "UTPPSetMMFirmFeet" },
+  { want = "overlayInertialSwitch", field = "setOverlayInertialSwitch", native = "UTPPSetMMOverlayInertialSwitch" },
 }
 function M.ApplyOptions(api)
   if not M.want.enabled then return false end
@@ -1030,11 +1035,11 @@ function M.RegisterSettings(core)
     desc = "Shortens V's steps to her movement speed while she walks, runs or moves crouched, so her feet slide less over the "
       .. "ground. Off = the steps of the animations as they are. Starts, stops, turns, jumps and slides are unchanged.",
     apply = function(v) M.SetOption("strideWarp", v == true) end })
-  core.Register({ key = "mm.firmFeet", section = "animation", type = "bool", default = false,
+  core.Register({ key = "mm.firmFeet", section = "animation", type = "bool", default = true,
     label = "Firm feet in turns and stops",
     desc = "Keeps V's planted feet fixed on the ground while she turns at walking pace, turns on the spot or stops, so they slide "
-      .. "less. Her legs stretch or bend a little more to reach the planted feet (never beyond what the leg can reach). Off "
-      .. "(default) = the feet may slip a little to follow the animations.",
+      .. "less. Her legs stretch or bend a little more to reach the planted feet (never beyond what the leg can reach). On "
+      .. "(default); off = the feet may slip a little to follow the animations.",
     apply = function(v) M.SetOption("firmFeet", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
@@ -1065,9 +1070,9 @@ function M.RegisterSettings(core)
     label = "motion: lean head amount",
     desc = "Amount of the head lean (1 = full strength, applies to the head layer only; lean amount scales the torso).",
     apply = function(v) M.SetLeanHeadScale(v) end })
-  core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = false,
-    label = "motion: steady aim while turning (experimental)",
-    desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns. Off (default) = the earlier aim.",
+  core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = true,
+    label = "motion: steady aim while turning",
+    desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns and short camera jerks do not jolt the body. On (default); off = the earlier aim.",
     apply = function(v) M.SetOption("aimWorldSmooth", v == true) end })
   core.Register({ key = "mm.neutralAim", section = "motion", type = "bool", default = false,
     label = "motion: look with the camera in strafe (experimental)",
@@ -1089,6 +1094,14 @@ function M.RegisterSettings(core)
     label = "motion: jump timing for the game gravity (experimental)",
     desc = "Picks the jump and fall animations by the time left until landing as if under the gravity the animations were made for, so landings start on time. Takes effect after the next load of a save. Off (default) = the earlier timing.",
     apply = function(v) M.SetOption("farJumpGravity", v == true) end })
+  core.Register({ key = "mm.overlayInertialSwitch", section = "motion", type = "bool", default = false,
+    label = "motion: smooth weapon pose switch (experimental)",
+    desc = "When V draws, holsters or changes the weapon type, the weapon pose changes at once and the body blends into it without overshooting: the arms and hands in about 0.2 s, the legs and hips in about 0.4 s. Off (default) = the earlier crossfade.",
+    apply = function(v) M.SetOption("overlayInertialSwitch", v == true) end })
+  core.Register({ key = "mm.capsuleForecast", section = "motion", type = "bool", default = false,
+    label = "motion: predicted path for turning starts (experimental)",
+    desc = "The animation choice predicts the path of a start at the game's own acceleration also when V starts away from the facing, or with a partly tilted stick. Off (default) = only straight full-stick starts use it.",
+    apply = function(v) M.SetOption("capsuleForecast", v == true) end })
   core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
     choices = { { "standard", "Standard" }, { "wide", "Wide" } },
     label = "motion: lean coverage",

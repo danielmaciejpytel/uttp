@@ -153,12 +153,16 @@ local orderIndex = {}
 -- mm.headLead: the lean head layer takes the head in the default configuration, so the switch changes nothing there.
 -- perspective.startInLastView: the remembered view changes only through console calls (nothing in the controls or the menu
 -- sets it), so the switch changes nothing for a player; a stored value is still read and written.
+-- bodyturn.turnRate / bodyturn.turnRateMax: no effect on frames the motion driver owns; they apply on the legacy matcher and
+-- on frames handed back to it.
 M.HIDDEN_KEYS = {}
 for _, k in ipairs({ "camera.aim.occlusion", "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.minWalkSpeed", "camera.body",
   "camera.collision", "mm.aimAtCrosshair", "perspective.sceneTier", "interactRange.scale", "lootRange.scale", "lootView.zoom",
   "lootView.radius", "vehicle.keepTpp", "vehicle.pullOut", "vehicle.rideWatchdog", "vehicle.safeTeleportExit", "camera.mouseScale",
   "perspective.minGap", "camera.aim.range", "camera.zoomUnarmed.fov", "camera.zoomUnarmed.lastFov",
-  "perspective.blend", "mm.headLead", "perspective.startInLastView" }) do M.HIDDEN_KEYS[k] = true end
+  "perspective.blend", "mm.headLead", "perspective.startInLastView", "bodyturn.turnRate", "bodyturn.turnRateMax" }) do
+  M.HIDDEN_KEYS[k] = true
+end
 
 -- Options that follow another option: vehicle.keepTpp holds the same behaviour as perspective.vehicleKeepTpp, which is the
 -- option of the menu and the single authority. A follower takes the value of its authority whenever either is registered, read
@@ -567,7 +571,7 @@ local LAYOUT = {
   --   "Walk speed (m/s)" (mm.walkSpeed, utpp_motion: capsule speed under the walk toggle) after it, then "Minimum walk
   -- speed (m/s)" (mm.minWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
   -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less), then "Firm feet in turns and
-  -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default off)
+  -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default on)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
@@ -619,7 +623,7 @@ local LAYOUT = {
                                "bodyturn.aimStrafeUnarmed", "bodyturn.turnRateMax", "mm.orientWarp",
                                "mm.slide", "mm.lean", "mm.leanScale", "mm.leanHead", "mm.leanHeadScale", "mm.leanCoverage",
                                "mm.selectionGuards", "mm.aimWorldSmooth", "mm.neutralAim", "mm.pelvisPlacement", "mm.handBackBlend", "mm.stepDownReach",
-                               "mm.farJumpGravity" } },
+                               "mm.farJumpGravity", "mm.overlayInertialSwitch", "mm.capsuleForecast" } },
   --   Debug: the diagnostic logs have one visible list in General (the single switches stay diagnostic level,
   -- console only); camera.aim.occlusion stays visible (detection only, the switch saves its rays)
   { "advanced", "debug", { "camera.aim.occlusion" } },
