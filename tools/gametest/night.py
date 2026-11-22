@@ -2838,6 +2838,21 @@ class Night:
         info['verdict_after'] = rec.get('verdict')
         self.log(f'[weapon-block] {key}: second try done, verdict {rec.get("verdict")}')
 
+    def move_to_home_at(self, pad, guard) -> bool:
+        """--home-at X,Y,Z: V (on foot) is teleported to that point, facing as before, before the start point is taken, so every
+        scenario of the session starts there (keep_near_home returns V to it). True = the teleport ran."""
+        at = parse_home_at(getattr(self.args, 'home_at', ''))
+        if at is None:
+            return False
+        text = self.console_verified(pad, guard, gn.home_cmd(at), lambda t: gn.HOME_ECHO in t, 'home', 3.0)
+        ok = text is not None and gn.HOME_ECHO + 'true' in text
+        self.cycle['home_at'] = {'target': [round(v, 2) for v in at], 'ok': ok}
+        self.log('[home] --home-at %.1f, %.1f, %.1f: %s' % (at + ('V put there' if ok else 'the teleport did not run',)))
+        if ok:
+            guard.wait(gn.HOME_SETTLE_S)
+            self.last_known = None
+        return ok
+
     def note_home(self, pad, guard) -> None:
         """Remembers where V stands on foot when the scenarios begin: the place the session returns to (keep_near_home).
         Only with the positions the game logs by itself (NightAuto): a position asked through the console costs typing, and
@@ -3916,6 +3931,7 @@ class Night:
                     self.level_camera(pad, guard, plan)
                 except NeedsKeyboard as e:
                     self.log(f'[scenarios] walking away from the vehicle skipped: {e}')
+            self.move_to_home_at(pad, guard)
             self.note_home(pad, guard)
             with TimerResolution():
                 for name in self.names:
@@ -5144,6 +5160,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--stride-warp', default='', choices=['', 'on', 'off'],
                    help='stride matching (mm.strideWarp) of the session for an A/B run: on | off replaces the pinned value; '
                         'empty (default) = the pinned value')
+    p.add_argument('--shooter-mode', default='', choices=['', 'on', 'off'],
+                   help='Shooter mode (bodyturn.shooterMode, pinned off) of the session: on = the session runs in Shooter mode (the neutral '
+                        'aim grid and the head cap act only there), put back before ExitGame like every pinned value; empty (default) = off')
+    p.add_argument('--home-at', default='',
+                   help='X,Y,Z: after V left the start vehicle, V is teleported there (facing as before) and that place becomes the '
+                        'start point that --home-radius returns to (a known spot of a scenario, e.g. next to a curb); empty = '
+                        'where V stands')
     p.add_argument('--animation-pack', default='', choices=[''] + list(gs.PACK_VALUES),
                    help="the mod's animation pack option of the session: utpp | game, set after arming through the same ledger and "
                         'put back before ExitGame; empty (default) = the option is not touched')
@@ -5219,6 +5242,10 @@ def validate_args(args) -> list[str]:
     fz = getattr(args, 'freeze_seconds', gt_freeze.DEFAULT_SECONDS)
     if fz < 0 or 0 < fz < 3:
         errs.append(f'--freeze-seconds {fz:g}: 0 (no watch) or at least 3')
+    try:
+        parse_home_at(getattr(args, 'home_at', ''))
+    except ValueError as e:
+        errs.append(str(e))
     return errs
 
 
@@ -5278,9 +5305,26 @@ def write_body_summary(args, results: list) -> list[str]:
 
 
 def session_overrides(args) -> dict:
-    """--stride-warp on | off: the pinned session values it replaces (key -> value); empty = none."""
+    """--stride-warp / --shooter-mode on | off: the pinned session values they replace (key -> value); empty = none."""
+    out = {}
     sw = str(getattr(args, 'stride_warp', '') or '')
-    return {'mm.strideWarp': sw == 'on'} if sw else {}
+    if sw:
+        out['mm.strideWarp'] = sw == 'on'
+    sm = str(getattr(args, 'shooter_mode', '') or '')
+    if sm:
+        out['bodyturn.shooterMode'] = sm == 'on'
+    return out
+
+
+def parse_home_at(text: str) -> tuple[float, float, float] | None:
+    """--home-at 'X,Y,Z' -> (x, y, z); '' -> None; anything else raises ValueError."""
+    text = str(text or '').strip()
+    if not text:
+        return None
+    parts = [float(v) for v in text.split(',')]
+    if len(parts) != 3 or not all(math.isfinite(v) for v in parts):
+        raise ValueError(f'--home-at {text!r}: X,Y,Z expected')
+    return parts[0], parts[1], parts[2]
 
 
 def main(argv=None) -> int:

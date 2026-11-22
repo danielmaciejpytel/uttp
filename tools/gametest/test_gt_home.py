@@ -162,5 +162,74 @@ class KeepNearHome(unittest.TestCase):
         self.assertEqual(n.cycle['home_returns'][0]['after_m'], 100.0)
 
 
+class HomeAt(unittest.TestCase):
+    """--home-at X,Y,Z: V is put at a known spot before the start point is taken (a scenario that needs a curb, a step)."""
+    make = KeepNearHome.make
+    Guard = KeepNearHome.Guard
+
+    def make_at(self, text):
+        n = self.make()
+        n.args.home_at = text
+        return n
+
+    def test_parse_and_validation(self):
+        self.assertIsNone(night.parse_home_at(''))
+        self.assertEqual(night.parse_home_at(' 1583.5, 2251,181.7 '), (1583.5, 2251.0, 181.7))
+        for bad in ('1,2', '1,2,3,4', 'a,b,c', 'nan,1,2'):
+            with self.assertRaises(ValueError):
+                night.parse_home_at(bad)
+        args = night.build_parser().parse_args(['--home-at', '1,2'])
+        self.assertTrue(any('--home-at' in e for e in night.validate_args(args)))
+        args = night.build_parser().parse_args(['--home-at', '1583.5,2251,181.7'])
+        self.assertFalse(any('--home-at' in e for e in night.validate_args(args)))
+
+    def test_without_the_option_nothing_is_sent(self):
+        n = self.make_at('')
+        self.assertFalse(n.move_to_home_at(None, self.Guard()))
+        self.assertEqual(n.sent, [])
+        self.assertNotIn('home_at', n.cycle)
+
+    def test_v_is_teleported_there_and_that_place_becomes_the_start_point(self):
+        n = self.make_at('1583.5,2251,181.7')
+        n.last_known = 'stale'
+        g = self.Guard()
+        self.assertTrue(n.move_to_home_at(None, g))
+        self.assertEqual(n.sent, [gn.home_cmd((1583.5, 2251.0, 181.7))])
+        self.assertEqual(n.cycle['home_at'], {'target': [1583.5, 2251.0, 181.7], 'ok': True})
+        self.assertIsNone(n.last_known)
+        self.assertGreaterEqual(g.waited, gn.HOME_SETTLE_S)
+        n.answers = [pos(1583.6, 2251.1, 181.7)]
+        n.note_home(None, g)
+        self.assertEqual(n.home, (1583.6, 2251.1, 181.7))
+
+    def test_a_lost_teleport_is_reported_not_retried(self):
+        n = self.make_at('1583.5,2251,181.7')
+        n.reply = None
+        self.assertFalse(n.move_to_home_at(None, self.Guard()))
+        self.assertEqual(len(n.sent), 1)
+        self.assertFalse(n.cycle['home_at']['ok'])
+        self.assertTrue(any('did not run' in ln for ln in n.lines))
+
+
+class SessionOverrides(unittest.TestCase):
+    def test_shooter_mode_and_stride_warp_replace_their_pinned_values(self):
+        p = night.build_parser()
+        self.assertEqual(night.session_overrides(p.parse_args([])), {})
+        self.assertEqual(night.session_overrides(p.parse_args(['--shooter-mode', 'on'])), {'bodyturn.shooterMode': True})
+        self.assertEqual(night.session_overrides(p.parse_args(['--shooter-mode', 'off', '--stride-warp', 'off'])),
+                         {'bodyturn.shooterMode': False, 'mm.strideWarp': False})
+        import gt_settings as gs
+        plan = dict(gs.session_plan('shipped', night.session_overrides(p.parse_args(['--shooter-mode', 'on']))))
+        self.assertIs(plan['bodyturn.shooterMode'], True)
+        self.assertIs(plan['mm.firmFeet'], True)
+
+    def test_curb_set_resolves_to_a_scenario_of_the_file(self):
+        scen = night.load_scenarios(os.path.join(HERE, 'scenarios.json'))
+        names = gn.resolve_sets('curb')
+        self.assertEqual(names, ['curb_spoke'])
+        self.assertEqual(gn.validate_sets(names, scen), [])
+        self.assertNotIn('curb_spoke', gn.SETS['all'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -413,14 +413,14 @@ class SessionSettingsTests(unittest.TestCase):
               'perspective.scene': True, 'perspective.blend': 0.8,
               'mm.walkSpeed': 2.4, 'mm.minWalkSpeed': 0.5, 'mm.stickSpeed': 'analog', 'mm.lean': False, 'mm.leanHead': False, 'mm.leanScale': 1.5,
               'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'wide', 'mm.orientWarp': False, 'mm.strideWarp': False, 'mm.footReplant': 'always',
-              'bodyturn.aimJog': False,
+              'mm.firmFeet': False, 'mm.bodyHeightSmooth': False, 'mm.neutralAim': False, 'mm.aimWorldSmooth': False, 'bodyturn.aimJog': False,
               'bodyturn.aimJogSpeed': 3.8, 'bodyturn.aimSmooth': False, 'bodyturn.shooterMode': True}
     LOCO = {'mm.walkSpeed': 1.6, 'mm.minWalkSpeed': 0.82, 'mm.stickSpeed': 'fixed', 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.85,
             'mm.leanHeadScale': 0.9, 'mm.leanCoverage': 'standard', 'mm.orientWarp': True, 'mm.strideWarp': True,
-            'mm.footReplant': 'crouch', 'bodyturn.aimJog': True,
-            'bodyturn.aimJogSpeed': 3.3, 'bodyturn.aimSmooth': True, 'bodyturn.shooterMode': False}
+            'mm.footReplant': 'crouch', 'mm.firmFeet': True, 'mm.bodyHeightSmooth': True, 'mm.neutralAim': True, 'mm.aimWorldSmooth': True,
+            'bodyturn.aimJog': True, 'bodyturn.aimJogSpeed': 3.3, 'bodyturn.aimSmooth': True, 'bodyturn.shooterMode': False}
     LOCO_TEXT = ('locomotion walkSpeed=1.6 minWalkSpeed=0.82 stickSpeed=fixed lean=true leanHead=true leanScale=0.85 leanHeadScale=0.9 leanCoverage=standard orientWarp=true '
-                 'strideWarp=true footReplant=crouch aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
+                 'strideWarp=true footReplant=crouch firmFeet=true bodyHeightSmooth=true neutralAim=true aimWorldSmooth=true aimJog=true aimJogSpeed=3.3 aimSmooth=true shooterMode=false')
 
     def test_plans(self):
         self.assertEqual(dict(gs.session_plan('author')),

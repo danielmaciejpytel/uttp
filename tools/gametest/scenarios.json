@@ -132,6 +132,15 @@
         {"name": "run_stop", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, 0]]}
       ]
     },
+    "curb_spoke": {
+      "description": "curb / step crossing (set 'curb', run with --repeat 8 --home-at X,Y,Z --home-radius 1): turn the camera ~50 deg right, run 1.4 s ahead (under the long look-ahead route), run back 2.0 s, stop. V starts each repeat at the --home-at point, so eight repeats cross a curb within ~5 m of it in several directions, up and down; the crossings are read from the feed dump (isolated capsule z steps, ground_report.py), not scored",
+      "steps": [
+        {"name": "turn", "duration": 0.6, "interp": "step", "ls": [[0, 0, 0]], "rs": [[0, 0, 0], [0.05, 1, 0], [0.22, 0, 0]], "metrics": false},
+        {"name": "run_out", "duration": 1.4, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "run_back", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]], "metrics": false},
+        {"name": "stop", "duration": 1.0, "interp": "linear", "ls": [[0, 0, -1], [0.15, 0, 0]], "metrics": false}
+      ]
+    },
     "idle_then_start_sideways": {
       "description": "idle 3 s, quick start right, stop, start left, stop, start backwards, stop",
       "steps": [

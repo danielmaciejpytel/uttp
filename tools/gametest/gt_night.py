@@ -54,6 +54,8 @@ SETS = {
     # jumps, slide and weapon fire / reload, pad only (works with --background); not in 'all'. The weapon macro is last:
     # it needs a ranged weapon with ammo and the shots can draw attention
     'states': STATE_SCENARIOS + ['weapon_fire_reload'],
+    # curb / step crossings around a known spot (--home-at, --repeat 8, --home-radius 1); pad only, not scored; not in 'all'
+    'curb': ['curb_spoke'],
 }
 # The car scenario runs FIRST: both test saves start at (or in) the car, so V is next to it. At the end of the set
 # the walking scenarios had taken V 50-80 m away and the summoned car parked wherever the game chose (2026-11-12
