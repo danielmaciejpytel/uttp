@@ -12,6 +12,7 @@
 #include "mm/LeanRuntime.hpp"
 #include "mm/LocomotionSignalBlend.hpp"
 #include "mm/MagTap.hpp"
+#include "mm/MovingPlatform.hpp" // moving platform (elevator) feed conditioning, shared with motionhost::Feed
 #include "mm/NativeReloadContactsRuntime.hpp"
 #include "mm/OrientWarp.hpp"
 #include "mm/RecoilProfiles.hpp"
@@ -2947,8 +2948,17 @@ void SetAirFeed(bool aOnGround, float aDistanceToGround, int32_t aPsmFall)
     ++g_airDiag.feeds;
 }
 
-void FeedAirFromInput(const motionhost::FeedInput& aIn)
+void FeedAirFromInput(const motionhost::FeedInput& aRawIn)
 {
+    // moving platform (elevator): the same conditioning motionhost::Feed applies to this feed (mm/MovingPlatform.hpp)
+    motionhost::FeedInput platformIn;
+    const bool platform = mm::platform::Applies(aRawIn);
+    if (platform)
+    {
+        platformIn = aRawIn;
+        mm::platform::Condition(platformIn);
+    }
+    const motionhost::FeedInput& aIn = platform ? platformIn : aRawIn;
     // Dual-wield D0 diagnostics: the raw (unconditioned) psmBlock of every feed, for the status string only. Nothing reads it back.
     g_feedPsmRaw.store(aIn.psmBlock, std::memory_order_relaxed);
     if (!aIn.haveAir || AirMut() == 10)

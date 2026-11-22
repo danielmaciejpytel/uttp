@@ -41,6 +41,7 @@
 #include "mm/FootLocker.hpp"
 #include "mm/GameIntegration.hpp"
 #include "mm/MeleeFullBody.hpp" // melee full body (2026-11-09)
+#include "mm/MovingPlatform.hpp" // moving platform (elevator) feed conditioning
 #include "mm/VaultShoulder.hpp" // vault shoulder limiter (2026-11-15)
 #include "mm/VaultTorso.hpp" // vault torso limiter (2026-11-10)
 #include "mm/BaseMatcher.hpp"
@@ -3757,28 +3758,90 @@ void ExitDiagLocked(const FeedInput& aIn, int32_t aRawLoco, int aPsmDetail, floa
         g_exitDiagT = -1.0f;
 }
 
+// Moving platform ride summary (always on, info): one line when the script flag turns on and one when it turns off, with what the game
+// sent during the ride (raw contact losses, raw vertical velocity range) and how many feeds were conditioned (mm/MovingPlatform.hpp).
+struct PlatformRide
+{
+    bool on = false;
+    uint32_t feeds = 0, airFeeds = 0, lost = 0, conditioned = 0;
+    float vzMin = 0.0f, vzMax = 0.0f, seconds = 0.0f;
+};
+PlatformRide g_platformRide;
+
+void PlatformLogLocked(const FeedInput& aRawIn, bool aConditioned)
+{
+    PlatformRide& r = g_platformRide;
+    const float vz = std::isfinite(aRawIn.velWorld[2]) ? aRawIn.velWorld[2] : 0.0f;
+    if (aRawIn.onMovingPlatform && !r.on)
+    {
+        r = PlatformRide{};
+        r.on = true;
+        r.vzMin = r.vzMax = vz;
+        if (g_log)
+        {
+            char line[200];
+            std::snprintf(line, sizeof line, "UTPP PLATFORM on: onGround=%d vz=%.2f detail=%d", aRawIn.haveAir ? (aRawIn.onGround ? 1 : 0) : -1,
+                          static_cast<double>(vz), PsmDetailOf(aRawIn.psmBlock));
+            g_log(line);
+        }
+    }
+    if (r.on && aRawIn.onMovingPlatform)
+    {
+        ++r.feeds;
+        r.airFeeds += aRawIn.haveAir ? 1 : 0;
+        r.lost += aRawIn.haveAir && !aRawIn.onGround ? 1 : 0;
+        r.conditioned += aConditioned ? 1 : 0;
+        r.vzMin = std::fmin(r.vzMin, vz);
+        r.vzMax = std::fmax(r.vzMax, vz);
+        r.seconds += std::isfinite(aRawIn.dt) ? std::clamp(aRawIn.dt, 0.0f, 0.25f) : 0.0f;
+    }
+    else if (r.on)
+    {
+        r.on = false;
+        if (g_log)
+        {
+            char line[260];
+            std::snprintf(line, sizeof line,
+                          "UTPP PLATFORM off: %.1f s, feeds=%u airFeeds=%u contactLost=%u vz=%.2f..%.2f conditioned=%u", static_cast<double>(r.seconds),
+                          r.feeds, r.airFeeds, r.lost, static_cast<double>(r.vzMin), static_cast<double>(r.vzMax), r.conditioned);
+            g_log(line);
+        }
+    }
+}
+
 void Feed(const FeedInput& aRawIn)
 {
     // Ragdoll episode (ragdoll/RagdollEpisode.hpp): while the engine owns V's body the feed carries the existing game-owned state of
     // knockdown (LocomotionDetailed 29, integ::PsmDetailReleases). The gate closes, HoldBlocker reports release:detail and the normal
     // gate fader fades MM out and, after the episode, back in through the reopen hold; v2 yields on the same detail (psm-release).
     // Idle: the flag is false and aRaw is aRawIn itself, nothing changes.
-    std::optional<FeedInput> ragdollFeed;
+    std::optional<FeedInput> conditionedFeed;
     if (ragdoll::GameOwned())
     {
-        ragdollFeed = aRawIn;
-        ragdollFeed->psmBlock = ragdoll::GameOwnedPsmBlock(aRawIn.psmBlock);
+        conditionedFeed = aRawIn;
+        conditionedFeed->psmBlock = ragdoll::GameOwnedPsmBlock(aRawIn.psmBlock);
     }
     else if (ragdoll::GetUpOwns())
     {
         // native get-up (ragdoll/GetUpPlayer.hpp): the knockdown detail the script injects is removed again, so the gate can open and MM
         // (v1 weight filled below) owns V while the clip is published. Vehicle / death / scene bits stay and still close the gate.
-        ragdollFeed = aRawIn;
-        ragdollFeed->psmBlock = ragdoll::GetUpPsmBlock(aRawIn.psmBlock);
+        conditionedFeed = aRawIn;
+        conditionedFeed->psmBlock = ragdoll::GetUpPsmBlock(aRawIn.psmBlock);
     }
-    const FeedInput& aRaw = ragdollFeed ? *ragdollFeed : aRawIn;
+    // Moving platform (elevator, mm/MovingPlatform.hpp): the feed in the platform frame (in contact, no vertical velocity), the same
+    // conditioning motiondriver::FeedAirFromInput applies. Flag off: nothing changes.
+    const bool platformFeed = mm::platform::Applies(conditionedFeed ? *conditionedFeed : aRawIn);
+    if (platformFeed)
+    {
+        if (!conditionedFeed)
+            conditionedFeed = aRawIn;
+        mm::platform::Condition(*conditionedFeed);
+    }
+    const FeedInput& aRaw = conditionedFeed ? *conditionedFeed : aRawIn;
     std::lock_guard lock(g_mutex);
     g_bodyHeightAllowed = false; // set again by the leg pipeline of this feed
+    if (!aRawIn.synthetic)
+        PlatformLogLocked(aRawIn, platformFeed);
     if (aRawIn.synthetic && g_synthGuardOn)
     {
         g_synthGuardOn = false;
