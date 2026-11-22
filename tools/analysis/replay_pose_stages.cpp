@@ -41,9 +41,14 @@
 //                       along the recorded camera yaw, the aim target while the PSM upper body is Aim; overlay inputs pose P with a
 //                       drawn weapon (0 Default, 1 Rifle, 2 Pistol1H, 3 Pistol2H; the weapon is not recorded), Aiming / Ready / Relaxed
 //                       from the PSM; mm.aimGameUpper false (the script default). No camera pitch in the dumps: level only. One AIMCAM line.
+//   --aim-camera-alt Q  with --aim-camera P: while the weapon is drawn the overlay pose alternates P / Q every 90 drawn feeds (feed
+//                       count over the whole run: P for drawn feeds 0..89, Q for 90..179, ...), so the replay contains weapon class changes
 //                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
 //   --stride-warp 0|1   stride warping of the blend stack off / on after --settings-log (motiondriver::SetStrideWarp, the mm.strideWarp
 //                       setting; the settings log call MMStrideWarp of later sessions is applied as well); not passed: the log / build default
+//   --overlay-inertial-switch 0|1  inertialized overlay switch off / on after --settings-log (motiondriver::SetOverlayInertialSwitch,
+//                       the mm.overlayInertialSwitch setting; the settings log call MMOverlayInertialSwitch is applied as well); it acts on
+//                       overlay changes only, so a replay without --aim-camera (overlay always Default) is unchanged by it
 //   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
 //                       mm.stickSpeed setting; the settings log call MotionStickSpeedMode of later sessions is applied as well)
 //                       With --settings-log, the driver first gets the values a game session held before its first setting call in
@@ -204,6 +209,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MotionBodyYawOffset") motiondriver::SetBodyYawOffset(arg(0));
         else if (name == "MotionBodyYawOffsets") motiondriver::SetBodyYawOffsets(arg(0), arg(1));
         else if (name == "MMStrideWarp") motiondriver::SetStrideWarp(flag(0));
+        else if (name == "MMOverlayInertialSwitch") motiondriver::SetOverlayInertialSwitch(flag(0));
         else if (name == "MMSteerMode" || name == "MMSteerActiveOnly") {} // turn steering options of test builds: no option now
         else if (name == "MotionLean") motiondriver::SetLean(arg(0) != 0);
         else if (name == "MotionLeanHead") motiondriver::SetLeanHead(arg(0) != 0);
@@ -364,8 +370,11 @@ int main(int argc, char** argv)
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
+    int32_t overlayInertialSwitch = -1;                                          // -1 = not passed
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
+    int32_t aimCameraAlt = -1;                 // --aim-camera-alt: second overlay pose of a drawn weapon, < 0 = not passed
+    uint64_t aimCameraDrawnFeeds = 0;
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -420,10 +429,14 @@ int main(int argc, char** argv)
             shooterMode = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stride-warp") == 0)
             strideWarp = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--overlay-inertial-switch") == 0)
+            overlayInertialSwitch = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stick-speed") == 0)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--aim-camera") == 0)
             aimCameraPose = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-camera-alt") == 0)
+            aimCameraAlt = std::atoi(argv[i + 1]);
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -556,6 +569,8 @@ int main(int argc, char** argv)
         motiondriver::SetShooterMode(shooterMode != 0);
     if (strideWarp >= 0)
         motiondriver::SetStrideWarp(strideWarp != 0);
+    if (overlayInertialSwitch >= 0)
+        motiondriver::SetOverlayInertialSwitch(overlayInertialSwitch != 0);
     if (stickSpeed >= 0)
         motiondriver::SetStickSpeedMode(stickSpeed);
     int32_t lastAimCameraPose = -1, lastAimCameraState = -1;
@@ -648,7 +663,9 @@ int main(int argc, char** argv)
             // the camera / aim target the script feeds every frame: a level point 60 m along the recorded camera yaw (actor axes)
             const bool drawn = (inputs[i].psmBlock & integ::kPsmWeaponDrawn) != 0;
             const bool aim = integ::PsmUpperBodyOf(inputs[i].psmBlock) == integ::kPsmUpperBodyAim;
-            const int32_t pose = drawn ? aimCameraPose : 0, state = aim ? 2 : (drawn ? 1 : 0);
+            const bool alt = drawn && aimCameraAlt >= 0 && (aimCameraDrawnFeeds / 90) % 2 == 1;
+            aimCameraDrawnFeeds += drawn ? 1 : 0;
+            const int32_t pose = drawn ? (alt ? aimCameraAlt : aimCameraPose) : 0, state = aim ? 2 : (drawn ? 1 : 0);
             if (pose != lastAimCameraPose || state != lastAimCameraState)
             {
                 motiondriver::SetOverlayInputs(pose, state, false, false);

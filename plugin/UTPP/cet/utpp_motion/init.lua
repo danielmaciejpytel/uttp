@@ -89,7 +89,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
-  strideWarp = true }
+  strideWarp = true, overlayInertialSwitch = false }
 -- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
   nativeOnly = false, aimApplied = true, slideApplied = nil, orientWarpApplied = nil,
@@ -907,6 +907,7 @@ M.OPTIONS = {
   { want = "leanCoverage", field = "setLeanCoverage", native = "UTPPSetMotionLeanCoverage",
     arg = function(v) return v == "wide" and 1 or 0 end },
   { want = "strideWarp", field = "setStrideWarp", native = "UTPPSetMMStrideWarp" },
+  { want = "overlayInertialSwitch", field = "setOverlayInertialSwitch", native = "UTPPSetMMOverlayInertialSwitch" },
 }
 function M.ApplyOptions(api)
   if not M.want.enabled then return false end
@@ -1078,6 +1079,10 @@ function M.RegisterSettings(core)
     label = "motion: jump timing for the game gravity (experimental)",
     desc = "Picks the jump and fall animations by the time left until landing as if under the gravity the animations were made for, so landings start on time. Takes effect after the next load of a save. Off (default) = the earlier timing.",
     apply = function(v) M.SetOption("farJumpGravity", v == true) end })
+  core.Register({ key = "mm.overlayInertialSwitch", section = "motion", type = "bool", default = false,
+    label = "motion: smooth weapon pose switch (experimental)",
+    desc = "When V draws, holsters or changes the weapon type, the weapon pose changes at once and the body blends into it without overshooting: the arms and hands in about 0.2 s, the legs and hips in about 0.4 s. Off (default) = the earlier crossfade.",
+    apply = function(v) M.SetOption("overlayInertialSwitch", v == true) end })
   core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
     choices = { { "standard", "Standard" }, { "wide", "Wide" } },
     label = "motion: lean coverage",

@@ -34,6 +34,7 @@ bool SetNeutralAimOffset(bool aOn);
 void SetHandBackBlend(bool aOn);
 void SetStepDownReach(bool aOn);
 void SetFarJumpGravityScale(bool aOn);
+bool SetOverlayInertialSwitch(bool aOn);
 }
 
 namespace utpp::motiondriver
@@ -559,6 +560,18 @@ void Native_SetMMStrideWarp(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame,
     if (aOut)
         *aOut = ok;
 }
+// inertialized overlay switch (CET utpp_motion mm.overlayInertialSwitch; default off). Logged in the setting-call form the offline
+// replay applies.
+void Native_SetMMOverlayInertialSwitch(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = SetOverlayInertialSwitch(on);
+    pluginlog::LogInfo("UTPPSetMMOverlayInertialSwitch(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // body yaw offset per body (CET utpp_motion mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale): deg, + = left, -20..20 each
 void Native_SetMotionBodyYawOffsets(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -745,6 +758,9 @@ void RegisterNatives()
     auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMotionBodyYawOffsets", "UTPPSetMotionBodyYawOffsets", &Native_SetMotionBodyYawOffsets);
     o9->flags = flags; o9->AddParam("Float", "female"); o9->AddParam("Float", "male"); o9->SetReturnType("Bool");
     rtti->RegisterFunction(o9);
+    auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMOverlayInertialSwitch", "UTPPSetMMOverlayInertialSwitch",
+                                                 &Native_SetMMOverlayInertialSwitch);
+    o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);
 }
 
 void Install(const std::wstring& aDllDir)

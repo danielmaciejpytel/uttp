@@ -183,6 +183,11 @@ inline constexpr float kFeminineSoftStart = UTPP_FEM_SOFTSTART, kFeminineMaxReac
 #endif
 inline constexpr float kFeminineUnarmedSoftStart = UTPP_FEM_UNARMED_SOFTSTART, kFeminineUnarmedMaxReach = 0.9995f;
 
+// Inertialized overlay switch time (UE AnimNode_Inertialization default blend duration).
+inline constexpr float kOverlaySwitchSeconds = 0.2f;
+// Duration factor of the leg chains and the bones above the thighs (pelvis, root): 0.4 s keeps the quintic peak speed (1.875 x / T) under the linear 0.2 s fade.
+inline constexpr float kOverlaySwitchLegFactor = 2.0f;
+
 struct FrameInfo
 {
     bool finite = true;
@@ -190,6 +195,7 @@ struct FrameInfo
     bool liveCrossfade = false;
     float inertialDuration = 0.0f; // motionfix item 7: effective duration of the running / last transition (s)
     bool layered = false;
+    bool overlaySwitchActive = false; // inertialized overlay switch (SetOverlayInertialSwitch) blending this frame
     gik::GripResult grip;
     gik::Grip gripTarget;
     bool gripFromOverlay = false;
@@ -333,6 +339,35 @@ public:
         }
         if (!m_inertial.Init(m_n, aFirstBone))
             return Fail(aErr, "inertializer init");
+        if (!m_ovSwitch.Init(static_cast<uint32_t>(sk.n), 0))
+            return Fail(aErr, "overlay switch inertializer init");
+        m_ovSwitch.SetMinDuration(0.0f); // UE semantics: a switch inside a running blend pays the deficit
+        {
+            // legs and their ancestors (pelvis, root) blend longer: the quintic peak speed stays below the linear crossfade, so
+            // planted feet do not slide faster than with the crossfade
+            std::vector<float> factors(static_cast<size_t>(sk.n), 1.0f);
+            std::vector<char> leg(static_cast<size_t>(sk.n), 0);
+            m_ovSwitchLegRoots = 0;
+            for (int b = 0; b < sk.n; ++b) // parents come first: one pass marks both leg subtrees
+            {
+                const auto name = aOv->BoneName(b);
+                const int p = sk.parent[b];
+                const bool root = name == "LeftUpLeg" || name == "RightUpLeg";
+                m_ovSwitchLegRoots += root ? 1 : 0;
+                leg[static_cast<size_t>(b)] = root || (p >= 0 && leg[static_cast<size_t>(p)]);
+            }
+            for (int b = 0; b < sk.n; ++b)
+            {
+                if (!leg[static_cast<size_t>(b)])
+                    continue;
+                factors[static_cast<size_t>(b)] = kOverlaySwitchLegFactor;
+                for (int a = sk.parent[b]; a >= 0 && !leg[static_cast<size_t>(a)]; a = sk.parent[a])
+                    factors[static_cast<size_t>(a)] = kOverlaySwitchLegFactor; // pelvis and root above the thighs
+            }
+            m_ovSwitch.SetDurationFactors(factors.data());
+        }
+        m_ovSwitchIn.assign(static_cast<size_t>(sk.n), BoneTransform{});
+        m_ovSwitchOut.assign(static_cast<size_t>(sk.n), BoneTransform{});
         m_inertial.SetMinDuration(adapter::kBlendFloorSeconds); // motionfix item 7: blend floor on every v2 blend
         m_L = std::make_unique<ov::Pose>();
         m_B = std::make_unique<ov::Pose>();
@@ -445,6 +480,7 @@ public:
         else
             m_styleTable.SetDefaults();
         m_machine = ov::OverlayMachine{};
+        m_machineFade = ov::OverlayMachine{};
         m_idle = idlebreak::Controller{};
         m_aoFilter.Reset();
         m_barrel.Reset();
@@ -486,15 +522,45 @@ public:
     bool IgnoreDeficitArmed() const { return m_ignoreDeficit; }
     // Swing gate of the weapon pose's legs layer (ov::LegSwingGate); on by default, off = the ungated composition (analysis tools).
     void SetLegSwingGate(bool aOn) { m_legSwingOn = aOn; }
+    // Inertialized overlay switch (mm.overlayInertialSwitch, default off): weapon class and style changes swap the overlay keys at
+    // once and the composed pose is inertialized over kOverlaySwitchSeconds, the legs, pelvis and root over kOverlaySwitchSeconds x
+    // kOverlaySwitchLegFactor (quintic, no overshoot per bone). Off = the crossfades.
+    // The stages after the inertialization (grip IK gates, support grip and stock, support-hand twist, aim offset sweep, barrel
+    // slots, overlaySteady) read the weights of a second machine that keeps the crossfades (m_machineFade), so their gates still
+    // fade while the composed pose blends.
+    void SetOverlayInertialSwitch(bool aOn)
+    {
+        if (aOn != m_ovSwitchOn)
+        {
+            m_ovSwitch.Reset();
+            if (aOn)
+                m_machineFade = m_machine; // starts aligned: the live machine held the crossfades until now
+            else
+                // Turning the option off inside a running switch blend drops the remaining inertialization offset: the composed pose
+                // snaps by what was left of it (at most the switch distance on that frame). The live machine takes the crossfade
+                // state, so the weights continue the fades the option-off build would be running.
+                m_machine = m_machineFade;
+            m_machine.instantSwitch = m_machineFade.instantSwitch = false;
+            m_machine.switchedThisFrame = m_machineFade.switchedThisFrame = false;
+        }
+        m_ovSwitchOn = aOn;
+    }
+    bool OverlayInertialSwitch() const { return m_ovSwitchOn; }
+    // Thigh bones found for the longer leg blend of the overlay switch (2 on both bodies; fewer = those legs use the 0.2 s blend).
+    int OverlaySwitchLegRoots() const { return m_ovSwitchLegRoots; }
+    // Machine whose weights the stages after the overlay switch inertialization read: the live one with the option off.
+    const ov::OverlayMachine& FadeMachine() const { return m_ovSwitchOn ? m_machineFade : m_machine; }
     void Reset()
     {
         m_legSwing.Reset();
         m_clavTransient.Reset();
         m_inertial.Reset();
+        m_ovSwitch.Reset();
         m_stack.Reset();
         m_externalBase = m_usesLiveBase = false;
         m_ignoreDeficit = false;
         m_machine = ov::OverlayMachine{};
+        m_machineFade = ov::OverlayMachine{};
         m_idle = idlebreak::Controller{};
         m_aoFilter.Reset();
         m_barrel.Reset();
@@ -639,11 +705,17 @@ private:
             info.idle = m_idle.Update(ii);
         }
         // (2) overlay layering
+        m_machine.instantSwitch = m_ovSwitchOn;
         m_machine.Update(aIn.machine, aDt);
+        if (m_ovSwitchOn)
+            m_machineFade.Update(aIn.machine, aDt); // the crossfade weights for the stages after the switch inertialization
         const float w = ov::Clamp01(aIn.overlayWeight);
         bool ok = true;
         if (!(w > 0.0f))
+        {
             m_clavTransient.Reset(); // no layering this frame: the next one starts free
+            m_ovSwitch.Reset();      // no composed pose this frame: no history for an overlay switch blend
+        }
         if (w > 0.0f)
         {
             ToOv(m_base.data(), *m_L);
@@ -877,6 +949,9 @@ private:
             }
             if (aIn.capturePoseDiagnostics)
                 CaptureStageDelta(feminineBefore, *m_lay, info.feminineDelta);
+            // inertialized overlay switch: the composed pose with its posture passes, before grip IK and the aim offset
+            if (m_ovSwitchOn)
+                info.overlaySwitchActive = InertializeOverlaySwitch(aDt);
             // Recoil is a weapon-local delta on THIS frame's authored arms.
             // Caching the pre-shot arms freezes Ready while the machine advances into Aim
             // and would also freeze locomotion once moving recoil is admitted.
@@ -887,12 +962,13 @@ private:
             }
             // A one-handed game's free left hand is not a two-handed pistol grip.
             // Capture the authored relative contact before AO, then let it follow the right-hand weapon.
+            const ov::OverlayMachine& fm = FadeMachine(); // the crossfade weights also while the overlay switch is inertialized
             bool twoHandPoseActive = false;
-            for (int i = 0; i < m_machine.poses.count; ++i)
+            for (int i = 0; i < fm.poses.count; ++i)
                 twoHandPoseActive = twoHandPoseActive ||
-                    (m_machine.poses.w[i] > 0.005f &&
-                     (m_machine.poses.key[i] / 12 == static_cast<int>(ov::PoseOverlay::Pistol2H) ||
-                      m_machine.poses.key[i] / 12 == static_cast<int>(ov::PoseOverlay::Rifle)));
+                    (fm.poses.w[i] > 0.005f &&
+                     (fm.poses.key[i] / 12 == static_cast<int>(ov::PoseOverlay::Pistol2H) ||
+                      fm.poses.key[i] / 12 == static_cast<int>(ov::PoseOverlay::Rifle)));
             // Keep the authored contact while a 2H pose fades out to 1H. Dropping IK on the input switch
             // itself releases an almost-full 2H pose in one frame and snaps the left upper arm.
             // A verified 1H asset may only drive a settled 1H pose. During the
@@ -918,15 +994,15 @@ private:
             if (m_rig.Valid(sk))
             {
                 float wRifle = 0.0f, wShoulder = 0.0f;
-                for (int i = 0; i < m_machine.poses.count; ++i)
+                for (int i = 0; i < fm.poses.count; ++i)
                 {
                     ov::PoseOverlay o; ov::AimState a; bool c, mv;
-                    ov::DecodePoseKey(m_machine.poses.key[i], o, a, c, mv);
-                    if (o != ov::PoseOverlay::Rifle || !(m_machine.poses.w[i] > 0.0f))
+                    ov::DecodePoseKey(fm.poses.key[i], o, a, c, mv);
+                    if (o != ov::PoseOverlay::Rifle || !(fm.poses.w[i] > 0.0f))
                         continue;
-                    wRifle += m_machine.poses.w[i];
+                    wRifle += fm.poses.w[i];
                     if (a == ov::AimState::Aiming)
-                        wShoulder += m_machine.poses.w[i];
+                        wShoulder += fm.poses.w[i];
                 }
                 sgRifleW = wRifle;
                 // gate time from the hand's way (release / regrip <= sgrip::kMaxHandSpeed, >= 0.2 s), with the entry the gate moves: while
@@ -1237,12 +1313,12 @@ private:
             if (m_rig.Valid(sk) && aIn.bodyWoman)
             {
                 float w2H = 0.0f;
-                for (int i = 0; i < m_machine.poses.count; ++i)
+                for (int i = 0; i < fm.poses.count; ++i)
                 {
-                    const int overlay = m_machine.poses.key[i] / 12;
-                    if (m_machine.poses.w[i] > 0.0f &&
+                    const int overlay = fm.poses.key[i] / 12;
+                    if (fm.poses.w[i] > 0.0f &&
                         (overlay == static_cast<int>(ov::PoseOverlay::Rifle) || overlay == static_cast<int>(ov::PoseOverlay::Pistol2H)))
-                        w2H += m_machine.poses.w[i];
+                        w2H += fm.poses.w[i];
                 }
                 const ov::HandTwistLimitResult support = ov::LimitHandTwistBySwivel(*m_lay, m_rig.left.upper, m_rig.left.lower,
                     m_rig.left.hand, m_forearmTwist.childCount[0], ov::kSupportHandTwistLimitDeg, ov::kSupportHandMaxSwivelDeg,
@@ -1277,7 +1353,7 @@ private:
                                       m_meshPos[m_rig.left.hand].z - m_meshPos[m_rig.weaponRight].z};
                 info.leftHandToWeapon = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
             }
-            info.overlaySteady = m_machine.poses.count == 1 && m_machine.aimW.count == 1 && m_machine.bases.count == 1;
+            info.overlaySteady = fm.poses.count == 1 && fm.aimW.count == 1 && fm.bases.count == 1;
         }
         else
         {
@@ -1322,6 +1398,29 @@ public:
     const ov::Skeleton& Skel() const { return m_ov->Skel(); }
     const gik::Rig& GripRig() const { return m_rig; }
     int OvBone(uint32_t aDbBone) const { return m_dbToOv[aDbBone]; }
+    // Inertialized overlay switch on the composed pose (local transforms of the overlay skeleton, scale untouched). Runs every
+    // layered frame while the option is on so the blend has the last two outputs at a switch; true while a blend runs.
+    bool InertializeOverlaySwitch(float aDt)
+    {
+        const int n = m_ov->Skel().n;
+        if (m_machine.switchedThisFrame)
+            m_ovSwitch.Request(kOverlaySwitchSeconds);
+        for (int b = 0; b < n; ++b)
+        {
+            m_ovSwitchIn[static_cast<size_t>(b)].q = m_lay->b[b].r;
+            m_ovSwitchIn[static_cast<size_t>(b)].p = m_lay->b[b].t;
+        }
+        // no target one frame back: the previous target is the other overlay's pose (UE semantics)
+        m_ovSwitch.Update(m_ovSwitchIn.data(), nullptr, aDt, m_ovSwitchOut.data());
+        if (!m_ovSwitch.Active())
+            return false;
+        for (int b = 0; b < n; ++b)
+        {
+            m_lay->b[b].r = m_ovSwitchOut[static_cast<size_t>(b)].q;
+            m_lay->b[b].t = m_ovSwitchOut[static_cast<size_t>(b)].p;
+        }
+        return true;
+    }
     void ToOv(const BoneTransform* aIn, ov::Pose& aOut) const
     {
         // scale is not part of the .utppmm pose: keep the overlay rest scale of the base pose (B of the stand idle key)
@@ -1450,16 +1549,17 @@ private:
         float sweepWeights[6];
         int sweepIds[6];
         int sweepCount = 0;
-        for (int k = 0; k < m_machine.poses.count; ++k)
+        const ov::OverlayMachine& fm = FadeMachine(); // after the overlay switch inertialization: the crossfade weights
+        for (int k = 0; k < fm.poses.count; ++k)
         {
-            const int key = m_machine.poses.key[k];
+            const int key = fm.poses.key[k];
             const int o = key / 12;
             const int d = o >= 0 && o < kOverlays ? m_sweep[o][(key & 2) != 0 ? 1 : 0] : -1;
             int existing = 0;
             while (existing < sweepCount && sweepIds[existing] != d) ++existing;
             if (existing < sweepCount)
             {
-                sweepWeights[existing] += m_machine.poses.w[k];
+                sweepWeights[existing] += fm.poses.w[k];
                 continue;
             }
             sweepIds[sweepCount] = d;
@@ -1480,7 +1580,7 @@ private:
                 ov::BlendAdditives(s, w, 2, slot);
             }
             sweepSlots[sweepCount] = &slot;
-            sweepWeights[sweepCount++] = m_machine.poses.w[k];
+            sweepWeights[sweepCount++] = fm.poses.w[k];
         }
         if (sweepCount > 0)
         {
@@ -1522,16 +1622,17 @@ private:
         if (!run && m_barrel.Idle())
             return false;
         m_barrelSlotCount = 0;
-        for (int k = 0; k < m_machine.poses.count; ++k)
+        const ov::OverlayMachine& fm = FadeMachine(); // after the overlay switch inertialization: the crossfade weights
+        for (int k = 0; k < fm.poses.count; ++k)
         {
-            const int key = m_machine.poses.key[k];
+            const int key = fm.poses.key[k];
             const int o = key / 12;
             if (o < 0 || o >= kOverlays)
                 continue;
-            for (int j = 0; j < m_machine.styles.count && m_barrelSlotCount < kBarrelSlotMax; ++j)
+            for (int j = 0; j < fm.styles.count && m_barrelSlotCount < kBarrelSlotMax; ++j)
             {
-                const int st = m_machine.styles.key[j];
-                const float w = m_machine.poses.w[k] * m_machine.styles.w[j];
+                const int st = fm.styles.key[j];
+                const float w = fm.poses.w[k] * fm.styles.w[j];
                 if (st < 0 || st >= 3 || !(w > 0.0f))
                     continue;
                 m_barrelSlots[m_barrelSlotCount] = ((o * 2) + ((key & 2) != 0 ? 1 : 0)) * 3 + st;
@@ -1973,6 +2074,10 @@ private:
     float m_handBackDt = 0.0f;
     bool m_handBackPrevValid = false;
     QuinticInertializer m_inertial;
+    QuinticInertializer m_ovSwitch;                         // SetOverlayInertialSwitch: composed pose, overlay skeleton
+    std::vector<BoneTransform> m_ovSwitchIn, m_ovSwitchOut; // overlay skeleton order
+    bool m_ovSwitchOn = false;
+    int m_ovSwitchLegRoots = 0;
     motionstack::BlendStack m_stack;
     BaseBlendPolicy m_basePolicy = BaseBlendPolicy::Quintic;
     bool m_externalBase = false, m_usesLiveBase = false;
@@ -2019,6 +2124,7 @@ private:
     bool m_figureOn = true, m_figureHave = false;
     float m_figureW = 0.0f;
     ov::OverlayMachine m_machine;
+    ov::OverlayMachine m_machineFade; // SetOverlayInertialSwitch: the crossfades of m_machine (FadeMachine)
     ov::StyleWeightTable m_styleTable;
     idlebreak::Controller m_idle;
     gik::Rig m_rig;
