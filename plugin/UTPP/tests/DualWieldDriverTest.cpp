@@ -22,6 +22,11 @@
 #include "MotionDriverIntegrationTest.cpp"
 #undef main
 
+namespace utpp::motiondriver
+{
+bool SetAimWorldSmoothing(bool aOn, float aHz);
+} // namespace utpp::motiondriver
+
 namespace
 {
 Xf ModelXf(const mm::integ::PoseSnapshot& s, const Rig& aR, int32_t aBone, bool& aOk)
@@ -371,6 +376,7 @@ std::string Fmt(double v)
 
 int main(int argc, char** argv)
 {
+    motiondriver::SetAimWorldSmoothing(false, 0.0f); // the kicks are measured on the unsmoothed aim (the DLL default is on at 12 Hz)
     if (argc == 7 && std::string(argv[1]) == "--dual-child")
         return DualChildMain(argv[2], argv[3], argv[4], std::stoi(argv[5]), argv[6]);
     if (argc < 2)

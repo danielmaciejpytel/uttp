@@ -580,7 +580,7 @@ int g_bodyFollowDir = 0;          // 0.5.7: +1 / -1 = the body turns the long wa
 uint64_t g_againstSearches = 0, g_startRateFeeds = 0;
 // 0.6.3 turn rate (default on; off = 0.6.2), see MotionHost.hpp SetTurnRate
 bool g_turnRateOn = true;
-float g_turnRateMin = 0.9f, g_turnRateMax = 1.1f; // 0.6.4: shipped default stays 1.1 (foot-lock regression guard 15.5 cm); the CET setting bodyturn.turnRateMax (default 1.4) raises it in game via UTPPSetMMTurnRateParams - 20:24 test: run turns still too slow at 1.1
+float g_turnRateMin = 0.9f, g_turnRateMax = 1.1f; // native default 1.1 (foot-lock guard) until the CET setting bodyturn.turnRateMax (hidden, default and maximum 1.15) sets it through UTPPSetMMTurnRateParams; no effect on frames the motion driver owns; applies on the legacy matcher and on frames handed back to it (melee full body, leg stage not ready, layout mismatch, traversal the driver does not own)
 constexpr float kTurnRateMinCapsule = 1.0f; // m/s, recent capsule speed (decaying max): slower = 0.5.7 start rate / slow walk
 constexpr float kTurnRateRecentHl = 0.5f;   // s, half-life of the recent capsule speed (a flick brakes through 0)
 constexpr float kTurnRateBand = 0.35f;      // root below its clip peak by this fraction -> full weight

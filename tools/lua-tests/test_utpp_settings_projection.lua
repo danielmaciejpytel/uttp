@@ -350,7 +350,7 @@ local STORED_TEXT = table.concat({
   "camera.profile=3", "camera.profileCount=5", "camera.distance=2.23456789", "camera.aim.side=0.123456", "camera.p3.fov=62", "camera.sens=1.3",
   "camera.invertY=true", "camera.aim.fov=34", "perspective.aiming=fpp", "perspective.combat=fpp", "perspective.userWantsTpp=false",
   "perspective.startInLastView=false", "mm.air=hold", "mm.database=alt_db", "mm.trace=true", "mm.footReplant=off",
-  "mm.motionDriver=false", "mm.leanScale=1.1", "bodyturn.turnRateMax=1.7", "bodyturn.shooterMode=true", "body.retry=false",
+  "mm.motionDriver=false", "mm.leanScale=1.1", "bodyturn.turnRateMax=1.1", "bodyturn.shooterMode=true", "body.retry=false",
   "lootRange.scale=1.5", "headGuard.impl=false", "vehicle.pullOut=false", "other.module=42", "lootView.radius=9",
   "headLook.impl=auto", "camera.p9.distance=3", "" }, "\n")
 
@@ -763,7 +763,7 @@ if not WRITE then
       and core.settings.defs["camera.startTpp"].label == "Start in third person")
     check("standard: building calls no apply / native and no Save", #LOG == 0 and saves.save == 0, table.concat(LOG, "; "))
     check("standard: settings file and values unchanged by the build", readFile(tmpSettings) == before and valuesOf(core) == valsBefore)
-    -- registry flag hidden = true: four head look tuning options and 25 more options are registered
+    -- registry flag hidden = true: four head look tuning options and 27 more options are registered
     -- and working on their defaults, listed in no view; HIDDEN is the exact set (the head look switch and "Look at the camera"
     -- are visible since 2026-11-13: they keep their defaults, DEFAULTS lists them too, but HIDDEN does not)
     do
@@ -776,7 +776,8 @@ if not WRITE then
                          ["vehicle.keepTpp"] = true, ["vehicle.pullOut"] = true, ["vehicle.rideWatchdog"] = true,
                          ["vehicle.safeTeleportExit"] = true, ["camera.mouseScale"] = 0, ["perspective.minGap"] = 0.5,
                          ["camera.aim.range"] = 60, ["camera.zoomUnarmed.fov"] = 45, ["camera.zoomUnarmed.lastFov"] = 25,
-                         ["perspective.blend"] = 0.8, ["mm.headLead"] = true, ["perspective.startInLastView"] = true }
+                         ["perspective.blend"] = 0.8, ["mm.headLead"] = true, ["perspective.startInLastView"] = true,
+                         ["bodyturn.turnRate"] = true, ["bodyturn.turnRateMax"] = 1.15 }
       local HIDDEN = {}
       for key in pairs(DEFAULTS) do HIDDEN[key] = true end
       HIDDEN["headLook.impl"], HIDDEN["headLook.faceCamera"] = nil, nil
@@ -787,7 +788,7 @@ if not WRITE then
         if (def.hidden == true) ~= (HIDDEN[key] == true) then bad[#bad + 1] = key end
       end
       for _, s in ipairs(list) do if HIDDEN[string.match(s, "|(.*)$")] then listed[#listed + 1] = s end end
-      check("hidden: exactly the 29 listed options carry the flag (4 head look + 25 more)", flagged == 29 and #bad == 0, table.concat(bad, ", "))
+      check("hidden: exactly the 31 listed options carry the flag (4 head look + 27 more)", flagged == 31 and #bad == 0, table.concat(bad, ", "))
       check("hidden: level 'hidden' (kept layout group), no widget, not in the standard list", #listed == 0
         and core.MenuPlacement("headLook.maxYaw") == "hidden" and select(2, core.MenuPlacement("headLook.maxYaw")) == "world"
         and core.settings.widgets["headLook.whileWalking"] == nil and core.settings.widgets["headLook.lookAtLoot"] == nil

@@ -22,6 +22,7 @@
 namespace utpp::motiondriver
 {
 bool SetNeutralAimOffset(bool aOn);
+bool SetAimWorldSmoothing(bool aOn, float aHz);
 } // namespace utpp::motiondriver
 
 namespace
@@ -67,6 +68,7 @@ void RestoreDefaults()
     motiondriver::SetBarrelAxis(aim::kDefaultBarrelAxis);
     motiondriver::SetBarrelMuzzle(aim::Params{}.muzzleOffset);
     motiondriver::SetNeutralAimOffset(true);
+    motiondriver::SetAimWorldSmoothing(false, 0.0f); // the cases measure the unsmoothed aim (the DLL default is on at 12 Hz)
 }
 bool DefaultsInStatus(std::string& aWhy)
 {

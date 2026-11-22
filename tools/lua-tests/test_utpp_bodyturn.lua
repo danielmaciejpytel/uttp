@@ -461,13 +461,13 @@ do -- registration: key, type, default, section, label; apply routes into SetWea
   -- 2026-10-12 turn clip rate settings (natives from UTPP.dll 0.6.4; absent in this offline Game mock -> logged once, inert)
   local t1, t2 = regs[2], regs[3]
   xcheck("turnRate settings: keys / types / defaults", t1 and t1.key == "bodyturn.turnRate" and t1.type == "bool"
-    and t1.default == true and t2 and t2.key == "bodyturn.turnRateMax" and t2.type == "float" and t2.default == 1.5
-    and t2.min == 1.0 and t2.max == 2.0, t1 and t1.key, t2 and t2.key)
-  xcheck("turnRate settings: natives missing -> inert, state kept", m.turnRate.on == true and m.turnRate.max == 1.5
+    and t1.default == true and t2 and t2.key == "bodyturn.turnRateMax" and t2.type == "float" and t2.default == 1.15
+    and t2.min == 1.0 and t2.max == 1.15, t1 and t1.key, t2 and t2.key)
+  xcheck("turnRate settings: natives missing -> inert, state kept", m.turnRate.on == true and m.turnRate.max == 1.15
     and m.turnRate.missing == true and m.turnRate.sent == nil)
-  t2.apply(1.6)
-  xcheck("turnRate settings: apply(1.6) updates the module state", m.turnRate.max == 1.6)
-  xcheck("turnRate settings: Status() shows turnRate", m.Status():find("turnRate=true max=1.60 sent=missing", 1, true) ~= nil,
+  t2.apply(1.1)
+  xcheck("turnRate settings: apply(1.1) updates the module state", m.turnRate.max == 1.1)
+  xcheck("turnRate settings: Status() shows turnRate", m.Status():find("turnRate=true max=1.10 sent=missing", 1, true) ~= nil,
     m.Status())
   -- 2026-10-13 B2 aim strafe settings (natives absent in this mock -> logged once, inert)
   local s1, s2 = regs[4], regs[5]

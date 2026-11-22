@@ -36,6 +36,11 @@
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt")
 
+namespace utpp::motiondriver
+{
+bool SetAimWorldSmoothing(bool aOn, float aHz);
+} // namespace utpp::motiondriver
+
 using namespace utpp;
 using mm::adapter::Fallback;
 
@@ -485,6 +490,7 @@ int main(int argc, char** argv)
     if (argc >= 3 && std::string(argv[1]) == "--p3-two-shutdowns")
         return ConcurrentShutdownChild(argv[2], true);
     const std::string data = argv[1];
+    motiondriver::SetAimWorldSmoothing(false, 0.0f); // the aim cases measure the unsmoothed aim (the DLL default is on at 12 Hz)
     {
         // G2 / G5 native settings (data-free): walk toggle speed validation + the lock-free target gate, Tier2 Slow flag
         Check(motiondriver::WalkSpeedSetting() == 0.0f && motiondriver::WalkSpeedTarget() == 0.0f, "G2: walk speed default 0 (off)");
