@@ -21,7 +21,7 @@
 namespace utpp::mm::bodyheight::rt
 {
 
-inline std::atomic<bool> g_on{false};
+inline std::atomic<bool> g_on{true}; // on by default (the menu default, motionhost g_bodyHeightOn)
 // bit 0: the stage may act (feed gate); bits 8..31: reset serial (teleport, hand-back, toggle)
 inline std::atomic<uint32_t> g_gate{0};
 inline integ::SeqlockBuffer<LegRig> g_rig;

@@ -41,9 +41,14 @@
 //                       along the recorded camera yaw, the aim target while the PSM upper body is Aim; overlay inputs pose P with a
 //                       drawn weapon (0 Default, 1 Rifle, 2 Pistol1H, 3 Pistol2H; the weapon is not recorded), Aiming / Ready / Relaxed
 //                       from the PSM; mm.aimGameUpper false (the script default). No camera pitch in the dumps: level only. One AIMCAM line.
+//   --aim-camera-alt Q  with --aim-camera P: while the weapon is drawn the overlay pose alternates P / Q every 90 drawn feeds (feed
+//                       count over the whole run: P for drawn feeds 0..89, Q for 90..179, ...), so the replay contains weapon class changes
 //                       The settings log calls MMNeutralAimOffset and MMAimWorldSmoothing are applied as well (later sessions).
 //   --stride-warp 0|1   stride warping of the blend stack off / on after --settings-log (motiondriver::SetStrideWarp, the mm.strideWarp
 //                       setting; the settings log call MMStrideWarp of later sessions is applied as well); not passed: the log / build default
+//   --overlay-inertial-switch 0|1  inertialized overlay switch off / on after --settings-log (motiondriver::SetOverlayInertialSwitch,
+//                       the mm.overlayInertialSwitch setting; the settings log call MMOverlayInertialSwitch is applied as well); it acts on
+//                       overlay changes only, so a replay without --aim-camera (overlay always Default) is unchanged by it
 //   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
 //                       mm.stickSpeed setting; the settings log call MotionStickSpeedMode of later sessions is applied as well)
 //                       With --settings-log, the driver first gets the values a game session held before its first setting call in
@@ -56,6 +61,23 @@
 //                       with the drawn world height; here it runs after each feed on the published pose, with the drawn height of
 //                       --draw-z next (default: the next feed's capsule z, the capsule after the tick's movement) or same (this feed's
 //                       capsule z) and the gate the host published. One BODYHEIGHT line. Off / not passed: output unchanged.
+//   --turn-rate 0|1     turn clip rate of the legacy matcher off / on after --settings-log (motionhost::SetTurnRate, the bodyturn.turnRate
+//                       setting); not passed: the build default (on)
+//   --turn-rate-max M   turn clip rate cap after --settings-log (motionhost::SetTurnRateParams(0.9, M), bodyturn.turnRateMax; the
+//                       settings log call MMTurnRateParams is applied as well); either option adds one TURNRATE line (the host
+//                       turn rate status: raised feeds, turns, cap)
+//   --aim-game-upper 0|1  mm.aimGameUpper off / on (motiondriver::SetAimGameUpper), set after --settings-log and after the
+//                       --aim-camera script default (false); not passed: unchanged. On, the published pose keeps the motion upper body
+//                       without the aim offset (the game's upper body is not recorded): barrel measurements of it are not the shown pose.
+//   --capsule-forecast 0|1  capsule forecast for turning and partial-stick starts (motiondriver::SetCapsuleForecast, the
+//                       mm.capsuleForecast setting; the settings log call MMCapsuleForecast is applied as well). Off / not passed: unchanged.
+//   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
+//                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
+//                       (inspection only; the other outputs are unchanged)
+//   --aim-jog-query 1   after every feed ask the host for the aim jog target with the feed's stick and hand the answer to the driver, as
+//                       the locomotion script does right after each feed (utpp.reds UTPPUpdateAimSpeed: UTPPMMAimJogTarget, which also
+//                       sets motiondriver::SetAimJogOff); without it the driver keeps the vanilla aim walk mapping while aiming. Adds
+//                       one AIMJOG line (queries, feeds with a jog target). Off / not passed: unchanged.
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -211,6 +233,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MotionBodyYawOffset") motiondriver::SetBodyYawOffset(arg(0));
         else if (name == "MotionBodyYawOffsets") motiondriver::SetBodyYawOffsets(arg(0), arg(1));
         else if (name == "MMStrideWarp") motiondriver::SetStrideWarp(flag(0));
+        else if (name == "MMOverlayInertialSwitch") motiondriver::SetOverlayInertialSwitch(flag(0));
         else if (name == "MMSteerMode" || name == "MMSteerActiveOnly") {} // turn steering options of test builds: no option now
         else if (name == "MotionLean") motiondriver::SetLean(arg(0) != 0);
         else if (name == "MotionLeanHead") motiondriver::SetLeanHead(arg(0) != 0);
@@ -231,6 +254,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
+        else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
     }
@@ -372,10 +396,20 @@ int main(int argc, char** argv)
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
+    int32_t turnRate = -1;                     // -1 = not passed
+    float turnRateMax = -1.0f;                 // < 0 = not passed
+    int32_t overlayInertialSwitch = -1;                                          // -1 = not passed
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
     int32_t bodyHeight = -1;                   // --body-height-smooth: < 0 = not passed (the settings log / build default)
     bool drawZNext = true;                     // --draw-z next (default) | same
+    int32_t aimCameraAlt = -1;                 // --aim-camera-alt: second overlay pose of a drawn weapon, < 0 = not passed
+    uint64_t aimCameraDrawnFeeds = 0;
+    int32_t aimGameUpper = -1;                 // --aim-game-upper: < 0 = not passed
+    int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
+    bool forecastDump = false;                 // --forecast-dump 1
+    bool aimJogQuery = false;                  // --aim-jog-query 1
+    uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -430,14 +464,30 @@ int main(int argc, char** argv)
             shooterMode = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stride-warp") == 0)
             strideWarp = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--overlay-inertial-switch") == 0)
+            overlayInertialSwitch = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stick-speed") == 0)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--turn-rate") == 0)
+            turnRate = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--turn-rate-max") == 0)
+            turnRateMax = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-camera") == 0)
             aimCameraPose = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--body-height-smooth") == 0)
             bodyHeight = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--draw-z") == 0)
             drawZNext = std::strcmp(argv[i + 1], "same") != 0;
+        else if (std::strcmp(argv[i], "--aim-camera-alt") == 0)
+            aimCameraAlt = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-game-upper") == 0)
+            aimGameUpper = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--aim-jog-query") == 0)
+            aimJogQuery = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--capsule-forecast") == 0)
+            capsuleForecast = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--forecast-dump") == 0)
+            forecastDump = std::atoi(argv[i + 1]) != 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -570,16 +620,37 @@ int main(int argc, char** argv)
         motiondriver::SetShooterMode(shooterMode != 0);
     if (strideWarp >= 0)
         motiondriver::SetStrideWarp(strideWarp != 0);
+    if (overlayInertialSwitch >= 0)
+        motiondriver::SetOverlayInertialSwitch(overlayInertialSwitch != 0);
     if (stickSpeed >= 0)
         motiondriver::SetStickSpeedMode(stickSpeed);
+    if (turnRate >= 0)
+        motionhost::SetTurnRate(turnRate != 0);
+    if (turnRateMax >= 0.0f && !motionhost::SetTurnRateParams(0.9f, turnRateMax))
+    {
+        std::fprintf(stderr, "--turn-rate-max %g rejected\n", static_cast<double>(turnRateMax));
+        return 2;
+    }
     int32_t lastAimCameraPose = -1, lastAimCameraState = -1;
     if (aimCameraPose >= 0)
         motiondriver::SetAimGameUpper(false); // the script setting mm.aimGameUpper (default false); the DLL default is true
+    if (aimGameUpper >= 0)
+        motiondriver::SetAimGameUpper(aimGameUpper != 0);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     if (turnFootPhase >= 0)
         motiondriver::SetTurnFootPhase(turnFootPhase != 0);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
+    if (capsuleForecast >= 0)
+        motiondriver::SetCapsuleForecast(capsuleForecast != 0);
+    FILE* forecastOut = nullptr;
+    if (forecastDump && out != "-")
+    {
+        forecastOut = std::fopen((out + ".forecast.txt").c_str(), "w");
+        if (!forecastOut)
+            return 7;
+        std::fprintf(forecastOut, "# t valid posX posY posZ d35X d35Y d35Z d70X d70Y d70Z accel\n");
+    }
     motionhost::TestSetPelvisPlacement(pelvis);
     if (bodyHeight >= 0)
         motionhost::SetBodyHeightSmooth(bodyHeight != 0);
@@ -670,7 +741,9 @@ int main(int argc, char** argv)
             // the camera / aim target the script feeds every frame: a level point 60 m along the recorded camera yaw (actor axes)
             const bool drawn = (inputs[i].psmBlock & integ::kPsmWeaponDrawn) != 0;
             const bool aim = integ::PsmUpperBodyOf(inputs[i].psmBlock) == integ::kPsmUpperBodyAim;
-            const int32_t pose = drawn ? aimCameraPose : 0, state = aim ? 2 : (drawn ? 1 : 0);
+            const bool alt = drawn && aimCameraAlt >= 0 && (aimCameraDrawnFeeds / 90) % 2 == 1;
+            aimCameraDrawnFeeds += drawn ? 1 : 0;
+            const int32_t pose = drawn ? (alt ? aimCameraAlt : aimCameraPose) : 0, state = aim ? 2 : (drawn ? 1 : 0);
             if (pose != lastAimCameraPose || state != lastAimCameraState)
             {
                 motiondriver::SetOverlayInputs(pose, state, false, false);
@@ -691,6 +764,14 @@ int main(int argc, char** argv)
         feedUs.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - feed0).count());
         if (capsuleStats)
             capsuleStatReplay.AfterFeed(rows[i].loco, i + 1 < rows.size() ? double(rows[i + 1].t) : 1e30);
+        if (aimJogQuery)
+        {
+            // the script's query right after the feed: the next feed's mapping sees the answer (Main.cpp Native_MMAimJogTarget)
+            const float jog = motionhost::AimJogTarget(rows[i].mvx, rows[i].mvy);
+            motiondriver::SetAimJogOff(!(jog > 0.0f));
+            ++aimJogQueries;
+            aimJogOnFeeds += jog > 0.0f ? 1 : 0;
+        }
         const bool published = ReadPublished();
         if (mm::bodyheight::rt::Enabled())
         {
@@ -715,6 +796,13 @@ int main(int argc, char** argv)
                 bodyHeightAbs.push_back(std::fabs(double(off)) * 100.0);
                 bodyHeightAbsMax = std::max(bodyHeightAbsMax, std::fabs(double(off)) * 100.0);
             }
+        }
+        if (forecastOut)
+        {
+            const auto fp = motiondriver::TestForecastProbe();
+            std::fprintf(forecastOut, "%.6f %d %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\n", double(rows[i].t), fp.valid ? 1 : 0,
+                         double(fp.pos[0]), double(fp.pos[1]), double(fp.pos[2]), double(fp.d35[0]), double(fp.d35[1]), double(fp.d35[2]),
+                         double(fp.d70[0]), double(fp.d70[1]), double(fp.d70[2]), double(fp.accel));
         }
         if (rows[i].t < from || rows[i].t > to)
             continue;
@@ -972,6 +1060,8 @@ int main(int argc, char** argv)
                     static_cast<unsigned long long>(mm::bodyheight::rt::g_legClamps.load()),
                     double(mm::bodyheight::rt::g_maxAnkleError.load()) * 1000.0);
     }
+    if (forecastOut)
+        std::fclose(forecastOut);
     motionhost::SetMotionHooks(nullptr);
     motionhost::TestSetQpcTicks(-1);
     if (g_motionLog)
@@ -1015,6 +1105,9 @@ int main(int argc, char** argv)
         if (aimCameraPose >= 0)
             std::printf("AIMCAM run=%s pose=%d feeds=%llu aimFeeds=%llu\n", name.c_str(), aimCameraPose,
                         static_cast<unsigned long long>(aimCameraFeeds), static_cast<unsigned long long>(aimCameraAimFeeds));
+        if (aimGameUpper >= 0)
+            std::printf("AIMGAMEUPPER run=%s on=%d handback=%s\n", name.c_str(), aimGameUpper,
+                        StatusField(motiondriver::Status(), " handback=").c_str());
         if (aimOptions)
         {
             uint64_t neutralFeeds = 0, smoothFeeds = 0;
@@ -1023,6 +1116,11 @@ int main(int argc, char** argv)
                         neutralAim, aimWorldSmoothHz, shooterMode, static_cast<unsigned long long>(neutralFeeds),
                         static_cast<unsigned long long>(smoothFeeds));
         }
+        if (turnRate >= 0 || turnRateMax >= 0.0f) // turn clip rate state of the legacy matcher (raised feeds, turns, cap)
+            std::printf("TURNRATE run=%s %s\n", name.c_str(), motionhost::TurnRateStatus().c_str());
+        if (aimJogQuery)
+            std::printf("AIMJOG run=%s queries=%llu jogFeeds=%llu\n", name.c_str(), static_cast<unsigned long long>(aimJogQueries),
+                        static_cast<unsigned long long>(aimJogOnFeeds));
         if (airFeed) // only with the option: the scripts refuse a tool that was asked for it and printed no AIRFEED line
             std::printf("AIRFEED run=%s forwarded=%llu withAirFields=%llu\n", name.c_str(), static_cast<unsigned long long>(airFeeds),
                         static_cast<unsigned long long>(airFeedRows));

@@ -432,8 +432,12 @@ public:
         const float rotStep = m_ctrlYawRate * kPredictionInterval; // ControllerRotationPerStep (l. 451)
         // Scalar physical acceleration is known only for an aligned straight
         // start. A rotating prediction still uses the existing vector/friction model.
+        // The capsule forecast (accel::Prediction::turning) also admits a turning input: the game turns the capsule velocity to
+        // the input within a frame, so the ramp follows the input rotated by the controller yaw rate (mid-step direction for the
+        // distance, end-of-step direction for the velocity).
+        const bool turningStart = d.capsuleStart.turning && std::fabs(rotStep) > kKindaSmall;
         const bool capsuleStart = d.stepGround && !IsZero(aAcc) && d.capsuleStart.Active() &&
-            std::fabs(rotStep) <= kKindaSmall;
+            (std::fabs(rotStep) <= kKindaSmall || d.capsuleStart.turning);
         m_capsuleAcceleration = capsuleStart ? d.capsuleStart.acceleration : 0.f;
         const V3 startDirection = SafeNormal(aAcc);
         for (int k = 0; k <= kPredictionCount; ++k)
@@ -441,16 +445,18 @@ public:
             m_pred[k] = Sample{p, t, f};
             if (k == kPredictionCount)
                 break;
+            const V3 stepDirection = turningStart ? RotateYaw(startDirection, rotStep * (float(k) + .5f)) : startDirection;
             p = p + (capsuleStop ? stopDirection * d.capsuleStop.DistanceBetween(
                 float(k) * kPredictionInterval, float(k + 1) * kPredictionInterval) :
-                capsuleStart ? startDirection * d.capsuleStart.DistanceBetween(
+                capsuleStart ? stepDirection * d.capsuleStart.DistanceBetween(
                     float(k) * kPredictionInterval, float(k + 1) * kPredictionInterval) : v * kPredictionInterval);
             t += kPredictionInterval;
             if (d.stepGround)
             {
                 a = RotateYaw(a, rotStep);
+                const V3 endDirection = turningStart ? RotateYaw(startDirection, rotStep * float(k + 1)) : startDirection;
                 v = capsuleStop ? stopDirection * d.capsuleStop.QuerySpeedAt(float(k + 1) * kPredictionInterval) :
-                    capsuleStart ? startDirection * d.capsuleStart.QuerySpeedAt(float(k + 1) * kPredictionInterval) :
+                    capsuleStart ? endDirection * d.capsuleStart.QuerySpeedAt(float(k + 1) * kPredictionInterval) :
                     StepGround(kPredictionInterval, v, a, d);
                 f = NormalizeAxis(f + rotStep);
                 if (d.orientToMovement && !NearlyZeroPerComponent(a, kKindaSmall))

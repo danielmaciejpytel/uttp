@@ -924,6 +924,10 @@ struct OverlayMachine
     Crossfade<3> aimW;   // keys AimState: weight of each aim state (Aiming weight = AO sweep alpha)
     Crossfade<4> families; // keys SourceFamily of the active MM clip (per-clip style weight)
     SourceFamily family = SourceFamily::Primary;
+    // Inertialized switch (set by the caller before Update, default off): weapon class and style changes swap their keys at
+    // once and switchedThisFrame tells the caller to start an inertialization of the composed pose. Off = the crossfades above.
+    bool instantSwitch = false;
+    bool switchedThisFrame = false; // output of the last Update
 
     void Update(const OverlayInputs& aIn, float aDt)
     {
@@ -1121,10 +1125,22 @@ struct OverlayMachine
                 handsGuard = true;
             }
         }
+        switchedThisFrame = false;
         if (aIn.style != style)
         {
             style = aIn.style;
-            styles.SetTarget(static_cast<int>(style), times.styleSwitch);
+            // inertialized switch: the style delta swaps at once, the caller blends the composed pose (switchedThisFrame)
+            styles.SetTarget(static_cast<int>(style), instantSwitch ? 0.0f : times.styleSwitch);
+            switchedThisFrame = instantSwitch;
+        }
+        // Inertialized switch (instantSwitch): a weapon class change whose fade would take poseSwitch swaps the pose keys at once;
+        // the caller inertializes the composed pose over the same time. Longer aim-driven fades (one-handed -> two-handed aim,
+        // the hip raise, the aim exit) keep their crossfade.
+        if (instantSwitch && overlayChanged && !fadingPistol1HTo2H && poseTime <= times.poseSwitch)
+        {
+            poseTime = 0.0f;
+            poseCurve = BlendCurve::Linear;
+            switchedThisFrame = true;
         }
         const int poseKey = PoseKey(overlay, aim, crouch, moving);
         if (poseKey != poses.target)

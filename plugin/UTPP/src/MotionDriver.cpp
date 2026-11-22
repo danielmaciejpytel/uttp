@@ -336,8 +336,10 @@ float g_neutralAoPrevYawDeg = 0.0f;
 bool g_neutralAoPrevValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
+bool g_overlayInertialSwitchOn = false; // SetOverlayInertialSwitch (default off)
 int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
+bool g_capsuleForecastOn = false; // SetCapsuleForecast (MapConfig::capsuleForecast, mm.capsuleForecast)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
 // Slide feed (CET mm.slide -> SetSlide, default ON like the setting; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 reaches the
@@ -780,6 +782,7 @@ struct LoadDone
     char sha[17] = {};
     char err[192] = {};
     char lean[112] = {}; // lean pack: "none" / "ok:<mapped>/<mismatch>" / "fail:<why>"
+    int ovSwitchLegRoots = -1; // thigh bones of the overlay switch leg blend (pose evaluator), -1 = no evaluator
 };
 LoadDone g_loadDone;
 char g_loadBuf[768] = {};
@@ -1647,6 +1650,8 @@ void NoteLoadDoneLocked(Body aBody, const Bundle* b, const char* aOutcome, float
     d.ovOk = b->ovOk;
     d.styleOk = b->styleOk;
     d.travOk = b->travOk;
+    if (b->evalOk)
+        d.ovSwitchLegRoots = b->eval.OverlaySwitchLegRoots();
     if (b->res.dbParsed)
     {
         d.bones = b->db.NumBones();
@@ -1688,6 +1693,13 @@ void EmitLoadDoneLocked()
                   installed && g_map.ok ? 1 : 0, installed ? g_map.mapped : 0u, installed ? g_map.numDbBones : 0u, d.lean, d.err);
     ++g_loadLines;
     g_log(g_loadBuf);
+    if (installed && d.ovSwitchLegRoots >= 0 && d.ovSwitchLegRoots != 2)
+    {
+        // the overlay switch blends the legs found over the longer leg time; a missing thigh name leaves that leg on the arm time
+        std::snprintf(g_loadBuf, sizeof(g_loadBuf), "UTPP mm.motionDriver warning body=%s overlay switch leg roots=%d (expected 2)",
+                      BodyName(d.body), d.ovSwitchLegRoots);
+        g_log(g_loadBuf);
+    }
 #endif
 }
 
@@ -1749,6 +1761,8 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
                 g_bundle->eval.SetHandBackBlend(g_handBackBlendReq != 0);
             if (g_bundle->evalOk && g_strideWarpReq >= 0)
                 g_bundle->eval.SetStrideWarp(g_strideWarpReq != 0);
+            if (g_bundle->evalOk)
+                g_bundle->eval.SetOverlayInertialSwitch(g_overlayInertialSwitchOn);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
@@ -2319,6 +2333,15 @@ void SetHandBackBlend(bool aOn)
         g_bundle->eval.SetHandBackBlend(aOn);
 }
 
+bool SetOverlayInertialSwitch(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_overlayInertialSwitchOn = aOn;
+    if (g_bundle && g_bundle->evalOk)
+        g_bundle->eval.SetOverlayInertialSwitch(aOn);
+    return true;
+}
+
 bool SetStrideWarp(bool aOn)
 {
     std::lock_guard lock(g_m);
@@ -2340,6 +2363,12 @@ void SetStepDownReach(bool aOn)
 {
     std::lock_guard lock(g_m);
     g_stepDownReachOn = aOn; // the native also switches the runtime air state (motionhost::SetAirStepDownReach)
+}
+
+void SetCapsuleForecast(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_capsuleForecastOn = aOn;
 }
 
 void SetFarJumpGravityScale(bool aOn)
@@ -2543,6 +2572,29 @@ uint64_t TestLiveHistorySearches()
 {
     std::lock_guard lock(g_m);
     return g_liveHistSearches;
+}
+
+ForecastProbe TestForecastProbe()
+{
+    std::lock_guard lock(g_m);
+    ForecastProbe r;
+    if (!g_bundle)
+        return r;
+    const auto& tr = g_bundle->map.traj;
+    if (tr.NumHistory() == 0)
+        return r;
+    const auto now = tr.Prediction(0);
+    r.valid = true;
+    const auto p35 = tr.PositionAt(now.t + .35f), p70 = tr.PositionAt(now.t + .7f);
+    const float cur[3] = {now.pos.x, now.pos.y, now.pos.z}, a[3] = {p35.x, p35.y, p35.z}, b[3] = {p70.x, p70.y, p70.z};
+    for (int i = 0; i < 3; ++i)
+    {
+        r.pos[i] = cur[i];
+        r.d35[i] = a[i] - cur[i];
+        r.d70[i] = b[i] - cur[i];
+    }
+    r.accel = g_bundle->map.capsuleAccelModel;
+    return r;
 }
 
 uint64_t TestTurnFootPhaseSearches()
@@ -5485,6 +5537,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
                       utpp::mm::air::kStepDownMaxSeconds == adapter::kGroundDropStepMaxS,
                   "the runtime air state and the chooser mapping agree on a step-down");
     mc.stepDownReach = g_stepDownReachOn; // SetStepDownReach (same switch as the runtime air state)
+    mc.capsuleForecast = g_capsuleForecastOn; // SetCapsuleForecast
     mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam
     // the exit window of the gate can close on the first open feed; the grace keeps its own short tail
     g_exitAirTail = aRaw.vehicleExitWindow ? 0.6f : std::fmax(0.0f, g_exitAirTail - std::fmax(aRaw.dt, 0.0f));
@@ -6715,7 +6768,10 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
     if (handbackUsed || fadingAim || g_weaponUpperFrame || fadingWeapon || reloadHandback || reloadCorrectionTail || meleeUpper)
     {
         if (handbackUsed)
+        {
             ++g_aimHandback;
+            UTPP_STAGE_TRACE(GameUpper); // the game's upper body (its graph + aimofs) replaces the finished motion upper body
+        }
         if (!sameBones)
         {
             const integ::UpperMask m =

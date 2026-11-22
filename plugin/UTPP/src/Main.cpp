@@ -3168,7 +3168,7 @@ void Native_FeedLocomotion(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, 
     }
     utpp::motiondriver::FeedAirFromInput(in); // UTPP-MOTION SEAM air: UTPPFeedAir fields -> one-shot v2 AirFeed of this feed's Step (v2 mutex only; v1 untouched)
     motionhost::Feed(in);
-    if (utpp::mm::bodyheight::rt::Enabled()) // body height smoothing (option, default off): player transform for the animation thread
+    if (utpp::mm::bodyheight::rt::Enabled()) // body height smoothing (option, default on): player transform for the animation thread
         BodyHeightOnFeed(GetPlayerEntityRaw(), in.haveExtra ? in.capsulePos[2] : std::nanf(""),
                          g_hot.timing.load(std::memory_order_relaxed), &MMTraceLog);
     aimofs::OnFeed(tpp, static_cast<uint32_t>(psmBlock)); // 0.6.3 aim offset guards (UpperBody, melee, vehicle, TPP)

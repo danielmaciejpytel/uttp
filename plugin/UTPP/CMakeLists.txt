@@ -1212,6 +1212,13 @@ if(DEFINED _utpp_mdmotion_data_native)
   target_compile_definitions(utpp_motion_driver_aimoffset_world_turn_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
   target_link_libraries(utpp_motion_driver_aimoffset_world_turn_test PRIVATE bcrypt)
   add_test(NAME utpp_motion_driver_aimoffset_world_turn_test COMMAND utpp_motion_driver_aimoffset_world_turn_test "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
+  # layer order of the weapon upper body (aim offset, grip IK, hand-back to the game with mm.aimGameUpper) from the test-only stage trace
+  add_executable(utpp_motion_driver_aimoffset_layer_order_test tests/LayerOrderDriverTest.cpp src/MotionHost.cpp src/MotionDriver.cpp)
+  target_compile_features(utpp_motion_driver_aimoffset_layer_order_test PRIVATE cxx_std_20)
+  target_compile_options(utpp_motion_driver_aimoffset_layer_order_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+  target_compile_definitions(utpp_motion_driver_aimoffset_layer_order_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV UTPP_POSE_STAGE_TRACE)
+  target_link_libraries(utpp_motion_driver_aimoffset_layer_order_test PRIVATE bcrypt)
+  add_test(NAME utpp_motion_driver_aimoffset_layer_order_test COMMAND utpp_motion_driver_aimoffset_layer_order_test "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}")
 endif()
 # ---- near-reversal tie: a 180 deg stick flip with a residual body yaw of +-0.3 deg turns the body with the turn clip (real host + driver,
 # tests/ReversalTieHostTest.cpp). Mutant REVERSAL_TIE 1 = the body takes the shorter way at the tie; it MUST print its FAIL line.

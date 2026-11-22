@@ -19,7 +19,7 @@ local tmp = os.tmpname()
 local EXPECTED = {
   -- Body turn
   ["bodyturn.guardFix"] = true, ["bodyturn.aimSmooth"] = true, ["bodyturn.weaponTurn"] = true, ["bodyturn.turnRate"] = true,
-  ["bodyturn.turnRateMax"] = 1.5, ["bodyturn.aimStrafe"] = true, ["bodyturn.aimStrafeUnarmed"] = true,
+  ["bodyturn.turnRateMax"] = 1.15, ["bodyturn.aimStrafe"] = true, ["bodyturn.aimStrafeUnarmed"] = true,
   ["bodyturn.aimChestAlign"] = true, ["bodyturn.aimJog"] = true, ["bodyturn.aimJogSpeed"] = 3.3,
   ["bodyturn.shooterMode"] = false, -- Shooter mode (2026-10-22): opt-in, OFF by default
   -- Body visibility
@@ -36,6 +36,7 @@ local EXPECTED = {
   ["mm.motionDriver"] = true, ["mm.pistol1h"] = true, ["mm.pistolAuto"] = true, ["mm.aimGameUpper"] = false,
   ["mm.slide"] = true, ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.85,
   ["mm.leanHeadScale"] = 0.9, ["mm.selectionGuards"] = true, ["mm.debug"] = false,
+  ["mm.bodyHeightSmooth"] = true, -- smoothed body height on uneven ground (2026-11-22): on by default
   -- Crosshair (2026-10-30): the UTPP crosshair is on by default
   ["crosshair.impl"] = true, ["crosshair.color"] = "standard",
 }
@@ -143,8 +144,8 @@ do
     #rec.magTap == 1 and rec.magTap[1][1] == true and core.Get("mm.shinobiBonusReload") == true)
   check("fresh start: database default utpp_base requested", rec.dbRequests[1] == "utpp_base" and core.Get("mm.database") == "utpp_base")
   local sp, tp = rec.strafeParams[#rec.strafeParams], rec.turnParams[#rec.turnParams]
-  check("fresh start: bodyturn natives get unarmed strafe ON, jog 3.3 and turn clip max 1.5",
-    sp ~= nil and sp[1] == true and near(sp[2], 3.3) and tp ~= nil and near(tp[2], 1.5))
+  check("fresh start: bodyturn natives get unarmed strafe ON, jog 3.3 and turn clip max 1.15",
+    sp ~= nil and sp[1] == true and near(sp[2], 3.3) and tp ~= nil and near(tp[2], 1.15))
   check("motion wanted state follows the defaults before the first sync", v2.want.enabled == true and v2.want.pistol1h == true
     and v2.want.aimGameUpper == false and v2.want.slide == true and v2.want.orientWarp == true and v2.want.lean == true
     and v2.want.leanHead == true and near(v2.want.leanScale, 0.85) and near(v2.want.leanHeadScale, 0.9) and v2.want.debug == false)
@@ -185,7 +186,7 @@ do
   end
   check("every listed key could be moved off its default (guards the reset check)", #changed == count, #changed)
   check("moved values differ from the defaults", core.Get("mm.leanScale") ~= 0.85 and core.Get("mm.trace") == true
-    and core.Get("bodyturn.turnRateMax") ~= 1.5 and core.Get("mm.database") ~= "utpp_base")
+    and core.Get("bodyturn.turnRateMax") ~= 1.15 and core.Get("mm.database") ~= "utpp_base")
   -- the Native Settings restore callback is core.ResetAll (BuildNativeSettings: registerRestoreDefaultsCallback)
   check("ResetAll returns true", core.ResetAll() == true)
   local still = {}
@@ -211,22 +212,36 @@ end
 -- ---------------------------------------------------------------- 4. stored values of existing users win over the new defaults
 do
   local stored = "mm.motionDriver=false\nmm.leanScale=1\nmm.leanHeadScale=1.2\nmm.trace=true\nmm.feedDump=true\nmm.weaponUpper=true\n"
-    .. "mm.climbRelease=true\nmm.headLead=false\nmm.airSteer=false\nbodyturn.turnRateMax=1.4\nbodyturn.aimStrafeUnarmed=false\n"
+    .. "mm.climbRelease=true\nmm.headLead=false\nmm.airSteer=false\nbodyturn.turnRateMax=1.1\nbodyturn.aimStrafeUnarmed=false\n"
     .. "mm.database=alt_db\nmm.aimGameUpper=true\n"
   local core, rec, t, v2 = boot(stored)
   check("stored values keep winning over the new defaults", core.Get("mm.motionDriver") == false and near(core.Get("mm.leanScale"), 1)
     and near(core.Get("mm.leanHeadScale"), 1.2) and core.Get("mm.trace") == true and core.Get("mm.feedDump") == true
     and core.Get("mm.weaponUpper") == true and core.Get("mm.climbRelease") == true and core.Get("mm.headLead") == false
-    and core.Get("mm.airSteer") == false and near(core.Get("bodyturn.turnRateMax"), 1.4)
+    and core.Get("mm.airSteer") == false and near(core.Get("bodyturn.turnRateMax"), 1.1)
     and core.Get("bodyturn.aimStrafeUnarmed") == false and core.Get("mm.database") == "alt_db"
     and core.Get("mm.aimGameUpper") == true)
   check("stored values are what the natives get at start", rec.trace[1][1] == true and rec.feedDump[1][1] == true
     and rec.weaponUpper[1][1] == true and rec.climbRelease[1][1] == true and rec.dbRequests[1] == "alt_db"
-    and rec.strafeParams[#rec.strafeParams][1] == false and near(rec.turnParams[#rec.turnParams][2], 1.4))
+    and rec.strafeParams[#rec.strafeParams][1] == false and near(rec.turnParams[#rec.turnParams][2], 1.1))
   check("stored mm.motionDriver=false keeps motion untouched (no glue calls)", v2.Sync(t.api) == "off" and t.enabled == false and #t.leanParams == 0)
   core.Set("mm.motionDriver", true)
   v2.Sync(t.api)
   check("stored lean amounts (1.0, 1.2) are what motion sends", #t.leanParams == 1 and near(t.leanParams[1][1], 1.0) and near(t.leanParams[1][2], 1.2))
+end
+
+-- ---------------------------------------------------------------- 4b. a stored turn clip rate cap above 1.15 (earlier maximum 2.0)
+-- loads as 1.15, the native gets 1.15 and the next save writes 1.15; a stored value below the cap is kept
+do
+  for _, case in ipairs({ { "1.5", 1.15 }, { "2", 1.15 }, { "1.15", 1.15 }, { "1.05", 1.05 } }) do
+    local core, rec = boot("bodyturn.turnRateMax=" .. case[1] .. "\n")
+    check("stored bodyturn.turnRateMax=" .. case[1] .. " loads as " .. case[2], near(core.Get("bodyturn.turnRateMax"), case[2])
+      and #rec.turnParams >= 1 and near(rec.turnParams[#rec.turnParams][2], case[2]), tostring(core.Get("bodyturn.turnRateMax")))
+    core.Save(tmp)
+    local text = io.open(tmp):read("*a")
+    check("stored bodyturn.turnRateMax=" .. case[1] .. " is saved as " .. case[2],
+      text:find("bodyturn.turnRateMax=" .. string.format("%.4g", case[2]) .. "\n", 1, true) ~= nil)
+  end
 end
 
 -- ---------------------------------------------------------------- 5. database default falls back when utpp_base is not installed
@@ -279,7 +294,7 @@ local USER_SETTINGS = {
   ["mm.shootTransfer"] = true, ["mm.aimUpperFade"] = true, ["mm.idleHold"] = true, ["mm.kneeFix"] = true,
   ["mm.kneeHold"] = true, ["mm.headLead"] = true, ["mm.air"] = "auto", ["mm.airProbe"] = true, ["mm.airSteer"] = true,
   ["mm.airRobust"] = true, ["mm.climbRelease"] = false, ["mm.database"] = "utpp_base", ["bodyturn.weaponTurn"] = true,
-  ["bodyturn.turnRate"] = true, ["bodyturn.turnRateMax"] = 1.5, ["bodyturn.aimStrafe"] = true,
+  ["bodyturn.turnRate"] = true, ["bodyturn.turnRateMax"] = 1.15, ["bodyturn.aimStrafe"] = true,
   ["bodyturn.aimStrafeUnarmed"] = true, ["bodyturn.aimChestAlign"] = true, ["bodyturn.aimJog"] = true,
   ["bodyturn.aimJogSpeed"] = 3.3, ["bodyturn.guardFix"] = true, ["bodyturn.aimSmooth"] = true, ["bodyturn.shooterMode"] = false,
   ["body.impl"] = true,

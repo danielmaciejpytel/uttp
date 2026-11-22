@@ -4177,6 +4177,8 @@ if type(registerForEvent) == "function" then
         end
         G.ragN = G.updN
         local ragIn = M.RagdollRead(G, det, vh.held) -- ragdoll camera (nil = natives absent / switched off)
+        local airIn -- the player is in the air (on foot only; see air below)
+        if not vh.held then airIn = det == 6 or (det >= 14 and det <= 22) end
         res = CM.solve(M.S, {
           ragdoll = ragIn,
           dt = dt, playerPos = ppos, playerQ = playerQ, bodyYaw = bodyYaw,
@@ -4195,8 +4197,9 @@ if type(registerForEvent) == "function" then
           zoom = M.rt.zoom * (1 - poseW), -- zoom masked by the aim pose (and the unarmed zoom pose)
           raycast = rayFn, crouch = crouch, slide = slide, stanceFast = G.stanceFast == true,
           -- (P7 F2): LocomotionDetailed SlideFall 6 / Fall 14 / Jump 18 ... DodgeAir 22 (adapter::PsmAir): the slide pivot's exit blend
-          -- into the air is short and the pivot base follows the take-off (CM.pivotStep)
-          air = det == 6 or (det >= 14 and det <= 22),
+          -- into the air is short and the pivot base follows the take-off (CM.pivotStep); on foot it also keeps the fast-fall mode off on
+          -- curbs and stair steps (cfg.pivotFastGround). Not passed (nil) during a vehicle hold: an exit launch arms the fast mode as before.
+          air = airIn,
           -- the orbit is hidden while held (override / release blend): no limiter lag there. Vehicle hold:
           -- only then - a hold that still shows the orbit (mount start, before the pull-out) keeps the world yaw like free
           -- look (holdYaw: no whip when the mount animation turns V to the door)

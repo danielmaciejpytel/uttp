@@ -81,6 +81,43 @@ static void Tracker(int hz)
     Check(r.Offset() == 0.0f && r.Diagnostics().resets == 1, "teleport step 0.8 m: restart, offset 0", hz);
 }
 
+// a lift: V stands while the floor moves at 2 / 4 m/s up or down for 5 s (a smooth 0.5 s start and stop): the offset stays a short
+// transient at the start and the stop (under 1 s at a bound), it is not held at a bound for the ride, and it is back to zero 2 s after the stop
+static void Lift(int hz)
+{
+    for (float speed : {2.0f, -2.0f, 4.0f, -4.0f})
+    {
+        Filter f;
+        const float dt = 1.0f / float(hz);
+        const float ramp = 0.5f, ride = 5.0f, total = 9.0f; // 2 s after the stop
+        auto vel = [&](float t) {
+            if (t < 1.0f) return 0.0f;
+            const float u = t - 1.0f;
+            if (u < ramp) return speed * u / ramp;
+            if (u < ramp + ride) return speed;
+            if (u < 2.0f * ramp + ride) return speed * (2.0f * ramp + ride - u) / ramp;
+            return 0.0f;
+        };
+        float z = 0.0f, worstRide = 0.0f, worstAll = 0.0f, boundTime = 0.0f, boundRun = 0.0f;
+        for (int i = 0; i < int(total * float(hz)); ++i)
+        {
+            const float t = float(i) * dt;
+            z += vel(t) * dt;
+            const float o = f.Step(i ? dt : 0.0f, z, true);
+            worstAll = std::fmax(worstAll, std::fabs(o));
+            if (t > 1.0f + ramp + 0.3f && t < 1.0f + ramp + ride)
+                worstRide = std::fmax(worstRide, std::fabs(o));
+            const bool atBound = o <= -0.04f + 1e-5f || o >= 0.005f - 1e-6f;
+            boundRun = atBound ? boundRun + dt : 0.0f;
+            boundTime = std::fmax(boundTime, boundRun);
+        }
+        std::printf("  lift %.0f m/s @%d Hz: offset max %.2f cm, during the ride %.3f cm, longest at a bound %.3f s, end %.4f cm\n", speed, hz,
+                    worstAll * 100.0f, worstRide * 100.0f, boundTime, f.Offset() * 100.0f);
+        Check(worstRide < 0.002f && boundTime < 1.0f && std::fabs(f.Offset()) < 1e-3f,
+              speed > 0 ? "lift up: offset only a short start / stop transient, back to zero" : "lift down: offset only a short start / stop transient, back to zero", hz);
+    }
+}
+
 static void RateIndependence()
 {
     // the drawn height 0.1 s after a 2 cm snap up does not depend on the frame rate (closed-form exponentials)
@@ -325,6 +362,9 @@ static void Stepper()
 
 int main(int argc, char** argv)
 {
+    Check(rt::Enabled(), "default: the stage is on at startup (the menu default mm.bodyHeightSmooth)");
+    for (int hz : {30, 60, 144})
+        Lift(hz);
     for (int hz : {30, 60, 144})
         Tracker(hz);
     RateIndependence();

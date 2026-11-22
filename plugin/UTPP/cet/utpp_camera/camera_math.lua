@@ -313,6 +313,13 @@ CM.DEFAULTS = {
   --    pivotFastSmooth s spring - no lag builds up, so there is nothing to catch up at the touchdown. After the speed fell below
   --    pivotFastVz for pivotFastArm s the spring goes back to pivotSmooth over pivotFastRamp s. pivotFast = false: the old rule exactly (snap to V when the base is over pivotSnap away, plain spring).
   pivotLagMax = 1.0, pivotSnapSpeed = 50, pivotFast = true, pivotFastVz = 3.0, pivotFastArm = 0.03, pivotFastSmooth = 0.08, pivotFastRamp = 0.2,
+  -- fast mode on uneven ground: a curb or a stair run snaps the capsule 3 - 22 cm per frame (over pivotFastVz for 2 - 3 frames, up on the
+  -- ground and down through one - two frames of the game's fall state), which armed the fast mode and the camera itself stepped 8 - 15 cm per
+  -- frame. With the air flag known (CM.pivotStep air ~= nil) the fast mode arms only when V was in the air on every frame of the fast run
+  -- and either rises (a jump take-off) or has been in the air for pivotFastAirT s in a row (a fall; a curb drop is 0.02 - 0.07 s), or when
+  -- the fast run has moved V by pivotFastGroundDz m in one direction (a lift, a climb; a curb is up to 0.33 m). air == nil (callers
+  -- without the flag) or pivotFastGround = false: the arming rule above alone.
+  pivotFastGround = true, pivotFastAirT = 0.1, pivotFastGroundDz = 0.5,
   -- jump-out landing (car jump-out: the rigid fast-fall follow stopped the camera dead in one frame at the
   -- touchdown, 250 - 1400 m/s^2). CM.jumpOutStep, only while the vehicle exit hold is on (pivotStep jo.on) and until it settled: a separate
   -- latched mode that replaces the fast-fall mode and the lag clamp. The base is an acceleration limited follower of V: speed command
@@ -1827,8 +1834,8 @@ function CM.newPivot() return { z = nil, vz = 0, base = nil, vb = 0, crouchW = n
 -- fast (bool, optional): the stance change that started the current crouch <-> stand move was a clean in-place edge: the
 -- pivot waits cfg.crouchDelay / standDelay and then blends over cfg.crouchBlend / standBlend (the body's clip), else over cfg.stanceBlend
 -- at once. Latched when the target changes.
--- air (bool, optional; P7 F2): the player is in the air (PSM LocomotionDetailed Fall / Jump / SlideFall ...): only used while the exit blend of
--- the slide pivot runs (cfg.slideAirExitBlend, cfg.slideAirExitSmooth).
+-- air (bool, optional; P7 F2): the player is in the air (PSM LocomotionDetailed Fall / Jump / SlideFall ...): used while the exit blend of
+-- the slide pivot runs (cfg.slideAirExitBlend, cfg.slideAirExitSmooth) and by the fast-fall arming on uneven ground (cfg.pivotFastGround).
 -- pin (bool, optional; ragdoll camera, CM.ragdollPivot): the base is V's own height every frame (no spring, no fast mode, no snap /
 -- clamp event, vertical velocity 0): V's z during a ragdoll episode is the body tumbling over the ground, the capsule pivot is not shown and
 -- must not run its fast-fall logic on it; the first frame after the episode starts from V's z.
@@ -1901,6 +1908,8 @@ function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, a
     local vzNow = pv.pvz or 0
     if stepZ ~= nil and dt > 1e-4 then vzNow = stepZ / dt end
     pv.pvz, pv.lastPz = vzNow, z
+    -- continuous air time of the game's own state (cfg.pivotFastGround); nil while the caller gives no air flag
+    if air == nil then pv.airT = nil elseif air == true then pv.airT = (pv.airT or 0) + dt else pv.airT = 0 end
     local lagMax = cfg.pivotLagMax or cfg.pivotSnap
     -- pivotFast = false: exactly the old rule (the base snaps to V when it is further than pivotSnap, then the plain spring); the own-step
     -- teleport test and the lag clamp belong to the fast-fall mode
@@ -1911,6 +1920,7 @@ function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, a
     if pin == true then
       pv.base, pv.vb, pv.pvz, pv.lastPz = z, 0, 0, z
       pv.fastOn, pv.fastT, pv.fastN, pv.slowT, pv.slowN, pv.fastRamp, pv.ev, pv.snapEv = false, 0, 0, 0, 0, nil, 0, nil
+      pv.fastDz, pv.fastAir = 0, false
       pv.joOn, pv.joA, pv.joG, pv.joFb, pv.joLeft = nil, nil, nil, nil, nil
       pv.xyJ = nil
     elseif pv.base == nil or (oldSnap and abs(z - pv.base) > cfg.pivotSnap) or (not oldSnap and (tele or (stepZ == nil and abs(z - pv.base) > cfg.pivotSnap))) then
@@ -1918,6 +1928,7 @@ function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, a
       if pv.base ~= nil then pv.snapEv = { kind = "teleport", lag = z - pv.base, vz = vzNow, dz = stepZ or 0, dt = dt } end
       pv.base, pv.vb = z, 0
       pv.fastOn, pv.fastT, pv.fastN, pv.slowT, pv.slowN, pv.fastRamp, pv.ev = false, 0, 0, 0, 0, nil, 0
+      pv.fastDz, pv.fastAir = 0, false
       pv.joOn, pv.joA, pv.joG, pv.joFb, pv.joLeft = nil, nil, nil, nil, nil
       pv.xyJ = nil
     elseif joNow or pv.joOn then
@@ -1931,10 +1942,20 @@ function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, a
         local vth, armT = cfg.pivotFastVz or 3, cfg.pivotFastArm or 0.03
         if abs(vzNow) > vth then
           pv.fastT, pv.fastN, pv.slowT, pv.slowN = (pv.fastT or 0) + dt, (pv.fastN or 0) + 1, 0, 0
+          -- the travel of this fast run in one direction (a reversal starts it again)
+          local d, run = stepZ or 0, pv.fastDz or 0
+          if run ~= 0 and (d > 0) ~= (run > 0) then run = 0 end
+          pv.fastDz = run + d
+          pv.fastAir = air == true and (pv.fastN == 1 or pv.fastAir == true) -- in the air on every frame of this fast run
         else
           pv.fastT, pv.fastN, pv.slowT, pv.slowN = 0, 0, (pv.slowT or 0) + dt, (pv.slowN or 0) + 1
+          pv.fastDz, pv.fastAir = 0, false
         end
-        if not fast and pv.fastN >= 2 and pv.fastT >= armT and pv.slideMode == nil then -- not while a slide / its exit blend runs (P7 F2 keeps its own air spring)
+        -- uneven ground (cfg.pivotFastGround): a curb / stair snap is not a fall
+        local groundOk = air == nil or cfg.pivotFastGround == false
+          or (pv.fastAir == true and (vzNow > 0 or (pv.airT or 0) >= (cfg.pivotFastAirT or 0)))
+          or abs(pv.fastDz or 0) >= (cfg.pivotFastGroundDz or 0)
+        if not fast and pv.fastN >= 2 and pv.fastT >= armT and pv.slideMode == nil and groundOk then -- not while a slide / its exit blend runs (P7 F2 keeps its own air spring)
           fast, pv.fastOn, pv.ev, pv.fastRamp = true, true, 0, nil
         elseif fast and pv.slowN >= 2 and pv.slowT >= armT then
           -- left: V's speed is the base's speed again (V stopped at the touchdown: the base keeps only the offset's own velocity)
@@ -1987,6 +2008,7 @@ function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, a
   end
   pv.base, pv.crouchW, pv.slideW, pv.aimS, pv.slideMode, pv.slideExit, pv.slideBase, pv.hh = nil, nil, nil, nil, nil, nil, nil, nil
   pv.lastPz, pv.pvz, pv.fastOn, pv.fastT, pv.fastN, pv.slowT, pv.slowN, pv.fastRamp, pv.ev = nil, nil, nil, nil, nil, nil, nil, nil, nil
+  pv.fastDz, pv.airT, pv.fastAir = nil, nil, nil
   pv.joOn, pv.joA, pv.joG, pv.joFb, pv.joLeft = nil, nil, nil, nil, nil
   pv.xyJ, pv.xyLx, pv.xyLy = nil, nil, nil
   local h = (eyeZ ~= nil) and (eyeZ - playerPos.z) or nil

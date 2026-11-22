@@ -1097,14 +1097,14 @@ do
     local minRel = slideJump(UTPP_CAMERA_PATH)
     -- the world z of the camera is pivot + boom offset: the boom offset differs a little from "pivot over the capsule", so the bound is the measured
     -- one of the pre-fix camera (0.75 m) plus the fix (>= 0.95 m at the camera)
-    local from = "air = det == 6 or (det >= 14 and det <= 22),"
+    local from = "airIn = det == 6 or (det >= 14 and det <= 22)"
     local a, b = srcFull:find(from, 1, true)
     check("P (mutation setup): the air flag of init.lua is found", a ~= nil)
     local minOld
     if a then
       local mutPath = TMP .. "utpp_camera_mut_air.lua"
       local f = io.open(mutPath, "wb")
-      f:write(srcFull:sub(1, a - 1) .. "air = false," .. srcFull:sub(b + 1))
+      f:write(srcFull:sub(1, a - 1) .. "airIn = false" .. srcFull:sub(b + 1))
       f:close()
       minOld = slideJump(mutPath)
       os.remove(mutPath)

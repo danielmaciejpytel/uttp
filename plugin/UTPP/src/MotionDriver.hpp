@@ -195,6 +195,10 @@ int StickSpeedMode();
 // Read on every Step, for both bodies and every bundle loaded later. Always true. Status: selGuards=.
 bool SetSelectionGuards(bool aOn);
 bool SelectionGuards();
+// Capsule forecast for turning and partial-stick starts (CET mm.capsuleForecast, default off; MapConfig::capsuleForecast): the
+// query trajectory ramps at the applied capsule acceleration also when the body faces away from the input, at a partial stick and
+// with a turning input. Read on every Step.
+void SetCapsuleForecast(bool aOn);
 // Tier2 Slow flag (GameplayRestriction.Tier2LocomotionSlow; reds UTPPFeedMotionTier2Slow, sent right before every UTPPFeedLocomotion): the next
 // v2 Steps lower the stand run cap by 1.3 m/s (MotionFeed::tier2Slow). Process-lifetime atomic, false at start. Status: tier2Slow=.
 void FeedTier2Slow(bool aSlow);
@@ -253,6 +257,14 @@ struct RootProbe
 RootProbe TestRootProbe();
 // test targets only: searches that read the live pose history.
 uint64_t TestLiveHistorySearches();
+// test targets only: the query trajectory after the last Step (adapter cm): current sample position, predicted displacement 0.35 /
+// 0.7 s ahead, and the applied capsule acceleration of the forecast (0 = the vector model).
+struct ForecastProbe
+{
+    bool valid = false;
+    float pos[3] = {0, 0, 0}, d35[3] = {0, 0, 0}, d70[3] = {0, 0, 0}, accel = 0;
+};
+ForecastProbe TestForecastProbe();
 // test targets only: reversal searches that received the shown pose for the turn foot-phase re-rank.
 uint64_t TestTurnFootPhaseSearches();
 // test targets only: re-rank decisions so far (MatchResult::turnFootPhase): trajectory winner kept, re-ranked row picked, re-ranked row refused.
@@ -292,6 +304,10 @@ bool SetOrientWarp(bool aOn);
 // state of the installed bundle (else the requested one).
 bool SetStrideWarp(bool aOn);
 bool StrideWarp();
+// Inertialized overlay switch (CET mm.overlayInertialSwitch; MotionPose SetOverlayInertialSwitch; default off): a weapon class or
+// style change swaps the overlay pose at once and the composed pose is inertialized instead of the 0.2 / 0.3 s crossfades: arms and
+// hands relative to the chest over 0.2 s, legs, pelvis and root over 0.4 s (kOverlaySwitchLegFactor). Applied to the installed bundle at once and to every bundle loaded later. Always true.
+bool SetOverlayInertialSwitch(bool aOn);
 // Run pelvis yaw trim (CET mm.pelvisYawTrim; mm/OrientWarp.hpp PelvisTrim): aDeg (+ = left, -10..10, default 0) turns the pelvis of
 // the v2 pose while V walks / runs / sprints forward on the ground (chest, head and feet keep their direction; the motion forward
 // loops carry the pelvis ~5 deg to the right, +5 squares it). Not while aiming / weapon drawn / air / crouch / slide / traversal;

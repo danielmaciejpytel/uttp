@@ -893,6 +893,13 @@ struct MapConfig
     float gravity = 9.81f;          // Standalone fallback; runtime passes this feed's learned AirState gravity (m/s^2).
     float capsuleBrakingDeceleration = 0.0f; // fresh native base stat, physical m/s^2; zero keeps motion fallback
     float capsuleAcceleration = 0.0f; // fresh observed base * applied multiplier, physical m/s^2
+    // Capsule forecast for turning and partial-stick starts (mm.capsuleForecast, default off). The game turns the capsule velocity
+    // to the input direction within a frame and ramps its speed at the applied acceleration whatever the body facing, the stick tilt
+    // below the cap or a turning camera; on, the applied-acceleration ramp of the straight start also covers a body facing away from
+    // the input, a partial stick (ramp to the steady speed of that stick) and a turning input (the direction follows the controller
+    // yaw rate), each while the capsule is below kCapsuleForecastStartFraction of the steady speed (starts, not loops). false = the
+    // straight full-stick domain only, bit for bit.
+    bool capsuleForecast = false;
     float stanceSpeedBlendTime = 0.0f; // Runtime supplies its existing ground-to-ground transition duration.
     bool visualStrafe = false; // Explicit grounded firing-pose movement; never changes native ADS/PSM.
     bool strafeWhileAiming = true;  // [P] motion RotationMode = Strafe when !bOrientRotationToMovement; the game strafes while aiming
@@ -1080,6 +1087,36 @@ inline accel::Prediction CapsuleStartPrediction(const MapConfig& c, float crouch
     p.crouchWeight = map.crouchWeight;
     p.stand = map.stand;
     p.crouch = map.crouch;
+    return p;
+}
+
+// Capsule forecast (MapConfig::capsuleForecast): the applied-acceleration ramp towards the steady game speed whose mapped query speed
+// is the prediction cap aQueryCap (cm/s), with the direction following a turning input. A cap held up by the minimum analog speed
+// (aRawQueryCap below it) has no game speed behind it and keeps the existing forecast; so does a capsule already at or above the cap
+// (Active() false) and a map that cannot reach the cap. Only starts: a capsule at kCapsuleForecastStartFraction of the steady speed
+// or faster (steady loops, whose measured speed sits a few percent below the cap) keeps the existing forecast as well.
+constexpr float kCapsuleForecastStartFraction = .9f;
+inline accel::Prediction CapsuleTurningStartPrediction(const MapConfig& c, float crouchWeight, float gameSpeed, float aQueryCap,
+                                                       float aRawQueryCap)
+{
+    accel::Prediction p = CapsuleStartPrediction(c, crouchWeight, gameSpeed, 0.f);
+    constexpr float kMaxGameSpeed = 15.f; // m/s, above every gait cap
+    if (!std::isfinite(aQueryCap) || !(aQueryCap > 0.f) || !(aRawQueryCap + .1f >= aQueryCap) ||
+        !(p.QuerySpeed(kMaxGameSpeed) >= aQueryCap))
+    {
+        p.acceleration = 0.f;
+        return p;
+    }
+    float lo = 0.f, hi = kMaxGameSpeed;
+    for (int i = 0; i < 40; ++i)
+    {
+        const float mid = .5f * (lo + hi);
+        (p.QuerySpeed(mid) < aQueryCap ? lo : hi) = mid;
+    }
+    p.maxSpeed = hi;
+    p.turning = true;
+    if (std::fabs(p.QuerySpeed(hi) - aQueryCap) > .1f || !(gameSpeed < kCapsuleForecastStartFraction * hi))
+        p.acceleration = 0.f;
     return p;
 }
 
@@ -1971,9 +2008,9 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         motiontraj::Dot(motiontraj::SafeNormal(planarVelocity), motiontraj::SafeNormal(dir)) >= alignedCos;
     const bool alignedActor = std::isfinite(yawNow) &&
         std::fabs(motiontraj::NormalizeAxis(inputYaw - yawNow)) <= 5.f;
-    if (dt > 0.f && mode == 0 && PsmGround(locoDetail) && stickRaw >= .99f &&
-        rot == motiontraj::RotationMode::OrientToMovement && alignedActor && alignedVelocity &&
-        std::fabs(calibrationWeight - float(stance)) <= .0001f)
+    const bool stableGroundOrient = dt > 0.f && mode == 0 && PsmGround(locoDetail) &&
+        rot == motiontraj::RotationMode::OrientToMovement && std::fabs(calibrationWeight - float(stance)) <= .0001f;
+    if (stableGroundOrient && stickRaw >= .99f && alignedActor && alignedVelocity)
     {
         float gameCap = stance == 1 ? c.gameCrouchPoint : c.gameStandPoints[gait];
         if (stance != 1 && gait == 1)
@@ -1984,7 +2021,12 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         // not equal the calibrated native gait cap.
         if (std::fabs(d.capsuleStart.QuerySpeed(gameCap) - d.maxSpeed) > .1f)
             d.capsuleStart.acceleration = 0.f;
+        // a turning input keeps the ramp; the controller yaw rate is non-zero only on a start from idle (kGenMoving clamps it to 0)
+        d.capsuleStart.turning = c.capsuleForecast;
     }
+    else if (c.capsuleForecast && stableGroundOrient && !slideBrake && !motiontraj::IsZero(trajAcc) && alignedVelocity)
+        d.capsuleStart = CapsuleTurningStartPrediction(c, calibrationWeight, gameSp, d.maxSpeed,
+            motiontraj::MotionMaxSpeed(c.cmc, gait, stance, false, 0.0f) * std::clamp(stick, 0.0f, 1.0f));
     m.capsuleBrakeModel = d.capsuleStop.Active() ? d.capsuleStop.deceleration : 0.0f;
     const bool hasFloor = f.air.valid && f.air.distanceToGround >= 0.0f;
     m.traj.Update(dt, vel, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);

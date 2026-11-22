@@ -298,10 +298,11 @@ function M.SetWeaponTurn(on)
   return W.on
 end
 
--- turn clip rate (natives UTPPSetMMTurnRate / UTPPSetMMTurnRateParams; with
--- a cap of 1.1 it still looked slow): TR.on / TR.max sent whenever a setting changes; missing natives (older DLL) are
--- logged once and the settings stay inert.
-local TR = { on = true, max = 1.5, min = 0.9, sent = nil, calls = 0, fails = 0, missing = false }
+-- turn clip rate (natives UTPPSetMMTurnRate / UTPPSetMMTurnRateParams): TR.on / TR.max sent whenever a setting changes;
+-- missing natives (older DLL) are logged once and the settings stay inert. No effect on frames the motion driver owns;
+-- it applies on the legacy matcher and on frames handed back to it (the driver plays its own turn timing). Both settings are hidden from the menus (utpp_core
+-- HIDDEN_KEYS); the maximum is capped at 1.15 (a stored higher value loads as 1.15).
+local TR = { on = true, max = 1.15, min = 0.9, sent = nil, calls = 0, fails = 0, missing = false }
 M.turnRate = TR
 function M.ApplyTurnRate()
   if Game == nil or type(Game.UTPPSetMMTurnRate) ~= "function" or type(Game.UTPPSetMMTurnRateParams) ~= "function" then
@@ -742,12 +743,12 @@ function M.RegisterSettings(core)
     apply = function(v) M.SetWeaponTurn(v == true) end })
   core.Register({ key = "bodyturn.turnRate", section = "bodyturn", type = "bool", default = true,
     label = "Faster turn clips (match the run speed)",
-    desc = "Plays the run turn / pivot clips at the rate that matches the capsule speed instead of the run loop rate (the turns looked like slow motion).",
+    desc = "No effect on frames the motion driver owns; on the legacy matcher and frames handed back to it: plays the run turn / pivot clips at the rate that matches the capsule speed instead of the run loop rate.",
     apply = function(v) TR.on = v == true; M.ApplyTurnRate() end })
-  core.Register({ key = "bodyturn.turnRateMax", section = "bodyturn", type = "float", default = 1.5, min = 1.0, max = 2.0,
+  core.Register({ key = "bodyturn.turnRateMax", section = "bodyturn", type = "float", default = 1.15, min = 1.0, max = 1.15,
     step = 0.05, label = "Turn clip rate: maximum",
-    desc = "Upper cap of the turn clip playback rate (1.0 = clip speed). Raise if the turns still look slow, lower if the feet slide.",
-    apply = function(v) TR.max = tonumber(v) or 1.5; M.ApplyTurnRate() end })
+    desc = "No effect on frames the motion driver owns; on the legacy matcher and frames handed back to it: upper cap of the turn clip playback rate (1.0 = clip speed, at most 1.15).",
+    apply = function(v) TR.max = tonumber(v) or 1.15; M.ApplyTurnRate() end })
   core.Register({ key = "bodyturn.aimStrafe", section = "bodyturn", type = "bool", default = true,
     label = "Strafe while aiming",
     desc = "While aiming with a weapon the legs step sideways / backwards / diagonally in the stick direction and the hips and feet keep facing the aim (no forward running legs or turn steps). Off = legs as before.",
