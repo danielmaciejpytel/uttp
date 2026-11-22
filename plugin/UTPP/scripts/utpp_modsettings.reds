@@ -210,11 +210,11 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "15")
   @runtimeProperty("ModSettings.displayName", "Walk speed (m/s)")
-  @runtimeProperty("ModSettings.description", "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed (default 1.6). The game's own walk toggle is about 2.7 m/s. 0 = the game's own speed. Only on foot in third person; sprinting, aiming, crouching and jumping are unchanged. No effect with the Game Animations pack.")
+  @runtimeProperty("ModSettings.description", "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed (default 1.9). The game's own walk toggle is about 2.7 m/s. 0 = the game's own speed. Only on foot in third person; sprinting, aiming, crouching and jumping are unchanged. No effect with the Game Animations pack.")
   @runtimeProperty("ModSettings.min", "0.0")
   @runtimeProperty("ModSettings.max", "3.5")
   @runtimeProperty("ModSettings.step", "0.1")
-  public let mm_walkSpeed: Float = 1.6;
+  public let mm_walkSpeed: Float = 1.9;
 
   // mm.strideWarp
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")

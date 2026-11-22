@@ -164,7 +164,7 @@ bool SetShooterMode(bool aOn);
 // LIVE (setting on, v2 enabled, no fallback, bundle loaded); exactly 1.0f otherwise. ShooterModeLive mirrors that flag.
 float ShooterModeSpeedMul(float aMoveX, float aMoveY, int32_t aDetailed);
 bool ShooterModeLive();
-// Walk toggle speed (CET mm.walkSpeed, DLL default 1.6 like the setting, 0 = off; mm/MotionAdapter.hpp MapConfig::gameWalkTogglePoint): the capsule speed (game
+// Walk toggle speed (CET mm.walkSpeed, DLL default 1.9 like the setting, 0 = off; mm/MotionAdapter.hpp MapConfig::gameWalkTogglePoint): the capsule speed (game
 // m/s, 0 .. kWalkSpeedMaxMs) the game walk toggle (G) should hold at the full stick. SetWalkSpeed stores it (false on NaN / out of range,
 // nothing changed); the driver maps that speed onto the motion Walk cap while the toggle is on (stand ground, no aim / air / sprint), and
 // the script (utpp.reds UTPPUpdateWalkSpeed) holds the capsule there with one MaxSpeed multiplier = WalkSpeedTarget() / 2.72 (the speed
@@ -304,7 +304,7 @@ bool SetOrientWarp(bool aOn);
 // state of the installed bundle (else the requested one).
 bool SetStrideWarp(bool aOn);
 bool StrideWarp();
-// Inertialized overlay switch (CET mm.overlayInertialSwitch; MotionPose SetOverlayInertialSwitch; default off): a weapon class or
+// Inertialized overlay switch (CET mm.overlayInertialSwitch; MotionPose SetOverlayInertialSwitch; default on): a weapon class or
 // style change swaps the overlay pose at once and the composed pose is inertialized instead of the 0.2 / 0.3 s crossfades: arms and
 // hands relative to the chest over 0.2 s, legs, pelvis and root over 0.4 s (kOverlaySwitchLegFactor). Applied to the installed bundle at once and to every bundle loaded later. Always true.
 bool SetOverlayInertialSwitch(bool aOn);

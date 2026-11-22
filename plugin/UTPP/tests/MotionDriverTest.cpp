@@ -494,10 +494,10 @@ int main(int argc, char** argv)
     motiondriver::SetAimWorldSmoothing(false, 0.0f); // the aim cases measure the unsmoothed aim (the DLL default is on at 12 Hz)
     {
         // G2 / G5 native settings (data-free): walk toggle speed validation + the lock-free target gate, Tier2 Slow flag
-        Check(motiondriver::WalkSpeedSetting() == 1.6f && motiondriver::WalkSpeedTarget() == 0.0f,
-              "G2: walk speed default 1.6 (= mm.walkSpeed), target 0 while motion does not drive");
+        Check(motiondriver::WalkSpeedSetting() == 1.9f && motiondriver::WalkSpeedTarget() == 0.0f,
+              "G2: walk speed default 1.9 (= mm.walkSpeed), target 0 while motion does not drive");
         Check(!motiondriver::SetWalkSpeed(std::numeric_limits<float>::quiet_NaN()) && !motiondriver::SetWalkSpeed(-0.1f) && !motiondriver::SetWalkSpeed(3.6f) &&
-                  !motiondriver::SetWalkSpeed(std::numeric_limits<float>::infinity()) && motiondriver::WalkSpeedSetting() == 1.6f,
+                  !motiondriver::SetWalkSpeed(std::numeric_limits<float>::infinity()) && motiondriver::WalkSpeedSetting() == 1.9f,
               "G2: SetWalkSpeed rejects NaN / negative / over 3.5 / inf and keeps the previous value");
         Check(motiondriver::SetWalkSpeed(2.0f) && motiondriver::WalkSpeedSetting() == 2.0f, "G2: SetWalkSpeed(2.0) stored");
         Check(motiondriver::WalkSpeedTarget() == 0.0f, "G2: target answers 0 while motion is not driving third-person locomotion");

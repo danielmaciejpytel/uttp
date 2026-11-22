@@ -12,7 +12,7 @@ return {
     ["body.showTpp"] = "true",
     ["bodyturn.aimChestAlign"] = "true",
     ["bodyturn.aimJog"] = "true",
-    ["bodyturn.aimJogSpeed"] = "3.2999999999999998",
+    ["bodyturn.aimJogSpeed"] = "3.8500000000000001",
     ["bodyturn.aimSmooth"] = "true",
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
@@ -136,7 +136,7 @@ return {
     ["mm.motionDriver"] = "true",
     ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
-    ["mm.overlayInertialSwitch"] = "false",
+    ["mm.overlayInertialSwitch"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
@@ -150,7 +150,7 @@ return {
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "false",
-    ["mm.walkSpeed"] = "1.6000000000000001",
+    ["mm.walkSpeed"] = "1.8999999999999999",
     ["mm.weaponUpper"] = "false",
     ["perspective.aiming"] = "\"tpp\"",
     ["perspective.aimingScoped"] = "\"fpp\"",
@@ -248,19 +248,19 @@ return {
     "native UTPPSetMMTurnRateParams(0.90000000000000002,1.1499999999999999)",
     "apply bodyturn.turnRateMax(1.1499999999999999,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
     "apply bodyturn.aimStrafe(true,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
     "apply bodyturn.aimStrafeUnarmed(true,\"ok\")",
     "native UTPPSetMMChestAlign(true)",
     "apply bodyturn.aimChestAlign(true,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
     "apply bodyturn.aimJog(true,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
-    "apply bodyturn.aimJogSpeed(3.2999999999999998,\"ok\")",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
+    "apply bodyturn.aimJogSpeed(3.8500000000000001,\"ok\")",
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
     "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
@@ -284,8 +284,8 @@ return {
     "native UTPPSetMotionBodyYawOffsets(4,0)",
     "apply mm.bodyYawOffsetFemale(4,\"ok\")",
     "apply mm.bodyYawOffsetMale(0,\"ok\")",
-    "native UTPPSetMotionWalkSpeed(1.6000000000000001)",
-    "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
+    "native UTPPSetMotionWalkSpeed(1.8999999999999999)",
+    "apply mm.walkSpeed(1.8999999999999999,\"ok\")",
     "native UTPPSetMotionMinAnalogWalk(0.81999999999999995)",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "native UTPPSetMMAimWorldSmoothing(true,12)",
@@ -299,7 +299,7 @@ return {
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
-    "native UTPPSetMMOverlayInertialSwitch(false)",
+    "native UTPPSetMMOverlayInertialSwitch(true)",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "native UTPPSetStickSpeedMode(1)",
@@ -321,7 +321,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
-    "apply mm.overlayInertialSwitch(false,\"ok\")",
+    "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
@@ -479,19 +479,19 @@ return {
     "native UTPPSetMMTurnRateParams(0.90000000000000002,1.1000000000000001)",
     "apply bodyturn.turnRateMax(1.1000000000000001,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
     "apply bodyturn.aimStrafe(true,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
     "apply bodyturn.aimStrafeUnarmed(true,\"ok\")",
     "native UTPPSetMMChestAlign(true)",
     "apply bodyturn.aimChestAlign(true,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
     "apply bodyturn.aimJog(true,\"ok\")",
     "native UTPPSetMMStrafe(true)",
-    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
-    "apply bodyturn.aimJogSpeed(3.2999999999999998,\"ok\")",
+    "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.8500000000000001)",
+    "apply bodyturn.aimJogSpeed(3.8500000000000001,\"ok\")",
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
     "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
@@ -508,7 +508,7 @@ return {
     "apply mm.pelvisYawTrim(2,\"ok\")",
     "apply mm.bodyYawOffsetFemale(4,\"ok\")",
     "apply mm.bodyYawOffsetMale(0,\"ok\")",
-    "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
+    "apply mm.walkSpeed(1.8999999999999999,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
@@ -525,7 +525,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
-    "apply mm.overlayInertialSwitch(false,\"ok\")",
+    "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
@@ -720,7 +720,7 @@ return {
       ["type"] = "bool"
     },
     ["bodyturn.aimJogSpeed"] = {
-      ["default"] = "3.2999999999999998",
+      ["default"] = "3.8500000000000001",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 3.8500000000000001,
@@ -1830,7 +1830,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.overlayInertialSwitch"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -1949,7 +1949,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.walkSpeed"] = {
-      ["default"] = "1.6000000000000001",
+      ["default"] = "1.8999999999999999",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 3.5,
@@ -2327,7 +2327,7 @@ return {
     ["body.showTpp"] = "true",
     ["bodyturn.aimChestAlign"] = "true",
     ["bodyturn.aimJog"] = "true",
-    ["bodyturn.aimJogSpeed"] = "3.2999999999999998",
+    ["bodyturn.aimJogSpeed"] = "3.8500000000000001",
     ["bodyturn.aimSmooth"] = "true",
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
@@ -2451,7 +2451,7 @@ return {
     ["mm.motionDriver"] = "true",
     ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
-    ["mm.overlayInertialSwitch"] = "false",
+    ["mm.overlayInertialSwitch"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
@@ -2465,7 +2465,7 @@ return {
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "false",
-    ["mm.walkSpeed"] = "1.6000000000000001",
+    ["mm.walkSpeed"] = "1.8999999999999999",
     ["mm.weaponUpper"] = "false",
     ["perspective.aiming"] = "\"tpp\"",
     ["perspective.aimingScoped"] = "\"fpp\"",
@@ -2975,7 +2975,7 @@ return {
     "apply bodyturn.aimStrafeUnarmed(true,\"ok\")",
     "apply bodyturn.aimChestAlign(true,\"ok\")",
     "apply bodyturn.aimJog(true,\"ok\")",
-    "apply bodyturn.aimJogSpeed(3.2999999999999998,\"ok\")",
+    "apply bodyturn.aimJogSpeed(3.8500000000000001,\"ok\")",
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
     "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
@@ -2992,7 +2992,7 @@ return {
     "apply mm.pelvisYawTrim(2,\"ok\")",
     "apply mm.bodyYawOffsetFemale(4,\"ok\")",
     "apply mm.bodyYawOffsetMale(0,\"ok\")",
-    "apply mm.walkSpeed(1.6000000000000001,\"ok\")",
+    "apply mm.walkSpeed(1.8999999999999999,\"ok\")",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
@@ -3009,7 +3009,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
-    "apply mm.overlayInertialSwitch(false,\"ok\")",
+    "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
@@ -3160,7 +3160,7 @@ bodyturn.aimStrafe=true\r\
 bodyturn.aimStrafeUnarmed=true\r\
 bodyturn.aimChestAlign=true\r\
 bodyturn.aimJog=true\r\
-bodyturn.aimJogSpeed=3.3\r\
+bodyturn.aimJogSpeed=3.85\r\
 bodyturn.guardFix=true\r\
 bodyturn.aimSmooth=true\r\
 bodyturn.meleeStrikeTurn=true\r\
@@ -3184,7 +3184,7 @@ mm.feminineFigure=true\r\
 mm.pelvisYawTrim=2\r\
 mm.bodyYawOffsetFemale=4\r\
 mm.bodyYawOffsetMale=0\r\
-mm.walkSpeed=1.6\r\
+mm.walkSpeed=1.9\r\
 mm.minWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
@@ -3201,7 +3201,7 @@ mm.bodyHeightSmooth=true\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
-mm.overlayInertialSwitch=false\r\
+mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
@@ -3548,7 +3548,7 @@ vehicle.jumpOutSidePush=true\r\
     ["body.showTpp"] = "true",
     ["bodyturn.aimChestAlign"] = "true",
     ["bodyturn.aimJog"] = "true",
-    ["bodyturn.aimJogSpeed"] = "3.2999999999999998",
+    ["bodyturn.aimJogSpeed"] = "3.8500000000000001",
     ["bodyturn.aimSmooth"] = "true",
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
@@ -3672,7 +3672,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.motionDriver"] = "false",
     ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
-    ["mm.overlayInertialSwitch"] = "false",
+    ["mm.overlayInertialSwitch"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
@@ -3686,7 +3686,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "true",
-    ["mm.walkSpeed"] = "1.6000000000000001",
+    ["mm.walkSpeed"] = "1.8999999999999999",
     ["mm.weaponUpper"] = "false",
     ["perspective.aiming"] = "\"fpp\"",
     ["perspective.aimingScoped"] = "\"fpp\"",
@@ -3784,7 +3784,7 @@ bodyturn.aimStrafe=true\r\
 bodyturn.aimStrafeUnarmed=true\r\
 bodyturn.aimChestAlign=true\r\
 bodyturn.aimJog=true\r\
-bodyturn.aimJogSpeed=3.3\r\
+bodyturn.aimJogSpeed=3.85\r\
 bodyturn.guardFix=true\r\
 bodyturn.aimSmooth=true\r\
 bodyturn.meleeStrikeTurn=true\r\
@@ -3808,7 +3808,7 @@ mm.feminineFigure=true\r\
 mm.pelvisYawTrim=2\r\
 mm.bodyYawOffsetFemale=4\r\
 mm.bodyYawOffsetMale=0\r\
-mm.walkSpeed=1.6\r\
+mm.walkSpeed=1.9\r\
 mm.minWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
@@ -3825,7 +3825,7 @@ mm.bodyHeightSmooth=true\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
-mm.overlayInertialSwitch=false\r\
+mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\

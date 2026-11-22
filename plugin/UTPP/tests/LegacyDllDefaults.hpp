@@ -20,6 +20,7 @@ bool SetMinAnalogWalk(float aMs);
 void SetWeaponUpper(bool aOn);
 void SetShootTransferEnabled(bool aOn);
 void SetMagTapEnabled(bool aOn);
+bool SetOverlayInertialSwitch(bool aOn);
 } // namespace utpp::motiondriver
 
 namespace utpp::motionhost
@@ -41,7 +42,8 @@ bool SetParams(float aMaxUpDeg, float aMaxDownDeg, float aSmoothHz);
 namespace utpp::testdefaults
 {
 // Driver: aim game upper body on, world aim smoothing off, head lead off, pelvis trim 0, body yaw offsets 0 / 0, barrel loop off,
-// lean amounts 1 / 1, walk speeds off, weapon upper body on, Pistol2H shot transfer off, magazine top-up off.
+// lean amounts 1 / 1, walk speeds off, weapon upper body on, Pistol2H shot transfer off, magazine top-up off, inertialized overlay
+// switch off.
 inline void LegacyDriverDefaults()
 {
     motiondriver::SetAimGameUpper(true);
@@ -56,6 +58,7 @@ inline void LegacyDriverDefaults()
     motiondriver::SetWeaponUpper(true);
     motiondriver::SetShootTransferEnabled(false);
     motiondriver::SetMagTapEnabled(false);
+    motiondriver::SetOverlayInertialSwitch(false);
 }
 
 // Host: weapon upper body on, air steering off, climb release on, unarmed strafe off with the walk gait, turn clip max 1.1, melee guard off,

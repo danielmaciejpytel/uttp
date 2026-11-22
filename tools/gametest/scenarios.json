@@ -108,7 +108,7 @@
       ]
     },
     "walk_toggle": {
-      "description": "walk toggle (keyboard G, no pad binding: the night runner taps G at the start of the 'toggle' step and waits for '[utpp_walk] walkToggled=1', one more tap only when no walk line came; needs the keyboard, skipped with --background), full-stick walk straight, 90 deg arc right, stop, then an L3 sprint tap that clears the toggle (sprint ends WalkToggled); after the scenario the runner reads the newest walk line and taps G once more only while it still says walkToggled=1, so the toggle never carries into the next scenario; FAILs with 'walk toggle not engaged' when the full stick moves the capsule at run speed (toggle walk 1.6 m/s with mm.walkSpeed 1.6, vanilla 2.72, run 3.84); the feed dump column 'walk' shows the toggle state",
+      "description": "walk toggle (keyboard G, no pad binding: the night runner taps G at the start of the 'toggle' step and waits for '[utpp_walk] walkToggled=1', one more tap only when no walk line came; needs the keyboard, skipped with --background), full-stick walk straight, 90 deg arc right, stop, then an L3 sprint tap that clears the toggle (sprint ends WalkToggled); after the scenario the runner reads the newest walk line and taps G once more only while it still says walkToggled=1, so the toggle never carries into the next scenario; FAILs with 'walk toggle not engaged' when the full stick moves the capsule at run speed (toggle walk 1.9 m/s with mm.walkSpeed 1.9, vanilla 2.72, run 3.84); the feed dump column 'walk' shows the toggle state",
       "thresholds": {
         "straight.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
         "arc_90.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"}

@@ -63,7 +63,7 @@
 --                  (SetAimPoint: the native aim / camera targets = the hit point P of the camera ray). P is switched on only while motion is on,
 --                  the setting is on and the DLL acknowledged the loop (never P alone: open loop from the chest at a near P); re-checked
 --                  every Sync (camera module loaded later, motion off -> P off, an older DLL without the native -> P off).
---   mm.walkSpeed float 0 .. 3.5, default 1.6 (m/s; the game walk point the motion speed map puts on the motion set Walk cap, DLL default 1.6; 0 = off) - capsule speed at the full stick while
+--   mm.walkSpeed float 0 .. 3.5, default 1.9 (m/s; the game walk point the motion speed map puts on the motion set Walk cap, DLL default 1.9; 0 = off) - capsule speed at the full stick while
 --                  the game walk toggle (G) is on (native UTPPSetMotionWalkSpeed; reds UTPPUpdateWalkSpeed holds the capsule there with one
 --                  MaxSpeed multiplier = walkSpeed / 2.72, the speed the unmodified toggle gives in game 2.5; the motion driver maps it onto the
 --                  motion set Walk cap). 0 = vanilla toggle speed. Third person, on the ground, motion driving only; sprint, aim walk, crouch, air: untouched.
@@ -97,9 +97,9 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 -- wanted state (settings) and what the glue reported last; slide / orientWarp / lean / leanHead / stickSpeed / strideWarp start at the DLL defaults
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 0.85, leanHeadScale = 0.9, pelvisYawTrim = 2, shoulderNarrow = 2.5,
-  feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.6, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
+  feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
-  strideWarp = true, overlayInertialSwitch = false, firmFeet = true }
+  strideWarp = true, overlayInertialSwitch = true, firmFeet = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -658,7 +658,7 @@ function M.SetBodyYawOffset(v, api)
   return M.want.bodyYawOffsetFemale
 end
 
--- Walk toggle speed (mm.walkSpeed): the same contract as the trims (process-lifetime DLL value, default 1.6, 0 = off, nothing called while
+-- Walk toggle speed (mm.walkSpeed): the same contract as the trims (process-lifetime DLL value, default 1.9, 0 = off, nothing called while
 -- the wanted value equals what the DLL holds, only while motion is on). nil / non-numeric / NaN -> 0; otherwise clamped to 0 .. 3.5 (the native
 -- rejects more).
 local function walkSpeedMs(v)
@@ -1023,9 +1023,9 @@ function M.RegisterSettings(core)
       .. "and feet together. With the camera over the right shoulder he can look turned to the right; a few degrees to the left "
       .. "squares him with the view (default 0 = off). The movement direction is unchanged. Not while aiming or during weapon actions.",
     apply = function(v) M.SetBodyYawOffsetMale(v) end })
-  core.Register({ key = "mm.walkSpeed", section = "animation", type = "float", default = 1.6, min = 0, max = 3.5, step = 0.1,
+  core.Register({ key = "mm.walkSpeed", section = "animation", type = "float", default = 1.9, min = 0, max = 3.5, step = 0.1,
     label = "Walk speed (m/s)",
-    desc = "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed (default 1.6). The game's own walk "
+    desc = "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed (default 1.9). The game's own walk "
       .. "toggle is about 2.7 m/s. 0 = the game's own speed. Only on foot in third person; sprinting, aiming, crouching and "
       .. "jumping are unchanged.",
     apply = function(v) M.SetWalkSpeed(v) end })
@@ -1104,9 +1104,9 @@ function M.RegisterSettings(core)
     label = "motion: jump timing for the game gravity (experimental)",
     desc = "Picks the jump and fall animations by the time left until landing as if under the gravity the animations were made for, so landings start on time. Takes effect after the next load of a save. Off (default) = the earlier timing.",
     apply = function(v) M.SetOption("farJumpGravity", v == true) end })
-  core.Register({ key = "mm.overlayInertialSwitch", section = "motion", type = "bool", default = false,
+  core.Register({ key = "mm.overlayInertialSwitch", section = "motion", type = "bool", default = true,
     label = "motion: smooth weapon pose switch (experimental)",
-    desc = "When V draws, holsters or changes the weapon type, the weapon pose changes at once and the body blends into it without overshooting: the arms and hands in about 0.2 s, the legs and hips in about 0.4 s. Off (default) = the earlier crossfade.",
+    desc = "When V draws, holsters or changes the weapon type, the weapon pose changes at once and the body blends into it without overshooting: the arms and hands in about 0.2 s, the legs and hips in about 0.4 s (default on). Off = the earlier crossfade.",
     apply = function(v) M.SetOption("overlayInertialSwitch", v == true) end })
   core.Register({ key = "mm.capsuleForecast", section = "motion", type = "bool", default = false,
     label = "motion: predicted path for turning starts (experimental)",

@@ -64,7 +64,8 @@
 //                       then the logged calls: an older log without one of these calls replays as recorded with any build default.
 //                       The same baseline holds the earlier DLL values of the settings whose calls the game log does not carry in a
 //                       form this parser applies (aim game upper body on, world aim smoothing off, weapon upper body on, Pistol2H
-//                       shot transfer off, magazine top-up off, air steering off, melee guard off): with or without a log entry the
+//                       shot transfer off, magazine top-up off, air steering off, melee guard off, inertialized overlay switch off):
+//                       with or without a log entry the
 //                       replay keeps the state of the earlier replays for them, whatever the build default.
 //                       The settings log calls MMSteerMode / MMSteerActiveOnly of test builds are ignored (turn steering has no
 //                       option: the newest layer steered, carried through the layer mix).
@@ -310,6 +311,7 @@ void ApplyLogBaseline()
     motionhost::SetAirSteer(false);
     motionhost::SetMeleeGuardSetting(false);
     motionhost::SetFirmFeet(false);
+    motiondriver::SetOverlayInertialSwitch(false);
 }
 // --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped
 FILE* g_motionLog = nullptr;

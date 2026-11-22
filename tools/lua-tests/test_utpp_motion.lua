@@ -211,8 +211,8 @@ do
     pt ~= nil and pt.type == "float" and pt.default == 2 and pt.min == -10 and pt.max == 10 and pt.step == 0.5
     and pt.section == "animation" and #pt.label <= 38, pt and pt.label)
   local ws = defs["mm.walkSpeed"]
-  check("registered mm.walkSpeed: float 0..3.5 step 0.1, default 1.6, animation section, label <= 38 chars, desc names the walk toggle",
-    ws ~= nil and ws.type == "float" and ws.default == 1.6 and ws.min == 0 and ws.max == 3.5 and ws.step == 0.1
+  check("registered mm.walkSpeed: float 0..3.5 step 0.1, default 1.9, animation section, label <= 38 chars, desc names the walk toggle",
+    ws ~= nil and ws.type == "float" and ws.default == 1.9 and ws.min == 0 and ws.max == 3.5 and ws.step == 0.1
     and ws.section == "animation" and #ws.label <= 38 and type(ws.desc) == "string" and ws.desc:find("(G)", 1, true) ~= nil, ws and ws.label)
   local mw = defs["mm.minWalkSpeed"]
   check("registered mm.minWalkSpeed: float 0..1.6 step 0.01, default 0.82, animation section, label <= 38 chars",
@@ -456,13 +456,13 @@ do
   check("no stored value: width 0, no call", w == 0 and #t.shoulder == 0)
 end
 
--- mm.walkSpeed (2026-10-31): DLL default 1.6 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
+-- mm.walkSpeed (2026-10-31): DLL default 1.9 since 2026-11-22 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
 -- wanted value once, then only a change; clamped to 0..3.5, NaN -> 0
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("walkSpeed default (DLL 1.6): enabling motion sends it once", v.Sync(t.api) == "enabled" and #t.walk == 1
-    and t.walk[1] == 1.6 and v.rt.walkSpeedApplied == 1.6)
+  check("walkSpeed default (DLL 1.9): enabling motion sends it once", v.Sync(t.api) == "enabled" and #t.walk == 1
+    and t.walk[1] == 1.9 and v.rt.walkSpeedApplied == 1.9)
   check("walkSpeed default: steady sync makes no call", v.Sync(t.api) == "same" and #t.walk == 1)
   v.SetWalkSpeed(2.0, t.api)
   check("walkSpeed 2.0 is sent once", #t.walk == 2 and t.walk[2] == 2.0 and v.rt.walkSpeedApplied == 2.0)

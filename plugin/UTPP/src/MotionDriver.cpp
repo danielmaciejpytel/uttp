@@ -354,7 +354,7 @@ float g_neutralAoPrevPlayerYawDeg = 0.0f; // actor yaw of the last neutral step 
 bool g_neutralAoPrevPlayerValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
-bool g_overlayInertialSwitchOn = false; // SetOverlayInertialSwitch (default off)
+bool g_overlayInertialSwitchOn = true; // SetOverlayInertialSwitch (default on, like the setting)
 int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_capsuleForecastOn = false; // SetCapsuleForecast (MapConfig::capsuleForecast, mm.capsuleForecast)
@@ -381,8 +381,8 @@ std::atomic<int64_t> g_fnDrivingNs{0};
 std::atomic<int> g_fnLastGait{-1};
 // Walk toggle speed (SetWalkSpeed, CET mm.walkSpeed; MotionAdapter.hpp MapConfig::gameWalkTogglePoint) and the Tier2 Slow feed flag
 // (FeedTier2Slow). g_walkSpeedLive = target > 0 AND v2 can run (enabled, no fallback, bundle): the lock-free gate WalkSpeedTarget reads,
-// refreshed with the Shooter live flag. Starts at 1.6 m/s like the setting (0 = off).
-std::atomic<float> g_walkSpeed{1.6f};
+// refreshed with the Shooter live flag. Starts at 1.9 m/s like the setting (0 = off).
+std::atomic<float> g_walkSpeed{1.9f};
 std::atomic<bool> g_walkSpeedLive{false};
 // Minimum analog walk speed (SetMinAnalogWalk, CET mm.minWalkSpeed; MotionAdapter.hpp AnalogWalkFloorMul): g_minAnalogWalkLive = setting > 0
 // AND v2 can run, refreshed with the walk speed flag (AnalogFloorMul gate). Starts at 0.82 m/s like the setting (0 = off).

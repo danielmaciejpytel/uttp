@@ -20,7 +20,7 @@ local EXPECTED = {
   -- Body turn
   ["bodyturn.guardFix"] = true, ["bodyturn.aimSmooth"] = true, ["bodyturn.weaponTurn"] = true, ["bodyturn.turnRate"] = true,
   ["bodyturn.turnRateMax"] = 1.15, ["bodyturn.aimStrafe"] = true, ["bodyturn.aimStrafeUnarmed"] = true,
-  ["bodyturn.aimChestAlign"] = true, ["bodyturn.aimJog"] = true, ["bodyturn.aimJogSpeed"] = 3.3,
+  ["bodyturn.aimChestAlign"] = true, ["bodyturn.aimJog"] = true, ["bodyturn.aimJogSpeed"] = 3.85,
   ["bodyturn.shooterMode"] = false, -- Shooter mode (2026-10-22): opt-in, OFF by default
   -- Body visibility
   ["body.impl"] = true, ["body.hideFpp"] = true, ["body.showTpp"] = true, ["body.shadowProxy"] = false, ["body.garments"] = true,
@@ -144,8 +144,8 @@ do
     #rec.magTap == 1 and rec.magTap[1][1] == true and core.Get("mm.shinobiBonusReload") == true)
   check("fresh start: database default utpp_base requested", rec.dbRequests[1] == "utpp_base" and core.Get("mm.database") == "utpp_base")
   local sp, tp = rec.strafeParams[#rec.strafeParams], rec.turnParams[#rec.turnParams]
-  check("fresh start: bodyturn natives get unarmed strafe ON, jog 3.3 and turn clip max 1.15",
-    sp ~= nil and sp[1] == true and near(sp[2], 3.3) and tp ~= nil and near(tp[2], 1.15))
+  check("fresh start: bodyturn natives get unarmed strafe ON, jog 3.85 and turn clip max 1.15",
+    sp ~= nil and sp[1] == true and near(sp[2], 3.85) and tp ~= nil and near(tp[2], 1.15))
   check("motion wanted state follows the defaults before the first sync", v2.want.enabled == true and v2.want.pistol1h == true
     and v2.want.aimGameUpper == false and v2.want.slide == true and v2.want.orientWarp == true and v2.want.lean == true
     and v2.want.leanHead == true and near(v2.want.leanScale, 0.85) and near(v2.want.leanHeadScale, 0.9) and v2.want.debug == false)
@@ -296,7 +296,7 @@ local USER_SETTINGS = {
   ["mm.airRobust"] = true, ["mm.climbRelease"] = false, ["mm.database"] = "utpp_base", ["bodyturn.weaponTurn"] = true,
   ["bodyturn.turnRate"] = true, ["bodyturn.turnRateMax"] = 1.15, ["bodyturn.aimStrafe"] = true,
   ["bodyturn.aimStrafeUnarmed"] = true, ["bodyturn.aimChestAlign"] = true, ["bodyturn.aimJog"] = true,
-  ["bodyturn.aimJogSpeed"] = 3.3, ["bodyturn.guardFix"] = true, ["bodyturn.aimSmooth"] = true, ["bodyturn.shooterMode"] = false,
+  ["bodyturn.aimJogSpeed"] = 3.85, ["bodyturn.guardFix"] = true, ["bodyturn.aimSmooth"] = true, ["bodyturn.shooterMode"] = false,
   ["body.impl"] = true,
   ["body.hideFpp"] = true, ["body.showTpp"] = true, ["body.shadowProxy"] = false, ["body.garments"] = true,
   ["body.headGuard"] = true, ["body.garmentOffsets"] = false, ["body.retry"] = true,

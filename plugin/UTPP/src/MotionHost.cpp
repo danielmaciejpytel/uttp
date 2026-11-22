@@ -440,7 +440,7 @@ strafe::StrafeConfig g_strafeCfg = [] { // UTPPSetMMStrafeParams (unarmed, rootT
     c.unarmed = true; // bodyturn.aimStrafeUnarmed, default on like the setting
     return c;
 }();
-float g_strafeJogF = 3.3f; // UTPPSetMMStrafeParams jogF (S4: 0 = walk gait; > 0 = run gait, forward game speed); 3.3 = bodyturn.aimJogSpeed default
+float g_strafeJogF = 3.85f; // UTPPSetMMStrafeParams jogF (S4: 0 = walk gait; > 0 = run gait, forward game speed); 3.85 = bodyturn.aimJogSpeed default
 constexpr float kStrafeAimWalk = 1.65f;  // m/s vanilla aim-walk capsule speed (measured 1.63-1.67): strafe intent / speed-map point
 strafe::StrafeProfiles g_strafeProf;     // RecomputeDerivedClassDataLocked (after the state tag masks)
 strafe::StrafeMode g_strafeMode;

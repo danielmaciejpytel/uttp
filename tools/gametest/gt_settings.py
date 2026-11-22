@@ -42,11 +42,12 @@ SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # mm.stickSpeed = 'analog' as an override). Firm feet, body height smoothing, the neutral aim grid and the world aim smoothing change
 # foot placement, the drawn body height and the head / upper body of every walk: pinned for the same reason (--shooter-mode on is
 # the override that lets the neutral aim grid act).
-LOCO_VALUES = (('mm.walkSpeed', 1.6), ('mm.minWalkSpeed', 0.82), ('mm.stickSpeed', 'fixed'), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
+LOCO_VALUES = (('mm.walkSpeed', 1.9), ('mm.minWalkSpeed', 0.82), ('mm.stickSpeed', 'fixed'), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
                ('mm.leanHeadScale', 0.9), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.strideWarp', True),
                ('mm.footReplant', 'crouch'), ('mm.firmFeet', True), ('mm.bodyHeightSmooth', True), ('mm.neutralAim', True),
                ('mm.aimWorldSmooth', True), ('bodyturn.aimJog', True),
-               ('bodyturn.aimJogSpeed', 3.3), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False))
+               ('bodyturn.aimJogSpeed', 3.85), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False),
+               ('mm.overlayInertialSwitch', True))
 LOCO_KEYS = tuple(k for k, _ in LOCO_VALUES)
 AUTHOR_VALUES = (('mm.bodyYawOffsetFemale', 4), ('mm.bodyYawOffsetMale', 0), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
                  ('perspective.scene', False), ('perspective.blend', 0.6)) + LOCO_VALUES
@@ -93,7 +94,7 @@ def differs_from_shipped(values: dict) -> list[dict]:
 
 
 def loco_text(values: dict) -> str:
-    """'locomotion walkSpeed=1.6 lean=true ... footReplant=crouch' of the pinned locomotion keys in values ('' when none)."""
+    """'locomotion walkSpeed=1.9 lean=true ... footReplant=crouch' of the pinned locomotion keys in values ('' when none)."""
     items = []
     for k in LOCO_KEYS:
         if k in values:

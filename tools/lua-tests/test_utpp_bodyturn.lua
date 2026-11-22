@@ -503,9 +503,9 @@ do -- registration: key, type, default, section, label; apply routes into SetWea
     m.Status())
   -- 2026-10-13 B2 aim strafe S4 jog settings (natives absent in this mock -> inert, state kept, no second missing line)
   local j1, j2 = regs[7], regs[8]
-  xcheck("aimJog settings: keys / types / defaults (aimJog ON by default, aimJogSpeed 3.3 in 3.3..3.85)", j1 and j1.key == "bodyturn.aimJog"
+  xcheck("aimJog settings: keys / types / defaults (aimJog ON by default, aimJogSpeed 3.85 in 3.3..3.85)", j1 and j1.key == "bodyturn.aimJog"
     and j1.type == "bool" and j1.default == true and j1.section == "bodyturn" and j2 and j2.key == "bodyturn.aimJogSpeed"
-    and j2.type == "float" and j2.default == 3.3 and j2.min == 3.3 and j2.max == 3.85 and j2.section == "bodyturn",
+    and j2.type == "float" and j2.default == 3.85 and j2.min == 3.3 and j2.max == 3.85 and j2.section == "bodyturn",
     j1 and j1.key, j2 and j2.key)
   j2.apply(3.5)
   j1.apply(false)
@@ -913,17 +913,17 @@ do -- 2026-10-13 B2 aim strafe: settings -> Game.UTPPSetMMStrafe(on) + UTPPSetMM
                        Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end })
   local p = calls.params[#calls.params]
   xcheck("aimStrafe wiring: defaults applied (aimStrafe, unarmed, aimJog, aimJogSpeed) -> UTPPSetMMStrafe(true), params (true, 10, 30, "
-    .. "0.15, 3.3 = S4 jog on by default; unarmed strafe on by user default 2026-10-20)",
+    .. "0.15, 3.85 = S4 jog on by default; unarmed strafe on by user default 2026-10-20)",
     #calls.on == 4 and calls.on[4] == true and p and p[1] == true and p[2] == 10 and p[3] == 30 and math.abs(p[4] - 0.15) < 1e-9
-    and math.abs(p[5] - 3.3) < 1e-6 and m.strafe.sent ~= nil and m.strafe.sent.jogF == 3.3 and m.strafe.missing == false, #calls.on, p and p[5])
-  -- the module defaults equal the setting defaults: every params call while registering carries jogF 3.3 (no jog flash on load)
-  xcheck("aimJog wiring: every params call while registering carries jogF 3.3 (module defaults = setting defaults)",
-    #calls.params == 4 and calls.params[1][5] == 3.3 and calls.params[2][5] == 3.3 and calls.params[3][5] == 3.3 and calls.params[4][5] == 3.3,
+    and math.abs(p[5] - 3.85) < 1e-6 and m.strafe.sent ~= nil and m.strafe.sent.jogF == 3.85 and m.strafe.missing == false, #calls.on, p and p[5])
+  -- the module defaults equal the setting defaults: every params call while registering carries jogF 3.85 (no jog flash on load)
+  xcheck("aimJog wiring: every params call while registering carries jogF 3.85 (module defaults = setting defaults)",
+    #calls.params == 4 and calls.params[1][5] == 3.85 and calls.params[2][5] == 3.85 and calls.params[3][5] == 3.85 and calls.params[4][5] == 3.85,
     #calls.params, calls.params[1][5])
   regs[7].apply(true)
   p = calls.params[#calls.params]
-  xcheck("aimJog wiring: aimJog on -> jogF 3.3 (default speed)", math.abs(p[5] - 3.3) < 1e-6 and m.strafe.jog == true
-    and m.lines[#m.lines]:find("jog 3.30", 1, true) ~= nil, p[5])
+  xcheck("aimJog wiring: aimJog on -> jogF 3.85 (default speed)", math.abs(p[5] - 3.85) < 1e-6 and m.strafe.jog == true
+    and m.lines[#m.lines]:find("jog 3.85", 1, true) ~= nil, p[5])
   regs[7].apply(false)
   p = calls.params[#calls.params]
   xcheck("aimJog wiring: aimJog off -> jogF 0 (vanilla aim walk speed)", p[5] == 0 and m.strafe.jog == false
@@ -940,8 +940,8 @@ do -- 2026-10-13 B2 aim strafe: settings -> Game.UTPPSetMMStrafe(on) + UTPPSetMM
   local nan = calls.params[#calls.params][5]
   regs[8].apply("x")
   local str = calls.params[#calls.params][5]
-  xcheck("aimJog wiring: speed clamped to 3.3..3.85, NaN / non-number -> 3.3 (native range 3.3..6 never violated)",
-    math.abs(hi - 3.85) < 1e-6 and math.abs(lo - 3.3) < 1e-6 and nan == 3.3 and str == 3.3, hi, lo, nan, str)
+  xcheck("aimJog wiring: speed clamped to 3.3..3.85, NaN / non-number -> 3.85 (the default; native range 3.3..6 never violated)",
+    math.abs(hi - 3.85) < 1e-6 and math.abs(lo - 3.3) < 1e-6 and nan == 3.85 and str == 3.85, hi, lo, nan, str)
   regs[8].apply(3.3)
   regs[7].apply(false)
 

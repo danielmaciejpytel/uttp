@@ -331,9 +331,9 @@ end
 -- (tuning params keep the native defaults 10 / 30 / 0.15 / 0); missing natives (older DLL) are logged once, the settings stay inert.
 -- (jog while aiming): SF.jog / SF.jogSpeed (settings bodyturn.aimJog / bodyturn.aimJogSpeed) -> jogF = jogSpeed (3.3..3.85 m/s
 -- forward; sides 0.70x, back 0.60x) or 0 (jog off = the vanilla aim walk speed; the reds MaxSpeed multiplier is removed).
--- Default ON (jog while aiming), speed 3.3 = native minimum (run loop rate
+-- Default ON (jog while aiming) at 3.85 m/s; 3.3 = native minimum (run loop rate
 -- floor 0.6 x 5.46 m/s; back 0.60 x 3.3 = 1.98 m/s stays above the vanilla aim walk 1.65).
-local SF = { on = true, unarmed = true, rootTurn = 10.0, rootWarp = 30.0, exitHold = 0.15, jogF = 0.0, jog = true, jogSpeed = 3.3,
+local SF = { on = true, unarmed = true, rootTurn = 10.0, rootWarp = 30.0, exitHold = 0.15, jogF = 0.0, jog = true, jogSpeed = 3.85,
              sent = nil, calls = 0, fails = 0, missing = false }
 M.strafe = SF
 function M.ApplyStrafe()
@@ -345,8 +345,8 @@ function M.ApplyStrafe()
     return false
   end
   SF.calls = SF.calls + 1
-  local js = tonumber(SF.jogSpeed) or 3.3
-  if js ~= js then js = 3.3 end
+  local js = tonumber(SF.jogSpeed) or 3.85
+  if js ~= js then js = 3.85 end
   js = math.max(3.3, math.min(3.85, js))
   SF.jogF = (SF.jog == true) and js or 0.0
   local ok1 = try(Game.UTPPSetMMStrafe, SF.on == true)
@@ -765,10 +765,10 @@ function M.RegisterSettings(core)
     label = "Strafe while aiming: jog",
     desc = "While aiming with a weapon V jogs instead of walking (strafe run steps; forward at the jog speed below, sideways 70 %, backwards 60 % of it). Weapon slowdowns keep their effect. Off = the vanilla aim walk speed.",
     apply = function(v) SF.jog = v == true; M.ApplyStrafe() end })
-  core.Register({ key = "bodyturn.aimJogSpeed", section = "bodyturn", type = "float", default = 3.3, min = 3.3, max = 3.85,
+  core.Register({ key = "bodyturn.aimJogSpeed", section = "bodyturn", type = "float", default = 3.85, min = 3.3, max = 3.85,
     step = 0.05, label = "Strafe while aiming: jog speed (m/s)",
-    desc = "Forward jog speed while aiming (default 3.3, 3.3 to 3.85 = vanilla run; vanilla aim walk is 1.65). Sideways and backwards scale with it (0.70 / 0.60).",
-    apply = function(v) SF.jogSpeed = tonumber(v) or 3.3; M.ApplyStrafe() end })
+    desc = "Forward jog speed while aiming (default 3.85, 3.3 to 3.85 = vanilla run; vanilla aim walk is 1.65). Sideways and backwards scale with it (0.70 / 0.60).",
+    apply = function(v) SF.jogSpeed = tonumber(v) or 3.85; M.ApplyStrafe() end })
   core.Register({ key = "bodyturn.guardFix", section = "bodyturn", type = "bool", default = true,
     label = "Body turn guard: shown camera, never while moving",
     desc = "The guard that pauses the body turn when the camera turns with V reads the camera you see (not the game's look, "
