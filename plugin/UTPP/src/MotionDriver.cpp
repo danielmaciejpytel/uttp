@@ -3400,6 +3400,8 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
         if (w > 0.0f && angles)
         {
             in.neutralAoWeight = w;
+            in.neutralGridLeanWeight =
+                b.leanOk && (g_leanSetting || !b.lean.Idle()) ? std::clamp(b.lean.Weight() * g_leanParams.scale, 0.0f, 1.0f) : 0.0f;
             in.neutralAoYawDeg = ny;
             in.neutralAoPitchDeg = np;
         }
@@ -5023,8 +5025,15 @@ void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::M
         return;
     ov::Pose p;
     aB.eval.ToOv(aB.pose.data(), p);
+    // neutral aim grid frame: the lean may not twist the head against the chest past what the grid left (LimitLeanHeadChest)
+    const float gridW = aB.eval.NeutralGridAppliedWeight();
+    const float hcBefore = gridW > 0.0f ? aB.eval.HeadChestYawOf(p) : 0.0f;
     if (aB.lean.Apply(aB.leanPack, g_leanParams, p))
+    {
+        if (gridW > 0.0f)
+            aB.eval.LimitLeanHeadChest(p, hcBefore);
         aB.eval.FromOv(p, aB.pose.data());
+    }
 }
 
 // ragdoll R0 probe, feed side (called only while g_probe.Active(), at the top of StepLocked, before every gate / skip return so a
