@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -71,6 +72,9 @@ def run_stages(exe_dir, root, feed, log, body, prefix, extra=''):
         raise RuntimeError('--capsule-stats 1 requested but %s printed no CAPSTAT line (the tool does not know the option)' % cmd[0])
     if air_feed_requested(extra) and 'AIRFEED ' not in p.stdout:
         raise RuntimeError('--air-feed 1 requested but %s printed no AIRFEED line (the tool does not know the option)' % cmd[0])
+    if lean_pack_requested(extra) and not re.search(r'^LEANPACK .*\bloaded=1\b', p.stdout, re.M):
+        raise RuntimeError('--lean-pack 1 requested but %s printed no LEANPACK line with loaded=1 (old tool or no lean pack in %s)'
+                           % (cmd[0], data))
     return p.stdout
 
 
@@ -82,6 +86,11 @@ def _flag_on(extra, flag):
 def air_feed_requested(extra):
     """True when the replay arguments ask for the air feed (--air-feed with a non-zero value)."""
     return _flag_on(extra, '--air-feed')
+
+
+def lean_pack_requested(extra):
+    """True when the replay arguments ask for the motion lean pack (--lean-pack with a non-zero value)."""
+    return _flag_on(extra, '--lean-pack')
 
 
 def motion_log_requested(extra):

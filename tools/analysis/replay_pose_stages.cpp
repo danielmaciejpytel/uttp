@@ -69,6 +69,10 @@
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
 //                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
 //                       (inspection only; the other outputs are unchanged)
+//   --lean-pack 0|1     1: the driver loads the motion lean pack <data>\utpp_lean_<body>.bin for both bodies, as the game does from the
+//                       mod data folder, so the lean body / head layers run and the head lead gives way to the lean head layer when the
+//                       settings ask for both (mm.lean + mm.leanHead, the menu defaults). Not passed / 0: no lean pack (earlier replays:
+//                       lean unavailable, the head lead runs instead). Either value adds one LEANPACK line (requested, loaded).
 //   --aim-jog-query 1   after every feed ask the host for the aim jog target with the feed's stick and hand the answer to the driver, as
 //                       the locomotion script does right after each feed (utpp.reds UTPPUpdateAimSpeed: UTPPMMAimJogTarget, which also
 //                       sets motiondriver::SetAimJogOff); without it the driver keeps the vanilla aim walk mapping while aiming. Adds
@@ -139,6 +143,16 @@ constexpr size_t kMetaFloats = sizeof(kMeta) / sizeof(kMeta[0]);
 motionhost::MotionSetFrame g_tail;
 std::vector<float> g_driverPose;
 bool g_tailValid = false;
+
+// Lean pack state in the driver status (" lean=<setting>/<pack loaded>/..."): 1 / 0, -1 = no bundle installed.
+int LeanPackLoaded(const std::string& aStatus)
+{
+    const size_t p = aStatus.find(" lean=");
+    if (p == std::string::npos)
+        return -1;
+    const size_t s = aStatus.find('/', p);
+    return s == std::string::npos ? -1 : std::atoi(aStatus.c_str() + s + 1);
+}
 
 bool CaptureTail(const int32_t* aMap, uint32_t aN, motionhost::MotionSetFrame& aFrame)
 {
@@ -399,6 +413,8 @@ int main(int argc, char** argv)
     int32_t aimGameUpper = -1;                 // --aim-game-upper: < 0 = not passed
     int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
     bool forecastDump = false;                 // --forecast-dump 1
+    int32_t leanPack = -1;                     // --lean-pack: < 0 = not passed (no lean pack)
+    int leanLoaded = -1;                       // with --lean-pack: lean pack state of the bundles seen (LEANPACK line)
     bool aimJogQuery = false;                  // --aim-jog-query 1
     uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
@@ -475,6 +491,8 @@ int main(int argc, char** argv)
             capsuleForecast = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--forecast-dump") == 0)
             forecastDump = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--lean-pack") == 0)
+            leanPack = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -584,8 +602,16 @@ int main(int argc, char** argv)
                                   &motiondriver::OwnsTraversal};
     hooks.published = &motiondriver::RecordPublishedPose;
     g_baseDb = Wide(argv[2]);
-    motiondriver::SetPathsOverride(0, womanPaths);
-    motiondriver::SetPathsOverride(1, DataPaths(data, "man"));
+    {
+        auto woman = womanPaths, manPaths = DataPaths(data, "man");
+        if (leanPack > 0)
+        {
+            woman.lean = data + "\\utpp_lean_woman.bin";
+            manPaths.lean = data + "\\utpp_lean_man.bin";
+        }
+        motiondriver::SetPathsOverride(0, woman);
+        motiondriver::SetPathsOverride(1, manPaths);
+    }
     motiondriver::SetRigBody(man ? 1 : 0);
     motiondriver::SetOverlayInputs(0, 0, false, false);
     motionhost::SetMotionHooks(&hooks);
@@ -966,6 +992,8 @@ int main(int argc, char** argv)
         if (!published)
             ++missing;
         const std::string st = motiondriver::Status();
+        if (leanPack >= 0)
+            leanLoaded = std::max(leanLoaded, LeanPackLoaded(st));
         const std::string pick = StatusField(st, "pick=clip:");
         const auto at = pick.find('@'), slash = pick.find("/db");
         const int clip = pick.empty() ? -1 : std::atoi(pick.c_str());
@@ -1059,6 +1087,8 @@ int main(int argc, char** argv)
         }
         if (turnRate >= 0 || turnRateMax >= 0.0f) // turn clip rate state of the legacy matcher (raised feeds, turns, cap)
             std::printf("TURNRATE run=%s %s\n", name.c_str(), motionhost::TurnRateStatus().c_str());
+        if (leanPack >= 0) // loaded: the pack state of the installed bundle (1 / 0), -1 = no bundle seen
+            std::printf("LEANPACK run=%s requested=%d loaded=%d\n", name.c_str(), leanPack, leanLoaded);
         if (aimJogQuery)
             std::printf("AIMJOG run=%s queries=%llu jogFeeds=%llu\n", name.c_str(), static_cast<unsigned long long>(aimJogQueries),
                         static_cast<unsigned long long>(aimJogOnFeeds));
