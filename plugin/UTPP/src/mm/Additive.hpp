@@ -494,6 +494,12 @@ struct AimOffsetState
     WeightSmoother<kAOMaxSamples> fastWeights;  // per-bone override bones (neck 4 /s)
     BoneWeights fastMask;                       // 1 for override bones
 
+    void Reset()
+    {
+        weights.init = false; // the next Apply starts at its target weights
+        fastWeights.init = false;
+    }
+
     void Apply(const Skeleton& aSk, Pose& aPose, const AimOffsetGrid& aGrid, float aYawDeg, float aPitchDeg,
                float aAlpha, float aDt, float aSpeed = 1.5f, float aFastSpeed = 4.0f)
     {
@@ -513,6 +519,90 @@ struct AimOffsetState
         ApplyAdditive(aSk, aPose, slow, aAlpha);
     }
 };
+
+// ---- neutral aim grid with a yaw cap ---------------------------------------------------------------------------
+// The neutral (no weapon target) head / neck turn: the standing neutral aim grid sampled at clamp(yaw, +-kNeutralGridCapDeg) and
+// the pitch; above the cap the spine yaw ramps in so that at the end angle (the spine yaw clamp) the head has turned as far as with
+// the spine yaw alone. Angles in the ApplySpineYaw sense (+ = left about +Z, pitch + = up); the grid's yaw axis is the opposite
+// (grid yaw + = right), so the grid is sampled at -yaw.
+inline constexpr float kNeutralGridCapDeg = 45.0f;
+
+inline float NeutralGridSampleYawDeg(float aYawDeg)
+{
+    const float y = std::isfinite(aYawDeg) ? std::max(-kNeutralGridCapDeg, std::min(kNeutralGridCapDeg, aYawDeg)) : 0.0f;
+    return -y;
+}
+
+// Spine yaw (deg, same sense as aYawDeg) of the capped grid: 0 up to the cap, then a linear ramp to (aEndDeg - |head yaw of the grid
+// at the cap on that side|) at aEndDeg and constant beyond. aHeadAtCapLeftDeg / aHeadAtCapRightDeg: head yaw of the grid sample at the
+// cap for a turn to the left / right (measured on the data, NeutralGridHeadYawDeg).
+inline float NeutralGridSpineYawDeg(float aYawDeg, float aHeadAtCapLeftDeg, float aHeadAtCapRightDeg, float aEndDeg)
+{
+    if (!std::isfinite(aYawDeg) || !(aEndDeg > kNeutralGridCapDeg))
+        return 0.0f;
+    const float a = std::fabs(aYawDeg);
+    if (!(a > kNeutralGridCapDeg))
+        return 0.0f;
+    const bool left = aYawDeg > 0.0f;
+    const float head = std::fabs(left ? aHeadAtCapLeftDeg : aHeadAtCapRightDeg);
+    const float rest = std::isfinite(head) ? std::max(0.0f, aEndDeg - head) : 0.0f;
+    const float u = (std::min(a, aEndDeg) - kNeutralGridCapDeg) / (aEndDeg - kNeutralGridCapDeg);
+    return (left ? 1.0f : -1.0f) * u * rest;
+}
+
+// Yaw (deg, + = left about +Z) of the forward axis (+Y) under a mesh-space rotation: the head turn a grid sample gives.
+inline float NeutralGridHeadYawDeg(const Quat& aMeshDelta)
+{
+    const Vec3 f = math::QuatRotate(aMeshDelta, Vec3{0.0f, 1.0f, 0.0f});
+    return std::atan2(-f.x, f.y) * (180.0f / math::kPi);
+}
+
+// Head-vs-chest yaw (deg, + = left): the head's forward axis seen from the chest (Spine3), both bones measured from a reference
+// pose in which they face mesh +Y (the X0_Y0 grid pose): +Y rotated by inv(C) * H, C = chest * inv(chest ref), H = head * inv(head
+// ref), then the heading of that direction in the chest frame. A spine yaw of Spine..Spine3 turns both and leaves it unchanged.
+inline float HeadChestYawDeg(const Quat& aChest, const Quat& aHead, const Quat& aChestRef, const Quat& aHeadRef)
+{
+    const Quat c = math::QuatMul(aChest, math::QuatInv(aChestRef));
+    const Quat h = math::QuatMul(aHead, math::QuatInv(aHeadRef));
+    const Vec3 f = math::QuatRotate(math::QuatMul(math::QuatInv(c), h), Vec3{0.0f, 1.0f, 0.0f});
+    return std::atan2(-f.x, f.y) * (180.0f / math::kPi);
+}
+
+// Total head-vs-chest yaw cap of the neutral grid: from the straight stance (aZeroDeg, the head-vs-chest yaw of the neutral standing
+// pose) the head may turn from the chest as far as the grid alone turns it at the 45 deg cap (aLimitLeft / aLimitRight, both > 0: the
+// grid poses X-45_Y0 / X+45_Y0 against X0_Y0), or as far as the clip already had it before the grid (aBefore) where the clip alone
+// exceeds that. The yaw after the grid (aAfter) is clamped into [min(aBefore, aZeroDeg - aLimitRight), max(aBefore, aZeroDeg +
+// aLimitLeft)]: the clip's own turn and the grid's never add up past the limit, a grid turn against the clip's turn is never cut,
+// and the clamp is continuous in both angles (no step when it starts to act).
+inline float NeutralGridHeadChestClampDeg(float aBefore, float aAfter, float aLimitLeft, float aLimitRight, float aZeroDeg = 0.0f)
+{
+    if (!std::isfinite(aBefore) || !std::isfinite(aAfter) || !std::isfinite(aLimitLeft) || !std::isfinite(aLimitRight) ||
+        !std::isfinite(aZeroDeg))
+        return aAfter;
+    const float lo = std::min(aBefore, aZeroDeg - std::fabs(aLimitRight)), hi = std::max(aBefore, aZeroDeg + std::fabs(aLimitLeft));
+    return std::max(lo, std::min(hi, aAfter));
+}
+
+// Turns the listed bones (chain order, each the parent of the next) about the mesh-space unit axis aAxis by aAngleRad / count each;
+// the turns add up along the chain, so the last bone (and everything below it) turns by aAngleRad in all.
+inline void ApplyChainAxisTurn(const Skeleton& aSk, Pose& aPose, const int* aBones, int aCount, const Vec3& aAxis, float aAngleRad)
+{
+    if (aCount <= 0 || !std::isfinite(aAngleRad) || aAngleRad == 0.0f)
+        return;
+    const float a = 0.5f * aAngleRad / static_cast<float>(aCount), s = std::sin(a);
+    const Quat rq{aAxis.x * s, aAxis.y * s, aAxis.z * s, std::cos(a)};
+    Quat ms[kMaxBones];
+    for (int k = 0; k < aCount; ++k)
+    {
+        const int b = aBones[k];
+        if (b < 0 || b >= aSk.n)
+            continue;
+        MeshRotations(aSk, aPose, ms);
+        const int p = aSk.parent[b];
+        const Quat newMs = math::QuatMul(rq, ms[b]);
+        aPose.b[b].r = p < 0 ? math::QuatNormalize(newMs) : math::QuatNormalize(math::QuatMul(math::QuatInv(ms[p]), newMs));
+    }
+}
 
 // ---- spine rotation (branch B, Enable_SpineRotation): yaw / count on each listed bone, mesh space about +Z -----
 inline void ApplySpineYaw(const Skeleton& aSk, Pose& aPose, const int* aBones, int aCount, float aYawRad,

@@ -19,6 +19,12 @@
 #include <functional>
 #include <limits>
 
+namespace utpp::motiondriver
+{
+bool SetNeutralAimOffset(bool aOn);
+bool SetAimWorldSmoothing(bool aOn, float aHz);
+} // namespace utpp::motiondriver
+
 namespace
 {
 constexpr float kRadToDeg = 57.29577951f;
@@ -61,6 +67,8 @@ void RestoreDefaults()
     motiondriver::SetBarrelLoop(false);
     motiondriver::SetBarrelAxis(aim::kDefaultBarrelAxis);
     motiondriver::SetBarrelMuzzle(aim::Params{}.muzzleOffset);
+    motiondriver::SetNeutralAimOffset(true);
+    motiondriver::SetAimWorldSmoothing(false, 0.0f); // the cases measure the unsmoothed aim (the DLL default is on at 12 Hz)
 }
 bool DefaultsInStatus(std::string& aWhy)
 {
@@ -1349,10 +1357,17 @@ void AimCase(Rt& rt)
     Gen g("f-aim");
     g.psm = kWeaponDrawn;
     std::vector<bool> flag;
+    std::vector<int> spanOf; // flagged span of the frame: 0 ADS, 1 burst + hold, 2 reload
+    int nextSpan = 0;
     auto mark = [&](size_t from, bool v) {
         flag.resize(g.Size(), false);
+        spanOf.resize(g.Size(), -1);
         for (size_t i = from; i < g.Size(); ++i)
+        {
             flag[i] = v;
+            spanOf[i] = v ? nextSpan : -1;
+        }
+        nextSpan += v ? 1 : 0;
     };
     g.Idle(1.0f);
     mark(0, false);
@@ -1386,7 +1401,10 @@ void AimCase(Rt& rt)
     mark(a, true);
     g.Idle(0.5f);
     mark(g.Size() - 30, false);
+    // the Shooter mode contract itself, with the neutral aim offset (a separate option, on by default; its own cases in
+    // AimOptionsDriverTest / MotionPoseTest 7n) off in both runs: without aiming it turns the head towards the camera in Shooter mode only
     RestoreDefaults();
+    motiondriver::SetNeutralAimOffset(false);
     const Run offRun = RunSynth(rt, g, Opts{false, 3, false});
     ShooterModeOn();
     const Run onRun = RunSynth(rt, g, Opts{false, 3, false});
@@ -1407,7 +1425,31 @@ void AimCase(Rt& rt)
     if (first != SIZE_MAX)
         detail += ", first " + std::to_string(first) + " ON " + DbName(rt, onRun.out[first].db) + ":" + ClipName(rt, onRun.out[first].clip) + " vs OFF " +
                   DbName(rt, offRun.out[first].db) + ":" + ClipName(rt, offRun.out[first].clip) + " probe fn " + std::to_string(onRun.probe[first].shooterModeActive);
-    Check(n > 300 && diff == 0, "A10 F-AIM: ADS, hip fire and reload frames are identical with Shooter on and off", detail);
+    Check(n > 300 && diff == 0, "A10 F-AIM: ADS, hip fire and reload frames are identical with Shooter on and off (neutral aim offset off)", detail);
+    // the defaults (neutral aim offset on): Shooter on vs off per flagged span (ADS, burst + hold, reload)
+    const Run defOff = RunSynth(rt, g, Opts{false, 3, false});
+    ShooterModeOn();
+    const Run defOn = RunSynth(rt, g, Opts{false, 3, false});
+    RestoreDefaults();
+    size_t spanN[3] = {}, spanDiff[3] = {}, spanFirst[3] = {SIZE_MAX, SIZE_MAX, SIZE_MAX};
+    for (size_t i = 0; i < g.Size(); ++i)
+    {
+        const int span = flag[i] ? spanOf[i] : -1;
+        if (span < 0 || span > 2)
+            continue;
+        ++spanN[span];
+        if (!SameFrame(defOn.out[i], defOff.out[i]))
+        {
+            ++spanDiff[span];
+            spanFirst[span] = std::min(spanFirst[span], i);
+        }
+    }
+    const char* spanName[3] = {"ADS", "burst", "reload"};
+    std::string dd;
+    for (int k = 0; k < 3; ++k)
+        dd += std::string(k ? ", " : "") + spanName[k] + " " + std::to_string(spanDiff[k]) + "/" + std::to_string(spanN[k]) +
+              (spanFirst[k] != SIZE_MAX ? " (first " + std::to_string(spanFirst[k]) + ")" : "");
+    std::printf("INFO A10 F-AIM defaults (neutral aim offset on): Shooter on vs off differing frames %s\n", dd.c_str());
 }
 
 // A16 BARREL-LOOP (aim pitch plan 2026-10-30, seam C): ADS with Pistol2H and a near aim point P (legacy ADS target, actor space), the

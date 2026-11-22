@@ -98,7 +98,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 0.85, leanHeadScale = 0.9, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.6, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, bodyHeightSmooth = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
   strideWarp = true, overlayInertialSwitch = false, firmFeet = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
@@ -1077,11 +1077,12 @@ function M.RegisterSettings(core)
     apply = function(v) M.SetLeanHeadScale(v) end })
   core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = true,
     label = "motion: steady aim while turning",
-    desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns and short camera jerks do not jolt the body. On (default); off = the earlier aim.",
+    desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns and short camera jerks do not jolt the body (nor the head with Head follows the camera). On (default, 12 Hz); off = the earlier aim.",
     apply = function(v) M.SetOption("aimWorldSmooth", v == true) end })
-  core.Register({ key = "mm.neutralAim", section = "motion", type = "bool", default = false,
-    label = "motion: look with the camera in strafe (experimental)",
-    desc = "While V strafes or holds the shooter facing without aiming, the upper body turns and tilts towards the camera direction. Off (default) = the upper body follows the body.",
+  core.Register({ key = "mm.neutralAim", section = "motion", type = "bool", default = true,
+    label = "Head follows the camera",
+    desc = "In Shooter mode and while strafing without aiming, V's head and neck turn and tilt towards where the camera looks "
+      .. "(up to 45 degrees to the side); further round, the upper body turns with them. Off = the head stays with the body.",
     apply = function(v) M.SetOption("neutralAim", v == true) end })
   core.Register({ key = "mm.pelvisPlacement", section = "motion", type = "bool", default = false,
     label = "motion: pelvis follows the feet (experimental)",

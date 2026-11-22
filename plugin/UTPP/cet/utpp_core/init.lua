@@ -103,7 +103,7 @@ M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkSpeed", "mm.minWalkSpeed",
   "mm.strideWarp", "mm.firmFeet", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
-  "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead" }) do M.PACK_DEPENDENT[k] = true end
+  "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
 M.pack = { requested = "utpp", applied = "utpp", pending = false, sent = nil, sentAt = -1e9, safeFor = 0, inSession = false,
@@ -335,7 +335,7 @@ M.MIGRATED_KEYS = MIGRATED_KEYS
 -- default (it cannot be told from a value nobody chose); any other stored value is a choice and stays. Save writes the
 -- current revision, so the replacement happens once.
 M.DEFAULTS_REVISION_KEY = "core.defaultsRevision"
-M.DEFAULTS_REVISION = 3
+M.DEFAULTS_REVISION = 4
 M.DEFAULT_CHANGES = {
   { rev = 1, key = "melee.guard", from = false, to = true },
   { rev = 2, key = "body.shadowProxy", from = true, to = false },
@@ -345,6 +345,7 @@ M.DEFAULT_CHANGES = {
   { rev = 3, key = "mm.shinobiBonusReload", from = false, to = true },
   { rev = 3, key = "perspective.scene", from = true, to = false },
   { rev = 3, key = "camera.side", from = 0.5, to = 1 },
+  { rev = 4, key = "mm.neutralAim", from = false, to = true },
 }
 S.fileRevision = nil
 
@@ -554,14 +555,15 @@ for i, g in ipairs(M.MENU_GROUPS) do GROUP_INDEX[g.id] = i end
 -- group can mix levels in the listed order. Levels: player / advanced = shown in the standard view and in Mod Settings,
 -- developer / diagnostic = "Show all options" only. label = presentation-only override.
 local LAYOUT = {
-  --   General: "Use Ultimate Third Person" first, "Animation pack" second, then "Shooter mode"; "Diagnostic logs" last
+  --   General: "Use Ultimate Third Person" first, "Animation pack" second, then "Shooter mode" and "Head follows the camera"
+  -- (mm.neutralAim, utpp_motion: acts in the shooter facing and the strafe only); "Diagnostic logs" last
   --   no "Start in third person" option: the mod always starts in third person (perspective.defaultTpp and
   -- camera.startTpp are in the Debug developer list below, kept only so stored values load; Start in the last used view is hidden)
   --   "Use motion matching" (mm.enabled) is developer level: the animation pack decides which animations play
   { "player", "start", { "camera.impl", "animation.pack" } },
   { "advanced", "start", { "perspective.impl" } },
   { "developer", "start", { "mm.enabled" } },
-  { "player", "start", { "bodyturn.shooterMode", "perspective.startInLastView", "core.diagnosticLogs" } },
+  { "player", "start", { "bodyturn.shooterMode", "mm.neutralAim", "perspective.startInLastView", "core.diagnosticLogs" } },
   --   Camera: one fixed camera profile, no "Active profile" selector; utpp_camera's framing views
   -- (distance, shoulder offset, FOV, height: ranks 1-4) come first, then these
   --   "Run pelvis yaw trim" (mm.pelvisYawTrim, registered by utpp_motion) after the camera controls, then
@@ -622,7 +624,7 @@ local LAYOUT = {
                                "body.garmentOffsets", "mm.motionDriver", "mm.pistolAuto", "mm.pistol1h", "bodyturn.aimJogSpeed",
                                "bodyturn.aimStrafeUnarmed", "bodyturn.turnRateMax", "mm.orientWarp",
                                "mm.slide", "mm.lean", "mm.leanScale", "mm.leanHead", "mm.leanHeadScale", "mm.leanCoverage",
-                               "mm.selectionGuards", "mm.aimWorldSmooth", "mm.neutralAim", "mm.pelvisPlacement", "mm.bodyHeightSmooth", "mm.handBackBlend", "mm.stepDownReach",
+                               "mm.selectionGuards", "mm.aimWorldSmooth", "mm.pelvisPlacement", "mm.bodyHeightSmooth", "mm.handBackBlend", "mm.stepDownReach",
                                "mm.farJumpGravity", "mm.overlayInertialSwitch", "mm.capsuleForecast" } },
   --   Debug: the diagnostic logs have one visible list in General (the single switches stay diagnostic level,
   -- console only); camera.aim.occlusion stays visible (detection only, the switch saves its rays)

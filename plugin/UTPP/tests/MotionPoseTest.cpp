@@ -38,6 +38,13 @@
 //      7h) a handback (aoSuppress) at the loss fades the AO in 0.15 s (no cut, the former 60 deg pop), gone after 0.2 s;
 //      7i) the target returns during the latch: the sweep pitch catches up (Head <= 3 cm, WeaponRight <= 8 cm per frame).
 //      Mutations 5 (no continuity: 7f), 6 (no latch: 7g), 7 (handback fades in 0.5 s: 7h), 11 (pitch snaps: 7i) each fail checks.
+//      7n) neutral aim grid (no aim target, neutral weight 1, Rifle Relaxed): weight 0 = no neutral input bit for bit; the head turns
+//          with the camera side, equals the grid head yaw at the 45 deg cap (+-2) and is continuous there; above the cap Spine3 turns
+//          by the ramp (60 - grid head yaw at the cap, +-1.5) and the head faces the camera at the 60 deg clamp (+-3); pitch +-40
+//          tilts the head by >= 20; an aim exit with the neutral weight held moves Spine3 / Head <= 6 deg per frame.
+//          A base pose with its own head turn plus the grid stays within the head-vs-chest yaw of the grid alone at the cap (+0.5),
+//          or the base turn where that is larger; a grid turn against it is not cut.
+//          Mutations 20 (no cap), 21 (grid sign flipped), 22 (hard switch at the aim exit), 23 (no total cap) each fail a check.
 //  10) barrel pitch loop (src/mm/BarrelPitchLoop.hpp, aim pitch plan 2026-10-30 sections 2.B / 3 / 5): camera of camera_math.lua
 //      (aim boom 1.1 / 0.45 / 0.05, boomPitchScale 0.35), pitch -60..+60 step 5 x d {50, 25, 10, 5, 2} (floor hit / 2 m clamp),
 //      Rifle / Pistol1H / Pistol2H x stand / crouch, 0.5 s per cell. Signed pitch error = elevation(WeaponRight +Y) -
@@ -1541,6 +1548,212 @@ static void TestBody(const char* aTag, const char* aDbPath, const char* aOvPath,
             Check(lOk && rOk && (hl >= 0.999f || hr >= 0.999f),
                   F("%s %s: hand fix: clavicle local vs no AO: L %.4f deg (Hand_L %.2f) R %.4f deg (Hand_R %.2f)", aTag,
                     ovn[oi], eL, hl, eR, hr));
+        }
+        // 7n) neutral aim grid (head and neck look with the camera, no aim target): Rifle, Relaxed (Aiming weight 0), neutral weight 1,
+        // each angle settled for 1 s, then probed with dt 0. Head heading follows the grid up to the 45 deg cap (yaw + = left, grid yaw = -yaw), the
+        // spine finishes the turn above it (ramp to the full head turn at the 60 deg spine yaw clamp); weight 0 = bit for bit the
+        // pose without the neutral input. Mutations 20 (no cap), 21 (grid sign flipped), 22 (hard switch at an aim exit) fail here.
+        if (sp3 >= 0)
+        {
+            const int hd = bone("Head");
+            Check(ev->HasNeutralGrid() && hd >= 0, F("%s 7n: neutral grid loaded (%d), Head %d", aTag, ev->HasNeutralGrid() ? 1 : 0, hd));
+            const float capL = ev->NeutralGridHeadAtCapDeg(0), capR = ev->NeutralGridHeadAtCapDeg(1);
+            Check(capL > 20.0f && capL < 60.0f && capR < -20.0f && capR > -60.0f,
+                  F("%s 7n: grid head yaw at the cap: left %+.2f, right %+.2f deg (20..60 to each side)", aTag, capL, capR));
+            // pure helpers: the cap and the sign of the sample, the spine ramp continuous at the cap and full at the clamp
+            Check(ov::NeutralGridSampleYawDeg(30.0f) == -30.0f && ov::NeutralGridSampleYawDeg(80.0f) == -45.0f &&
+                      ov::NeutralGridSampleYawDeg(-80.0f) == 45.0f && ov::NeutralGridSampleYawDeg(std::nanf("")) == 0.0f,
+                  F("%s 7n: grid sample yaw = -clamp(yaw, +-45)", aTag));
+            const float r45 = ov::NeutralGridSpineYawDeg(45.0f, capL, capR, 60.0f), r46 = ov::NeutralGridSpineYawDeg(45.01f, capL, capR, 60.0f);
+            const float r60 = ov::NeutralGridSpineYawDeg(60.0f, capL, capR, 60.0f), rN60 = ov::NeutralGridSpineYawDeg(-60.0f, capL, capR, 60.0f);
+            const float r90 = ov::NeutralGridSpineYawDeg(90.0f, capL, capR, 60.0f);
+            Check(r45 == 0.0f && std::fabs(r46) < 0.05f && std::fabs(r60 - (60.0f - capL)) < 1e-3f && std::fabs(rN60 + (60.0f + capR)) < 1e-3f &&
+                      r90 == r60,
+                  F("%s 7n: spine ramp 0 at 45 (%.3f / %.3f), %.2f at +60 (%.2f), %.2f at -60 (%.2f), %.2f at 90", aTag, r45, r46, r60,
+                    60.0f - capL, rN60, -(60.0f + capR), r90));
+            ev->Reset();
+            motionpose::OverlayFrameInputs in;
+            in.machine.overlay = ov::PoseOverlay::Rifle;
+            in.machine.style = aMan ? ov::Style::Masculine : ov::Style::Feminine;
+            in.machine.wantsToAim = false;
+            motion::MatchResult r;
+            r.clip = idle;
+            r.clipTime = 0.5f;
+            for (int f = 0; f < 120; ++f)
+                ev->Evaluate(dt, r, in, out.data(), n);
+            ev->Evaluate(0.0f, r, in, ref.data(), n);
+            std::vector<BoneTransform> pz(n);
+            in.neutralAoYawDeg = 30.0f;
+            in.neutralAoPitchDeg = 20.0f;
+            ev->Evaluate(0.0f, r, in, pz.data(), n);
+            Check(std::memcmp(pz.data(), ref.data(), sizeof(BoneTransform) * n) == 0,
+                  F("%s 7n: neutral weight 0 + neutral angles = no neutral input, bit for bit", aTag));
+            in.neutralAoWeight = 1.0f;
+            in.neutralAoYawDeg = 0.0f;
+            in.neutralAoPitchDeg = 0.0f;
+            for (int f = 0; f < 60; ++f)
+                ev->Evaluate(dt, r, in, out.data(), n);
+            std::vector<math::Quat> qr;
+            mesh(ref, qr);
+            motionpose::FrameInfo inf;
+            struct Probe { float yaw, pitch, head, headPitch, spine, share; };
+            auto probe = [&](float aYaw, float aPitch) {
+                in.neutralAoYawDeg = aYaw;
+                in.neutralAoPitchDeg = aPitch;
+                std::vector<BoneTransform> p(n);
+                for (int f = 0; f < 60; ++f) // the aim offset filter catches up with time only (a dt 0 frame keeps its angles)
+                    ev->Evaluate(dt, r, in, p.data(), n);
+                ev->Evaluate(0.0f, r, in, p.data(), n, &inf);
+                std::vector<math::Quat> q;
+                mesh(p, q);
+                // the head's turn as a mesh-space rotation applied to the mesh forward (+Y): heading + = left, pitch + = up
+                const math::Quat dq = math::QuatMul(q[hd], math::QuatInv(qr[hd]));
+                const math::Vec3 fw = math::QuatRotate(dq, math::Vec3{0, 1, 0});
+                const float hdPitch = std::atan2(fw.z, std::sqrt(fw.x * fw.x + fw.y * fw.y)) * 180.0f / math::kPi;
+                return Probe{aYaw, aPitch, wrap(yawOf(q[hd]) - yawOf(qr[hd])), hdPitch,
+                             wrap(yawOf(q[sp3]) - yawOf(qr[sp3])), inf.aoGridShare};
+            };
+            const Probe c0 = probe(0, 0), l30 = probe(30, 0), r30 = probe(-30, 0), l45 = probe(45, 0), l4499 = probe(44.9f, 0),
+                        l4501 = probe(45.1f, 0), l60 = probe(60, 0), l90 = probe(90, 0), rt45 = probe(-45, 0), rt60 = probe(-60, 0),
+                        up = probe(0, 40), dn = probe(0, -40);
+            for (const Probe& p : {c0, l30, r30, l45, l4499, l4501, l60, l90, rt45, rt60, up, dn})
+                std::printf("INFO AO7n %s yaw %+6.2f pitch %+4.0f: Head heading %+7.2f pitch %+6.2f, Spine3 heading %+6.2f, grid share %.3f\n",
+                            aTag, p.yaw, p.pitch, p.head, p.headPitch, p.spine, p.share);
+            Check(c0.share > 0.999f && std::fabs(c0.head) <= 1.0f && std::fabs(c0.spine) <= 1.0f,
+                  F("%s 7n: centre: grid share %.3f, Head %+.2f, Spine3 %+.2f deg (|.| <= 1)", aTag, c0.share, c0.head, c0.spine));
+            Check(l30.head > 10.0f && r30.head < -10.0f,
+                  F("%s 7n: yaw +30 turns the head left (%+.2f), yaw -30 right (%+.2f)", aTag, l30.head, r30.head));
+            Check(std::fabs(l45.head - capL) <= 2.0f && std::fabs(rt45.head - capR) <= 2.0f,
+                  F("%s 7n: at the cap the head yaw = the grid's: left %+.2f (%+.2f), right %+.2f (%+.2f) +- 2", aTag, l45.head, capL, rt45.head,
+                    capR));
+            Check(std::fabs(l4501.head - l4499.head) <= 0.5f && std::fabs(l4501.spine - l4499.spine) <= 0.5f,
+                  F("%s 7n: continuous at the cap: Head %+.2f / %+.2f, Spine3 %+.2f / %+.2f", aTag, l4499.head, l4501.head, l4499.spine,
+                    l4501.spine));
+            Check(std::fabs((l60.spine - l45.spine) - (60.0f - capL)) <= 1.5f && std::fabs((rt60.spine - rt45.spine) + (60.0f + capR)) <= 1.5f,
+                  F("%s 7n: above the cap the spine turns: +45 -> +60 Spine3 %+.2f (%+.2f), -45 -> -60 %+.2f (%+.2f) +- 1.5", aTag,
+                    l60.spine - l45.spine, 60.0f - capL, rt60.spine - rt45.spine, -(60.0f + capR)));
+            Check(std::fabs(l60.head - 60.0f) <= 3.0f && std::fabs(rt60.head + 60.0f) <= 3.0f && std::fabs(l90.head - l60.head) <= 0.5f,
+                  F("%s 7n: at the clamp the head faces the camera: +60 %+.2f, -60 %+.2f (+-3), +90 %+.2f (= +60)", aTag, l60.head, rt60.head,
+                    l90.head));
+            Check(up.headPitch - dn.headPitch >= 20.0f,
+                  F("%s 7n: pitch +40 / -40 tilts the head up %+.2f / down %+.2f (difference >= 20)", aTag, up.headPitch, dn.headPitch));
+            // aim exit with the neutral weight held (yaw 50 both ways: the sweep path twists the spine 50 deg, the grid path ~10):
+            // the hand-over follows the Aiming weight, so no frame swaps the paths
+            in.neutralAoYawDeg = 50.0f;
+            in.neutralAoPitchDeg = 0.0f;
+            in.haveAim = true;
+            in.aimYawDeg = 50.0f;
+            in.aimPitchDeg = 0.0f;
+            in.machine.wantsToAim = true;
+            for (int f = 0; f < 180; ++f)
+                ev->Evaluate(dt, r, in, out.data(), n);
+            std::vector<math::Quat> qa;
+            mesh(out, qa);
+            float prevSpine = yawOf(qa[sp3]), prevHead = yawOf(qa[hd]), maxSpine = 0.0f, maxHead = 0.0f, endShare = 0.0f;
+            in.haveAim = false;
+            in.machine.wantsToAim = false;
+            for (int f = 0; f < 90; ++f)
+            {
+                ev->Evaluate(dt, r, in, out.data(), n, &inf);
+                mesh(out, qa);
+                const float s = yawOf(qa[sp3]), h = yawOf(qa[hd]);
+                maxSpine = std::max(maxSpine, std::fabs(wrap(s - prevSpine)));
+                maxHead = std::max(maxHead, std::fabs(wrap(h - prevHead)));
+                prevSpine = s;
+                prevHead = h;
+                endShare = inf.aoGridShare;
+            }
+            std::printf("INFO AO7n %s aim exit at yaw 50: max step per frame Spine3 %.2f, Head %.2f deg; grid share at the end %.3f\n", aTag,
+                        maxSpine, maxHead, endShare);
+            Check(maxSpine <= 6.0f && maxHead <= 6.0f && endShare > 0.999f,
+                  F("%s 7n: aim exit hand-over: Spine3 step %.2f, Head step %.2f deg/frame (<= 6), grid share %.3f at the end", aTag, maxSpine,
+                    maxHead, endShare));
+            // total head-vs-chest cap: a base pose whose own head is already turned (the idle frame with the Head turned in its local
+            // frame) plus the grid never turns the head further from the chest than the grid alone at the cap (+0.5), or than the base
+            // alone where that is larger; a grid turn against the base turn is not cut. Mutation 23 (no total cap) fails here.
+            const float hcL = ev->NeutralGridHeadChestCapDeg(0), hcR = ev->NeutralGridHeadChestCapDeg(1);
+            const float hcZ = ev->NeutralGridHeadChestZeroDeg(); // the straight stance the limits count from
+            Check(hcL > 20.0f && hcL < 60.0f && hcR > 20.0f && hcR < 60.0f,
+                  F("%s 7n: head-vs-chest yaw of the grid at the cap: left %.2f, right %.2f deg (20..60)", aTag, hcL, hcR));
+            Check(ov::NeutralGridHeadChestClampDeg(10.0f, 50.0f, 40.0f, 40.0f) == 40.0f &&
+                      ov::NeutralGridHeadChestClampDeg(55.0f, 70.0f, 40.0f, 40.0f) == 55.0f &&
+                      ov::NeutralGridHeadChestClampDeg(55.0f, 20.0f, 40.0f, 40.0f) == 20.0f &&
+                      ov::NeutralGridHeadChestClampDeg(10.0f, -45.0f, 40.0f, 38.0f) == -38.0f &&
+                      ov::NeutralGridHeadChestClampDeg(10.0f, 30.0f, 40.0f, 40.0f) == 30.0f &&
+                      ov::NeutralGridHeadChestClampDeg(-10.0f, -70.0f, 40.0f, 40.0f, -20.0f) == -60.0f &&
+                      ov::NeutralGridHeadChestClampDeg(-10.0f, 30.0f, 40.0f, 40.0f, -20.0f) == 20.0f,
+                  F("%s 7n: head-vs-chest clamp into [min(before, zero - right), max(before, zero + left)]", aTag));
+            int dbHead = -1;
+            for (uint32_t k = 0; k < n; ++k)
+                if (db->BoneName(k) == "Head")
+                    dbHead = static_cast<int>(k);
+            Check(dbHead >= 0, F("%s 7n: database Head %d", aTag, dbHead));
+            if (dbHead >= 0)
+            {
+                std::vector<BoneTransform> rawIdle(n), turned(n), p(n);
+                adapter::SamplePose(*db, idle, 0.5f, rawIdle.data(), n);
+                in.haveAim = false;
+                in.machine.wantsToAim = false;
+                in.neutralAoWeight = 1.0f;
+                in.neutralAoPitchDeg = 0.0f;
+                struct Cap { float in, grid, out, pose; };
+                auto capProbe = [&](float aTurnDeg, int aAxis, float aYaw) {
+                    turned = rawIdle;
+                    const float h = 0.5f * aTurnDeg * math::kPi / 180.0f;
+                    math::Quat rq{0.0f, 0.0f, 0.0f, std::cos(h)};
+                    (aAxis == 0 ? rq.x : aAxis == 1 ? rq.y : rq.z) = std::sin(h);
+                    turned[dbHead].q = math::QuatNormalize(math::QuatMul(turned[dbHead].q, rq));
+                    in.neutralAoYawDeg = aYaw;
+                    ev->Reset();
+                    for (int f = 0; f < 60; ++f)
+                        ev->EvaluateWithPose(dt, r, turned.data(), in, p.data(), n);
+                    ev->EvaluateWithPose(0.0f, r, turned.data(), in, p.data(), n, &inf);
+                    ev->ToOv(p.data(), *tmp);
+                    return Cap{inf.aoHeadChestInDeg, inf.aoHeadChestGridDeg, inf.aoHeadChestOutDeg, ev->HeadChestYawOf(*tmp)};
+                };
+                // the local axis and sign of the Head that turns it left from the chest (largest change of the base yaw for 20 deg)
+                const float b0 = capProbe(0.0f, 0, 0.0f).in;
+                {
+                    const Cap i45 = capProbe(0.0f, 0, 45.0f), iR45 = capProbe(0.0f, 0, -45.0f);
+                    std::printf("INFO AO7n %s idle head-vs-chest %+6.2f (straight stance %+6.2f); grid +45: %+6.2f -> %+6.2f, grid -45: "
+                                "%+6.2f -> %+6.2f\n", aTag, b0, hcZ, i45.grid, i45.out, iR45.grid, iR45.out);
+
+                }
+                int axis = 0;
+                float per = 0.0f;
+                for (int a = 0; a < 3; ++a)
+                {
+                    const float d = capProbe(20.0f, a, 0.0f).in - b0;
+                    if (std::fabs(d) > std::fabs(per))
+                    {
+                        per = d;
+                        axis = a;
+                    }
+                }
+                const float sgn = per < 0.0f ? -1.0f : 1.0f, gain = std::fabs(per) / 20.0f;
+                Check(gain > 0.5f, F("%s 7n: a Head turn of 20 deg turns the head from the chest by %.2f (axis %d)", aTag, per, axis));
+                if (gain > 0.5f)
+                {
+                    const float turnSome = sgn * (hcZ + 20.0f - b0) / gain, turnMuch = sgn * (hcZ + hcL + 15.0f - b0) / gain;
+                    const float lim = hcZ + hcL; // the left limit of the head-vs-chest yaw
+                    const Cap s45 = capProbe(turnSome, axis, 45.0f), s60 = capProbe(turnSome, axis, 60.0f), s30 = capProbe(turnSome, axis, 30.0f);
+                    const Cap sR = capProbe(turnSome, axis, -45.0f), m45 = capProbe(turnMuch, axis, 45.0f);
+                    for (const Cap& c : {s30, s45, s60, sR, m45})
+                        std::printf("INFO AO7n %s head-vs-chest cap: before %+6.2f, grid %+6.2f, capped %+6.2f, pose %+6.2f deg (limit %+.2f / %+.2f)\n",
+                                    aTag, c.in, c.grid, c.out, c.pose, lim, hcZ - hcR);
+                    Check(s45.in > hcZ + 12.0f && s45.grid > lim + 5.0f && s45.pose <= lim + 0.5f && s60.pose <= lim + 0.5f &&
+                              s45.pose >= lim - 1.0f && std::fabs(s45.pose - s45.out) <= 0.5f,
+                          F("%s 7n: base turned %+.2f + grid at +45 / +60 = %+.2f / %+.2f from the chest (grid alone at the cap %+.2f, +0.5)",
+                            aTag, s45.in, s45.pose, s60.pose, lim));
+                    Check(s30.pose <= lim + 0.5f && s30.pose > s45.in,
+                          F("%s 7n: base turned %+.2f + grid at +30 = %+.2f (above the base, <= %+.2f)", aTag, s30.in, s30.pose, lim + 0.5f));
+                    Check(sR.out == sR.grid && sR.pose < s45.in - 10.0f,
+                          F("%s 7n: a grid turn against the base turn is not cut: grid %+.2f, capped %+.2f, pose %+.2f", aTag, sR.grid, sR.out,
+                            sR.pose));
+                    Check(m45.in > lim + 5.0f && std::fabs(m45.pose - m45.in) <= 0.75f,
+                          F("%s 7n: base alone beyond the cap (%+.2f): the grid at +45 leaves it there (%+.2f, +-0.75)", aTag, m45.in, m45.pose));
+                }
+            }
         }
         // 7f-7h) fix batch 2 (AO), Rifle and Pistol2H: the spine yaw is continuous where the target yaw wraps at +-180, a lost
         // target fades out instead of ending the whole AO in one frame, a handback (aoSuppress) still ends it at once.

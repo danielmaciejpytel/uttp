@@ -134,7 +134,7 @@ return {
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
-    ["mm.neutralAim"] = "false",
+    ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
     ["mm.overlayInertialSwitch"] = "false",
     ["mm.pelvisPlacement"] = "false",
@@ -289,7 +289,7 @@ return {
     "native UTPPSetMotionMinAnalogWalk(0.81999999999999995)",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "native UTPPSetMMAimWorldSmoothing(true,12)",
-    "native UTPPSetMMNeutralAimOffset(false)",
+    "native UTPPSetMMNeutralAimOffset(true)",
     "native UTPPSetMMPelvisPlacement(false)",
     "native UTPPSetMMBodyHeightSmooth(true)",
     "native UTPPSetMMHandBackBlend(false)",
@@ -315,7 +315,7 @@ return {
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
-    "apply mm.neutralAim(false,\"ok\")",
+    "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
@@ -519,7 +519,7 @@ return {
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
-    "apply mm.neutralAim(false,\"ok\")",
+    "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
@@ -1814,7 +1814,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.neutralAim"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2449,7 +2449,7 @@ return {
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
-    ["mm.neutralAim"] = "false",
+    ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
     ["mm.overlayInertialSwitch"] = "false",
     ["mm.pelvisPlacement"] = "false",
@@ -3003,7 +3003,7 @@ return {
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
-    "apply mm.neutralAim(false,\"ok\")",
+    "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
@@ -3105,7 +3105,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=3\r\
+core.defaultsRevision=4\r\
 core.settingsReset=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
@@ -3195,7 +3195,7 @@ mm.leanHead=true\r\
 mm.leanScale=0.85\r\
 mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=true\r\
-mm.neutralAim=false\r\
+mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
 mm.handBackBlend=false\r\
@@ -3670,7 +3670,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.leanScale"] = "1.1000000000000001",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "false",
-    ["mm.neutralAim"] = "false",
+    ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
     ["mm.overlayInertialSwitch"] = "false",
     ["mm.pelvisPlacement"] = "false",
@@ -3729,7 +3729,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=3\r\
+core.defaultsRevision=4\r\
 core.settingsReset=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
@@ -3819,7 +3819,7 @@ mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=true\r\
-mm.neutralAim=false\r\
+mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
 mm.handBackBlend=false\r\

@@ -4,6 +4,8 @@ Input : retargeted utppclip v1 files (Animations/retarget/out_sourcepack_<rig>),
         Animations/sourcepack/als_export/meta), CP rig json (rig identity hash as .utppmm v2), retarget bonemap (masks).
 Output: Data/overlay/utpp_overlays_<rig>.utppov + .summary.json. Deterministic (no timestamps in the binary).
 
+The neutral aim offset grid (NeutralAO, 15 one-frame poses + their mesh-space deltas) is appended after every other entry of
+POSE / FRAM / DELT / DFRM / OVLY, so the earlier entries keep their indices and bytes.
 """
 import argparse
 import glob
@@ -72,6 +74,23 @@ UE_RAMP = {"spine_01": ("spine_01", "spine_02", "spine_03", "spine_04", "spine_0
 UE_TO_CP_EXTRA = {"ik_hand_l": "WeaponLeft", "ik_hand_r": "WeaponRight"}
 MASKS = ["pelvis", "spine", "head", "arm_l", "arm_r", "hand_l", "hand_r"]
 
+# Neutral aim offset grid (the standing neutral aim offset blend space): yaw -90..90 x pitch -90..90 samples, one frame each
+# (the blend space samples frame 0; every frame of the source clips is the same pose). Delta = mesh-space rotation offset
+# against frame 0 of the centre sample X0_Y0 (its additive base). Grid index = pitchIdx * 5 + yawIdx (mm/Additive.hpp
+# AimOffsetGrid), so X0_Y0 is sample 7.
+NEUTRAL_AO_YAW = [-90, -45, 0, 45, 90]
+NEUTRAL_AO_PITCH = [-90, 0, 90]
+NEUTRAL_AO_BASE = "M_Neutral_AO_Stand_X0_Y0"
+
+
+def neutral_ao_name(yaw, pitch):
+    def s(v):
+        return "0" if v == 0 else "%+d" % v
+    return "M_Neutral_AO_Stand_X%s_Y%s" % (s(yaw), s(pitch))
+
+
+NEUTRAL_AO = [neutral_ao_name(y, p) for p in NEUTRAL_AO_PITCH for y in NEUTRAL_AO_YAW]
+
 # Deliberate curve overrides per rig, applied only in the pack step of bake() (Clip / delta / name_bytes stay
 # untouched). rig -> pose -> curve -> value, written to every frame of that pose.
 # WHY: in the relaxed one-handed pistol idle the female rig must keep the unarmed lower body (stance), so the
@@ -126,6 +145,7 @@ def select_clips(style, clip_names):
             raise SystemExit("overlay %s: no clips" % o)
         out.append((o, 0, 1 if o in CAN_AIM else 0, names))
     out.append(("Transitions", 3, 0, [need(n) for n in TRANSITIONS]))
+    out.append(("NeutralAO", 0, 0, [need(n) for n in NEUTRAL_AO]))  # last: the earlier entries keep their indices
     return out
 
 
@@ -251,7 +271,7 @@ def bake(rig_key, out_path, clips_dir=None, rig_path=None, style=None, overrides
             meta = load_json(os.path.join(rel(META_DIR), n + ".json"))["additive"]
             at = ADD_TYPE[meta["additive_anim_type"]]
             base = meta.get("base") if at else None
-            if n.startswith("AO_"):
+            if n.startswith("AO_") or n in NEUTRAL_AO:
                 grp = GROUP["sweep"]
             elif okind == 2:
                 grp = GROUP["base"]
@@ -277,11 +297,12 @@ def bake(rig_key, out_path, clips_dir=None, rig_path=None, style=None, overrides
                 applied.append(dict(pose=n, curve=k, value=val, frames=c.n,
                                     source_values=sorted({float(x) for x in c.curves[k]})))
                 cv[:, ci] = val
+            nfr = 1 if n in NEUTRAL_AO else c.n  # the grid samples frame 0 of each clip
             pose_index[n] = len(poses)
-            poses.append(dict(name=n, group=grp, first=len(frames), n=c.n, add=at,
+            poses.append(dict(name=n, group=grp, first=len(frames), n=nfr, add=at,
                               base_seq=(base or {}).get("seq"), base_frame=int((base or {}).get("frame", 0)),
                               base_kind=BASE_KIND[(base or {}).get("kind")], mask=mask))
-            for f in range(c.n):
+            for f in range(nfr):
                 frames.append((c, f, cv[f]))
         ovly.append(dict(name=oname, kind=okind, flags=oflags, first=first, n=len(poses) - first))
 
@@ -300,7 +321,7 @@ def bake(rig_key, out_path, clips_dir=None, rig_path=None, style=None, overrides
     # deltas: (1) additive assets against their asset base, (2) style dP = D_MS(BP -> OB)
     deltas, dframes = [], []
     for p in poses:
-        if p["add"]:
+        if p["add"] and p["name"] not in NEUTRAL_AO:
             X, A = clips[p["name"]], clips[p["base_seq"]]
             if p["base_frame"] >= A.n:
                 raise SystemExit("%s: base frame out of range" % p["name"])
@@ -314,6 +335,16 @@ def bake(rig_key, out_path, clips_dir=None, rig_path=None, style=None, overrides
         deltas.append(dict(name="dP_%s_%s" % (style, stn), kind=1, target=pose_index[on], tfirst=0, n=1,
                            base=pose_index[bp], bframe=0, space=1, first=len(dframes)))
         dframes.extend(d)
+    # neutral aim offset grid deltas last (every earlier DELT entry and DFRM frame keeps its index)
+    for p in poses:
+        if p["add"] and p["name"] in NEUTRAL_AO:
+            X, A = clips[p["name"]], clips[p["base_seq"]]
+            if p["base_seq"] != NEUTRAL_AO_BASE or p["base_frame"] != 0 or p["add"] != ADD_TYPE["AAT_ROTATION_OFFSET_MESH_SPACE"]:
+                raise SystemExit("%s: unexpected additive base %s / %d, type %d" % (p["name"], p["base_seq"], p["base_frame"], p["add"]))
+            d = delta(X, [0], A, p["base_frame"])
+            deltas.append(dict(name=p["name"], kind=0, target=pose_index[p["name"]], tfirst=0, n=1,
+                               base=p["base_pose"], bframe=p["base_frame"], space=p["add"], first=len(dframes)))
+            dframes.extend(d)
 
     masks = build_masks(names, parents, load_json(rel(cfg["bonemap"])))
 

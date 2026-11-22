@@ -51,10 +51,38 @@ class OptionTests(unittest.TestCase):
         self.assertTrue(rws.capsule_stats_requested('--motion-log 1 --capsule-stats 1'))
         self.assertTrue(rws.air_feed_requested('--capsule-stats 1 --air-feed 1'))
         self.assertFalse(rws.air_feed_requested('--air-feed 0 --motion-log 1'))
+        self.assertTrue(rws.lean_pack_requested('--capsule-stats 1 --lean-pack 1'))
+        self.assertFalse(rws.lean_pack_requested('--lean-pack 0 --air-feed 1'))
+        self.assertFalse(rws.lean_pack_requested('--air-feed 1'))
 
     def test_the_world_slide_database_follows_the_root(self):
         root = os.path.join('X', 'variant')
         self.assertEqual(rws.db_path_of(root, 'man'), os.path.join(root, 'Data', 'utpp_motion_man.utppmm'))
+
+
+class LeanPackReplayTests(unittest.TestCase):
+    """The real replay tool (UTPP_REPLAY_EXE_DIR = folder of utpp_replay_pose_stages.exe) on the first seconds of a recorded session:
+    --lean-pack 1 loads the lean pack (the game ships it, so the lean head layer owns the head there), not passed / 0 leaves it out."""
+
+    RUN = ('man', '20261118-130756')
+
+    def replay(self, extra):
+        exe_dir = os.environ.get('UTPP_REPLAY_EXE_DIR', '')
+        root = rws.project_root()
+        logs = os.path.join(root, 'Research', 'logs', 'night', self.RUN[1], 'logs')
+        if not os.path.isfile(os.path.join(exe_dir, 'utpp_replay_pose_stages.exe')) or not os.path.isdir(logs) or \
+                not os.path.isfile(os.path.join(root, 'Data', 'utpp_lean_man.bin')):
+            self.skipTest('needs UTPP_REPLAY_EXE_DIR, the recorded session and Data/utpp_lean_man.bin')
+        feed = sorted(f for f in os.listdir(logs) if f.startswith('utpp-feed-') and f.endswith('.txt'))[-1]
+        log = sorted(f for f in os.listdir(logs) if f.startswith('utpp-2') and f.endswith('.log'))[-1]
+        with tempfile.TemporaryDirectory() as d:
+            return rws.run_stages(exe_dir, root, os.path.join(logs, feed), os.path.join(logs, log), self.RUN[0],
+                                  os.path.join(d, 'run'), '--to 3 ' + extra)
+
+    def test_the_lean_pack_is_loaded_only_when_asked(self):
+        self.assertRegex(self.replay('--lean-pack 1'), r'(?m)^LEANPACK .*requested=1 loaded=1$')
+        self.assertRegex(self.replay('--lean-pack 0'), r'(?m)^LEANPACK .*requested=0 loaded=0$')
+        self.assertNotIn('LEANPACK ', self.replay(''))
 
 
 class TraceContactTests(unittest.TestCase):

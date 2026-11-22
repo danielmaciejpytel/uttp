@@ -266,7 +266,9 @@ public:
     }
 
     // Publish rate: aPose = 7 floats per database bone (p.xyz, q.xyzw local). Returns the total yaw correction applied (deg).
-    float Apply(const Params& aP, const Skeleton& aSk, float* aPose, uint32_t aBones, float aDt)
+    // aMeasure false: the head of this pose is turned by another layer (the neutral aim grid), so the measurement filters keep
+    // their last values instead of learning that turn; the lead coming back after it starts from the clip's own head.
+    float Apply(const Params& aP, const Skeleton& aSk, float* aPose, uint32_t aBones, float aDt, bool aMeasure = true)
     {
         m_tel.applied = false;
         if (!aPose || !aSk.ok || !std::isfinite(aDt) || aDt <= 0.0f)
@@ -298,14 +300,17 @@ public:
             m_mf = m;
             m_mInit = true;
         }
-        else
+        else if (aMeasure)
             m_mf = Wrap(m_mf + Wrap(m - m_mf) * Alpha(dt, aP.measureTc));
         const bool pathLaw = aP.pathBlend > 0.0f && m_pathValid;
         float err = m_lead - m_mf;
         if (pathLaw)
         {
             const float hv = Wrap(AxisYaw(model[iH]) - m_path); // head vs travel direction (0 = the face looks along the path)
-            m_hpf = m_hInit ? Wrap(m_hpf + Wrap(hv - m_hpf) * Alpha(dt, aP.measureTc)) : hv;
+            if (!m_hInit)
+                m_hpf = hv;
+            else if (aMeasure)
+                m_hpf = Wrap(m_hpf + Wrap(hv - m_hpf) * Alpha(dt, aP.measureTc));
             m_hInit = true;
             const float b = Clamp(aP.pathBlend, 0.0f, 1.0f);
             err = (1.0f - b) * (m_lead - m_mf) + b * (m_lead - m_hpf);

@@ -22,6 +22,10 @@ TOL_DEG, TOL_M = 0.05, 1e-4
 EXP_OVERRIDES = {"woman": {"Pose_Pistol1H_Stand_Relax_Idle": {"layering_legs": 0.0, "layering_pelvis": 0.0}}}
 # plain bake (no overrides) of the woman rig, kept as a fixture for the C++ tests
 UNPATCHED_FIXTURE = "Build/test-data/overlay/utpp_overlays_woman_unpatched.utppov"
+# neutral aim offset grid, written out here on purpose (overlaybake.py NEUTRAL_AO): order = pitchIdx * 5 + yawIdx
+GRID_YAW, GRID_PITCH = (-90, -45, 0, 45, 90), (-90, 0, 90)
+NEUTRAL_AO = ["M_Neutral_AO_Stand_X%s_Y%s" % ("0" if y == 0 else "%+d" % y, "0" if p == 0 else "%+d" % p)
+              for p in GRID_PITCH for y in GRID_YAW]
 FAILS = []
 
 
@@ -179,7 +183,13 @@ def test_file(key):
         check(c["rig"] == ("player_%s_skeleton" % key), p["name"] + ": rig")
         A = np.array([f["bones"][:nb] for f in c["frames"]], np.float64)
         clips[p["name"]] = A
-        check(p["n"] == len(A), p["name"] + ": frame count")
+        if p["name"] in NEUTRAL_AO:
+            # one frame per grid sample; the source clip must hold that pose on every frame (else frame 0 is not the sample)
+            check(p["n"] == 1, p["name"] + ": grid sample has one frame")
+            Qs = A[:, :, 3:7] / np.linalg.norm(A[:, :, 3:7], axis=-1, keepdims=True)
+            check(qang(Qs, np.broadcast_to(Qs[0], Qs.shape)).max() <= TOL_DEG, p["name"] + ": source frames differ")
+        else:
+            check(p["n"] == len(A), p["name"] + ": frame count")
         stats["poses"] += 1
         for f in range(p["n"]):
             row = F["fr"][p["first"] + f].astype(np.float64)
@@ -252,6 +262,26 @@ def test_file(key):
     check(all(p["add"] == 1 and p["bkind"] == 1 and F["poses"][p["base"]]["name"] == "Pose_Base_Stand" for p in st),
           key + ": transitions base Pose_Base_Stand")
     check(sum(1 for d in F["deltas"] if d["kind"] == 1) == 3, key + ": 3 style dP")
+    # neutral aim offset grid: last overlay, last poses and last deltas, in grid order, mesh space vs X0_Y0 frame 0
+    pidx = {p["name"]: i for i, p in enumerate(F["poses"])}
+    grid_ov = [o for o in F["ov"] if o[0] == "NeutralAO"]
+    check(len(grid_ov) == 1 and F["ov"][-1][0] == "NeutralAO", key + ": NeutralAO is the last overlay")
+    if grid_ov:
+        _n, kind, flags, first, count = grid_ov[0]
+        check(kind == 0 and flags == 0 and count == 15 and first + count == len(F["poses"]), key + ": NeutralAO range")
+        check([F["poses"][first + i]["name"] for i in range(count)] == NEUTRAL_AO, key + ": NeutralAO pose order")
+    gd = F["deltas"][-15:]
+    check([F["poses"][d["target"]]["name"] for d in gd] == NEUTRAL_AO, key + ": grid deltas last, in grid order")
+    base = pidx.get(NEUTRAL_AO[7], -1)
+    check(all(d["kind"] == 0 and d["n"] == 1 and d["space"] == 1 and d["base"] == base and d["bframe"] == 0 for d in gd),
+          key + ": grid deltas mesh space vs X0_Y0 frame 0")
+    if len(gd) == 15:
+        centre = F["df"][gd[7]["first"]].astype(np.float64)
+        check(qang(centre[:, 0:4], np.tile([0, 0, 0, 1.0], (nb, 1))).max() < 1e-3, key + ": grid centre is the identity")
+        # yaw sense: the head of X+90 turns the other way about +Z than X-90 (mesh space, game axes)
+        hz = [float(F["df"][gd[i]["first"]][[n for n, _ in F["bones"]].index("Head"), 2]) for i in (5, 9)]
+        check(hz[0] * hz[1] < 0, key + ": grid yaw samples turn the head to opposite sides")
+    stats["grid_deltas"] = len(gd)
     stats["mask_bad_weights"] = check_masks(F, key)
     stats["mask_spine_ramp"] = [round(float(F["masks"]["spine"][[n for n, _ in F["bones"]].index(b)]), 4)
                                 for b in EXP_RAMP] if "spine" in F["masks"] else None
