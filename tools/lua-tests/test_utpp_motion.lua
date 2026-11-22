@@ -172,7 +172,7 @@ do
   local v, t = fresh(), mock()
   local aimLog = {}
   v.sink = function(line) aimLog[#aimLog + 1] = line end
-  check("aim default true and no native call while motion never enabled", v.want.aimGameUpper and
+  check("aim default false and no native call while motion never enabled", v.want.aimGameUpper == false and
     v.SetAimGameUpper(false, t.api) == false and #t.aim == 0)
   v.SetEnabled(true)
   check("saved aim false reaches native when motion starts", v.Sync(t.api) == "enabled" and
@@ -274,25 +274,27 @@ do
     v.Sync(t.api) == "same" and #t.aim == 2)
 end
 
--- mm.pelvisYawTrim (2026-10-30): DLL default 0 -> no native call until the value differs; clamped to -10..10, NaN -> 0
+-- mm.pelvisYawTrim (2026-10-30): DLL default 2 (= the setting); the cache starts unknown, so the first enable sends the wanted value
+-- once, then only a change; clamped to -10..10, NaN -> 0
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("pelvisYawTrim default 0: enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.trim == 0)
-  check("pelvisYawTrim default 0: steady sync makes no call", v.Sync(t.api) == "same" and #t.trim == 0)
+  check("pelvisYawTrim default 2: enabling motion sends it once", v.Sync(t.api) == "enabled" and #t.trim == 1 and t.trim[1] == 2
+    and v.rt.pelvisYawTrimApplied == 2)
+  check("pelvisYawTrim default: steady sync makes no call", v.Sync(t.api) == "same" and #t.trim == 1)
   v.SetPelvisYawTrim(5, t.api)
-  check("pelvisYawTrim 5 is sent once", #t.trim == 1 and t.trim[1] == 5 and v.rt.pelvisYawTrimApplied == 5)
-  check("steady pelvisYawTrim is not resent", v.Sync(t.api) == "same" and #t.trim == 1)
+  check("pelvisYawTrim 5 is sent once", #t.trim == 2 and t.trim[2] == 5 and v.rt.pelvisYawTrimApplied == 5)
+  check("steady pelvisYawTrim is not resent", v.Sync(t.api) == "same" and #t.trim == 2)
   v.SetPelvisYawTrim(25, t.api)
-  check("pelvisYawTrim clamped to 10", #t.trim == 2 and t.trim[2] == 10)
+  check("pelvisYawTrim clamped to 10", #t.trim == 3 and t.trim[3] == 10)
   v.SetPelvisYawTrim(0 / 0, t.api)
-  check("pelvisYawTrim NaN -> 0 (back to the DLL default, sent)", #t.trim == 3 and t.trim[3] == 0 and v.want.pelvisYawTrim == 0)
+  check("pelvisYawTrim NaN -> 0 (sent)", #t.trim == 4 and t.trim[4] == 0 and v.want.pelvisYawTrim == 0)
   t.trimReject = true
   v.SetPelvisYawTrim(-3, t.api)
-  check("rejected pelvisYawTrim is never acknowledged", v.rt.pelvisYawTrimApplied == 0 and #t.trim == 4)
+  check("rejected pelvisYawTrim is never acknowledged", v.rt.pelvisYawTrimApplied == 0 and #t.trim == 5)
   t.trimReject = false
   v.Sync(t.api)
-  check("rejected pelvisYawTrim retries", v.rt.pelvisYawTrimApplied == -3 and #t.trim == 5 and t.trim[5] == -3)
+  check("rejected pelvisYawTrim retries", v.rt.pelvisYawTrimApplied == -3 and #t.trim == 6 and t.trim[6] == -3)
 end
 do
   local v, t = fresh(), mock()
@@ -446,27 +448,29 @@ do
   check("no stored value: width 0, no call", w == 0 and #t.shoulder == 0)
 end
 
--- mm.walkSpeed (2026-10-31): DLL default 0 (= off) -> no native call until the value differs; clamped to 0..3.5, NaN -> 0
+-- mm.walkSpeed (2026-10-31): DLL default 1.6 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
+-- wanted value once, then only a change; clamped to 0..3.5, NaN -> 0
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("walkSpeed default (DLL 0): enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.walk == 0)
-  check("walkSpeed default: steady sync makes no call", v.Sync(t.api) == "same" and #t.walk == 0)
+  check("walkSpeed default (DLL 1.6): enabling motion sends it once", v.Sync(t.api) == "enabled" and #t.walk == 1
+    and t.walk[1] == 1.6 and v.rt.walkSpeedApplied == 1.6)
+  check("walkSpeed default: steady sync makes no call", v.Sync(t.api) == "same" and #t.walk == 1)
   v.SetWalkSpeed(2.0, t.api)
-  check("walkSpeed 2.0 is sent once", #t.walk == 1 and t.walk[1] == 2.0 and v.rt.walkSpeedApplied == 2.0)
-  check("steady walkSpeed is not resent", v.Sync(t.api) == "same" and #t.walk == 1)
+  check("walkSpeed 2.0 is sent once", #t.walk == 2 and t.walk[2] == 2.0 and v.rt.walkSpeedApplied == 2.0)
+  check("steady walkSpeed is not resent", v.Sync(t.api) == "same" and #t.walk == 2)
   v.SetWalkSpeed(9, t.api)
-  check("walkSpeed clamped to 3.5", #t.walk == 2 and t.walk[2] == 3.5)
+  check("walkSpeed clamped to 3.5", #t.walk == 3 and t.walk[3] == 3.5)
   v.SetWalkSpeed(-1, t.api)
-  check("walkSpeed below 0 -> 0 (off, sent)", #t.walk == 3 and t.walk[3] == 0 and v.want.walkSpeed == 0)
+  check("walkSpeed below 0 -> 0 (off, sent)", #t.walk == 4 and t.walk[4] == 0 and v.want.walkSpeed == 0)
   v.SetWalkSpeed(0 / 0, t.api)
-  check("walkSpeed NaN -> 0, already applied, not resent", #t.walk == 3 and v.want.walkSpeed == 0)
+  check("walkSpeed NaN -> 0, already applied, not resent", #t.walk == 4 and v.want.walkSpeed == 0)
   t.walkReject = true
   v.SetWalkSpeed(1.5, t.api)
-  check("rejected walkSpeed is never acknowledged", v.rt.walkSpeedApplied == 0 and #t.walk == 4)
+  check("rejected walkSpeed is never acknowledged", v.rt.walkSpeedApplied == 0 and #t.walk == 5)
   t.walkReject = false
   v.Sync(t.api)
-  check("rejected walkSpeed retries", v.rt.walkSpeedApplied == 1.5 and #t.walk == 5 and t.walk[5] == 1.5)
+  check("rejected walkSpeed retries", v.rt.walkSpeedApplied == 1.5 and #t.walk == 6 and t.walk[6] == 1.5)
   t.walkError = true
   v.SetWalkSpeed(2.5, t.api)
   check("thrown walkSpeed native is never acknowledged", v.rt.walkSpeedApplied == 1.5 and v.rt.errors >= 1)
@@ -482,13 +486,15 @@ do
   check("walkSpeed is not resent for a fresh glue session", v.Sync(t.api) == "enabled" and #t.walk == 1)
 end
 
--- mm.minWalkSpeed (2026-10-31): DLL default 0 (= off) -> no native call until the value differs; clamped to 0..1.6, NaN -> 0
+-- mm.minWalkSpeed (2026-10-31): DLL default 0.82 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
+-- wanted value once, then only a change; clamped to 0..1.6, NaN -> 0
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("minAnalogWalk default (DLL 0): enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.minWalk == 0)
+  check("minAnalogWalk default (DLL 0.82): enabling motion sends it once", v.Sync(t.api) == "enabled" and #t.minWalk == 1
+    and t.minWalk[1] == 0.82)
   v.SetMinAnalogWalk(0.82, t.api)
-  check("minAnalogWalk 0.82 is sent once", #t.minWalk == 1 and t.minWalk[1] == 0.82 and v.rt.minAnalogWalkApplied == 0.82)
+  check("minAnalogWalk 0.82 again is not resent", #t.minWalk == 1 and t.minWalk[1] == 0.82 and v.rt.minAnalogWalkApplied == 0.82)
   check("steady minAnalogWalk is not resent", v.Sync(t.api) == "same" and #t.minWalk == 1)
   v.SetMinAnalogWalk(9, t.api)
   check("minAnalogWalk clamped to 1.6", #t.minWalk == 2 and t.minWalk[2] == 1.6)
@@ -577,37 +583,39 @@ do
 end
 end
 
--- mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale (2026-10-30, one value per body since 2026-11-18): DLL default 0 / 0 -> no native call
--- until a value differs; both values go in one call; clamped to -20..20, NaN -> 0
+-- mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale (2026-10-30, one value per body since 2026-11-18): DLL default 4 / 0 (= the settings);
+-- the cache starts unknown, so the first enable sends the wanted pair once, then only a change; both values go in one call;
+-- clamped to -20..20, NaN -> 0
 local function pair(p, f, m) return p ~= nil and p[1] == f and p[2] == m end
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("bodyYawOffset default 0 / 0: enabling motion makes no call", v.Sync(t.api) == "enabled" and #t.bodyOffset == 0)
-  check("bodyYawOffset default 0 / 0: steady sync makes no call", v.Sync(t.api) == "same" and #t.bodyOffset == 0)
+  check("bodyYawOffset default 4 / 0: enabling motion sends it once", v.Sync(t.api) == "enabled" and #t.bodyOffset == 1
+    and pair(t.bodyOffset[1], 4, 0) and pair(v.rt.bodyYawOffsetApplied, 4, 0))
+  check("bodyYawOffset default 4 / 0: steady sync makes no call", v.Sync(t.api) == "same" and #t.bodyOffset == 1)
   v.SetBodyYawOffsetFemale(8, t.api)
-  check("female bodyYawOffset 8 is sent once with the male value", #t.bodyOffset == 1 and pair(t.bodyOffset[1], 8, 0)
+  check("female bodyYawOffset 8 is sent once with the male value", #t.bodyOffset == 2 and pair(t.bodyOffset[2], 8, 0)
     and pair(v.rt.bodyYawOffsetApplied, 8, 0))
-  check("steady bodyYawOffset is not resent", v.Sync(t.api) == "same" and #t.bodyOffset == 1)
+  check("steady bodyYawOffset is not resent", v.Sync(t.api) == "same" and #t.bodyOffset == 2)
   v.SetBodyYawOffsetMale(-2.5, t.api)
-  check("male bodyYawOffset is sent with the female value", #t.bodyOffset == 2 and pair(t.bodyOffset[2], 8, -2.5))
+  check("male bodyYawOffset is sent with the female value", #t.bodyOffset == 3 and pair(t.bodyOffset[3], 8, -2.5))
   v.SetBodyYawOffsetFemale(35, t.api)
-  check("bodyYawOffset clamped to 20", #t.bodyOffset == 3 and pair(t.bodyOffset[3], 20, -2.5))
+  check("bodyYawOffset clamped to 20", #t.bodyOffset == 4 and pair(t.bodyOffset[4], 20, -2.5))
   v.SetBodyYawOffsetMale(-35, t.api)
-  check("bodyYawOffset clamped to -20", #t.bodyOffset == 4 and pair(t.bodyOffset[4], 20, -20))
+  check("bodyYawOffset clamped to -20", #t.bodyOffset == 5 and pair(t.bodyOffset[5], 20, -20))
   v.SetBodyYawOffsetFemale(0 / 0, t.api)
-  check("bodyYawOffset NaN -> 0 (back to the DLL default, sent)", #t.bodyOffset == 5 and pair(t.bodyOffset[5], 0, -20)
+  check("bodyYawOffset NaN -> 0 (sent)", #t.bodyOffset == 6 and pair(t.bodyOffset[6], 0, -20)
     and v.want.bodyYawOffsetFemale == 0)
   v.SetBodyYawOffset(0, t.api)
-  check("console SetBodyYawOffset sets both bodies", #t.bodyOffset == 6 and pair(t.bodyOffset[6], 0, 0)
+  check("console SetBodyYawOffset sets both bodies", #t.bodyOffset == 7 and pair(t.bodyOffset[7], 0, 0)
     and v.want.bodyYawOffsetMale == 0)
   t.bodyOffsetReject = true
   v.SetBodyYawOffsetFemale(-3, t.api)
-  check("rejected bodyYawOffset is never acknowledged", pair(v.rt.bodyYawOffsetApplied, 0, 0) and #t.bodyOffset == 7)
+  check("rejected bodyYawOffset is never acknowledged", pair(v.rt.bodyYawOffsetApplied, 0, 0) and #t.bodyOffset == 8)
   t.bodyOffsetReject = false
   v.Sync(t.api)
-  check("rejected bodyYawOffset retries", pair(v.rt.bodyYawOffsetApplied, -3, 0) and #t.bodyOffset == 8 and pair(t.bodyOffset[8], -3, 0))
-  check("bodyYawOffset never touches the pelvis trim native", #t.trim == 0)
+  check("rejected bodyYawOffset retries", pair(v.rt.bodyYawOffsetApplied, -3, 0) and #t.bodyOffset == 9 and pair(t.bodyOffset[9], -3, 0))
+  check("bodyYawOffset never touches the pelvis trim native (only its own enable-time send)", #t.trim == 1 and t.trim[1] == 2)
 end
 do
   local v, t = fresh(), mock()
@@ -667,7 +675,8 @@ do
     and text:find("\nmm.strideWarp=false\n", 1, true) ~= nil, text)
 end
 
--- mm.aimAtCrosshair (aim pitch plan 2026-10-30): DLL loop (default off) + utpp_camera crosshair point, P only with an ACKNOWLEDGED loop
+-- mm.aimAtCrosshair (aim pitch plan 2026-10-30): DLL loop (default on, cache unknown at start) + utpp_camera crosshair point, P only
+-- with an ACKNOWLEDGED loop
 do
   local v, t = fresh(), mock()
   local defs = {}
@@ -720,7 +729,7 @@ do
   v.SetEnabled(true)
   local okS, res = pcall(v.Sync, t.api)
   check("older DLL (native missing): Sync never raises, the point stays off", okS and res == "enabled" and t.camOn == false
-    and v.rt.barrelLoopApplied == false)
+    and v.rt.barrelLoopApplied == nil)
 end
 do
   local v, t = fresh(), mock()
@@ -808,65 +817,67 @@ do
   check("selectionGuards call retries until accepted", v.rt.selectionGuardsApplied == true and #t.guards == 4 and t.guards[4] == true)
 end
 
--- mm.lean / leanHead / leanScale: same contract as the slide - lean and head lean are unknown at start (DLL default on) and the
--- wanted values (on before registration) are sent once; the scales (DLL default 1.0) only when they differ
+-- mm.lean / leanHead / leanScale: same contract as the slide - lean, head lean and the scales are unknown at start (DLL defaults on /
+-- on / 0.85 / 0.9) and the wanted values are sent once, then only when they change
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("lean unknown DLL value: enabling motion sends lean and head lean on once, no params call",
+  check("lean unknown DLL value: enabling motion sends lean and head lean on and the params (0.85, 0.9) once",
     v.Sync(t.api) == "enabled" and #t.lean == 1 and t.lean[1] == true and #t.leanHead == 1 and t.leanHead[1] == true
-    and #t.leanParams == 0 and v.rt.leanApplied == true and v.rt.leanHeadApplied == true)
-  check("lean: steady sync makes no call", v.Sync(t.api) == "same" and #t.lean == 1 and #t.leanHead == 1 and #t.leanParams == 0)
+    and #t.leanParams == 1 and t.leanParams[1][1] == 0.85 and t.leanParams[1][2] == 0.9 and v.rt.leanApplied == true
+    and v.rt.leanHeadApplied == true)
+  check("lean: steady sync makes no call", v.Sync(t.api) == "same" and #t.lean == 1 and #t.leanHead == 1 and #t.leanParams == 1)
   v.SetLean(false, t.api)
   check("lean off is sent once", #t.lean == 2 and t.lean[2] == false and v.rt.leanApplied == false)
   check("steady lean off is not resent", v.Sync(t.api) == "same" and #t.lean == 2)
   v.SetLeanHead(false, t.api)
   check("leanHead off is sent once", #t.leanHead == 2 and t.leanHead[2] == false and v.rt.leanHeadApplied == false)
   v.SetLeanScale(0.6, t.api)
-  check("leanScale 0.6 sends (0.6, 1.0) once (head amount is independent)", #t.leanParams == 1 and t.leanParams[1][1] == 0.6 and t.leanParams[1][2] == 1.0)
-  check("steady leanScale is not resent", v.Sync(t.api) == "same" and #t.leanParams == 1)
+  check("leanScale 0.6 sends (0.6, 0.9) once (head amount is independent)", #t.leanParams == 2 and t.leanParams[2][1] == 0.6 and t.leanParams[2][2] == 0.9)
+  check("steady leanScale is not resent", v.Sync(t.api) == "same" and #t.leanParams == 2)
   v.SetLeanScale(0 / 0, t.api)
-  check("NaN leanScale falls back to 1.0 (resent as the default)", v.want.leanScale == 1.0 and #t.leanParams == 2 and t.leanParams[2][1] == 1.0 and t.leanParams[2][2] == 1.0)
+  check("NaN leanScale falls back to 1.0 (resent)", v.want.leanScale == 1.0 and #t.leanParams == 3 and t.leanParams[3][1] == 1.0 and t.leanParams[3][2] == 0.9)
   v.SetLeanScale(nil, t.api)
-  check("nil leanScale stays 1.0 without a resend", v.want.leanScale == 1.0 and #t.leanParams == 2)
+  check("nil leanScale stays 1.0 without a resend", v.want.leanScale == 1.0 and #t.leanParams == 3)
   v.SetLeanScale(7, t.api)
-  check("leanScale 7 clamps to 2.0", v.want.leanScale == 2.0 and #t.leanParams == 3 and t.leanParams[3][1] == 2.0 and t.leanParams[3][2] == 1.0)
+  check("leanScale 7 clamps to 2.0", v.want.leanScale == 2.0 and #t.leanParams == 4 and t.leanParams[4][1] == 2.0 and t.leanParams[4][2] == 0.9)
   v.SetLeanScale(-1, t.api)
-  check("leanScale -1 clamps to 0", v.want.leanScale == 0 and #t.leanParams == 4 and t.leanParams[4][1] == 0 and t.leanParams[4][2] == 1.0)
+  check("leanScale -1 clamps to 0", v.want.leanScale == 0 and #t.leanParams == 5 and t.leanParams[5][1] == 0 and t.leanParams[5][2] == 0.9)
   v.SetLean(false, t.api)
   v.SetLean(true, t.api)
   check("lean on is sent when it differs from the DLL", #t.lean == 3 and t.lean[3] == true and v.rt.leanApplied == true)
 end
--- mm.leanHeadScale: second argument of the single UTPPSetMotionLeanParams(scale, headScale) call; default 1.0 never inherits leanScale
+-- mm.leanHeadScale: second argument of the single UTPPSetMotionLeanParams(scale, headScale) call; never inherits leanScale
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
   v.Sync(t.api)
-  check("leanHeadScale defaults: no params call", #t.leanParams == 0 and v.want.leanHeadScale == 1.0 and v.rt.leanHeadScaleApplied == 1.0)
+  check("leanHeadScale defaults: one params call (0.85, 0.9)", #t.leanParams == 1 and t.leanParams[1][1] == 0.85
+    and t.leanParams[1][2] == 0.9 and v.want.leanHeadScale == 0.9 and v.rt.leanHeadScaleApplied == 0.9)
   v.SetLeanHeadScale(0.5, t.api)
-  check("leanHeadScale 0.5 sends (1.0, 0.5) once", #t.leanParams == 1 and t.leanParams[1][1] == 1.0 and t.leanParams[1][2] == 0.5 and v.rt.leanHeadScaleApplied == 0.5)
-  check("steady leanHeadScale is not resent", v.Sync(t.api) == "same" and #t.leanParams == 1)
+  check("leanHeadScale 0.5 sends (0.85, 0.5) once", #t.leanParams == 2 and t.leanParams[2][1] == 0.85 and t.leanParams[2][2] == 0.5 and v.rt.leanHeadScaleApplied == 0.5)
+  check("steady leanHeadScale is not resent", v.Sync(t.api) == "same" and #t.leanParams == 2)
   v.SetLeanScale(0.6, t.api)
-  check("leanScale 0.6 after head 0.5 sends (0.6, 0.5) in one call", #t.leanParams == 2 and t.leanParams[2][1] == 0.6 and t.leanParams[2][2] == 0.5)
+  check("leanScale 0.6 after head 0.5 sends (0.6, 0.5) in one call", #t.leanParams == 3 and t.leanParams[3][1] == 0.6 and t.leanParams[3][2] == 0.5)
   v.SetLeanHeadScale(3, t.api)
-  check("leanHeadScale 3 clamps to 2.0 and keeps the torso scale", v.want.leanHeadScale == 2.0 and #t.leanParams == 3 and t.leanParams[3][1] == 0.6 and t.leanParams[3][2] == 2.0)
+  check("leanHeadScale 3 clamps to 2.0 and keeps the torso scale", v.want.leanHeadScale == 2.0 and #t.leanParams == 4 and t.leanParams[4][1] == 0.6 and t.leanParams[4][2] == 2.0)
   v.SetLeanHeadScale(-1, t.api)
-  check("leanHeadScale -1 clamps to 0", v.want.leanHeadScale == 0 and #t.leanParams == 4 and t.leanParams[4][2] == 0)
+  check("leanHeadScale -1 clamps to 0", v.want.leanHeadScale == 0 and #t.leanParams == 5 and t.leanParams[5][2] == 0)
   v.SetLeanHeadScale(0 / 0, t.api)
-  check("NaN leanHeadScale falls back to 1.0", v.want.leanHeadScale == 1.0 and #t.leanParams == 5 and t.leanParams[5][1] == 0.6 and t.leanParams[5][2] == 1.0)
+  check("NaN leanHeadScale falls back to 1.0", v.want.leanHeadScale == 1.0 and #t.leanParams == 6 and t.leanParams[6][1] == 0.6 and t.leanParams[6][2] == 1.0)
   v.SetLeanHeadScale(nil, t.api)
-  check("nil leanHeadScale stays 1.0 without a resend", v.want.leanHeadScale == 1.0 and #t.leanParams == 5)
+  check("nil leanHeadScale stays 1.0 without a resend", v.want.leanHeadScale == 1.0 and #t.leanParams == 6)
   -- native range survives a re-arm: values wanted while v2 is off are applied when it comes on; applied values are not resent
   v.SetEnabled(false)
   v.Sync(t.api)
   v.SetLeanHeadScale(0.4, t.api)
-  check("leanHeadScale while motion is off makes no native call", #t.leanParams == 5 and v.want.leanHeadScale == 0.4)
+  check("leanHeadScale while motion is off makes no native call", #t.leanParams == 6 and v.want.leanHeadScale == 0.4)
   v.SetEnabled(true)
-  check("re-arm applies the pending leanHeadScale (0.6, 0.4)", v.Sync(t.api) ~= nil and #t.leanParams == 6 and t.leanParams[6][1] == 0.6 and t.leanParams[6][2] == 0.4)
+  check("re-arm applies the pending leanHeadScale (0.6, 0.4)", v.Sync(t.api) ~= nil and #t.leanParams == 7 and t.leanParams[7][1] == 0.6 and t.leanParams[7][2] == 0.4)
   v.SetEnabled(false)
   v.SetEnabled(true)
   v.Sync(t.api)
-  check("re-arm without a change does not resend the params", #t.leanParams == 6)
+  check("re-arm without a change does not resend the params", #t.leanParams == 7)
   t.leanParamsReject = true
   v.SetLeanHeadScale(0.9, t.api)
   check("rejected leanHeadScale is never acknowledged", v.rt.leanHeadScaleApplied == 0.4 and v.rt.leanScaleApplied == 0.6)
@@ -894,7 +905,7 @@ do
   check("thrown lean call retries", v.rt.leanApplied == true)
   t.leanParamsReject = true
   v.SetLeanScale(0.5, t.api)
-  check("rejected leanScale is never acknowledged", v.rt.leanScaleApplied == 1.0)
+  check("rejected leanScale is never acknowledged", v.rt.leanScaleApplied == 0.85)
   t.leanParamsReject = false
   v.Sync(t.api)
   check("rejected leanScale retries", v.rt.leanScaleApplied == 0.5)

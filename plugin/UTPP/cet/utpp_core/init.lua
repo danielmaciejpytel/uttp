@@ -2473,7 +2473,7 @@ function M.SetDatabase(name) return M.Set("mm.database", name) end
 -- Applied when registered (game start, onInit) and on every change; a native call happens only when the effective value
 -- differs from the last one sent (the console / test harness may still switch MM directly).
 M.mm = { setEnabled = nil, setTrace = nil, enabled = nil, trace = nil, calls = 0, errors = 0,
-  motionMagTap = false } -- motionMagTap: DLL default of UTPPSetMotionMagTap (off), see applyMotionMagTap
+  motionMagTap = nil } -- motionMagTap: unknown until the first send of UTPPSetMotionMagTap (DLL default on), see applyMotionMagTap
 local function mmCall(fn, on, what, why)
   if type(fn) ~= "function" then return false end
   local ok, err = pcall(fn, on)
@@ -2592,9 +2592,9 @@ local function applyMotionShootTransfer(v)
   M.mm.motionShootTransfer = on
   M.Log("motion Pistol2H Shoot transfer -> " .. tostring(on))
 end
--- mm.shinobiBonusReload = false (default) | true - "Reload animation during Shinobi bonus": short left-hand move to the magazine when a
+-- mm.shinobiBonusReload = true (default) | false - "Reload animation during Shinobi bonus": short left-hand move to the magazine when a
 -- slide or air dash refills it without a reload. api.setMotionMagTap(on) = Game.UTPPSetMotionMagTap (process-lifetime DLL flag, default
--- off). M.mm.motionMagTap starts at the DLL default (false), so nothing is called while the option stays off; a failed call is logged
+-- on). M.mm.motionMagTap starts unknown (nil), so the value is sent once; a failed call is logged
 -- once and not marked as sent (a later change tries again).
 local function applyMotionMagTap(v)
   local on = v == true

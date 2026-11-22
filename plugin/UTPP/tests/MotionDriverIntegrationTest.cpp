@@ -2975,9 +2975,12 @@ int MotionFixChildMain(const std::string& aData, const std::string& aDb, const s
     return code;
 }
 
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 int main(int argc, char** argv)
 {
     DriverOptionBaseline();
+    utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
+    utpp::testdefaults::LegacyHostDefaults();
     if (argc == 5 && std::string(argv[1]) == "--motionfix-child")
         return MotionFixChildMain(argv[2], argv[3], argv[4]);
     if (argc == 7 && std::string(argv[1]) == "--scenario")

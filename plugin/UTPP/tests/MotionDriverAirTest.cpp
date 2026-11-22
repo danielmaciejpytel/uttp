@@ -793,8 +793,11 @@ bool RunChild(const char* aMode, const std::string& aData, const std::string& aB
 }
 } // namespace
 
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 int main(int argc, char** argv)
 {
+    utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
+    utpp::testdefaults::LegacyHostDefaults();
     if (argc == 6 && std::string(argv[1]) == "--child")
         return ChildMain(argv[2], argv[3], argv[4], argv[5]);
     if (argc < 3)

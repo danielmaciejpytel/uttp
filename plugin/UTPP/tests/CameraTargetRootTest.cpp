@@ -13,7 +13,8 @@ float Ao(){return std::strtof(StatusField(motiondriver::Status(),"aoYaw=").c_str
 struct OwnerFrame{float capsuleDeg;int ads,shot;};
 #include "data/recording_1215_owner_replay.inc"
 }
-int main(int argc,char**argv){if(argc!=3){std::puts("usage CameraTargetRootTest <driver-data> <basedb>");return 2;}
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
+int main(int argc,char**argv){utpp::testdefaults::LegacyDriverDefaults();utpp::testdefaults::LegacyHostDefaults();if(argc!=3){std::puts("usage CameraTargetRootTest <driver-data> <basedb>");return 2;}
  Rig rig;std::unique_ptr<mm::motion::MotionDatabase>db;if(!RigFromDb(DataPaths(argv[1],"woman").files.db,rig,&db))return 3;g_baseDb=std::wstring(argv[2],argv[2]+std::strlen(argv[2]));
  const char* turnLegNames[]={"LeftUpLeg","LeftLeg","RightUpLeg","RightLeg"};
  for(uint32_t b=0;b<db->NumBones();++b)for(int i=0;i<4;++i)if(db->BoneName(b)==turnLegNames[i])turnLegBones[i]=int(b);

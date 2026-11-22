@@ -1738,7 +1738,7 @@ void Native_SetMotionShootTransfer(RED4ext::IScriptable*, RED4ext::CStackFrame* 
 {
     Native_SetBool057<&motiondriver::SetShootTransferEnabled>(aFrame, "UTPPSetMotionShootTransfer");
 }
-// magazine top-up gesture setting (CET mm.shinobiBonusReload, default off; motiondriver::SetMagTapEnabled - the DLL default is off too)
+// magazine top-up gesture setting (CET mm.shinobiBonusReload, default on; motiondriver::SetMagTapEnabled - the DLL default is on too)
 void Native_SetMotionMagTap(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     Native_SetBool057<&motiondriver::SetMagTapEnabled>(aFrame, "UTPPSetMotionMagTap");

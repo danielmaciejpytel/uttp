@@ -31,6 +31,7 @@
 #include "../src/mm/MotionTraversal.hpp" // trav 8g (StartResult)
 #include "../src/mm/Overlay.hpp"         // PoseOverlay::Game
 #include "TestFailFast.hpp"
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 
 #include <windows.h>
 #include <bcrypt.h>
@@ -487,18 +488,20 @@ int main(int argc, char** argv)
     const std::string data = argv[1];
     {
         // G2 / G5 native settings (data-free): walk toggle speed validation + the lock-free target gate, Tier2 Slow flag
-        Check(motiondriver::WalkSpeedSetting() == 0.0f && motiondriver::WalkSpeedTarget() == 0.0f, "G2: walk speed default 0 (off)");
+        Check(motiondriver::WalkSpeedSetting() == 1.6f && motiondriver::WalkSpeedTarget() == 0.0f,
+              "G2: walk speed default 1.6 (= mm.walkSpeed), target 0 while motion does not drive");
         Check(!motiondriver::SetWalkSpeed(std::numeric_limits<float>::quiet_NaN()) && !motiondriver::SetWalkSpeed(-0.1f) && !motiondriver::SetWalkSpeed(3.6f) &&
-                  !motiondriver::SetWalkSpeed(std::numeric_limits<float>::infinity()) && motiondriver::WalkSpeedSetting() == 0.0f,
+                  !motiondriver::SetWalkSpeed(std::numeric_limits<float>::infinity()) && motiondriver::WalkSpeedSetting() == 1.6f,
               "G2: SetWalkSpeed rejects NaN / negative / over 3.5 / inf and keeps the previous value");
         Check(motiondriver::SetWalkSpeed(2.0f) && motiondriver::WalkSpeedSetting() == 2.0f, "G2: SetWalkSpeed(2.0) stored");
         Check(motiondriver::WalkSpeedTarget() == 0.0f, "G2: target answers 0 while motion is not driving third-person locomotion");
         Check(motiondriver::SetWalkSpeed(3.5f) && motiondriver::SetWalkSpeed(0.0f) && motiondriver::WalkSpeedSetting() == 0.0f, "G2: 3.5 accepted, 0 switches it off");
-        // minimum analog walk speed (CET mm.minWalkSpeed): DLL default 0 (off), 0 .. 1.6, the multiplier 1 while v2 does not drive
-        Check(motiondriver::MinAnalogWalkSetting() == 0.0f && motiondriver::AnalogFloorMul(0.0f, 0.09f, 1, false) == 1.0f, "minimum analog walk default 0 (off)");
+        // minimum analog walk speed (CET mm.minWalkSpeed): DLL default 0.82 (0 = off), 0 .. 1.6, the multiplier 1 while v2 does not drive
+        Check(motiondriver::MinAnalogWalkSetting() == 0.82f && motiondriver::AnalogFloorMul(0.0f, 0.09f, 1, false) == 1.0f,
+              "minimum analog walk default 0.82 (= mm.minWalkSpeed)");
         Check(!motiondriver::SetMinAnalogWalk(std::numeric_limits<float>::quiet_NaN()) && !motiondriver::SetMinAnalogWalk(-0.1f) &&
                   !motiondriver::SetMinAnalogWalk(1.7f) && !motiondriver::SetMinAnalogWalk(std::numeric_limits<float>::infinity()) &&
-                  motiondriver::MinAnalogWalkSetting() == 0.0f,
+                  motiondriver::MinAnalogWalkSetting() == 0.82f,
               "SetMinAnalogWalk rejects NaN / negative / over 1.6 / inf and keeps the previous value");
         Check(motiondriver::SetMinAnalogWalk(0.82f) && motiondriver::MinAnalogWalkSetting() == 0.82f, "SetMinAnalogWalk(0.82) stored");
         Check(motiondriver::AnalogFloorMul(0.0f, 0.09f, 1, false) == 1.0f, "floor multiplier 1 while motion is not driving third-person locomotion");
@@ -510,6 +513,7 @@ int main(int argc, char** argv)
         motiondriver::FeedTier2Slow(false);
         Check(!motiondriver::Tier2SlowFed(), "G5: Tier2 Slow flag cleared");
     }
+    utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
     Check(RunSelfChild("--p3-concurrent-shutdown \"" + data + "\"") == 0,
           "P3 concurrent WaitLoader/Shutdown: joins live worker, no late bundle, restart works");
     Check(RunSelfChild("--p3-two-shutdowns \"" + data + "\"") == 0,

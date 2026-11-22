@@ -267,7 +267,7 @@ void SetMeleeFullBodySetting(bool aOn);
 // Round 3 (2026-11-09 review, mm/MeleeFullBody.hpp). Allowed PSM.MeleeWeapon states for the full body (bit = state 0..21; default
 // mm::melee::kFullBodyDefaultStates = the attacks without ThrowAttack; false = bits outside 0..21, kept). Guard: script flag
 // (guard-capable melee weapon drawn) + user settings melee.guard / melee.guardFullBody (stage 2: legs) / melee.guardAimTilt,
-// all default off (= the previous behaviour bit for bit).
+// melee.guard default on like the setting, the other two default off (off = the previous behaviour bit for bit).
 bool SetMeleeFullBodyStates(int32_t aMask);
 void SetMeleeGuard(bool aOn);
 void SetMeleeGuardSetting(bool aOn);
@@ -288,7 +288,7 @@ std::string MeleeFullBodyStatus();
 // window without the mask, over-speed, stale feed (menu, pause), stagger. Released (normal fade): vehicle, scene, workspot,
 // swim, ladder, takedown, body carry, death, knockdown, TPP off, no valid MM pose.
 void SetHoldPose(bool aOn);
-// CLIMB RELEASE stage (driver default on; the CET menu default is off and is pushed at load; off = hold-eligible 8 / 9 as
+// CLIMB RELEASE stage (default off like the CET menu default; off = hold-eligible 8 / 9 as
 // before): PSM LocomotionDetailed Climb 8 / Vault 9 release the body to the game animation (release reason travRelease, normal
 // gate fade) unless v2 owns the traversal (MotionHooks::ownsTraversal). TRAV-1: with v2 traversal active (MotionHooks::travActive) the
 // release happens whatever this setting says; the setting only decides for v1 (mm.motionDriver off). Always true. Status: climbRelease= travRelease= releaseReasons= travReleaseFeeds= travReleaseEpisodes= travOwnedFeeds=.
@@ -352,7 +352,7 @@ bool ChestAlignEnabled();
 // at touchdown the search resumes with a dwell exemption (contacts ramp back over 0.08 s). Strafe reads the previous feed's
 // air ownership (AirOwns > Strafe > ground). SetAir: 0 auto, 1 clips, 2 hold, 3 off (false = invalid). SetAirParams: false for
 // NaN / out of range (takeoffLeadFrames 0..30, landLead 0..1 s, 0.1 <= rateMin <= rateMax <= 4, recover 0..2 s, holdRate 0..2,
-// heavyVz 1..50 m/s), previous kept. SetAirSteer (default off): while the air area owns the body with a valid
+// heavyVz 1..50 m/s), previous kept. SetAirSteer (default on): while the air area owns the body with a valid
 // Locomotion target and planar capsule speed >= 0.5 m/s, BodyYawCommand follows the measured velocity heading plus at most
 // 35 degrees of stick-requested lead (rate / acceleration limited, <= 200 deg/s); no turn intent or v1 yaw while v2 owns a feed.
 // Only while the hold pose keeps the body in the air (effective gate 0: UTPPSetMMHoldPose on, hold eligible); without the hold the

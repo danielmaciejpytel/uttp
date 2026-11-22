@@ -433,8 +433,12 @@ int g_activeClassSet = 0;
 // strafe rate law replaces the slow-walk rate / map floor), no turn-rate boost, offset-root heading lean off and root warp
 // <= rootWarpMaxDeg (30). Precedence for the later air area: strafe reads the previous-frame g_airOwnsPrev (stub: false).
 bool g_strafeOn = true;                 // UTPPSetMMStrafe
-strafe::StrafeConfig g_strafeCfg;        // UTPPSetMMStrafeParams (unarmed, rootTurnMaxDeg, rootWarpMaxDeg, exitHold)
-float g_strafeJogF = 0.0f;               // UTPPSetMMStrafeParams jogF (S4: 0 = walk gait; > 0 = run gait, forward game speed)
+strafe::StrafeConfig g_strafeCfg = [] { // UTPPSetMMStrafeParams (unarmed, rootTurnMaxDeg, rootWarpMaxDeg, exitHold)
+    strafe::StrafeConfig c;
+    c.unarmed = true; // bodyturn.aimStrafeUnarmed, default on like the setting
+    return c;
+}();
+float g_strafeJogF = 3.3f; // UTPPSetMMStrafeParams jogF (S4: 0 = walk gait; > 0 = run gait, forward game speed); 3.3 = bodyturn.aimJogSpeed default
 constexpr float kStrafeAimWalk = 1.65f;  // m/s vanilla aim-walk capsule speed (measured 1.63-1.67): strafe intent / speed-map point
 strafe::StrafeProfiles g_strafeProf;     // RecomputeDerivedClassDataLocked (after the state tag masks)
 strafe::StrafeMode g_strafeMode;
@@ -486,7 +490,7 @@ air::AirState g_air{[] {
 }()};
 int32_t g_airSetting = 0;               // UTPPSetMMAir: 0 auto, 1 clips, 2 hold, 3 off
 bool g_airProbeOn = true;               // UTPPSetMMAirProbe (CET mm.airProbe)
-bool g_airSteerOn = false;              // UTPPSetMMAirSteer (CET mm.airSteer, default off): in-air body steering
+bool g_airSteerOn = true;               // UTPPSetMMAirSteer (CET mm.airSteer, default on like the setting): in-air body steering
 // AIR STEER: optional, default off. In air the capsule travel heading is authoritative. The desired stick heading may
 // lead it by at most 35 degrees, so an abrupt camera/stick reversal cannot spin the airborne body ahead of its momentum.
 // The normal follow controller limits angular velocity and acceleration. This affects body yaw only (no turn clips).
@@ -580,7 +584,7 @@ int g_bodyFollowDir = 0;          // 0.5.7: +1 / -1 = the body turns the long wa
 uint64_t g_againstSearches = 0, g_startRateFeeds = 0;
 // 0.6.3 turn rate (default on; off = 0.6.2), see MotionHost.hpp SetTurnRate
 bool g_turnRateOn = true;
-float g_turnRateMin = 0.9f, g_turnRateMax = 1.1f; // native default 1.1 (foot-lock guard) until the CET setting bodyturn.turnRateMax (hidden, default and maximum 1.15) sets it through UTPPSetMMTurnRateParams; no effect on frames the motion driver owns; applies on the legacy matcher and on frames handed back to it (melee full body, leg stage not ready, layout mismatch, traversal the driver does not own)
+float g_turnRateMin = 0.9f, g_turnRateMax = 1.15f; // native default 1.15 = the CET setting bodyturn.turnRateMax (hidden, default and maximum 1.15, sent through UTPPSetMMTurnRateParams); no effect on frames the motion driver owns; applies on the legacy matcher and on frames handed back to it (melee full body, leg stage not ready, layout mismatch, traversal the driver does not own)
 constexpr float kTurnRateMinCapsule = 1.0f; // m/s, recent capsule speed (decaying max): slower = 0.5.7 start rate / slow walk
 constexpr float kTurnRateRecentHl = 0.5f;   // s, half-life of the recent capsule speed (a flick brakes through 0)
 constexpr float kTurnRateBand = 0.35f;      // root below its clip peak by this fraction -> full weight
@@ -679,7 +683,7 @@ bool g_maskLogged = false;              // the mask is logged once per build
 UpperMaskBlend g_maskBlend;             // 1 = upper-body bones on the game pose
 mm::melee::MaskTimeTracker g_maskTimes; // mask fade times: the eased fade out after a melee weapon release / a soft guard end
 bool g_aimUpperFadeOn = true, g_maskFadeFromAim = false;
-bool g_weaponUpperOn = true, g_weaponKnown = false, g_weaponHeld = false, g_weaponUpperActive = false;
+bool g_weaponUpperOn = false, g_weaponKnown = false, g_weaponHeld = false, g_weaponUpperActive = false;
 uint32_t g_maskReasons = 0;             // last feed: kMaskState* bits holding the mask (0 = none)
 uint32_t g_maskCovered = 0;             // last feed: gate bits replaced by the mask
 // melee full body (2026-11-09, mm/MeleeFullBody.hpp): the lower-body bones fade to the game pose as well while standing in melee
@@ -700,7 +704,7 @@ void (*g_meleePoseStateSink)(int32_t, float) = nullptr; // Main.cpp: meleepose::
 // melee round 3 (2026-11-09 review, mm/MeleeFullBody.hpp): full-body allowed PSM.MeleeWeapon states + the melee guard
 uint32_t g_meleeFullStates = mm::melee::kFullBodyDefaultStates; // UTPPSetMeleeFullBodyStates (a setting: kept by resets)
 bool g_meleeGuardFlag = false;          // UTPPSetMeleeGuard (script: guard-capable melee weapon drawn, UTPP third person on foot)
-bool g_meleeGuardSetting = false;       // UTPPSetMeleeGuardSetting (melee.guard, default off)
+bool g_meleeGuardSetting = true;        // UTPPSetMeleeGuardSetting (melee.guard, default on like the setting)
 bool g_meleeGuardFullSetting = false;   // UTPPSetMeleeGuardFullSetting (melee.guardFullBody, default off: stage 2, legs)
 bool g_meleeGuardTiltSetting = false;   // UTPPSetMeleeGuardAimTiltSetting (melee.guardAimTilt, default off)
 mm::melee::GuardGate g_meleeGuardGate;  // decision + air debounce
@@ -819,7 +823,7 @@ int g_lastDetail = -1;                  // last feed: PSM.LocomotionDetailed (di
 uint64_t g_holdFrames = 0, g_holdEpisodes = 0, g_holdSwaps = 0, g_holdTicks = 0;
 // CLIMB RELEASE stage: Climb 8 / Vault 9 -> game animation unless v2 owns the traversal (UTPPSetMMClimbRelease; driver default
 // on, the CET menu default is off and is pushed at load). TRAV-1: with v2 traversal active the setting is not consulted.
-bool g_climbReleaseOn = true;
+bool g_climbReleaseOn = false; // UTPPSetMMClimbRelease (CET mm.climbRelease, default off like the setting)
 uint32_t g_releaseReasons = 0;          // last feed: kRelease* (HoldInput::release; the no-feed tick reuses it)
 uint32_t g_releaseTracePrev = 0;        // release reasons of the last MMGATE decision (trace only)
 uint64_t g_travReleaseFeeds = 0, g_travReleaseEpisodes = 0, g_travOwnedFeeds = 0;

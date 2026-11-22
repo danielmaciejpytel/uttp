@@ -282,8 +282,11 @@ float MaxAoDiff(const Run& a, const Run& b, int aPhaseMax)
 }
 } // namespace
 
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 int main(int argc, char** argv)
 {
+    utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
+    utpp::testdefaults::LegacyHostDefaults();
     if (argc < 3)
     {
         std::puts("usage AimWorldTurnTest <driver-data> <basedb> [woman|man] [--report]");

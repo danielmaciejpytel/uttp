@@ -23,7 +23,7 @@ void SetTarget(bool aEnabled, bool aValid, const float aTargetModel[3]);
 // Game thread (UTPPSetMeleeAimTarget, script <= 20 Hz while a melee weapon is drawn): the game's melee target, its feet in model
 // space (aValid false = no target). Preferred over the camera point while fresh (core::kMaxLockAge).
 void SetLockTarget(bool aValid, const float aFeetModel[3]);
-// maxUp 0..45, maxDown 0..60 deg, smoothHz 0..120 (1/s). maxUp = maxDown = 0 = off (the DLL default). False = invalid, kept.
+// maxUp 0..45, maxDown 0..60 deg, smoothHz 0..120 (1/s). maxUp = maxDown = 0 = off (the DLL starts at 20 / 35 / 10 like melee.aimTilt). False = invalid, kept.
 bool SetParams(float aMaxUpDeg, float aMaxDownDeg, float aSmoothHz);
 std::string Status();
 // Game thread (MMDriver Feed, trace on): one 'UTPP MELEEAIM ...' line into aBuf; false = nothing new to report (no applied

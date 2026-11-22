@@ -50,7 +50,7 @@ integ::SeqlockBuffer<RigMsg> g_rig;
 uint64_t g_targetSeq = 0; // game thread
 uint64_t g_lockSeq = 0;   // game thread
 
-std::atomic<float> g_maxUp{0.0f}, g_maxDown{0.0f}, g_smoothHz{core::kDefaultSmoothHz}; // DLL default: off
+std::atomic<float> g_maxUp{core::kDefaultMaxUpDeg}, g_maxDown{core::kDefaultMaxDownDeg}, g_smoothHz{core::kDefaultSmoothHz}; // DLL default: on like melee.aimTilt
 std::atomic<bool> g_rigOk{false};
 std::atomic<uint32_t> g_rigFk{0};
 

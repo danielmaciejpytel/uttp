@@ -1014,8 +1014,10 @@ bool SamePoses(const std::vector<Frame>& a, const std::vector<Frame>& b, size_t 
 }
 } // namespace
 
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 int main(int argc, char** argv)
 {
+    utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
     if (argc < 3)
     {
         std::printf("usage: utpp_motion_driver_dodge_test <data dir> <fixture dir>\n");
