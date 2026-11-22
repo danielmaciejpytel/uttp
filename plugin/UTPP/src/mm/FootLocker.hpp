@@ -44,6 +44,7 @@
 #include "MMMath.hpp"
 #include "PelvisPlacement.hpp"
 #include "Steering.hpp"
+#include "StrideWarp.hpp"
 
 namespace utpp::mm
 {
@@ -190,6 +191,39 @@ struct FootPlantReferenceConfig
 #define UTPP_FOOT_STOP_FIRM_PLANT 1
 #endif
 
+// Firm feet in turns and stops (option, default off; FootLocker::SetFirmFeet / SetFirmHold). While the driver reports a turn or stop clip
+// (SetFirmHold) or an ordinary standing stop runs, a planted foot of the soft-slip path whose contact is firm (>= kStopFirmContact) is
+// latched (a new latch only on a capsule at or below `latchSpeed`: running turns keep the soft slip, their larger hold bent the knee skin):
+// until that contact ends the lock point stays fixed in the world up to `limit` from the animated toe (the soft slip starts there
+// instead of at the slip start, the ankle target bound and the drift unlock follow it, no settle). Two leg limits lower the hold per
+// update, along the direction of the offset: the ankle target stays within the reach the IK solves without its soft limit (max(animated
+// hip-ankle distance, softExtension x leg length)) and the knee is not folded beyond max(animated flexion + knee margin, the free flexion)
+// (the stride warp knee limit). An offset beyond the lowered hold slides with the usual soft slip (continuous, no release). Hand-back:
+// the contact end releases the foot through the rotation-space blend-out; a latched foot on a standing capsule after the turn / stop
+// clips lowers its hold at `handBackSpeed` to the slip start in effect (a foot inside the hold stays until the hold reaches it); the
+// latch ends once the foot is back there. Defaults from the offline replay of the recorded sessions (both bodies): limit 0.30 (0.35 put
+// the correction past 35 cm), hand-back 0.03 m/s (0.12 doubled the idle slide), latch at <= 2 m/s (keeps the knee skin at its off
+// values). Off = the previous paths bit for bit.
+struct FirmFeetConfig
+{
+    float limit = 0.30f;         // m, largest held offset of a latched foot (<= 0.35)
+    float driftMargin = 0.08f;   // m, drift unlock of a latched foot at max(maxDrift, hold + this)
+    float handBackSpeed = 0.03f; // m/s, how fast a latched foot on a standing capsule outside the turn / stop clips lowers its hold
+    float kneeMargin = 0.0052360f; // rad, knee fold bound: added flexion above the animated one (stridewarp::kKneeMargin)
+    float kneeFree = 1.0472f;      // rad, knee fold bound: flexion up to which the hold is not limited (stridewarp::kKneeFreeFlexion)
+    // m/s, release of a latched foot: its blend-out takes at least the shown offset / this (never shorter than blendOutTime), so a large
+    // hold fades over the swing instead of within the usual 0.15 s
+    float releaseSpeed = 1.0f;
+    float latchSpeed = 2.0f;   // m/s, a new latch needs a capsule at or below this (walking pace; running turns keep the soft slip)
+    static bool Valid(const FirmFeetConfig& c)
+    {
+        auto in = [](float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; };
+        return in(c.limit, 0.01f, 0.35f) && in(c.driftMargin, 0.01f, 0.5f) && in(c.handBackSpeed, 0.01f, 10.0f) &&
+               in(c.kneeMargin, 0.0f, 1.0f) && in(c.kneeFree, 0.0f, 3.1f) && in(c.releaseSpeed, 0.1f, 100.0f) &&
+               in(c.latchSpeed, 0.0f, 100.0f);
+    }
+};
+
 // Critically damped spring towards 0, exact for any step (x: value, v: its rate, w = sqrt(stiffness)).
 inline void SpringCritical(float& aX, float& aV, float aOmega, float aDt)
 {
@@ -218,6 +252,9 @@ struct FootLockFootDiag
     bool plantRef = false;     // reference plant model: this lock runs in it
     bool unplanted = false;    // reference plant model: the foot follows the animated toe through the spring (planted otherwise)
     float yawOffset = 0.0f;    // rad, reference plant model: yaw applied to the foot this update (before the IK weight)
+    bool firm = false;         // firm feet: this lock is latched after this update
+    float firmHold = 0.0f;     // m, firm feet: offset held this update (latched hold after the leg limits; 0 when not latched)
+    bool firmLegBound = false; // firm feet: a leg limit lowered the hold below the latched hold this update
 };
 
 // loco C0 (diagnostics only): foot events - drift unlocks and (loco C1b) replant steps by trigger. The driver writes one
@@ -282,6 +319,11 @@ struct FootLockDiagnostics
     uint64_t blendOutLifts = 0;                 // foot updates where the blend-out sink bound lifted the ankle (loco-fix 2026-11-09)
     uint64_t stopSwingReleases = 0;             // standing-stop locks released as a swing contact (loco-stop-knees 2026-11-09)
     uint64_t stopFirmWaits = 0;                 // standing-stop firm plant: foot updates whose lock waited for a firm contact
+    // firm feet (SetFirmFeet; zero while it is off)
+    uint64_t firmLatches = 0;                   // locks latched
+    uint64_t firmUpdates = 0;                   // locked-foot updates with a latched hold
+    uint64_t firmLegBounds = 0;                 // ... of them with the hold lowered by a leg limit
+    uint64_t firmHandBacks = 0;                 // latches ended by the hand-back on a standing capsule
     // pelvis stage (SetPelvisPlacement; zero / 0 while it is off)
     math::Vec3 pelvisOffset{};                  // m, pelvis offset applied this update (model space)
     math::Vec3 pelvisTarget{};                  // m, its unfiltered target this update
@@ -300,6 +342,9 @@ public:
     // standing-stop firm plant (SetStopFirmPlant): contact a stop lock waits for, and the longest wait (s of contact above onThreshold)
     static constexpr float kStopFirmContact = 0.90f;
     static constexpr float kStopFirmMaxDelay = 0.10f;
+    // firm feet hand-back: the latch ends when the foot is within this of the slip start, at the latest this long after its hold got there
+    static constexpr float kFirmHandOverExcess = 0.0005f; // m
+    static constexpr float kFirmHandOverTime = 0.25f;     // s
 
     // Finds LeftUpLeg/LeftLeg/LeftFoot and RightUpLeg/RightLeg/RightFoot, verifies the parent chain and allocates the
     // output buffer. Returns false (pass-through, Ready() == false) on failure.
@@ -430,6 +475,28 @@ public:
     // Standing-stop firm plant (see UTPP_FOOT_STOP_FIRM_PLANT). Off = the previous lock onset bit for bit.
     void SetStopFirmPlant(bool aOn) { m_stopFirmPlant = aOn; }
     bool StopFirmPlant() const { return m_stopFirmPlant; }
+    // Firm feet in turns and stops (see FirmFeetConfig). Off (default) = the previous paths bit for bit; switching it off drops every
+    // latch at once (the soft slip then takes the offset as it does after a slip start lowered by SetSlipRamp).
+    void SetFirmFeet(bool aOn)
+    {
+        m_firmOn = aOn;
+        if (!aOn)
+            for (Foot& f : m_foot)
+                f.firm = false;
+    }
+    bool FirmFeet() const { return m_firmOn; }
+    // Per update from the driver: a turn / pivot / reface / turn in place or stop clip plays on ground locomotion (an ordinary standing
+    // stop, SetStandingStopSupport, latches as well).
+    void SetFirmHold(bool aHold) { m_firmHold = aHold; }
+    // False = invalid (FirmFeetConfig::Valid), previous kept. Applies from the next update.
+    bool SetFirmFeetConfig(const FirmFeetConfig& aCfg)
+    {
+        if (!FirmFeetConfig::Valid(aCfg))
+            return false;
+        m_fcfg = aCfg;
+        return true;
+    }
+    const FirmFeetConfig& FirmFeetConfiguration() const { return m_fcfg; }
     // loco C1b plant / replant (see FootReplantConfig): replant mode for the next updates (the driver sets it per feed from the
     // stance and the UTPPSetMMFootReplant mask) and the Stops profile (playing clip idle / stop). Off (default) = the 0.5.9 path,
     // bit for bit, for every foot not in a replant step / handover.
@@ -619,6 +686,10 @@ private:
         bool crouchSourceValid = false;
         bool crouchSourceQuiet = false;
         math::Vec3 stopRel{};     // loco-stop-knees: at the lock, animated toe - the other foot's animated toe (character frame, z = 0)
+        bool firm = false;        // firm feet: this lock is latched (until its contact ends)
+        float firmHold = 0.0f;    // m, its latched hold (FirmFeetConfig::limit, lowered by the hand-back)
+        float firmShown = 0.0f;   // m, shown offset of the latched foot in its last locked update
+        float releaseTime = 0.0f; // s, blend-out time of a released latched foot (0 = FootLockConfig::blendOutTime)
         // reference plant model (only while locked in it)
         bool plantRef = false;    // this lock runs in the reference plant model
         bool unplanted = false;   // following the animated toe through the spring
@@ -999,6 +1070,8 @@ private:
         d.contactIn = aContact; // loco C0
         d.stepped = d.hurried = false; // loco C1b
         d.stopReleased = false;        // loco-stop-knees
+        d.firmHold = 0.0f;             // firm feet
+        d.firmLegBound = false;
         m_solveLocked[aSide] = false;  // pelvis stage: no locked solve yet this update
 
         // contact hysteresis (disabled -> contact off -> blend out)
@@ -1122,6 +1195,8 @@ private:
             f.springX = f.springV = math::Vec3{};
             f.yawLock = m_animYawW[aSide];
             f.yawX = f.yawV = f.yawApply = 0.0f;
+            f.firm = false; // firm feet: latched in the locked update below
+            f.firmHold = f.firmShown = f.releaseTime = 0.0f;
         }
         if (f.locked)
         {
@@ -1137,7 +1212,9 @@ private:
                 float tx = 0.0f, ty = 0.0f;
                 WorldToCharacter(f.lockX, f.lockY, tx, ty);
                 const math::Vec3 off{tx - gl.p.x, ty - gl.p.y, 0.0f};
-                if (!(Len(off) <= m_cfg.maxDrift))
+                // firm feet: a latched foot unlocks beyond its hold plus the margin (never below maxDrift)
+                const float maxDrift = f.firm ? std::fmax(m_cfg.maxDrift, f.firmHold + m_fcfg.driftMargin) : m_cfg.maxDrift;
+                if (!(Len(off) <= maxDrift))
                 {
                     f.releaseWeight = wPrev;
                     f.locked = false; // teleport / big correction: blend out with the previous update's deltas
@@ -1151,6 +1228,7 @@ private:
                 else if (f.replant || f.stepping || m_replantOn)
                 {
                     f.replant = true; // loco C1b (an off -> replant switch takes the planted foot over at once)
+                    f.firm = false;   // firm feet: the soft-slip path only
                     UpdateReplant(aSide, aDt, gl.p, off);
                 }
 #if !(defined(UTPP_FLSTOP_MUTATION) && UTPP_FLSTOP_MUTATION == 1) // mutation 1: no standing-stop swing-contact release
@@ -1186,10 +1264,52 @@ private:
                         holdSupport = cancelledSupport && reachable;
                         holdStopSettle = standingSupport && reachable;
                     }
+                    // firm feet: latch a firm contact in a turn / stop clip; a latched foot on a standing capsule outside them hands its
+                    // hold back to the slip start at handBackSpeed. The held offset of this update is the latched hold lowered by the
+                    // leg limits along this offset (see FirmFeetConfig).
+                    float firmStart = 0.0f;
+                    if (m_firmOn && !f.firm && m_firmHold && m_slipStart > 0.0f && aContact >= kStopFirmContact && !f.plantRef &&
+                        !f.crouchContact && m_capsuleSpeed <= m_fcfg.latchSpeed)
+                    {
+                        f.firm = true;
+                        f.firmHold = m_fcfg.limit;
+                        ++m_diag.firmLatches;
+                    }
+                    if (f.firm && !m_firmHold && m_capsuleSpeed < m_cfg.settleCapsuleSpeed)
+                    {
+                        // the latch ends once the foot itself is back at the slip start (the slip has taken up its lag behind the
+                        // lowered hold), or kFirmHandOverTime after the hold got there, so the settle does not add to that catch-up.
+                        // The hold is lowered from the latched one: a foot inside it stays where it is until the hold reaches it
+                        // (lowering it from the foot's own offset made the feet creep back through the idle: idle slide x3).
+                        f.firmHold = std::fmax(m_slipStart - m_fcfg.handBackSpeed * kFirmHandOverTime,
+                                               f.firmHold - m_fcfg.handBackSpeed * aDt);
+                        if (!(f.firmHold > m_slipStart) &&
+                            (!(Len(off) > m_slipStart + kFirmHandOverExcess) ||
+                             !(f.firmHold > m_slipStart - m_fcfg.handBackSpeed * kFirmHandOverTime)))
+                        {
+                            f.firm = false;
+                            ++m_diag.firmHandBacks;
+                        }
+                    }
+                    if (f.firm && !(m_slipStart > 0.0f))
+                        f.firm = false; // the soft slip was switched off: a plain lock again
+                    if (f.firm)
+                    {
+                        const float lo = Len(off);
+                        const float leg = lo > 1e-5f ? FirmLegLimit(ga, gb, gc, math::Vec3{off.x / lo, off.y / lo, 0.0f}) : f.firmHold;
+                        const float hold = std::fmin(f.firmHold, leg);
+                        firmStart = std::fmax(m_slipStart, hold);
+                        d.firmHold = hold;
+                        d.firmLegBound = hold < f.firmHold;
+                        ++m_diag.firmUpdates;
+                        if (d.firmLegBound)
+                            ++m_diag.firmLegBounds;
+                    }
                     // settling towards the animated toe while the capsule stands (world-space lock moves)
                     const float len = Len(off);
                     const float step = m_cfg.settleSpeed * aDt;
-                    if (!holdSupport && !holdStopSettle && m_capsuleSpeed < m_cfg.settleCapsuleSpeed && step > 0.0f && len > 1e-5f)
+                    if (!f.firm && !holdSupport && !holdStopSettle && m_capsuleSpeed < m_cfg.settleCapsuleSpeed && step > 0.0f &&
+                        len > 1e-5f)
                     {
                         const float k = std::fmin(1.0f, step / len);
                         f.offset = math::Vec3{off.x * (1.0f - k), off.y * (1.0f - k), 0.0f};
@@ -1199,10 +1319,12 @@ private:
                     const float ls = Len(f.offset);
                     // The ordinary-stop hold suppresses cosmetic settling only.
                     // Necessary excess still uses the proven soft-slip path.
-                    if (!holdSupport && m_slipStart > 0.0f && ls > m_slipStart)
+                    // firm feet: the slip starts at the held offset
+                    const float slipStart = f.firm ? firmStart : m_slipStart;
+                    if (!holdSupport && m_slipStart > 0.0f && ls > slipStart)
                     {
-                        const float ex = (ls - m_slipStart) * std::exp2(-aDt / m_slipHalflife);
-                        const float k = (m_slipStart + ex) / ls;
+                        const float ex = (ls - slipStart) * std::exp2(-aDt / m_slipHalflife);
+                        const float k = (slipStart + ex) / ls;
                         f.offset = math::Vec3{f.offset.x * k, f.offset.y * k, 0.0f};
                         CharacterToWorld(math::Vec3{gl.p.x + f.offset.x, gl.p.y + f.offset.y, gl.p.z}, f.lockX, f.lockY);
                         ++m_diag.slips;
@@ -1211,13 +1333,16 @@ private:
                     // the slip lags a fast toe: beyond the bound the ankle target stays at the bound toward the lock point (the shown
                     // foot moves with the toe, the leg is not stretched further). The lock point itself is unchanged, so the drift
                     // unlock and the release happen exactly when they did without the bound.
-                    const float bound = std::fmax(m_cfg.maxSlipOffset, m_slipStart);
+                    // (firm feet: at the held offset, never below the bound without the latch)
+                    const float bound = std::fmax(m_cfg.maxSlipOffset, f.firm ? firmStart : m_slipStart);
                     const float lb = Len(f.offset);
                     if (!holdSupport && m_slipStart > 0.0f && lb > bound)
                     {
                         f.targetScale = bound / lb;
                         ++m_diag.slipBounds;
                     }
+                    if (f.firm)
+                        f.firmShown = Len(f.offset) * f.targetScale;
                 }
             }
         }
@@ -1227,8 +1352,13 @@ private:
             f.crouchVelocity = {};
             f.plantRef = f.unplanted = false;
             f.yawApply = 0.0f;
+            if (f.firm) // firm feet: the latch ends with the lock; a large shown offset fades at releaseSpeed
+                f.releaseTime = std::fmax(m_cfg.blendOutTime, f.firmShown / m_fcfg.releaseSpeed);
+            f.firm = false;
         }
-        f.s = f.locked ? std::fmin(1.0f, f.s + aDt / m_cfg.blendInTime) : std::fmax(0.0f, f.s - aDt / m_cfg.blendOutTime);
+        d.firm = f.locked && f.firm;
+        const float blendOut = f.releaseTime > 0.0f ? f.releaseTime : m_cfg.blendOutTime;
+        f.s = f.locked ? std::fmin(1.0f, f.s + aDt / m_cfg.blendInTime) : std::fmax(0.0f, f.s - aDt / blendOut);
         const float w = Smoothstep(f.s);
         d.contact = f.contact;
         d.locked = f.locked;
@@ -1243,6 +1373,7 @@ private:
         if (w <= 0.0f)
         {
             f.offset = {};
+            f.releaseTime = 0.0f;
             for (math::Quat& q : f.delta)
                 q = math::Quat{};
             return;
@@ -1330,6 +1461,34 @@ private:
         const math::Vec3 rel = aToe - m_animToe[aSide ^ 1];
         const float dx = rel.x - f.stopRel.x, dy = rel.y - f.stopRel.y;
         return dx * dx + dy * dy > kStopSwingMax * kStopSwingMax;
+    }
+
+    // Firm feet leg limits (FirmFeetConfig): the largest planar offset along aDir (unit, z = 0) from the animated ankle gc that keeps the
+    // ankle target within max(animated hip-ankle distance, softExtension x leg length) of the hip ga and the knee flexion at or below
+    // max(animated flexion + kneeMargin, kneeFree). Degenerate legs return 0 (no hold beyond the slip start).
+    float FirmLegLimit(const BoneTransform& ga, const BoneTransform& gb, const BoneTransform& gc, math::Vec3 aDir) const
+    {
+        const float thigh = Len(gb.p - ga.p), shin = Len(gc.p - gb.p);
+        const math::Vec3 v = gc.p - ga.p;
+        const float vv = math::Dot(v, v);
+        const float d0 = std::sqrt(vv);
+        if (!(thigh > 1e-4f) || !(shin > 1e-4f) || !std::isfinite(d0))
+            return 0.0f;
+        const float b = math::Dot(v, aDir);
+        // reach: |v + s dir| <= dMax, the larger root of s^2 + 2 b s + vv - dMax^2 (vv <= dMax^2, so it is >= 0)
+        const float dMax = std::fmax(d0, (thigh + shin) * m_cfg.softExtension);
+        float s = -b + std::sqrt(std::fmax(0.0f, b * b - (vv - dMax * dMax)));
+        // knee fold: |v + s dir| >= dMin; moving towards the hip (b < 0) the distance first reaches dMin at the smaller root
+        const float flexMax = std::fmax(stridewarp::KneeFlexion(d0, thigh, shin) + m_fcfg.kneeMargin, m_fcfg.kneeFree);
+        if (flexMax < 3.14159265f)
+        {
+            const float dMin2 = std::fmax(0.0f, thigh * thigh + shin * shin + 2.0f * thigh * shin * std::cos(flexMax));
+            const float c = vv - dMin2;
+            const float disc = b * b - c;
+            if (c >= 0.0f && b < 0.0f && disc > 0.0f)
+                s = std::fmin(s, -b - std::sqrt(disc));
+        }
+        return std::isfinite(s) ? std::fmax(s, 0.0f) : 0.0f;
     }
 
     // Displayed lock point (model space) when the stored deltas are applied with weight aW (pose not modified).
@@ -1486,6 +1645,9 @@ private:
     bool m_supportHoldEligible = false;
     bool m_standingStopSupport = false;
     bool m_stopFirmPlant = UTPP_FOOT_STOP_FIRM_PLANT != 0; // standing-stop firm plant (SetStopFirmPlant)
+    bool m_firmOn = false;   // firm feet (SetFirmFeet)
+    bool m_firmHold = false; // this update: turn / stop clip (SetFirmHold)
+    FirmFeetConfig m_fcfg{};
     FootReplantConfig m_rcfg{};
     uint32_t m_nb = 0;
     std::vector<int32_t> m_parents;
@@ -1529,6 +1691,9 @@ struct FootFeedPolicy
     int32_t cancelStartSupport = -1;
     bool standingStopGate = false;   // gate open, no hold, tpp, stick <= 0.15 (driver side)
     bool classStop = false, classIdle = false;
+    bool classTurn = false;          // turn / pivot / reface / turn in place (FootSlipGroup 2)
+    bool firmFeet = false;           // firm feet option (FootLocker::SetFirmFeet)
+    bool firmGate = false;           // gate open, no hold, tpp (driver side)
     bool referencePlant = UTPP_FOOT_PLANT_REFERENCE != 0; // reference plant model for stand / sprint (FootPlantReferenceConfig)
     int32_t referencePlantStopsOnly = UTPP_FOOT_PLANT_STOPS_ONLY; // ... only while 1: `stops` (idle / stop databases), 2: classStop / classIdle
 };
@@ -1585,5 +1750,9 @@ inline void ApplyFootFeedPolicy(FootLocker& aLocker, const FootFeedPolicy& p)
     aLocker.SetSupportHold(p.v2 && !p.airborne && k > 0.f && p.stance == 1 ? p.cancelStartSupport : -1);
     const bool standingStop = p.v2 && !p.airborne && k == 1.f && p.stance == 1 && p.standingStopGate;
     aLocker.SetStandingStopSupport(standingStop && p.classStop, standingStop && p.classIdle);
+    // firm feet: stand / sprint on the ground in a turn or stop clip (crouch keeps its replant / contact policy)
+    aLocker.SetFirmFeet(p.firmFeet);
+    aLocker.SetFirmHold(p.firmFeet && p.firmGate && !p.airborne && k == 1.f && (p.stance == 1 || p.stance == 3) &&
+                        (p.classTurn || p.classStop));
 }
 } // namespace utpp::mm

@@ -1611,6 +1611,285 @@ static void SectionPlantReference(const Database& db)
     }
 }
 
+// Firm feet in turns and stops (FootLocker::SetFirmFeet / SetFirmHold, FirmFeetConfig): a standing pose of the database with both
+// contacts firm under the driver's soft slip, the capsule moving (sideways in both directions, or turning in place) at 30 / 60 / 144 Hz:
+//   (ff1) off = the previous path bit for bit: never set, set off with a hold and another config, and on without a hold (no turn / stop
+//         clip) give the same output as the default locker;
+//   (ff2) hold: a latched foot whose offset is below its held offset does not move in the world, and it holds well past the slip start
+//         that moves the foot without the option; no drift unlock before the limit;
+//   (ff3) limits: the shown offset stays within the limit, and while the hold is not at the bound floor the leg stays within its reach
+//         (max(animated, softExtension)) and its knee fold limit (max(animated + margin, free flexion)); overall the leg reaches past
+//         max(off, animated, softExtension) only by the soft slip lag behind a lowered hold (0.005), never past maxExtension;
+//   (ff4) release: a contact end fades the held offset at no more than releaseSpeed (smoothstep slope 1.5) and finishes in its release
+//         time; (ff5) hand-back: outside the clips on a standing capsule the foot returns at no more than handBackSpeed and the latch ends.
+namespace firm
+{
+struct Leg
+{
+    double ext = 0.0, flex = 0.0; // |hip - ankle| / (thigh + shin), knee flexion (rad)
+};
+static Leg LegOf(const FootLocker& fl, std::span<const BoneTransform> aPose, int aSide)
+{
+    const math::Vec3 h = fl.ModelSpace(aPose, fl.ChainBone(aSide, 0)).p, k = fl.ModelSpace(aPose, fl.ChainBone(aSide, 1)).p,
+                     a = fl.ModelSpace(aPose, fl.ChainBone(aSide, 2)).p;
+    const float t = legik::Len(k - h), s = legik::Len(a - k), d = legik::Len(a - h);
+    return Leg{double(d) / double(t + s), double(stridewarp::KneeFlexion(d, t, s))};
+}
+// Standing frame with both contacts firm whose straighter leg is closest to aExt (search over the whole database).
+static int32_t FindStanding(const Database& db, const FootLocker& fl, double aExt, std::vector<BoneTransform>& aPose)
+{
+    int32_t best = -1;
+    double bestErr = 1e9;
+    for (uint32_t fr = 0; fr < db.NumFrames(); ++fr)
+    {
+        if (db.Contacts(fr)[0] < 0.95f || db.Contacts(fr)[1] < 0.95f)
+            continue;
+        FramePose(db, fr, aPose);
+        const double e = std::max(LegOf(fl, aPose, 0).ext, LegOf(fl, aPose, 1).ext);
+        if (std::fabs(e - aExt) < bestErr)
+            bestErr = std::fabs(e - aExt), best = int32_t(fr);
+    }
+    if (best >= 0)
+        FramePose(db, uint32_t(best), aPose);
+    return best;
+}
+struct Result
+{
+    std::vector<float> out;                  // every output pose, all bones (p, q) of every update
+    double heldMax = 0.0;                    // m, largest offset of an update whose latched foot did not move in the world (ff2)
+    double heldMove = 0.0;                   // m, largest world toe step of such an update
+    int heldUpdates = 0;
+    double offOffsetMax = 0.0;               // m, largest |locked toe - animated toe| of a locked foot
+    double shownMax = 0.0;                   // m, largest |output toe - animated toe| while locked
+    double legExcess = -1e9, kneeExcess = -1e9; // ext / flex (rad) above their bound in updates whose hold is above the bound floor
+    int legChecked = 0;
+    double extMax = 0.0;
+    uint64_t driftUnlocks = 0, latches = 0, handBacks = 0;
+    double releaseStepMax = 0.0, releaseStepBound = 0.0, releaseTime = 0.0, releaseExpected = 0.0; // ff4 (side 0)
+    double handStepMax = 0.0, handStepBound = 0.0, handEndOffset = 0.0; // ff5
+    bool handEnded = false, finite = true;
+};
+// mode: 0 = firm feet never set, 1 = set off (with a hold and another config), 2 = on without a hold, 3 = on with the hold.
+// motion: 0 / 1 = capsule sideways -x / +x at 0.25 m/s, 2 = turning in place at 60 deg/s. end: 0 = release (contact L ends), 1 = hand-back.
+static Result Run(const Database& db, std::span<const BoneTransform> aPose, int aMode, int aMotion, int aEnd, float aDt,
+                  const FirmFeetConfig& aCfg)
+{
+    Result r;
+    FootLocker fl;
+    if (!fl.Init(db))
+        return r;
+    fl.SetReplantConfig(g_rcTest);
+    fl.SetSlip(0.05f, 0.02f); // driver 0.5.9 soft slip
+    if (aMode == 1)
+    {
+        FirmFeetConfig other = aCfg;
+        other.limit = 0.3f;
+        fl.SetFirmFeetConfig(other);
+        fl.SetFirmFeet(false);
+        fl.SetFirmHold(true);
+    }
+    else if (aMode >= 2)
+    {
+        fl.SetFirmFeetConfig(aCfg);
+        fl.SetFirmFeet(true);
+    }
+    const Leg anim[2] = {LegOf(fl, aPose, 0), LegOf(fl, aPose, 1)};
+    const math::Vec3 animToe[2] = {fl.ModelSpace(aPose, fl.LockBone(0)).p, fl.ModelSpace(aPose, fl.LockBone(1)).p};
+    const math::Vec3 animAnkle0 = fl.ModelSpace(aPose, fl.ChainBone(0, 2)).p;
+    float cx = 0.0f, cy = 0.0f, yaw = 0.0f;
+    double prevX[2] = {0, 0}, prevY[2] = {0, 0};
+    bool prevFirm[2] = {false, false};
+    math::Vec3 prevShown0{};
+    // the end phase covers a hand-back of the whole limit at handBackSpeed
+    const int nSettle = int(0.3f / aDt), nMove = int(1.4f / aDt), nEnd = int((aCfg.limit / aCfg.handBackSpeed + 1.5f) / aDt);
+    bool releasing = false;
+    double releaseStart = 0.0;
+    for (int i = 0; i < nSettle + nMove + nEnd; ++i)
+    {
+        const bool move = i >= nSettle && i < nSettle + nMove, end = i >= nSettle + nMove;
+        float vx = 0.0f, vy = 0.0f;
+        if (move && aMotion < 2)
+            vx = aMotion == 0 ? -0.25f : 0.25f;
+        if (move && aMotion == 2)
+            yaw = math::WrapAngle(yaw + 1.0471976f * aDt);
+        cx += vx * aDt;
+        cy += vy * aDt;
+        const bool hold = aMode == 3 && !(end && aEnd == 1);
+        if (aMode >= 2)
+            fl.SetFirmHold(hold);
+        const float cl = end && aEnd == 0 ? 0.0f : 1.0f;
+        fl.Update(aDt, vx, vy, yaw, cl, 1.0f, aPose);
+        const auto out = fl.Output();
+        for (const BoneTransform& b : out)
+        {
+            const float v[7] = {b.p.x, b.p.y, b.p.z, b.q.x, b.q.y, b.q.z, b.q.w};
+            r.out.insert(r.out.end(), v, v + 7);
+            for (float x : v)
+                r.finite = r.finite && std::isfinite(x);
+        }
+        const FootLockDiagnostics& d = fl.Diagnostics();
+        for (int s = 0; s < 2; ++s)
+        {
+            const FootLockFootDiag& fd = d.foot[s];
+            double x = 0, y = 0;
+            ToeWorld(fl, out, s, cx, cy, yaw, x, y);
+            const double step = std::hypot(x - prevX[s], y - prevY[s]);
+            const double shown = double(legik::Len(fl.ModelSpace(out, fl.LockBone(s)).p - animToe[s]));
+            if (fd.locked)
+            {
+                r.offOffsetMax = std::max(r.offOffsetMax, double(fd.offset));
+                r.shownMax = std::max(r.shownMax, shown);
+            }
+            // ff2: latched in this and the previous update, offset below the hold of this update
+            if (i > 0 && fd.locked && fd.firm && prevFirm[s] && double(fd.offset) < double(fd.firmHold) - 0.002)
+            {
+                ++r.heldUpdates;
+                r.heldMax = std::max(r.heldMax, double(fd.offset));
+                r.heldMove = std::max(r.heldMove, step);
+            }
+            // ff3: hold above the bound floor (maxSlipOffset) and the offset within it -> the ankle target is within the leg limits
+            const Leg o = LegOf(fl, out, s);
+            r.extMax = std::max(r.extMax, o.ext);
+            if (fd.locked && fd.firm && fd.firmHold >= 0.14f && double(fd.offset) <= double(fd.firmHold) + 0.001)
+            {
+                ++r.legChecked;
+                r.legExcess = std::max(r.legExcess, o.ext - std::max(anim[s].ext, 0.97));
+                r.kneeExcess =
+                    std::max(r.kneeExcess, o.flex - std::max(anim[s].flex + double(aCfg.kneeMargin), double(aCfg.kneeFree)));
+            }
+            if (end && aEnd == 1 && i > nSettle + nMove)
+            {
+                r.handStepMax = std::max(r.handStepMax, step);
+                r.handEndOffset = std::max(r.handEndOffset, i == nSettle + nMove + nEnd - 1 ? double(fd.offset) : 0.0);
+            }
+            prevX[s] = x;
+            prevY[s] = y;
+            prevFirm[s] = fd.locked && fd.firm;
+        }
+        // ff4: shown ankle offset of the released left foot (model space; pose and capsule still)
+        const math::Vec3 shown0 = fl.ModelSpace(out, fl.ChainBone(0, 2)).p - animAnkle0;
+        if (end && aEnd == 0)
+        {
+            if (!releasing && !d.foot[0].locked)
+            {
+                releasing = true;
+                releaseStart = double(i) * double(aDt);
+                r.releaseExpected = std::max(0.15, double(legik::Len(prevShown0)) / double(aCfg.releaseSpeed));
+            }
+            if (releasing)
+            {
+                r.releaseStepMax = std::max(r.releaseStepMax, double(legik::Len(shown0 - prevShown0)));
+                if (r.releaseTime == 0.0 && d.foot[0].weight <= 0.0f)
+                    r.releaseTime = double(i) * double(aDt) - releaseStart + double(aDt);
+            }
+        }
+        prevShown0 = shown0;
+    }
+    const FootLockDiagnostics& d = fl.Diagnostics();
+    r.driftUnlocks = d.driftUnlocks;
+    r.latches = d.firmLatches;
+    r.handBacks = d.firmHandBacks;
+    r.handEnded = !d.foot[0].firm && !d.foot[1].firm;
+    r.releaseStepBound = 1.6 * double(aCfg.releaseSpeed) * double(aDt) + 0.0005;
+    // the hand-back, then the settle (FootLockConfig::settleSpeed), plus the soft slip taking up its lag when the capsule stops
+    r.handStepBound = 1.15 * std::max(double(aCfg.handBackSpeed), double(FootLockConfig{}.settleSpeed)) * double(aDt) + 0.0003;
+    return r;
+}
+} // namespace firm
+
+static void SectionFirmFeet(const Database& db)
+{
+    FootLocker probe;
+    if (!probe.Init(db))
+    {
+        Expect("(ff0) FootLocker init", false);
+        return;
+    }
+    const FirmFeetConfig cfg{};
+    Expect("(ff0) firm feet off by default, limit within 0.35 m", !probe.FirmFeet() && cfg.limit <= 0.35f && FirmFeetConfig::Valid(cfg),
+           Fmt("limit %.2f m", double(cfg.limit)));
+    FirmFeetConfig bad = cfg;
+    bad.limit = 0.36f;
+    Expect("(ff0) a limit above 0.35 m is rejected", !probe.SetFirmFeetConfig(bad) && probe.FirmFeetConfiguration().limit == cfg.limit);
+    std::vector<BoneTransform> bent(db.NumBones()), straight(db.NumBones());
+    const int32_t fBent = firm::FindStanding(db, probe, 0.90, bent), fStraight = firm::FindStanding(db, probe, 0.985, straight);
+    Expect("(ff0) standing frames with both contacts firm", fBent >= 0 && fStraight >= 0,
+           Fmt("frames %.0f (leg %.3f) / %.0f (leg %.3f)", fBent,
+               std::max(firm::LegOf(probe, bent, 0).ext, firm::LegOf(probe, bent, 1).ext), fStraight,
+               std::max(firm::LegOf(probe, straight, 0).ext, firm::LegOf(probe, straight, 1).ext)));
+    if (fBent < 0 || fStraight < 0)
+        return;
+    // (ff6) a new latch needs a capsule at or below latchSpeed (a running turn keeps the soft slip)
+    for (const float speed : {cfg.latchSpeed + 0.5f, cfg.latchSpeed - 0.5f})
+    {
+        FootLocker fl;
+        fl.Init(db);
+        fl.SetReplantConfig(g_rcTest);
+        fl.SetSlip(0.05f, 0.02f);
+        fl.SetFirmFeet(true);
+        fl.SetFirmHold(true);
+        for (int i = 0; i < 20; ++i)
+            fl.Update(kDt, speed, 0.0f, 0.0f, 1.0f, 1.0f, bent);
+        const bool fast = speed > cfg.latchSpeed;
+        const uint64_t n = fl.Diagnostics().firmLatches;
+        Expect(fast ? "(ff6) no latch on a capsule above latchSpeed" : "(ff6) latch on a capsule below latchSpeed", fast ? n == 0 : n >= 1,
+               Fmt("capsule %.1f m/s, latchSpeed %.1f, latches %.0f", double(speed), double(cfg.latchSpeed), double(n)));
+    }
+    for (const float dt : {1.0f / 30.0f, 1.0f / 60.0f, 1.0f / 144.0f})
+    {
+        const std::string rate = " (dt 1/" + std::to_string(static_cast<int>(std::lround(1.0 / double(dt)))) + ")";
+        for (int pz = 0; pz < 2; ++pz)
+        {
+            const std::span<const BoneTransform> pose(pz == 0 ? bent : straight);
+            const std::string pn = pz == 0 ? " bent legs" : " straight legs";
+            for (int motion = 0; motion < 3; ++motion)
+            {
+                const std::string mn = motion == 0 ? " sideways -x" : motion == 1 ? " sideways +x" : " turn in place";
+                for (int endMode = 0; endMode < 2; ++endMode)
+                {
+                    const std::string tag = rate + pn + mn + (endMode == 0 ? ", release" : ", hand-back");
+                    const firm::Result base = firm::Run(db, pose, 0, motion, endMode, dt, cfg);
+                    const firm::Result off = firm::Run(db, pose, 1, motion, endMode, dt, cfg);
+                    const firm::Result noHold = firm::Run(db, pose, 2, motion, endMode, dt, cfg);
+                    const firm::Result on = firm::Run(db, pose, 3, motion, endMode, dt, cfg);
+                    Expect(("(ff1) off = the previous path bit for bit" + tag).c_str(),
+                           !base.out.empty() && base.out == off.out && base.out == noHold.out && noHold.latches == 0 && off.latches == 0,
+                           Fmt("poses %.0f floats", double(base.out.size())));
+                    Expect(("(ff1) finite output" + tag).c_str(), on.finite && base.finite);
+                    Expect(("(ff2) latched foot does not move in the world below its hold, no drift unlock" + tag).c_str(),
+                           on.latches >= 2 && on.driftUnlocks == 0 && (on.heldUpdates == 0 || on.heldMove <= 0.001),
+                           Fmt("latches %.0f, held updates %.0f up to %.1f cm, max world step %.2f mm, drift unlocks %.0f (off %.0f)",
+                               double(on.latches), on.heldUpdates, on.heldMax * 100.0, on.heldMove * 1000.0, double(on.driftUnlocks),
+                               double(base.driftUnlocks)));
+                    Expect(("(ff3) shown offset within the limit, leg within its limits" + tag).c_str(),
+                           on.shownMax <= double(cfg.limit) + 0.002 && (on.legChecked == 0 || (on.legExcess <= 0.002 && on.kneeExcess <= 0.004)) &&
+                               on.extMax <= std::max({base.extMax, firm::LegOf(probe, pose, 0).ext, firm::LegOf(probe, pose, 1).ext, double(FootLockConfig{}.softExtension)}) + 0.005 &&
+                               on.extMax <= double(FootLockConfig{}.maxExtension),
+                           Fmt("shown max %.1f cm (off %.1f), leg checked %.0f: ext excess %.4f, knee excess %.2f deg, ext max %.4f (off %.4f)",
+                               on.shownMax * 100.0, base.shownMax * 100.0, on.legChecked, on.legExcess, on.kneeExcess * kRad2Deg, on.extMax,
+                               base.extMax));
+                    if (endMode == 0)
+                        Expect(("(ff4) release fades at <= releaseSpeed and ends in its release time" + tag).c_str(),
+                               on.releaseStepMax <= on.releaseStepBound && on.releaseTime > 0.0 &&
+                                   on.releaseTime <= on.releaseExpected + 2.0 * double(dt) + 1e-6,
+                               Fmt("max step %.2f mm (bound %.2f), release %.3f s (expected %.3f s)", on.releaseStepMax * 1000.0,
+                                   on.releaseStepBound * 1000.0, on.releaseTime, on.releaseExpected));
+                    else
+                        Expect(("(ff5) hand-back at <= handBackSpeed, latch ended" + tag).c_str(),
+                               on.handStepMax <= on.handStepBound && on.handEnded && on.handBacks >= 1,
+                               Fmt("max world step %.2f mm (bound %.2f), hand-backs %.0f, offset at the end %.1f cm", on.handStepMax * 1000.0,
+                                   on.handStepBound * 1000.0, double(on.handBacks), on.handEndOffset * 100.0));
+                    // the option holds more than the soft slip without it (bent legs, sideways: the leg reach is not the limit)
+                    if (pz == 0 && motion < 2 && endMode == 0)
+                        Expect(("(ff2) holds past the slip start" + tag).c_str(), on.heldMax >= 0.12 && on.heldMax > base.shownMax + 0.03,
+                               Fmt("held without moving up to %.1f cm, shown offset without the option up to %.1f cm", on.heldMax * 100.0,
+                                   base.shownMax * 100.0));
+                }
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 2)
@@ -1943,6 +2222,7 @@ int main(int argc, char** argv)
     SectionPoleCarry();
     SectionStopSwing(); // loco-stop-knees 2026-11-09
     SectionPlantReference(db);
+    SectionFirmFeet(db);
 
     std::printf("SUMMARY: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
