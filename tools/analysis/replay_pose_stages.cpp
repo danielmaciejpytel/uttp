@@ -139,6 +139,7 @@ void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
 float TestAoGridShare();
+void TestAoDiag(float aOut[15]);
 }
 namespace utpp::motionhost
 {
@@ -154,7 +155,8 @@ constexpr const char* kMeta[] = {"t", "dt", "owned", "published", "tailed", "cli
                                  "lockL", "wL", "corrL_cm", "lockR", "wR", "corrR_cm", "playRate", "capX", "capY", "yawDeg",
                                  "mvx", "mvy", "loco", "rpPrepared", "rpCapDX", "rpCapDY", "rpCapDYaw", "rpAnimDX", "rpAnimDY",
                                  "rpAnimDYaw", "rpMovingGround", "rpMontage", "rpBeforeX", "rpBeforeY", "rpBeforeYaw", "rpAfterX", "rpAfterY",
-                                 "rpAfterYaw", "rpYawAhead", "aoGrid"};
+                                 "rpAfterYaw", "rpYawAhead", "aoGrid", "aoW", "aoGridShare", "aoYaw", "aoGridYaw", "aoPitch",
+                                 "aoSpineYaw", "aoHcIn", "aoHcGrid", "aoHcOut", "nYaw", "nPitch", "nW", "aimW", "haveAim", "aoSrcYaw"};
 constexpr size_t kMetaFloats = sizeof(kMeta) / sizeof(kMeta[0]);
 
 motionhost::MotionSetFrame g_tail;
@@ -1105,6 +1107,8 @@ int main(int argc, char** argv)
                 firmLast[k] = now[k];
             }
         }
+        float aod[15];
+        motiondriver::TestAoDiag(aod);
         const float meta[kMetaFloats] = {rows[i].t, rows[i].dt, g_log.stepResult ? 1.f : 0.f, published ? 1.f : 0.f, g_tailValid ? 1.f : 0.f,
                                          float(clip), ct, float(dbi), g_tail.contact[0], g_tail.contact[1], g_tail.rootVel[0],
                                          g_tail.rootVel[1], g_tail.rootYawRate, g_tail.providedRoot ? 1.f : 0.f, g_tail.rootOffsetX,
@@ -1115,7 +1119,8 @@ int main(int argc, char** argv)
                                          float(rows[i].loco), rp.prepared ? 1.f : 0.f, rp.capsuleDelta[0], rp.capsuleDelta[1],
                                          rp.capsuleYawDelta, rp.animDelta[0], rp.animDelta[1], rp.animYawDelta, rp.movingGround ? 1.f : 0.f,
                                          rp.montage ? 1.f : 0.f, rp.before[0], rp.before[1], rp.before[2], rp.after[0], rp.after[1], rp.after[2],
-                                         rp.yawAhead, motiondriver::TestAoGridShare()};
+                                         rp.yawAhead, motiondriver::TestAoGridShare(), aod[0], aod[1], aod[2], aod[3], aod[4], aod[5],
+                                         aod[6], aod[7], aod[8], aod[9], aod[10], aod[11], aod[12], aod[13], aod[14]};
         std::copy(meta, meta + kMetaFloats, rec.begin());
         std::fill(rec.begin() + kMetaFloats, rec.end(), std::nanf(""));
         if (g_tailValid && g_driverPose.size() == size_t(nb) * 7)

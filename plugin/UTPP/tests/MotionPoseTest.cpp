@@ -45,6 +45,7 @@
 //          A base pose with its own head turn plus the grid stays within the head-vs-chest yaw of the grid alone at the cap (+0.5),
 //          or the base turn where that is larger; a grid turn against it is not cut.
 //          Mutations 20 (no cap), 21 (grid sign flipped), 22 (hard switch at the aim exit), 23 (no total cap) each fail a check.
+//      7o) neutral aim grid, the camera crosses behind the back (side change of the clamp, 120 deg catch-up): Head <= 9 deg per frame.
 //  10) barrel pitch loop (src/mm/BarrelPitchLoop.hpp, aim pitch plan 2026-10-30 sections 2.B / 3 / 5): camera of camera_math.lua
 //      (aim boom 1.1 / 0.45 / 0.05, boomPitchScale 0.35), pitch -60..+60 step 5 x d {50, 25, 10, 5, 2} (floor hit / 2 m clamp),
 //      Rifle / Pistol1H / Pistol2H x stand / crouch, 0.5 s per cell. Signed pitch error = elevation(WeaponRight +Y) -
@@ -1668,6 +1669,40 @@ static void TestBody(const char* aTag, const char* aDbPath, const char* aOvPath,
             Check(maxSpine <= 6.0f && maxHead <= 6.0f && endShare > 0.999f,
                   F("%s 7n: aim exit hand-over: Spine3 step %.2f, Head step %.2f deg/frame (<= 6), grid share %.3f at the end", aTag, maxSpine,
                     maxHead, endShare));
+            // 7o) the camera crosses behind the back (yaw +100 -> +170 -> -170 -> -140): the side of the clamp changes, the yaw catches
+            // up over 120 deg. The grid turns the head ~1.5 deg per deg of yaw, so the catch-up runs at kNeutralGridYawRateDegPerSec
+            // (at the aiming rate of 480 deg/s the head swung 12-18 deg per frame in the recorded sessions).
+            {
+                std::vector<math::Quat> qs;
+                auto settle = [&](float aYaw, int aFrames) {
+                    in.neutralAoYawDeg = aYaw;
+                    for (int f = 0; f < aFrames; ++f)
+                        ev->Evaluate(dt, r, in, out.data(), n);
+                };
+                settle(100.0f, 60);
+                settle(170.0f, 30);
+                settle(-170.0f, 30);
+                mesh(out, qs);
+                float prevH = yawOf(qs[hd]), maxStep = 0.0f;
+                const float startH = wrap(prevH - yawOf(qr[hd]));
+                in.neutralAoYawDeg = -140.0f;
+                int frames = 0;
+                for (int f = 0; f < 60; ++f)
+                {
+                    ev->Evaluate(dt, r, in, out.data(), n, &inf);
+                    mesh(out, qs);
+                    const float h = yawOf(qs[hd]);
+                    maxStep = std::max(maxStep, std::fabs(wrap(h - prevH)));
+                    if (std::fabs(wrap(h - prevH)) > 0.05f)
+                        frames = f + 1;
+                    prevH = h;
+                }
+                const float endH = wrap(prevH - yawOf(qr[hd]));
+                std::printf("INFO AO7o %s side change behind the back: Head %+.2f -> %+.2f, max step %.2f deg/frame, moving %d frames\n", aTag,
+                            startH, endH, maxStep, frames);
+                Check(startH > 40.0f && endH < -40.0f && maxStep <= 9.0f,
+                      F("%s 7o: side change behind the back: Head %+.2f -> %+.2f, max step %.2f deg/frame (<= 9)", aTag, startH, endH, maxStep));
+            }
             // total head-vs-chest cap: a base pose whose own head is already turned (the idle frame with the Head turned in its local
             // frame) plus the grid never turns the head further from the chest than the grid alone at the cap (+0.5), or than the base
             // alone where that is larger; a grid turn against the base turn is not cut. Mutation 23 (no total cap) fails here.

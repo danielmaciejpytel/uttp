@@ -350,6 +350,8 @@ utpp::mm::strafe::NeutralAoConfig g_neutralAoCfg{true};
 utpp::mm::strafe::NeutralAoBlend g_neutralAo;
 float g_neutralAoPrevYawDeg = 0.0f;
 bool g_neutralAoPrevValid = false;
+float g_neutralAoPrevPlayerYawDeg = 0.0f; // actor yaw of the last neutral step (the body turn rate of NeutralAoInput)
+bool g_neutralAoPrevPlayerValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
 bool g_overlayInertialSwitchOn = false; // SetOverlayInertialSwitch (default off)
@@ -446,6 +448,9 @@ std::atomic<int64_t> g_testSteadyNs{-1}; // test targets only (never the DLL): >
 uint64_t g_testNeutralAoFeeds = 0, g_testAimSmoothFeeds = 0;
 float g_testAoAppliedWeight = 0.0f; // applied aim offset weight of the last evaluation
 float g_testAoGridShare = 0.0f;     // share of the neutral aim grid in that aim offset
+// aim offset of the last evaluation (TestAoDiag): applied weight, grid share, filtered yaw, grid sample yaw, pitch, spine yaw,
+// head-vs-chest before the grid / after it / after the cap, neutral input yaw / pitch / weight, Aiming weight, aim target, yaw the filter was stepped with
+float g_testAoDiag[15] = {};
 #endif
 int64_t SteadyNs()
 {
@@ -2003,7 +2008,7 @@ void SetEnabled(bool aOn)
     if (!aOn) integ::g_gamePoseCaptureWanted.store(false, std::memory_order_relaxed);
     if (!aOn) { g_airLegsFade.Reset(); g_jumpOutArmsFade.Reset(); g_jumpOutWindowNow = false; }
     // a new session starts without the neutral aim weight of the last one (the setting itself stays)
-    if (!aOn) { g_neutralAo.Reset(); g_neutralAoPrevValid = false; g_neutralAoPitchDeg = 0.0f; g_neutralWorldAim.Reset(); }
+    if (!aOn) { g_neutralAo.Reset(); g_neutralAoPrevValid = g_neutralAoPrevPlayerValid = false; g_neutralAoPitchDeg = 0.0f; g_neutralWorldAim.Reset(); }
     if (!aOn) { ResetAuthoredRecoil(); g_weaponAction = 0; g_hipFirePoseHold.Reset(); g_jumpOutExitHold.Reset(); g_stationaryShotTurn.Reset(); g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadGirdleHold.Reset(); g_reloadContactsEligible = false; g_shootLastReadyValid = g_shootBaseValid = false; g_shootHold.Reset(); g_shootEpisode.Reset(); }
     if (g_enabled != aOn)
     {
@@ -2332,7 +2337,7 @@ bool SetNeutralAimOffset(bool aOn)
     if (aOn && !g_neutralAoCfg.enabled && !(g_neutralAo.Alpha() > 0.0f))
     {
         g_neutralAo.Reset();
-        g_neutralAoPrevValid = false;
+        g_neutralAoPrevValid = g_neutralAoPrevPlayerValid = false;
         g_neutralAoPitchDeg = 0.0f;
     }
     g_neutralAoCfg.enabled = aOn;
@@ -2673,6 +2678,11 @@ float TestAoGridShare()
 {
     std::lock_guard lock(g_m);
     return g_testAoGridShare;
+}
+void TestAoDiag(float aOut[15])
+{
+    std::lock_guard lock(g_m);
+    std::copy_n(g_testAoDiag, 15, aOut);
 }
 void TestSetMapStepDownReach(int32_t aOn)
 {
@@ -3362,6 +3372,11 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
         n.prevAoYawDeg = g_neutralAoPrevValid ? g_neutralAoPrevYawDeg : n.aoYawDeg;
         n.slotWeight = handback ? 1.0f : std::clamp(g_reloadUpperWeight, 0.0f, 1.0f);
         n.disableAo = 0.0f; // no Disable_AO curve in the database
+        const bool playerYaw = std::isfinite(f.playerYawDeg);
+        if (playerYaw && g_neutralAoPrevPlayerValid && dt > 0.0f)
+            n.bodyYawRateDegPerSec = motionpose::WrapDeg180(f.playerYawDeg - g_neutralAoPrevPlayerYawDeg) / dt;
+        g_neutralAoPrevPlayerValid = playerYaw;
+        g_neutralAoPrevPlayerYawDeg = playerYaw ? f.playerYawDeg : 0.0f;
         const float w = g_neutralAo.Step(n, g_neutralAoCfg, dt);
         g_neutralAoPrevValid = angles;
         g_neutralAoPrevYawDeg = ny;
@@ -6250,6 +6265,13 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_testAoAppliedWeight = info.aoAppliedWeight;
     g_testAoGridShare = info.aoApplied ? info.aoGridShare : 0.0f;
+    {
+        const float d[15] = {info.aoApplied ? info.aoAppliedWeight : 0.0f, g_testAoGridShare, info.aoYawDeg, info.aoGridYawDeg,
+                             info.aoPitchInDeg, info.aoSpineYawDeg, info.aoHeadChestInDeg, info.aoHeadChestGridDeg,
+                             info.aoHeadChestOutDeg, in.neutralAoYawDeg, in.neutralAoPitchDeg, in.neutralAoWeight,
+                             info.aoWeight, in.haveAim ? 1.0f : 0.0f, info.aoSrcYawDeg};
+        std::copy_n(d, 15, g_testAoDiag);
+    }
 #endif
     TravYawBackLocked(b, dt); // UTPP-MOTION SEAM trav: verifier round 2, handback turn of the last montage root yaw
     g_airDiag.landBypassArmed = bypassArmed;

@@ -140,6 +140,10 @@ inline constexpr float kAimSpineYawClampDeg = 60.0f;
 // aiming sessions and only added lag.
 inline constexpr float kNeutralGridWeightSpeed = 0.0f;
 inline constexpr float kNeutralGridHeadWeightSpeed = 0.0f;
+// Catch-up rate of the aim offset yaw (deg/s, AimSpineYawFilter) on a neutral-only frame with the grid: the grid turns the head about
+// 1.5 deg per deg of yaw (neck, head and the chest of its samples), so the side change of the clamp behind the back (120 deg of yaw)
+// at the aiming rate (480 deg/s = 8 deg/frame) swung the head 12-18 deg per frame at 60 fps; 300 deg/s keeps it near 8.
+inline constexpr float kNeutralGridYawRateDegPerSec = 300.0f;
 
 // Fix batch 2 (AO) x reload contacts: the stationary pistol reload puts the hands and the weapon on the absolute NATIVE model
 // positions (NativeReloadContactsRuntime FinishCore) while Spine..Spine3 stay MM. An aim offset that keeps tilting the MM torso
@@ -227,6 +231,7 @@ struct FrameInfo
     float aoGridShare = 0.0f;
     float aoGridYawDeg = 0.0f;
     float aoSpineYawDeg = 0.0f;
+    float aoSrcYawDeg = 0.0f; // raw yaw the aim offset filter was stepped with (the frame of the drawn root)
     // head-vs-chest yaw (deg, + = left, ov::HeadChestYawDeg) on a grid frame: before the grid, after it, after the total cap
     float aoHeadChestInDeg = 0.0f;
     float aoHeadChestGridDeg = 0.0f;
@@ -1649,6 +1654,7 @@ private:
         const bool srcHave = neutralOnly ? true : aIn.haveAim;
         const float srcYaw = neutralOnly ? aIn.neutralAoYawDeg : aIn.aimYawDeg;
         const float srcPitch = neutralOnly ? aIn.neutralAoPitchDeg : aIn.aimPitchDeg;
+        aInfo.aoSrcYawDeg = srcYaw;
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 3
         constexpr float kYawClampDeg = 360.0f; // mutation 3: no clamp
 #else
@@ -1657,8 +1663,9 @@ private:
         AimSpineYawFilter::Output ao;
         // world aim target (default off): the angles were recomputed from the world direction for this root, the jump band ran on it
         const bool worldTracked = !neutralOnly && aIn.aimSmoothDeltaValid;
+        const float yawRate = neutralOnly && m_gridReady ? kNeutralGridYawRateDegPerSec : kAoYawRateDegPerSec;
         const bool have = m_aoFilter.Step(srcHave, a, srcYaw, srcPitch, aDt, kYawClampDeg,
-                                          aIn.machine.overlay == ov::PoseOverlay::Rifle ? 1 : 0, aIn.aoSuppress, ao, worldTracked);
+                                          aIn.machine.overlay == ov::PoseOverlay::Rifle ? 1 : 0, aIn.aoSuppress, ao, worldTracked, yawRate);
         if (!have || a <= ov::kZeroWeight)
             return neutralOnly;
         float alpha = ao.release < 1.0f ? std::min(a, ao.release) : a; // = a bit for bit while a target drives the AO
