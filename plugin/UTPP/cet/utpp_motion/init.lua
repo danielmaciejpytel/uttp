@@ -42,6 +42,9 @@
 --                  in play; the movement direction is unchanged; off while aiming / during weapon actions (native
 --                  UTPPSetMotionBodyYawOffsets(female, male), both values in one call). Replace mm.bodyYawOffset (one value for both
 --                  bodies): utpp_core moves a stored value to mm.bodyYawOffsetFemale on load; male V starts at 0.
+--   mm.capsuleForecast bool, default false (DLL default off) - the predicted path of the movement also ramps at the game's own
+--                  acceleration when V starts away from the facing, with a partly tilted stick or while the camera turns (the
+--                  straight full-stick start already does); developer option (native UTPPSetMMCapsuleForecast).
 --   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
@@ -88,7 +91,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
   strideWarp = true }
 -- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -904,6 +907,7 @@ M.OPTIONS = {
   { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
   { want = "stepDownReach", field = "setStepDownReach", native = "UTPPSetMMStepDownReach" },
   { want = "farJumpGravity", field = "setFarJumpGravity", native = "UTPPSetMMFarJumpGravity" },
+  { want = "capsuleForecast", field = "setCapsuleForecast", native = "UTPPSetMMCapsuleForecast" },
   { want = "leanCoverage", field = "setLeanCoverage", native = "UTPPSetMotionLeanCoverage",
     arg = function(v) return v == "wide" and 1 or 0 end },
   { want = "strideWarp", field = "setStrideWarp", native = "UTPPSetMMStrideWarp" },
@@ -1078,6 +1082,10 @@ function M.RegisterSettings(core)
     label = "motion: jump timing for the game gravity (experimental)",
     desc = "Picks the jump and fall animations by the time left until landing as if under the gravity the animations were made for, so landings start on time. Takes effect after the next load of a save. Off (default) = the earlier timing.",
     apply = function(v) M.SetOption("farJumpGravity", v == true) end })
+  core.Register({ key = "mm.capsuleForecast", section = "motion", type = "bool", default = false,
+    label = "motion: predicted path for turning starts (experimental)",
+    desc = "The animation choice predicts the path of a start at the game's own acceleration also when V starts away from the facing, with a partly tilted stick or while the camera turns. Off (default) = only straight full-stick starts use it.",
+    apply = function(v) M.SetOption("capsuleForecast", v == true) end })
   core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
     choices = { { "standard", "Standard" }, { "wide", "Wide" } },
     label = "motion: lean coverage",

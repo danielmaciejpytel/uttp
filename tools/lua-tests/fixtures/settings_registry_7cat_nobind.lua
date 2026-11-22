@@ -109,6 +109,7 @@ return {
     ["mm.airSteer"] = "true",
     ["mm.bodyYawOffsetFemale"] = "4",
     ["mm.bodyYawOffsetMale"] = "0",
+    ["mm.capsuleForecast"] = "false",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
@@ -290,6 +291,7 @@ return {
     "native UTPPSetMMHandBackBlend(false)",
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
+    "native UTPPSetMMCapsuleForecast(false)",
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
     "apply mm.strideWarp(true,\"ok\")",
@@ -312,6 +314,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -512,6 +515,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -1586,6 +1590,14 @@ return {
       ["step"] = 0.5,
       ["type"] = "float"
     },
+    ["mm.capsuleForecast"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.climbRelease"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -2377,6 +2389,7 @@ return {
     ["mm.airSteer"] = "true",
     ["mm.bodyYawOffsetFemale"] = "4",
     ["mm.bodyYawOffsetMale"] = "0",
+    ["mm.capsuleForecast"] = "false",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
@@ -2582,6 +2595,7 @@ return {
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
+    "mm.capsuleForecast",
     "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
@@ -2770,6 +2784,7 @@ return {
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
+    "mm.capsuleForecast",
     "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
@@ -2948,6 +2963,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -3136,6 +3152,7 @@ mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
+mm.capsuleForecast=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -3399,6 +3416,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.handBackBlend",
       "mm.stepDownReach",
       "mm.farJumpGravity",
+      "mm.capsuleForecast",
       "mm.leanCoverage",
       "mm.selectionGuards",
       "mm.debug"
@@ -3574,6 +3592,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.airSteer"] = "true",
     ["mm.bodyYawOffsetFemale"] = "4",
     ["mm.bodyYawOffsetMale"] = "0",
+    ["mm.capsuleForecast"] = "false",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"alt_db\"",
     ["mm.debug"] = "false",
@@ -3748,6 +3767,7 @@ mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
+mm.capsuleForecast=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -3930,6 +3950,7 @@ other.module=42\r\
     "/utpp/motion|switch|mm.handBackBlend",
     "/utpp/motion|switch|mm.stepDownReach",
     "/utpp/motion|switch|mm.farJumpGravity",
+    "/utpp/motion|switch|mm.capsuleForecast",
     "/utpp/motion|selector|mm.leanCoverage",
     "/utpp/motion|switch|mm.selectionGuards",
     "/utpp/motion|switch|mm.debug",
