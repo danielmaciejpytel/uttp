@@ -1128,6 +1128,13 @@ target_compile_features(utpp_mm_footlock_pelvis_test PRIVATE cxx_std_20)
 target_compile_options(utpp_mm_footlock_pelvis_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_mm_footlock_pelvis_test COMMAND utpp_mm_footlock_pelvis_test "${UTPP_MMDB_TEST_FILE}")
 
+# ---- body height smoothing on uneven ground (mm/BodyHeightFilter.hpp, mm/BodyHeightRuntime.hpp; option, default off), 30 / 60 / 144 Hz ----
+add_executable(utpp_mm_loco_body_height_test tests/BodyHeightFilterTest.cpp src/BaseDatabase.hpp
+  src/mm/BodyHeightFilter.hpp src/mm/BodyHeightRuntime.hpp src/mm/LegIk.hpp)
+target_compile_features(utpp_mm_loco_body_height_test PRIVATE cxx_std_20)
+target_compile_options(utpp_mm_loco_body_height_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_mm_loco_body_height_test COMMAND utpp_mm_loco_body_height_test "${UTPP_MMDB_TEST_FILE}")
+
 # ---- live pose history (mm/LivePoseHistory.hpp; MotionDriver SetLivePoseHistory, off by default) ----
 if(DEFINED _utpp_nlr_base AND EXISTS "${_utpp_nlr_base}.utppmm" AND EXISTS "${_utpp_nlr_base}.chooser.json")
   add_executable(utpp_mm_live_pose_history_test tests/LivePoseHistoryTest.cpp src/mm/LivePoseHistory.hpp src/mm/ExitPoseHistory.hpp)

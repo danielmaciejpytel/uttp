@@ -30,6 +30,7 @@
 #include "PoseHook.hpp"
 #include "EarlyPoseRuntime.hpp"
 #include "mm/AimOffsetRuntime.hpp"
+#include "mm/BodyHeightRuntime.hpp"
 #include "mm/MeleeAimRuntime.hpp"
 #include "mm/MeleeBaseRuntime.hpp"
 #include "mm/MeleePoseRuntime.hpp"
@@ -76,6 +77,72 @@ void ApplyGunBashWrist(uint8_t* bones, uint32_t aCount, uint64_t aMergedRig, con
     mm::reload_contacts_runtime::ApplyGunBashWristLimit(cfg, aMergedRig, bones, aCount, bash, g_gunBashWrist, aNow, util::QpcFrequency());
 }
 } // namespace
+
+namespace
+{
+constexpr uint32_t kEntityTransformOff = 0xB0;   // entEntity transformComponent (SDK entEntity.hpp; input/GameLook.cpp)
+constexpr uint32_t kPlacedWorldPosZOff = 0xE8;   // IPlacedComponent worldTransform (0xE0) position z, FixedPoint (bits / 131072)
+
+// No C++ objects with destructors in the SEH helpers.
+bool SehReadWorldZ(uintptr_t aComponent, float* aOut)
+{
+    __try
+    {
+        const int32_t bits = *reinterpret_cast<const volatile int32_t*>(aComponent + kPlacedWorldPosZOff);
+        *aOut = static_cast<float>(bits) / 131072.0f;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+uintptr_t SehTransformComponent(void* aPlayer)
+{
+    __try
+    {
+        return *reinterpret_cast<const uintptr_t*>(static_cast<const uint8_t*>(aPlayer) + kEntityTransformOff);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return 0;
+    }
+}
+} // namespace
+
+void ApplyBodyHeight(mm::integ::PoseSnapshot& aSnapshot, int64_t aNow)
+{
+    if (!mm::bodyheight::rt::Enabled())
+        return;
+    const uintptr_t comp = mm::bodyheight::rt::TransformSource();
+    float z = 0.0f;
+    const bool haveZ = comp != 0 && SehReadWorldZ(comp, &z);
+    const float off = mm::bodyheight::rt::Step(aNow, util::QpcFrequency(), haveZ, z);
+    mm::bodyheight::rt::ApplyToSnapshot(aSnapshot, off);
+}
+
+void BodyHeightOnFeed(void* aPlayer, float aFeedZ, bool aTrace, void (*aLog)(const char*))
+{
+    namespace bh = mm::bodyheight::rt;
+    bh::SetTransformSource(aPlayer ? SehTransformComponent(aPlayer) : 0);
+    const uint32_t frames = bh::g_stepsSinceFeed.exchange(0, std::memory_order_relaxed);
+    if (!aTrace || !aLog)
+        return;
+    // Timing probe: drawZ is the height the last animation frame before this feed read (the frame drawn after the previous feed).
+    // drawZ == this feedZ: the body is drawn at the capsule after the movement (the next feed's height); drawZ == the previous line's
+    // feedZ: drawn at the height the previous feed read.
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    const int64_t tps = util::QpcFrequency();
+    const double ageMs = double(now.QuadPart - bh::g_drawTicks.load(std::memory_order_relaxed)) * 1000.0 / double(tps);
+    char line[256];
+    std::snprintf(line, sizeof(line), "UTPP BHZ t=%.6f feedZ=%.5f drawZ=%.5f drawAgeMs=%.2f frames=%u off=%.5f gate=0x%X steps=%llu noSrc=%llu",
+                  double(now.QuadPart) / double(tps), double(aFeedZ), double(bh::g_drawZ.load(std::memory_order_relaxed)), ageMs, frames,
+                  double(bh::g_offset.load(std::memory_order_relaxed)), bh::g_gate.load(std::memory_order_relaxed),
+                  static_cast<unsigned long long>(bh::g_steps.load(std::memory_order_relaxed)),
+                  static_cast<unsigned long long>(bh::g_noSource.load(std::memory_order_relaxed)));
+    aLog(line);
+}
 
 uint32_t ApplyPoseSnapshot(void*, uint8_t* aDesc, uint8_t* bones, uint32_t aCount,
                            uint64_t aMergedRig, const mm::integ::PoseSnapshot& snap, int64_t aNow)
@@ -406,6 +473,7 @@ void ApplyMotionMatching(uint8_t* aDesc, void* aRig, uint32_t aCount, int64_t aN
         return;
     }
     auto* bones = *reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff);
+    ApplyBodyHeight(snap, aNow);
     ApplyPoseSnapshot(nullptr, aDesc, bones, aCount, reinterpret_cast<uint64_t>(aRig), snap, aNow);
     // The game filled the shadow skeleton from the main bones before this write; set it again from the written pose. The published
     // writer mark is set once the pose passed every gate (third person, weight > 0, rig, age), also when the blend itself was fully

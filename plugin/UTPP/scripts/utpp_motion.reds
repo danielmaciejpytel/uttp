@@ -99,6 +99,8 @@ public native func UTPPSetMotionLeanParams(scale: Float, headScale: Float) -> Bo
 // external pose, deeper step-down reach, jump flight time under the game gravity (read when the motion database loads) and
 // the lean coverage (0 = unarmed running only, 1 = also with a weapon drawn, while aiming and crouched; false = out of range).
 public native func UTPPSetMMPelvisPlacement(on: Bool) -> Void
+// Smooths the drawn pelvis height on uneven ground; the feet stay where they are (off by default).
+public native func UTPPSetMMBodyHeightSmooth(on: Bool) -> Void
 public native func UTPPSetMMHandBackBlend(on: Bool) -> Void
 public native func UTPPSetMMStepDownReach(on: Bool) -> Void
 public native func UTPPSetMMFarJumpGravity(on: Bool) -> Void

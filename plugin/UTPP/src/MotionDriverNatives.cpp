@@ -23,6 +23,7 @@
 namespace utpp::motionhost
 {
 void SetPelvisPlacement(bool aOn); // MotionHost.cpp
+void SetBodyHeightSmooth(bool aOn); // MotionHost.cpp
 void SetAirStepDownReach(bool aOn); // MotionHost.cpp
 }
 namespace utpp::motiondriver
@@ -496,6 +497,15 @@ void Native_SetMMPelvisPlacement(RED4ext::IScriptable*, RED4ext::CStackFrame* aF
     aFrame->code++;
     motionhost::SetPelvisPlacement(v);
 }
+// body height smoothing on uneven ground (mm/BodyHeightRuntime.hpp; CET utpp_motion mm.bodyHeightSmooth, default off)
+void Native_SetMMBodyHeightSmooth(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    motionhost::SetBodyHeightSmooth(v);
+    pluginlog::LogInfo("UTPPSetMMBodyHeightSmooth(%d) -> 1", v ? 1 : 0);
+}
 void Native_SetMMHandBackBlend(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     bool v = false;
@@ -728,6 +738,8 @@ void RegisterNatives()
     // optional motion behaviours (default off)
     auto* o1 = RED4ext::CGlobalFunction::Create("UTPPSetMMPelvisPlacement", "UTPPSetMMPelvisPlacement", &Native_SetMMPelvisPlacement);
     o1->flags = flags; o1->AddParam("Bool", "on"); rtti->RegisterFunction(o1);
+    auto* o1b = RED4ext::CGlobalFunction::Create("UTPPSetMMBodyHeightSmooth", "UTPPSetMMBodyHeightSmooth", &Native_SetMMBodyHeightSmooth);
+    o1b->flags = flags; o1b->AddParam("Bool", "on"); rtti->RegisterFunction(o1b);
     auto* o2 = RED4ext::CGlobalFunction::Create("UTPPSetMMHandBackBlend", "UTPPSetMMHandBackBlend", &Native_SetMMHandBackBlend);
     o2->flags = flags; o2->AddParam("Bool", "on"); rtti->RegisterFunction(o2);
     auto* o3 = RED4ext::CGlobalFunction::Create("UTPPSetMMStepDownReach", "UTPPSetMMStepDownReach", &Native_SetMMStepDownReach);

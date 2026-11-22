@@ -18,6 +18,14 @@ void RdFkTraceSetBones(int32_t aHips, int32_t aHead, int32_t aFoot);
 uint32_t ApplyPoseSnapshot(void* aUser, uint8_t* aDesc, uint8_t* aBones, uint32_t aCount,
                            uint64_t aMergedRig, const mm::integ::PoseSnapshot& aSnapshot, int64_t aNow);
 
+// Body height smoothing (mm/BodyHeightRuntime.hpp; option, default off). Animation thread, right before ApplyPoseSnapshot on the
+// caller's local snapshot: reads the player's world height now (transform component, SEH guarded), steps the tracker once per frame
+// and moves the pelvis of aSnapshot (legs solved back to their ankles). Off: one relaxed load.
+void ApplyBodyHeight(mm::integ::PoseSnapshot& aSnapshot, int64_t aNow);
+// Game thread, after each feed while the option is on: caches the player's transform component for the animation thread and, with
+// mm.trace on, logs the timing probe line (feed height next to the height the last animation frame read).
+void BodyHeightOnFeed(void* aPlayer, float aFeedZ, bool aTrace, void (*aLog)(const char*));
+
 // Shadow skeleton of the player pose: 26 shadow_* bones in their own hierarchy, filled by the game from the main bones in a merge
 // pass that runs before the FK owner's write. After the FK owner's write the shadow bones are set again from the main bones, so the
 // shadow follows the written pose: shadow_X = X for 24 bones with the same parent chain, and shadow_ToeBase = Heel * ToeBase (the

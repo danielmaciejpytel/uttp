@@ -45,6 +45,7 @@
 #include "input/Locomotion.hpp"
 #include "mm/AimOffset.hpp"
 #include "mm/AimOffsetRuntime.hpp"
+#include "mm/BodyHeightRuntime.hpp" // body height smoothing option (feed-side transform source)
 #include "mm/MeleeAimRuntime.hpp" // melee aim tilt (2026-11-09)
 #include "mm/MeleeBaseRuntime.hpp" // melee chest base correction (2026-11-13)
 #include "mm/MeleePoseRuntime.hpp" // melee full pose
@@ -3167,6 +3168,9 @@ void Native_FeedLocomotion(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, 
     }
     utpp::motiondriver::FeedAirFromInput(in); // UTPP-MOTION SEAM air: UTPPFeedAir fields -> one-shot v2 AirFeed of this feed's Step (v2 mutex only; v1 untouched)
     motionhost::Feed(in);
+    if (utpp::mm::bodyheight::rt::Enabled()) // body height smoothing (option, default off): player transform for the animation thread
+        BodyHeightOnFeed(GetPlayerEntityRaw(), in.haveExtra ? in.capsulePos[2] : std::nanf(""),
+                         g_hot.timing.load(std::memory_order_relaxed), &MMTraceLog);
     aimofs::OnFeed(tpp, static_cast<uint32_t>(psmBlock)); // 0.6.3 aim offset guards (UpperBody, melee, vehicle, TPP)
     utpp::gamelook::OnFeed((static_cast<uint32_t>(psmBlock) & mm::integ::kPsmVehicle) != 0, tpp); // vehicle edge look zeroing
 }

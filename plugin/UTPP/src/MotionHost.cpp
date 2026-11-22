@@ -55,6 +55,7 @@
 #include "mm/Steering.hpp"
 #include "mm/Strafe.hpp"
 #include "ragdoll/RagdollEpisode.hpp" // ragdoll episode: game-owned feed
+#include "mm/BodyHeightRuntime.hpp" // body height smoothing (option, default off): gate + leg rig for the animation-thread stage
 #include "mm/VehicleTransition.hpp" // vehicle batch W1 P2: mount pop / exit hand-in (CAR-5 / MOTO-3, MOTO-6 / CAR-1 step 5)
 
 namespace utpp::motionhost
@@ -1460,6 +1461,13 @@ bool InitMatcherLocked()
     }
     if (ok)
         g_offsetRoot.Init(g_db, g_cfg.firstBodyBone, EffectiveOffsetCfgLocked()); // optional: failure = 0.3.2 pose path
+    {
+        // leg chains for the body height stage (animation thread); an invalid rig leaves the stage without effect
+        bodyheight::LegRig legRig;
+        if (!(ok && legRig.Init(g_db)))
+            legRig = bodyheight::LegRig{};
+        bodyheight::rt::PublishRig(legRig);
+    }
     if (ok)
         g_stanceGuard.Init(g_db, g_stanceCfg); // optional (0.3.6): failure = 0.3.5 pose path
     return ok;
@@ -1515,6 +1523,12 @@ struct LegContext
 LegContext g_legCtx; // last feed (status / tests)
 bool g_pelvisPlacementOn = false; // pelvis stage of the foot locker (false = the leg tail without it; default off until its pops are resolved)
 uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis stage
+// Body height smoothing (mm/BodyHeightRuntime.hpp; option, default off): the stage runs on the animation thread with the drawn height;
+// the feed only publishes its gate (ground locomotion of this feed) and a reset request (teleport, hand-back).
+bool g_bodyHeightOn = false;
+bool g_bodyHeightAllowed = false; // set by the leg pipeline of this feed
+bool g_bodyHeightReset = false;   // consumed by the next publish
+uint64_t g_bodyHeightTeleports = 0;
 
 LegContext ComputeLegContextLocked(const FeedInput& aIn, float aCapsuleSpeed)
 {
@@ -1663,6 +1677,7 @@ void MotionHandbackLocked() // UTPP-MOTION SEAM
     if (!g_motionHeldMatcher) // UTPP-MOTION SEAM
         return; // UTPP-MOTION SEAM
     g_motionHeldMatcher = false; // UTPP-MOTION SEAM
+    g_bodyHeightReset = g_bodyHeightOn; // body height smoothing restarts at the hand-back
     g_airHoldGroundReplantLeft = 0.0f; // never carry a v1 landing-step policy across v2 ownership
     g_airLandGroundBlendLeft = 0.0f; // never blend a cached v1 Land pose across an independently owned v2 span
     g_airLandGroundBlendPending = false;
@@ -1913,6 +1928,18 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
         pose = g_footLock.Output();
     }
     g_legPipelineOutput = pose;
+    if (g_bodyHeightOn)
+    {
+        // body height smoothing gate: ground locomotion (gate open, no hold, grounded, stand / crouch / sprint, small vz), not a traversal
+        // frame, third person; an offset-root teleport restarts the tracker
+        g_bodyHeightAllowed = aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && g_motionFrame.travFrame) && aIn.tppActive;
+        const uint64_t tp = g_offsetRoot.Diagnostics().teleports;
+        if (tp != g_bodyHeightTeleports)
+        {
+            g_bodyHeightTeleports = tp;
+            g_bodyHeightReset = true;
+        }
+    }
 }
 
 // Crossfade the pose before StanceGuard / FootLocker so both feet are solved against the final Hips pose.
@@ -1972,6 +1999,11 @@ void PublishLocked(float aWeight)
     g_snap.rig = g_rig;
     g_snap.publishTicks = Qpc();
     g_snap.sequence = ++g_publishes;
+    if (g_bodyHeightOn)
+    {
+        bodyheight::rt::PublishGate(g_bodyHeightAllowed && aWeight > 0.0f, g_bodyHeightReset);
+        g_bodyHeightReset = false;
+    }
     // Restore v1's canonical mask on every publish: v2 may replace the mask in this reused snapshot
     // (e.g. arms-only Reload). Its previous frame must not change later Aim or v2 -> v1 ownership.
     std::memcpy(g_snap.upperBits, g_upperMask.bits, sizeof g_snap.upperBits);
@@ -3746,6 +3778,7 @@ void Feed(const FeedInput& aRawIn)
     }
     const FeedInput& aRaw = ragdollFeed ? *ragdollFeed : aRawIn;
     std::lock_guard lock(g_mutex);
+    g_bodyHeightAllowed = false; // set again by the leg pipeline of this feed
     if (aRawIn.synthetic && g_synthGuardOn)
     {
         g_synthGuardOn = false;
@@ -7303,6 +7336,17 @@ void SetPelvisPlacement(bool aOn)
 {
     std::lock_guard lock(g_mutex);
     g_pelvisPlacementOn = aOn; // read at the next feed
+}
+
+void SetBodyHeightSmooth(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    if (g_bodyHeightOn != aOn)
+        g_bodyHeightReset = aOn;
+    g_bodyHeightOn = aOn;
+    bodyheight::rt::SetEnabled(aOn); // the animation-thread stage restarts its tracker on every toggle
+    if (aOn)
+        bodyheight::rt::PublishGate(false, true);
 }
 
 void SetAirStepDownReach(bool aOn)

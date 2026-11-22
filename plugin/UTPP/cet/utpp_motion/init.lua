@@ -42,6 +42,9 @@
 --                  in play; the movement direction is unchanged; off while aiming / during weapon actions (native
 --                  UTPPSetMotionBodyYawOffsets(female, male), both values in one call). Replace mm.bodyYawOffset (one value for both
 --                  bodies): utpp_core moves a stored value to mm.bodyYawOffsetFemale on load; male V starts at 0.
+--   mm.bodyHeightSmooth bool, default false (DLL default off) - the drawn pelvis height follows a smoothed ground height on
+--                  rough ground (offset -4 .. +0.5 cm, ground locomotion only); both legs are solved back to their ankles, so the feet
+--                  stay where they are (native UTPPSetMMBodyHeightSmooth).
 --   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
@@ -88,7 +91,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, bodyHeightSmooth = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
   strideWarp = true }
 -- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -901,6 +904,7 @@ M.OPTIONS = {
   { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 12 },
   { want = "neutralAim", field = "setNeutralAimOffset", native = "UTPPSetMMNeutralAimOffset" },
   { want = "pelvisPlacement", field = "setPelvisPlacement", native = "UTPPSetMMPelvisPlacement" },
+  { want = "bodyHeightSmooth", field = "setBodyHeightSmooth", native = "UTPPSetMMBodyHeightSmooth" },
   { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
   { want = "stepDownReach", field = "setStepDownReach", native = "UTPPSetMMStepDownReach" },
   { want = "farJumpGravity", field = "setFarJumpGravity", native = "UTPPSetMMFarJumpGravity" },
@@ -1066,6 +1070,10 @@ function M.RegisterSettings(core)
     label = "motion: pelvis follows the feet (experimental)",
     desc = "Lowers or shifts V's hips a little so that both feet can reach the ground on steps and slopes. Off (default) = the feet are placed without moving the hips.",
     apply = function(v) M.SetOption("pelvisPlacement", v == true) end })
+  core.Register({ key = "mm.bodyHeightSmooth", section = "motion", type = "bool", default = false,
+    label = "motion: smooth body height on uneven ground (experimental)",
+    desc = "Softens the small hops of the body when V runs over bumpy ground; the feet stay where they are. Off (default) = the body follows the ground height exactly.",
+    apply = function(v) M.SetOption("bodyHeightSmooth", v == true) end })
   core.Register({ key = "mm.handBackBlend", section = "motion", type = "bool", default = false,
     label = "motion: smooth hand-back (experimental)",
     desc = "When an animation of the game (a climb, a vault, a scene) hands V back to the motion animations, the body carries its last motion into the blend instead of starting from a still pose. Off (default) = the earlier blend.",

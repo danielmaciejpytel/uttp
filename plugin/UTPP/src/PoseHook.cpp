@@ -554,6 +554,7 @@ void ApplyEarlyMapping(void* aGraph, void* aContext, unsigned int aLod)
         view.outputCount = *reinterpret_cast<const uint32_t*>(desc + kDescCountOff);
         view.sourceNames = {reinterpret_cast<const uint64_t*>(names), sourceCount};
         view.pairs = {pairs, pairCount * 2u};
+        ApplyBodyHeight(snapshot, now.QuadPart);
         earlyruntime::EvaluateMapping(view, snapshot, now.QuadPart, &ApplyPoseSnapshot);
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
