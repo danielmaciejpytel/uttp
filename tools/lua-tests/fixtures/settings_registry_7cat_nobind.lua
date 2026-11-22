@@ -131,7 +131,7 @@ return {
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
-    ["mm.neutralAim"] = "false",
+    ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
@@ -285,7 +285,7 @@ return {
     "native UTPPSetMotionMinAnalogWalk(0.81999999999999995)",
     "apply mm.minWalkSpeed(0.81999999999999995,\"ok\")",
     "native UTPPSetMMAimWorldSmoothing(false,0)",
-    "native UTPPSetMMNeutralAimOffset(false)",
+    "native UTPPSetMMNeutralAimOffset(true)",
     "native UTPPSetMMPelvisPlacement(false)",
     "native UTPPSetMMHandBackBlend(false)",
     "native UTPPSetMMStepDownReach(false)",
@@ -307,7 +307,7 @@ return {
     "v2 setLeanParams(0.84999999999999998,0.90000000000000002)",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(false,\"ok\")",
-    "apply mm.neutralAim(false,\"ok\")",
+    "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
@@ -507,7 +507,7 @@ return {
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(false,\"ok\")",
-    "apply mm.neutralAim(false,\"ok\")",
+    "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
@@ -1775,7 +1775,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.neutralAim"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2399,7 +2399,7 @@ return {
     ["mm.leanScale"] = "0.84999999999999998",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
-    ["mm.neutralAim"] = "false",
+    ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
@@ -2943,7 +2943,7 @@ return {
     "apply mm.leanScale(0.84999999999999998,\"ok\")",
     "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
     "apply mm.aimWorldSmooth(false,\"ok\")",
-    "apply mm.neutralAim(false,\"ok\")",
+    "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
@@ -3042,7 +3042,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=3\r\
+core.defaultsRevision=4\r\
 core.settingsReset=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
@@ -3131,7 +3131,7 @@ mm.leanHead=true\r\
 mm.leanScale=0.85\r\
 mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=false\r\
-mm.neutralAim=false\r\
+mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
@@ -3596,7 +3596,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.leanScale"] = "1.1000000000000001",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "false",
-    ["mm.neutralAim"] = "false",
+    ["mm.neutralAim"] = "true",
     ["mm.orientWarp"] = "true",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
@@ -3654,7 +3654,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=3\r\
+core.defaultsRevision=4\r\
 core.settingsReset=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
@@ -3743,7 +3743,7 @@ mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=false\r\
-mm.neutralAim=false\r\
+mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\

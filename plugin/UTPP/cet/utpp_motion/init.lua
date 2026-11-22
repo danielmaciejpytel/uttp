@@ -88,7 +88,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = false, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
+  aimWorldSmooth = false, neutralAim = true, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, leanCoverage = "standard",
   strideWarp = true }
 -- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -895,7 +895,7 @@ function M.SetLeanHeadScale(v, api)
   return M.want.leanHeadScale
 end
 
--- Optional motion behaviours, all off in the DLL by default (their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
+-- Optional motion behaviours, off in the DLL by default except neutralAim (their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
 -- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
 M.OPTIONS = {
   { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 0 },
@@ -1058,9 +1058,10 @@ function M.RegisterSettings(core)
     label = "motion: steady aim while turning (experimental)",
     desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns. Off (default) = the earlier aim.",
     apply = function(v) M.SetOption("aimWorldSmooth", v == true) end })
-  core.Register({ key = "mm.neutralAim", section = "motion", type = "bool", default = false,
-    label = "motion: look with the camera in strafe (experimental)",
-    desc = "While V strafes or holds the shooter facing without aiming, the upper body turns and tilts towards the camera direction. Off (default) = the upper body follows the body.",
+  core.Register({ key = "mm.neutralAim", section = "motion", type = "bool", default = true,
+    label = "Head follows the camera",
+    desc = "In Shooter mode and while strafing without aiming, V's head and neck turn and tilt towards where the camera looks "
+      .. "(up to 45 degrees to the side); further round, the upper body turns with them. Off = the head stays with the body.",
     apply = function(v) M.SetOption("neutralAim", v == true) end })
   core.Register({ key = "mm.pelvisPlacement", section = "motion", type = "bool", default = false,
     label = "motion: pelvis follows the feet (experimental)",

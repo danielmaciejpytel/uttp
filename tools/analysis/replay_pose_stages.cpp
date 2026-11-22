@@ -96,6 +96,7 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
+float TestAoGridShare();
 }
 namespace utpp::motionhost
 {
@@ -110,7 +111,7 @@ constexpr const char* kMeta[] = {"t", "dt", "owned", "published", "tailed", "cli
                                  "lockL", "wL", "corrL_cm", "lockR", "wR", "corrR_cm", "playRate", "capX", "capY", "yawDeg",
                                  "mvx", "mvy", "loco", "rpPrepared", "rpCapDX", "rpCapDY", "rpCapDYaw", "rpAnimDX", "rpAnimDY",
                                  "rpAnimDYaw", "rpMovingGround", "rpMontage", "rpBeforeX", "rpBeforeY", "rpBeforeYaw", "rpAfterX", "rpAfterY",
-                                 "rpAfterYaw", "rpYawAhead"};
+                                 "rpAfterYaw", "rpYawAhead", "aoGrid"};
 constexpr size_t kMetaFloats = sizeof(kMeta) / sizeof(kMeta[0]);
 
 motionhost::MotionSetFrame g_tail;
@@ -896,7 +897,7 @@ int main(int argc, char** argv)
                                          float(rows[i].loco), rp.prepared ? 1.f : 0.f, rp.capsuleDelta[0], rp.capsuleDelta[1],
                                          rp.capsuleYawDelta, rp.animDelta[0], rp.animDelta[1], rp.animYawDelta, rp.movingGround ? 1.f : 0.f,
                                          rp.montage ? 1.f : 0.f, rp.before[0], rp.before[1], rp.before[2], rp.after[0], rp.after[1], rp.after[2],
-                                         rp.yawAhead};
+                                         rp.yawAhead, motiondriver::TestAoGridShare()};
         std::copy(meta, meta + kMetaFloats, rec.begin());
         std::fill(rec.begin() + kMetaFloats, rec.end(), std::nanf(""));
         if (g_tailValid && g_driverPose.size() == size_t(nb) * 7)

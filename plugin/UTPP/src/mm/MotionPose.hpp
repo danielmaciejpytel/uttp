@@ -133,6 +133,13 @@ struct OverlayFrameInputs
 // 90 deg neck twist: 60 deg [P], spread over Spine..Spine3 (OverlayFile spineYawBones).
 inline constexpr float kAimSpineYawClampDeg = 60.0f;
 
+// Neutral aim grid (no weapon target, ov::NeutralGridSpineYawDeg): sample weight smoothing of the grid, weight units per second
+// (ov::WeightSmoother; 0 = the bilinear weights of the filtered angles, unsmoothed), body and neck / head. Unsmoothed: the angles
+// already come through the aim offset filter and the neutral weight fade; 1.5 / 4 per second changed no pop count on the recorded
+// aiming sessions and only added lag.
+inline constexpr float kNeutralGridWeightSpeed = 0.0f;
+inline constexpr float kNeutralGridHeadWeightSpeed = 0.0f;
+
 // Fix batch 2 (AO) x reload contacts: the stationary pistol reload puts the hands and the weapon on the absolute NATIVE model
 // positions (NativeReloadContactsRuntime FinishCore) while Spine..Spine3 stay MM. An aim offset that keeps tilting the MM torso
 // (43-46 deg at pitch -60, head 1.46 m against the native 1.65 m) puts the weapon 0.2-0.3 m above the MM head. The aim offset
@@ -208,6 +215,15 @@ struct FrameInfo
     float aoYawDeg = 0.0f;   // clamped yaw spread over the spine bones (before the weight)
     float aoAppliedWeight = 0.0f; // fix batch 2: weight actually applied = min(aoWeight, latch release); < aoWeight while a lost target fades
     bool aoLatched = false;       // fix batch 2: the angles of this frame are the latched ones of a lost target
+    // neutral aim grid of this frame (no weapon target): share of the aim offset it took (0 = sweep only), its sample yaw (grid
+    // sense, capped) and the spine yaw (deg, before the weight) that actually turned the spine
+    float aoGridShare = 0.0f;
+    float aoGridYawDeg = 0.0f;
+    float aoSpineYawDeg = 0.0f;
+    // head-vs-chest yaw (deg, + = left, ov::HeadChestYawDeg) on a grid frame: before the grid, after it, after the total cap
+    float aoHeadChestInDeg = 0.0f;
+    float aoHeadChestGridDeg = 0.0f;
+    float aoHeadChestOutDeg = 0.0f;
     // motionfix item 6: distance LeftHand -> WeaponRight (m) of the published layered pose, -1 = not evaluated; steady =
     // one overlay pose key, one aim state and one base pose carry all the weight (no crossfade running)
     float leftHandToWeapon = -1.0f;
@@ -389,6 +405,7 @@ public:
                 if (on)
                     m_sweep[o][c] = m_ov->FindDelta(std::string("AO_") + on + (c ? "_Crouch_Sweep" : "_Stand_Sweep"));
             }
+        LoadNeutralGrid(sk);
         m_aoPre = std::make_unique<ov::Pose>();
         m_aoAdd = std::make_unique<ov::Additive>();
         m_aoA = std::make_unique<ov::Additive>();
@@ -975,10 +992,13 @@ private:
                 CaptureStageBones(*m_lay, aimBefore);
             // aim pitch plan 2026-10-30 B: closed barrel pitch loop on the sweep input + bounded residual (BarrelPitchLoop.hpp);
             // not engaged (loop off or no aim point, nothing left to fade) = the open-loop aim offset bit for bit
-            const bool barrelLoop = BarrelLoopBegin(aIn, info, aDt);
-            const bool aoNeutralOnly = ApplyAimOffset(sk, aIn, info, aDt, barrelLoop);
-            if (barrelLoop && !aoNeutralOnly)
-                ApplyBarrelLoop(sk, aIn, info, aDt, shootActive);
+            // a neutral-only frame (the neutral aim offset without an aim target) has no aim point for the loop: the bias and the
+            // residual fade out as after a lost point instead of ending in one frame at the aim exit
+            const bool aoNoPoint = NeutralOnlyFrame(aIn);
+            const bool barrelLoop = BarrelLoopBegin(aIn, info, aDt, aoNoPoint);
+            ApplyAimOffset(sk, aIn, info, aDt, barrelLoop);
+            if (barrelLoop)
+                ApplyBarrelLoop(sk, aIn, info, aDt, shootActive, aoNoPoint);
             if (aIn.capturePoseDiagnostics)
                 CaptureStageDelta(aimBefore, *m_lay, info.aimDelta);
 #endif
@@ -1373,6 +1393,107 @@ private:
         CaptureStageDelta(before, aAfter, aOut);
     }
 
+    // Neutral aim grid "M_Neutral_AO_Stand_X<yaw>_Y<pitch>" (yaw -90..90 x pitch -90..90, one-frame mesh-space deltas, grid index
+    // pitchIdx * 5 + yawIdx): decoded once. Missing samples (an older overlay pack) leave the grid off and the neutral aim offset on the
+    // sweep path. The head yaw of the samples at the cap sets the spine yaw ramp above it (ov::NeutralGridSpineYawDeg).
+    void LoadNeutralGrid(const ov::Skeleton& aSk)
+    {
+        static constexpr int kYaw[5] = {-90, -45, 0, 45, 90};
+        static constexpr int kPitch[3] = {-90, 0, 90};
+        m_gridReady = false;
+        m_grid = ov::AimOffsetGrid{};
+        m_gridState = ov::AimOffsetState{};
+        if (!m_gridSamples)
+            m_gridSamples = std::make_unique<ov::Additive[]>(15);
+        int head = -1, neck = -1, neck1 = -1;
+        m_gridChest = -1;
+        for (int k = 0; k < aSk.n; ++k)
+        {
+            const std::string_view nm = m_ov->BoneName(k);
+            if (nm == "Head")
+                head = k;
+            else if (nm == "Spine3")
+                m_gridChest = k;
+            else if (nm == "Neck")
+                neck = k;
+            else if (nm == "Neck1")
+                neck1 = k;
+            // the neck and the head follow the grid faster than the body (their own weight smoothing)
+            m_gridState.fastMask.n = aSk.n;
+            m_gridState.fastMask.w[k] = nm == "Neck" || nm == "Neck1" || nm == "Head" ? 1.0f : 0.0f;
+        }
+        m_gridHead = head;
+        m_gridNeckChain[0] = neck;
+        m_gridNeckChain[1] = neck1;
+        m_gridNeckChain[2] = head;
+        bool ok = head >= 0 && m_gridChest >= 0 && neck >= 0 && neck1 >= 0;
+        int gridFrame[15]{};
+        for (int p = 0; p < 3 && ok; ++p)
+            for (int y = 0; y < 5 && ok; ++y)
+            {
+                auto label = [](int v) { return v == 0 ? std::string("0") : (v > 0 ? "+" : "") + std::to_string(v); };
+                const int d = m_ov->FindDelta("M_Neutral_AO_Stand_X" + label(kYaw[y]) + "_Y" + label(kPitch[p]));
+                ok = d >= 0 && m_ov->DeltaAt(d).numFrames >= 1;
+                if (!ok)
+                    break;
+                ov::Additive& s = m_gridSamples[p * 5 + y];
+                m_ov->DeltaFrame(d, 0, true, s);
+                // the full grid pose of the sample (FRAM index of its target pose frame) for the head-vs-chest yaw
+                const auto& dr = m_ov->DeltaAt(d);
+                ok = dr.targetPose >= 0 && dr.targetPose < m_ov->NumPoses();
+                if (!ok)
+                    break;
+                gridFrame[p * 5 + y] = static_cast<int>(m_ov->PoseAt(dr.targetPose).firstFrame + dr.targetFirstFrame);
+                m_grid.samples[p * 5 + y] = &s;
+            }
+        if (!ok)
+        {
+            m_grid = ov::AimOffsetGrid{};
+            return;
+        }
+        // left turn (yaw > 0) samples grid yaw -cap, right turn +cap; pitch 0 row
+        m_gridHeadAtCap[0] = ov::NeutralGridHeadYawDeg(m_gridSamples[5 + 1].b[head].r);
+        m_gridHeadAtCap[1] = ov::NeutralGridHeadYawDeg(m_gridSamples[5 + 3].b[head].r);
+        // head-vs-chest reference (X0_Y0, faces mesh +Y) and the total cap: the head-vs-chest yaw of the grid poses at the cap
+        m_gridChestRef = m_ov->FrameMeshRot(gridFrame[5 + 2], m_gridChest);
+        m_gridHeadRef = m_ov->FrameMeshRot(gridFrame[5 + 2], head);
+        auto headChest = [&](int aIdx) {
+            return ov::HeadChestYawDeg(m_ov->FrameMeshRot(gridFrame[aIdx], m_gridChest), m_ov->FrameMeshRot(gridFrame[aIdx], head),
+                                       m_gridChestRef, m_gridHeadRef);
+        };
+        m_gridHeadChestCap[0] = headChest(5 + 1);  // left turn: grid yaw -45, > 0
+        m_gridHeadChestCap[1] = -headChest(5 + 3); // right turn: grid yaw +45, stored > 0
+        // the straight stance the limits count from: the neutral standing pose (the X0_Y0 grid pose has its own head turn)
+        const int stand = m_ov->FindPose("Pose_Neutral_Stand_Idle");
+        if (stand >= 0)
+        {
+            const int f = static_cast<int>(m_ov->PoseAt(stand).firstFrame);
+            m_gridHeadChestZero = ov::HeadChestYawDeg(m_ov->FrameMeshRot(f, m_gridChest), m_ov->FrameMeshRot(f, head), m_gridChestRef,
+                                                      m_gridHeadRef);
+        }
+        m_gridReady = stand >= 0 && std::isfinite(m_gridHeadAtCap[0]) && std::isfinite(m_gridHeadAtCap[1]) &&
+                      m_gridHeadChestCap[0] > 1.0f && m_gridHeadChestCap[1] > 1.0f && std::isfinite(m_gridHeadChestZero);
+    }
+
+public:
+    bool HasNeutralGrid() const { return m_gridReady; }
+    // head yaw (deg, + = left) of the grid at the cap for a turn to the left (aSide 0) / right (1)
+    float NeutralGridHeadAtCapDeg(int aSide) const { return m_gridHeadAtCap[aSide == 0 ? 0 : 1]; }
+    // total head-vs-chest yaw limit of the grid (deg, > 0) for a turn to the left (aSide 0) / right (1)
+    float NeutralGridHeadChestCapDeg(int aSide) const { return m_gridHeadChestCap[aSide == 0 ? 0 : 1]; }
+    // head-vs-chest yaw (deg) of the straight stance the limits count from (the neutral standing pose)
+    float NeutralGridHeadChestZeroDeg() const { return m_gridHeadChestZero; }
+    // head-vs-chest yaw (deg, + = left, ov::HeadChestYawDeg) of a pose in the overlay space (ToOv); 0 without the grid
+    float HeadChestYawOf(const ov::Pose& aPose) const
+    {
+        if (!m_gridReady)
+            return 0.0f;
+        math::Quat ms[ov::kMaxBones];
+        ov::MeshRotations(m_ov->Skel(), aPose, ms);
+        return ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
+    }
+
+private:
     // motionfix item 2 (report 3.11 / 3.12, motion ABP order): on the layered pose m_lay
     //   (a) OPB Aiming: the overlay's AO sweep at u = SweepTimeFromPitch(pitch) as a mesh-space additive, alpha = AimingWeight;
     //   (b) spine rotation (Enable_SpineRotation branch; the Aim poses carry SpineRot = 1): clamp(yaw, +-kAimSpineYawClampDeg)
@@ -1382,9 +1503,19 @@ private:
     // target is behind the back and the applied yaw moves at most kAoYawRateDegPerSec (no +60 -> -60 jump at +-180); a lost
     // target (haveAim false) keeps its last angles and fades out with the Aiming weight of the machine (alpha = min(a, release),
     // zero within kAoLatchMaxAgeSeconds) instead of ending the whole AO in one frame. aoSuppress (handback) fades it in 0.15 s.
-    // Returns true on a neutral-only frame (the neutral aim offset drives the angles, no aim target): no barrel loop then.
+    // Returns true on a neutral-only frame (the neutral aim offset drives the angles, no aim target; NeutralOnlyFrame): the barrel
+    // loop has no aim point then and fades out.
+    // The neutral aim offset drives this frame without an aim target (the rule of ApplyAimOffset, the machine of this evaluation).
+    bool NeutralOnlyFrame(const OverlayFrameInputs& aIn) const
+    {
+        const bool neutral = aIn.neutralAoWeight > 0.0f && std::isfinite(aIn.neutralAoWeight);
+        return neutral && !(aIn.haveAim && ov::Clamp01(m_machine.AimingWeight()) > ov::kZeroWeight);
+    }
+
     bool ApplyAimOffset(const ov::Skeleton& aSk, const OverlayFrameInputs& aIn, FrameInfo& aInfo, float aDt, bool aBarrel)
     {
+        const bool gridWasActive = m_gridActive; // the grid ran on the previous evaluation
+        m_gridActive = false;
         const float aimW = ov::Clamp01(m_machine.AimingWeight());
         aInfo.aoWeight = aimW;
         // The external (traversal montage) base never carries a latch: it had no AO without a target before.
@@ -1404,8 +1535,6 @@ private:
         const bool srcHave = neutralOnly ? true : aIn.haveAim;
         const float srcYaw = neutralOnly ? aIn.neutralAoYawDeg : aIn.aimYawDeg;
         const float srcPitch = neutralOnly ? aIn.neutralAoPitchDeg : aIn.aimPitchDeg;
-        if (neutralOnly)
-            aBarrel = false;
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 3
         constexpr float kYawClampDeg = 360.0f; // mutation 3: no clamp
 #else
@@ -1438,6 +1567,21 @@ private:
             return neutralOnly; // the reload has handed the upper body over: no AO, the layered pose stays untouched
         aInfo.aoAppliedWeight = alpha;
         aInfo.aoLatched = !ao.live;
+        // Neutral aim grid: the share g of the aim offset that the neutral weight holds over the Aiming weight. g = 0 without a neutral
+        // weight (the sweep + spine yaw path bit for bit); g = 1 with the neutral weight alone; in a hand-over both paths are crossfaded
+        // by the Aiming weight, so neither the entry nor the exit of an aim switches the layer in one frame.
+        float g = 0.0f;
+        if (neutral && m_gridReady)
+        {
+            const float gridPart = ov::Clamp01(aIn.neutralAoWeight) * (1.0f - aimW);
+#if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 22
+            g = neutralOnly ? 1.0f : 0.0f; // mutation 22: hard switch between the grid and the sweep path
+            (void)gridPart;
+#else
+            g = gridPart > ov::kZeroWeight ? gridPart / (aimW + gridPart) : 0.0f;
+#endif
+        }
+        aInfo.aoGridShare = g;
         std::memcpy(m_aoPre->b, m_lay->b, sizeof(ov::Xf) * static_cast<size_t>(aSk.n));
         aInfo.aoPitchInDeg = aInfo.aoPitchCmdDeg = ao.pitchDeg;
         if (aBarrel)
@@ -1490,15 +1634,62 @@ private:
                 ov::BlendAdditives(sweepSlots, sweepWeights, sweepCount, *m_aoAdd);
                 sweep = m_aoAdd.get();
             }
-            ov::ApplyAdditive(aSk, *m_lay, *sweep, alpha);
+            ov::ApplyAdditive(aSk, *m_lay, *sweep, g > 0.0f ? alpha * (1.0f - g) : alpha);
         }
         const float yaw = ao.yawDeg; // clamped to +-kAimSpineYawClampDeg by the filter
         aInfo.aoYawDeg = yaw;
+        // the spine yaw of the grid path: 0 up to the cap, above it the ramp to the full head turn at the spine yaw clamp
+        float spineYaw = yaw;
+        if (g > 0.0f)
+        {
+#if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 20
+            const float gy = -yaw; // mutation 20: no cap (the grid over the whole range, no spine yaw ramp)
+            const float ramp = 0.0f;
+#elif defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 21
+            const float gy = -ov::NeutralGridSampleYawDeg(yaw); // mutation 21: the grid sampled with the yaw sense of the spine
+            const float ramp = ov::NeutralGridSpineYawDeg(yaw, m_gridHeadAtCap[0], m_gridHeadAtCap[1], kAimSpineYawClampDeg);
+#else
+            const float gy = ov::NeutralGridSampleYawDeg(yaw);
+            const float ramp = ov::NeutralGridSpineYawDeg(yaw, m_gridHeadAtCap[0], m_gridHeadAtCap[1], kAimSpineYawClampDeg);
+#endif
+            aInfo.aoGridYawDeg = gy;
+            if (!gridWasActive)
+                m_gridState.Reset(); // a new grid episode starts at its target weights
+            m_gridActive = true;
+            // Total head-vs-chest cap: the clip's own head turn and the grid's never add up past what the grid alone gives at the
+            // 45 deg cap (counted from the neutral standing pose), or past the clip's own turn where the clip alone exceeds that
+            // (ov::NeutralGridHeadChestClampDeg). The excess is turned back about the chest's up axis, spread over Neck, Neck1 and
+            // Head, and handed to the spine yaw below, which turns the chest and the head together: the head keeps its direction
+            // and the neck its limit.
+            math::Quat ms[ov::kMaxBones];
+            ov::MeshRotations(aSk, *m_lay, ms);
+            const float hcIn = ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
+            m_gridState.Apply(aSk, *m_lay, m_grid, gy, ao.pitchDeg, alpha * g, aDt, kNeutralGridWeightSpeed, kNeutralGridHeadWeightSpeed);
+            ov::MeshRotations(aSk, *m_lay, ms);
+            const float hcGrid = ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
+#if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 23
+            const float hcOut = hcGrid; // mutation 23: no total cap (the clip's head turn adds to the grid's)
+#else
+            const float hcOut =
+                ov::NeutralGridHeadChestClampDeg(hcIn, hcGrid, m_gridHeadChestCap[0], m_gridHeadChestCap[1], m_gridHeadChestZero);
+#endif
+            if (hcOut != hcGrid)
+            {
+                const math::Quat c = math::QuatMul(ms[m_gridChest], math::QuatInv(m_gridChestRef));
+                const math::Vec3 up = math::QuatRotate(c, math::Vec3{0.0f, 0.0f, 1.0f});
+                ov::ApplyChainAxisTurn(aSk, *m_lay, m_gridNeckChain, 3, up, (hcOut - hcGrid) * math::kPi / 180.0f);
+            }
+            aInfo.aoHeadChestInDeg = hcIn;
+            aInfo.aoHeadChestGridDeg = hcGrid;
+            aInfo.aoHeadChestOutDeg = hcOut;
+            spineYaw = (1.0f - g) * yaw + g * ramp - (hcOut - hcGrid) / alpha; // alpha > 0 here (the early return above)
+        }
+        aInfo.aoSpineYawDeg = spineYaw;
         const ov::Regions& r = m_ov->Masks();
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 3
-        ov::ApplySpineYaw(aSk, *m_lay, r.spineYawBones, r.spineYawCount, alpha * yaw * math::kPi / 180.0f, 2.0f * math::kPi);
+        ov::ApplySpineYaw(aSk, *m_lay, r.spineYawBones, r.spineYawCount, alpha * spineYaw * math::kPi / 180.0f, 2.0f * math::kPi);
 #else
-        ov::ApplySpineYaw(aSk, *m_lay, r.spineYawBones, r.spineYawCount, alpha * yaw * math::kPi / 180.0f,
+        ov::ApplySpineYaw(aSk, *m_lay, r.spineYawBones, r.spineYawCount, alpha * spineYaw * math::kPi / 180.0f,
                           kAimSpineYawClampDeg * math::kPi / 180.0f);
 #endif
 #if !defined(UTPP_POSEV2_AO_MUTATION) || UTPP_POSEV2_AO_MUTATION != 2
@@ -1510,15 +1701,17 @@ private:
 
     // Aim pitch plan 2026-10-30 B (BarrelPitchLoop.hpp). Slots of this frame (overlay x stance of the machine pose keys x
     // style) and the bias command for the sweep. False = bypass (loop off or no aim point and nothing left to fade out).
-    bool BarrelLoopBegin(const OverlayFrameInputs& aIn, FrameInfo& aInfo, float aDt)
+    // aNoPoint: no aim point this frame whatever the inputs carry (a neutral-only frame): the loop only fades out.
+    bool BarrelLoopBegin(const OverlayFrameInputs& aIn, FrameInfo& aInfo, float aDt, bool aNoPoint)
     {
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 18
         (void)aIn;
         (void)aInfo;
         (void)aDt;
+        (void)aNoPoint;
         return false; // mutation 18: the loop never applies (open-loop aim offset)
 #else
-        const bool run = aIn.barrelLoop && aIn.haveAimPointVisual && math::IsFinite(aIn.aimPointVisual);
+        const bool run = !aNoPoint && aIn.barrelLoop && aIn.haveAimPointVisual && math::IsFinite(aIn.aimPointVisual);
         if (!run && m_barrel.Idle())
             return false;
         m_barrelSlotCount = 0;
@@ -1548,9 +1741,9 @@ private:
 
     // B1 measure after the aim offset, B2 learn, B3 residual about the lateral axis of the barrel (Spine2 / Spine3 share above
     // kBarrelSpineStartDeg, the rest at RightArm), B4 exclusions. The left hand is re-solved by the grip IK that follows.
-    void ApplyBarrelLoop(const ov::Skeleton& aSk, const OverlayFrameInputs& aIn, FrameInfo& aInfo, float aDt, bool aShot)
+    void ApplyBarrelLoop(const ov::Skeleton& aSk, const OverlayFrameInputs& aIn, FrameInfo& aInfo, float aDt, bool aShot, bool aNoPoint)
     {
-        const bool run = aIn.barrelLoop && aIn.haveAimPointVisual && math::IsFinite(aIn.aimPointVisual);
+        const bool run = !aNoPoint && aIn.barrelLoop && aIn.haveAimPointVisual && math::IsFinite(aIn.aimPointVisual);
         uint32_t ex = run ? 0u : static_cast<uint32_t>(kBarrelExNoPoint);
         if (m_barrel.ShotExcluded(aShot, aDt))
             ex |= kBarrelExShot;
@@ -2034,6 +2227,21 @@ private:
 #endif
     static constexpr int kOverlays = static_cast<int>(ov::PoseOverlay::Count);
     int m_sweep[kOverlays][2]{};
+    // neutral aim grid (LoadNeutralGrid): decoded samples, the grid view on them, its weight smoothing and the head yaw of the
+    // samples at the cap (left, right)
+    std::unique_ptr<ov::Additive[]> m_gridSamples;
+    ov::AimOffsetGrid m_grid;
+    ov::AimOffsetState m_gridState;
+    bool m_gridReady = false;
+    bool m_gridActive = false;
+    float m_gridHeadAtCap[2] = {0.0f, 0.0f};
+    // total head-vs-chest cap of the grid: Spine3, Head, the neck chain that takes the correction, the X0_Y0 reference mesh rotations
+    // and the limits (left, right; > 0)
+    int m_gridChest = -1, m_gridHead = -1;
+    int m_gridNeckChain[3] = {-1, -1, -1};
+    math::Quat m_gridChestRef{}, m_gridHeadRef{};
+    float m_gridHeadChestCap[2] = {0.0f, 0.0f};
+    float m_gridHeadChestZero = 0.0f;
     AimSpineYawFilter m_aoFilter; // fix batch 2 (AO): spine yaw continuity + latch of the last aim angles
     BarrelPitchLoop m_barrel;     // aim pitch plan 2026-10-30 B: closed barrel pitch loop (bias per slot + residual)
     static constexpr int kBarrelSlotMax = 6 * 3; // machine pose keys x styles

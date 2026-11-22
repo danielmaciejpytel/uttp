@@ -1,10 +1,13 @@
-// Optional aim options on the real driver path (both default off):
+// Optional aim options on the real driver path (world aim smoothing default off, neutral aim offset default on):
 //   1. world aim smoothing (SetAimWorldSmoothing): with a fixed aim target and a still body the smoothed direction converges, so the
 //      root-path aim offset yaw with the smoothing on equals the unsmoothed one within a small epsilon, and the smoothing delta is
 //      really carried (feeds with a delta > 0);
 //   2. neutral aim offset (SetNeutralAimOffset): in the shooter facing without an aim target the spine follows the camera through
 //      the aim offset (applied weight, yaw towards the camera side); turning the option off fades the applied weight out instead of
-//      cutting it in one frame.
+//      cutting it in one frame. The option is on by default and, with the neutral grid in the overlay pack, a frame without an aim
+//      target runs on the grid alone (grid share 1);
+//   3. a one-frame camera jerk without aiming: the world aim smoothing spreads the step of the neutral aim offset yaw (its own world
+//      filter) and converges to the unsmoothed yaw.
 #define main UnusedIntegrationMain
 #include "MotionDriverIntegrationTest.cpp"
 #undef main
@@ -13,6 +16,7 @@ namespace utpp::motiondriver
 {
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 float TestAoAppliedWeight();
+float TestAoGridShare();
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
 } // namespace utpp::motiondriver
@@ -120,6 +124,14 @@ int main(int argc, char** argv)
 
     // 2. neutral aim offset in the shooter facing, no aim target, camera to the right
     motiondriver::SetShooterMode(true);
+    uint64_t neutralBefore = 0;
+    motiondriver::TestAimOptionFeeds(neutralBefore, smoothFeeds);
+    Check(feed(180, right, false), "shooter facing without aiming owned (default options)");
+    motiondriver::TestAimOptionFeeds(neutralFeeds, smoothFeeds);
+    const float gridShare = motiondriver::TestAoGridShare();
+    std::printf("  neutral by default: feeds %llu, grid share %.3f\n", static_cast<unsigned long long>(neutralFeeds - neutralBefore), gridShare);
+    Check(neutralFeeds > neutralBefore, "the neutral aim offset is on by default");
+    Check(gridShare > 0.999f, "a frame without an aim target runs on the neutral grid");
     Check(motiondriver::SetNeutralAimOffset(true), "neutral aim offset on");
     Check(feed(180, right, false), "shooter facing without aiming owned");
     motiondriver::TestAimOptionFeeds(neutralFeeds, smoothFeeds);
@@ -137,6 +149,34 @@ int main(int argc, char** argv)
     std::printf("  neutral off: applied weight one frame later %.3f, 0.5 s later %.3f\n", wFirstOff, wLaterOff);
     Check(wFirstOff > 0.5f * wOn, "turning the option off fades the weight (no cut in one frame)");
     Check(wLaterOff == 0.0f, "the weight is gone after the fade");
+
+    // 3. a one-frame camera jerk of 12 deg in the shooter facing without aiming: unsmoothed the neutral aim offset yaw takes the whole
+    // step in that frame; with the world aim smoothing on (12 Hz) the step is spread over the next frames (< half in the first) and
+    // the yaw converges to the unsmoothed one.
+    const float jerkRad = -12.0f * 3.14159265f / 180.0f;
+    const float jerked[3] = {right[0] * std::cos(jerkRad) - right[1] * std::sin(jerkRad), right[0] * std::sin(jerkRad) + right[1] * std::cos(jerkRad),
+                             right[2]};
+    Check(motiondriver::SetNeutralAimOffset(true), "neutral aim offset on again");
+    const auto jerk = [&](float& aStep, float& aSettled) {
+        feed(180, right, false);
+        const float before = AoYaw();
+        feed(1, jerked, false);
+        aStep = AoYaw() - before;
+        feed(120, jerked, false);
+        aSettled = AoYaw();
+        feed(120, right, false);
+    };
+    float stepRaw = 0.0f, settledRaw = 0.0f, stepSmooth = 0.0f, settledSmooth = 0.0f;
+    jerk(stepRaw, settledRaw);
+    Check(motiondriver::SetAimWorldSmoothing(true, 12.0f), "world aim smoothing on (neutral)");
+    jerk(stepSmooth, settledSmooth);
+    Check(motiondriver::SetAimWorldSmoothing(false, 0.0f), "world aim smoothing off (neutral)");
+    std::printf("  neutral camera jerk 12 deg: first-frame aoYaw step raw %.2f, smoothed %.2f; settled %.3f / %.3f\n", stepRaw, stepSmooth,
+                settledRaw, settledSmooth);
+    Check(std::fabs(stepRaw) > 8.0f, "unsmoothed, the neutral aim offset yaw takes the camera jerk in one frame");
+    Check(std::fabs(stepSmooth) < 0.5f * std::fabs(stepRaw) && stepSmooth * stepRaw > 0.0f,
+          "world aim smoothing spreads the camera jerk of the neutral aim offset (less than half in the first frame)");
+    Check(std::fabs(settledSmooth - settledRaw) < 0.25f, "world aim smoothing: the neutral aim offset yaw converges to the unsmoothed one");
     motiondriver::SetShooterMode(false);
 
     motionhost::SetMotionHooks(nullptr);

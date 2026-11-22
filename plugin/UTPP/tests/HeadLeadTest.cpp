@@ -514,6 +514,56 @@ int main()
             }
         }
     }
+    // 8) measurement hold (Apply aMeasure false): while the lead is blocked and another layer (the neutral aim grid) turns the head,
+    // the filters keep their values, so the lead coming back corrects the clip's head as if that turn had never been measured; the
+    // learning variant comes back with a wound-up correction
+    {
+        Params PP = P;
+        PP.pathBlend = 1.0f;
+        const Skeleton skel = Sk();
+        HeadLead A, F, U; // clean pose throughout / turned pose held / turned pose learned
+        FaceRig clean, turned;
+        const float face[9] = {0, 0, 0, 0, 0, -10.0f, -10.0f, -10.0f, -10.0f};
+        float faceT[9];
+        std::memcpy(faceT, face, sizeof faceT);
+        faceT[8] += 40.0f; // the grid's head turn towards the camera
+        clean.Set(face);
+        turned.Set(faceT);
+        Signals s;
+        s.yawValid = true;
+        float heading = 0.0f;
+        float hpfHeld = 0.0f, heldDrift = 0.0f, maxDiffF = 0.0f, maxDiffU = 0.0f;
+        const int n1 = 120, n2 = 36, n3 = 60; // 2 s clean, 0.6 s blocked under the turn, 1 s back
+        for (int i = 0; i < n1 + n2 + n3; ++i)
+        {
+            heading += 180.0f * kDt;
+            s.vx = 3.8f * std::cos(heading * kRad);
+            s.vy = 3.8f * std::sin(heading * kRad);
+            s.yawDeg = heading - 90.0f - 30.0f;
+            const bool grid = i >= n1 && i < n1 + n2;
+            s.blocked = grid;
+            A.Step(PP, s, kDt);
+            F.Step(PP, s, kDt);
+            U.Step(PP, s, kDt);
+            FaceRig a = clean, f = grid ? turned : clean, u = grid ? turned : clean;
+            A.Apply(PP, skel, a.pose, 9, kDt);
+            F.Apply(PP, skel, f.pose, 9, kDt, !grid);
+            U.Apply(PP, skel, u.pose, 9, kDt);
+            if (i == n1)
+                hpfHeld = F.Tel().headVsPath;
+            if (grid)
+                heldDrift = std::fmax(heldDrift, std::fabs(F.Tel().headVsPath - hpfHeld));
+            if (i >= n1 + n2)
+            {
+                maxDiffF = std::fmax(maxDiffF, std::fabs(F.Corr() - A.Corr()));
+                maxDiffU = std::fmax(maxDiffU, std::fabs(U.Corr() - A.Corr()));
+            }
+        }
+        Check(heldDrift == 0.0f, "measurement hold: head-vs-path filter unchanged under the turned pose", heldDrift);
+        Check(maxDiffF < 0.5f, "measurement hold: the returning lead matches the clean run", maxDiffF);
+        Check(maxDiffU > 5.0f, "learning the turned pose winds the returning lead up (reference)", maxDiffU);
+        Check(std::fabs(A.Corr()) > 1.0f, "the clean run corrects (scenario check)", A.Corr());
+    }
     // 7) tuning validation
     Check(ValidTuning(14.0f, 22.0f) && ValidTuning(0.0f, 0.0f) && ValidTuning(45.0f, 45.0f), "valid tuning");
     Check(!ValidTuning(NAN, 22.0f) && !ValidTuning(14.0f, NAN) && !ValidTuning(-1.0f, 22.0f) && !ValidTuning(14.0f, 46.0f) &&

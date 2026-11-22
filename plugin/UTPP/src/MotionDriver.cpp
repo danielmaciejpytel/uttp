@@ -243,6 +243,9 @@ hlead::HeadLead g_hl;
 hlead::Skeleton g_hlSk;
 const void* g_hlSkBundle = nullptr;
 bool g_hlHaveApply = false;
+// the v2 pose of the last evaluation carries the neutral aim grid (its head turned towards the camera): the head lead's measurement
+// filters hold their values on such a pose (HeadLead::Apply aMeasure), so the lead does not come back fighting a turn that has ended
+bool g_poseGridHead = false;
 // Orientation warp (CET mm.orientWarp -> SetOrientWarp, default ON like the setting): mm/OrientWarp.hpp aligns the pelvis (extra visual
 // root yaw added to the provided root frame of the leg tail) and the torso (twist over Spine .. Spine3 of the tail's pose copy) with
 // the path of motion while V runs a circle. Step + Measure per v2 feed (StepLocked), applied in FrameLocked. OFF and idle (weight 0,
@@ -328,9 +331,15 @@ bool g_leanHeadSetting = true; // mm.leanHead (default ON like the setting): the
 lrt::Params g_leanParams;
 motionpose::WorldAimTargetParams g_worldAimParams; // SetAimWorldSmoothing (default off)
 motionpose::WorldAimTargetFilter g_worldAim;       // world aim direction of the aim offset while on
-// Neutral aim offset (SetNeutralAimOffset, default off): in a strafe / shooter facing without aiming the spine follows the camera
-// through the aim offset (mm/Strafe.hpp NeutralAoBlend). Off: the blend stays reset and OverlayFrameInputs::neutralAoWeight 0.
-utpp::mm::strafe::NeutralAoConfig g_neutralAoCfg;
+// world direction of the neutral aim offset while the world aim smoothing is on (its own state, the same parameters): a short camera
+// jerk does not jolt the head through the neutral aim grid
+motionpose::WorldAimTargetFilter g_neutralWorldAim;
+uint64_t g_stepSerial = 0, g_neutralWorldAimSerial = 0; // StepLocked calls; the call that last stepped g_neutralWorldAim
+// Neutral aim offset (SetNeutralAimOffset, CET mm.neutralAim, default ON like the setting): in a strafe / shooter facing without aiming
+// the head, neck and spine follow the camera through the neutral aim grid capped at 45 deg, the spine yaw finishing the turn above it
+// (mm/Strafe.hpp NeutralAoBlend, MotionPose ApplyAimOffset). Off: the blend stays reset and OverlayFrameInputs::neutralAoWeight 0.
+// Status " neutralAim=<on>/<grid loaded>": without the grid in the overlay pack the neutral weight drives the weapon sweep path.
+utpp::mm::strafe::NeutralAoConfig g_neutralAoCfg{true};
 utpp::mm::strafe::NeutralAoBlend g_neutralAo;
 float g_neutralAoPrevYawDeg = 0.0f;
 bool g_neutralAoPrevValid = false;
@@ -427,6 +436,7 @@ std::atomic<int64_t> g_testSteadyNs{-1}; // test targets only (never the DLL): >
 // test targets only: feeds that requested a neutral aim offset weight / a world aim smoothing delta (TestAimOptionFeeds)
 uint64_t g_testNeutralAoFeeds = 0, g_testAimSmoothFeeds = 0;
 float g_testAoAppliedWeight = 0.0f; // applied aim offset weight of the last evaluation
+float g_testAoGridShare = 0.0f;     // share of the neutral aim grid in that aim offset
 #endif
 int64_t SteadyNs()
 {
@@ -1970,6 +1980,8 @@ void SetEnabled(bool aOn)
     if (!aOn) g_authoredReload = false;
     if (!aOn) integ::g_gamePoseCaptureWanted.store(false, std::memory_order_relaxed);
     if (!aOn) { g_airLegsFade.Reset(); g_jumpOutArmsFade.Reset(); g_jumpOutWindowNow = false; }
+    // a new session starts without the neutral aim weight of the last one (the setting itself stays)
+    if (!aOn) { g_neutralAo.Reset(); g_neutralAoPrevValid = false; g_neutralAoPitchDeg = 0.0f; g_neutralWorldAim.Reset(); }
     if (!aOn) { ResetAuthoredRecoil(); g_weaponAction = 0; g_hipFirePoseHold.Reset(); g_jumpOutExitHold.Reset(); g_stationaryShotTurn.Reset(); g_reloadUpperWeight = 0.0f; g_reloadUpperEnv.Reset(); g_reloadRollHold.Reset(); g_slideDeRoll.Reset(); g_rifleSlideLatch.Reset(); g_slideCarryAim.Reset(); ResetMagTap(); g_reloadContactFade.Reset(); g_reloadContactEpisode.Reset(); g_reloadGirdleHold.Reset(); g_reloadContactsEligible = false; g_shootLastReadyValid = g_shootBaseValid = false; g_shootHold.Reset(); g_shootEpisode.Reset(); }
     if (g_enabled != aOn)
     {
@@ -2281,7 +2293,10 @@ bool SetAimWorldSmoothing(bool aOn, float aHz)
         return false;
     std::lock_guard lock(g_m);
     if (aOn != g_worldAimParams.enabled)
+    {
         g_worldAim.Reset();
+        g_neutralWorldAim.Reset();
+    }
     g_worldAimParams.enabled = aOn;
     g_worldAimParams.smoothHz = aHz;
     return true;
@@ -2593,6 +2608,11 @@ float TestAoAppliedWeight()
 {
     std::lock_guard lock(g_m);
     return g_testAoAppliedWeight;
+}
+float TestAoGridShare()
+{
+    std::lock_guard lock(g_m);
+    return g_testAoGridShare;
 }
 void TestSetMapStepDownReach(int32_t aOn)
 {
@@ -3276,6 +3296,23 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
         const float w = g_neutralAo.Step(n, g_neutralAoCfg, dt);
         g_neutralAoPrevValid = angles;
         g_neutralAoPrevYawDeg = ny;
+        // World aim smoothing (mm.aimWorldSmooth): the neutral direction is filtered in the world as the aim target's is (its own
+        // filter, the same rate and jump band), so a one-frame camera jerk reaches the grid and the head spread over the next frames;
+        // the blend above keeps the raw angles. Off, without a weight or under the game's upper body: no filter state.
+        const bool neutralSmooth = g_worldAimParams.enabled && !g_release && !handback && w > 0.0f && angles && std::isfinite(f.playerYawDeg);
+        // a step without these frame inputs in between (a montage / traversal frame) leaves a stale direction: start again
+        if (!neutralSmooth || g_neutralWorldAimSerial + 1 != g_stepSerial)
+            g_neutralWorldAim.Reset();
+        if (neutralSmooth)
+        {
+            g_neutralWorldAimSerial = g_stepSerial;
+            float wy = 0.0f, wp = 0.0f;
+            if (g_neutralWorldAim.Step(true, f.playerYawDeg + ny, np, dt, g_worldAimParams, wy, wp))
+            {
+                ny = motionpose::RootRelativeYawDeg(wy, f.playerYawDeg);
+                np = wp;
+            }
+        }
         if (w > 0.0f && angles)
         {
             in.neutralAoWeight = w;
@@ -3283,6 +3320,8 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
             in.neutralAoPitchDeg = np;
         }
     }
+    else
+        g_neutralWorldAim.Reset();
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_testNeutralAoFeeds += in.neutralAoWeight > 0.0f ? 1u : 0u;
     g_testAimSmoothFeeds += in.aimSmoothDeltaValid ? 1u : 0u;
@@ -4170,6 +4209,7 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
     const bool ok = fromPoses ? b.eval.EvaluateWithPose(dt, mr, b.travRaw.data(), in, b.pose.data(),
                                                         static_cast<uint32_t>(b.pose.size()), &info)
                               : b.eval.Evaluate(dt, mr, in, b.pose.data(), static_cast<uint32_t>(b.pose.size()), &info);
+    g_poseGridHead = info.aoApplied && info.aoGridShare > 0.0f && info.aoAppliedWeight > 0.0f;
     RecordGripInfoLocked(info);
     RecordBarrelProbeLocked(in, info, nullptr);
     if (!info.finite)
@@ -4730,7 +4770,11 @@ void HeadLeadStepLocked(const adapter::MotionFeed& aF, float aDt)
     sg.weaponBusy = g_weaponAction == 2 || g_weaponAction == 8 || g_hipFirePoseNow || g_reloadUpperWeight > 0.0f;
     sg.air = (aF.air.valid && !aF.air.onGround) || adapter::PsmAir(aF.psmDetailed);
     sg.crouch = adapter::PsmCrouchStance(aF.psmDetailed);
-    sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_headLeadOn || g_leanHeadOwns; // switched off: the weight fades out first
+    // switched off: the weight fades out first; the neutral aim grid turns the head towards the camera, so the lead into the
+    // travel direction gives way while the neutral weight is up (no second head turn on top of it); aiming, the grid has no share
+    // (the aim target owns the aim offset) and the lead keeps its own aiming rule
+    const bool gridHead = !sg.aiming && g_neutralAo.Alpha() > 0.0f && g_bundle && g_bundle->eval.HasNeutralGrid();
+    sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_headLeadOn || g_leanHeadOwns || gridHead;
     g_hl.Step(g_hlParams, sg, aDt);
 }
 
@@ -4754,7 +4798,7 @@ void HeadLeadApplyLocked(const Bundle& aB, integ::PoseSnapshot& aSnap)
     if (g_hlHaveApply)
         dt = std::clamp(elapsed, 1.0f / 240.0f, 0.1f);
     g_hlHaveApply = true;
-    g_hl.Apply(g_hlParams, g_hlSk, aSnap.pose, std::min<uint32_t>(n, integ::kMaxMMBones), dt);
+    g_hl.Apply(g_hlParams, g_hlSk, aSnap.pose, std::min<uint32_t>(n, integ::kMaxMMBones), dt, !g_poseGridHead);
 }
 
 // Orientation warp, feed rate: gates, path / turn rate (Step) and the measurement of the v2 pose of this feed (Measure). The pose and
@@ -4875,7 +4919,10 @@ void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::M
     sg.crouch = adapter::PsmCrouchStance(aF.psmDetailed) || aCs.stance != 0;
     sg.slide = g_slideFrame;
     sg.blocked = g_trav.active || g_release || g_meleeMasked || !g_leanSetting;
-    sg.head = headOwns;
+    // the head layer turns the head into the turn (up to ~60 deg of head yaw): it gives way (fades) while the neutral aim grid turns
+    // the head towards the camera, so the two head turns are never summed; the body lean stays. Aiming, the grid has no share.
+    const bool gridHead = !sg.aiming && g_neutralAo.Alpha() > 0.0f && aB.eval.HasNeutralGrid();
+    sg.head = headOwns && !gridHead;
     // wide coverage only (the default gate ignores both)
     sg.weaponAction = g_weaponAction == 2 || g_weaponAction == 8 || g_hipFirePoseNow || g_reloadUpperWeight > 0.0f;
     sg.weaponDrawn = g_weaponUpperFrame || (aF.haveWeapon && aF.weaponDrawn);
@@ -5074,6 +5121,7 @@ float DodgeFacingYawDeg(const Bundle& b, const motionhost::FeedInput& aRaw, bool
 
 bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 {
+    ++g_stepSerial;
     g_meleeOwnsBody = aRaw.meleeOwnsBody;
     g_meleeUpperMasked = aRaw.meleeUpperMasked;
     {
@@ -6120,6 +6168,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     else
 #endif
         ok = b.eval.Evaluate(dt, r, in, b.pose.data(), static_cast<uint32_t>(b.pose.size()), &info);
+    g_poseGridHead = info.aoApplied && info.aoGridShare > 0.0f && info.aoAppliedWeight > 0.0f;
     g_ovArmsNow = ok && OverlayArmsOf(b, info);
     RecordGripInfoLocked(info);
     RecordBarrelProbeLocked(in, info, rootWanted ? &rootEvaluation : nullptr);
@@ -6130,6 +6179,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_aoW = info.aoWeight;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_testAoAppliedWeight = info.aoAppliedWeight;
+    g_testAoGridShare = info.aoApplied ? info.aoGridShare : 0.0f;
 #endif
     TravYawBackLocked(b, dt); // UTPP-MOTION SEAM trav: verifier round 2, handback turn of the last montage root yaw
     g_airDiag.landBypassArmed = bypassArmed;
@@ -7741,6 +7791,7 @@ std::string StatusLocked()
            std::to_string(g_bundle && g_bundle->leanOk ? g_bundle->lean.Tel().disable : 0.0f) +
            " leanHead=" + std::to_string(g_leanHeadSetting ? 1 : 0) + " leanScale=" + std::to_string(g_leanParams.scale) +
            " leanClips=" + std::to_string(g_bundle ? g_bundle->leanMapped : 0) + "/" + std::to_string(g_bundle ? g_bundle->leanMismatch : 0) +
+           " neutralAim=" + std::to_string(g_neutralAoCfg.enabled ? 1 : 0) + "/" + std::to_string(g_bundle ? (g_bundle->eval.HasNeutralGrid() ? 1 : 0) : -1) +
            DualStatusSuffix() + BudgetStatusSuffixLocked();
 }
 } // namespace

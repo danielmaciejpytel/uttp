@@ -41,13 +41,16 @@ DFRM  count = total delta frames, per frame num_bones x 14 f32:
       translations), ds = s_X / s_A - 1. (UE ConvertPoseToAdditive / ConvertPoseToMeshRotation; report 3.11 D_MS/D_LS.)
       Baked: every additive asset (AO_*_Sweep vs own frame 15; Pose_Transition, Stand_Transition vs Pose_Base_Stand
       frame 0) and dP = D_MS(BP -> OB) for (Stand_Idle, Stand_Move) vs Pose_Base_Stand and Crouch vs
-      Pose_Base_Crouch. dLms = D_MS(B -> L) and dLls = D_LS(B -> L) depend on live locomotion L and are computed
+      Pose_Base_Crouch. Last: the 15 one-frame neutral aim grid deltas (kind 0, mesh space, base = the X0_Y0 grid pose,
+      frame 0) in grid order pitch -90, 0, +90 x yaw -90, -45, 0, +45, +90 (index = pitch * 5 + yaw).
+      dLms = D_MS(B -> L) and dLls = D_LS(B -> L) depend on live locomotion L and are computed
       at runtime from the B pose (Pose_Neutral_*) stored in FRAM (mesh rotations are precomputed there).
       Apply (report 3.11): A_MS: G <- nlerp(1, dq_ms, a) * G, t += a*dt, s *= 1 + a*ds; A_LS: Q <- nlerp(1, dq_ls, a) * Q.
 OVLY  count = O, 48 B: name[32]; u32 kind (0 pose overlay OP, 1 style OB, 2 base poses B/BP, 3 transitions);
       u32 flags (bit0 bCanAim); u32 first_pose; u32 num_poses (contiguous POSE range). Order: BasePoses, <style>,
       Default (0 poses: ABP_OverlayPose_Default has no pose, result = locomotion), Pistol1H, Pistol2H, Rifle,
-      Injured, Transitions.
+      Injured, Transitions, NeutralAO (kind 0, flags 0: the 15 one-frame POSE entries of the neutral aim grid, group 3,
+      named <base>_X<yaw>_Y<pitch>; the runtime finds them by name and samples them bilinearly, yaw capped at 45 deg).
 MASK  count = 7, 16 + num_bones*4 B: name[16] + f32 weight per bone. pelvis, spine, head, arm_l, arm_r, hand_l,
       hand_r = the ALS LayeredBoneBlend BranchFilters of ABP_LayerBlending (UE filter bone
       -> CP bone through the retarget bonemap cp <- src) with UE BlendDepth semantics (0 = subtree 1, k > 0 = depth
