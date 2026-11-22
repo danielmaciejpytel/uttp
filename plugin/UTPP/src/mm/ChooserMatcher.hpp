@@ -93,6 +93,9 @@ struct ChooserState
     int movementState = 0; // E_MovementState 0 Idle, 1 Moving
     int movementMode = 0;  // E_MovementMode 0 OnGround, 1 InAir, 2 Sliding (only with mm.slide and a slide bundle)
     float speed2dCmS = 0.0f;
+    // Capsule cm per mapped cm of the crouch map while the stance is Crouch (adapter::WriteCrouchRateScale; 1 = no raise; a hand-built
+    // state leaves it 1): MatcherConfig::crouchCapsuleRate.
+    float crouchRateScale = 1.0f;
     float timeToLand = 1.5f; // s (no landing predicted = last trajectory sample time)
     bool isStarting = false;
     bool isPivoting = false;
@@ -447,6 +450,13 @@ struct MatcherConfig
     // non-loop clip keep the ordinary bound. 0.5 = walkMinPlayRate: it halves the slide at the slow stick (the rest needs a slower clip, not a rate).
     bool slowCrouchLoops = true;
     float crouchWalkMinPlayRate = 0.5f;
+    // CR-5 (full crouch stick; replay tests/LocoMatcherTest.cpp, in-game crouch turns 2026-11-22 with the fixed stick speed). false = the plain
+    // rate. MEASURED: the capsule crouches at ~2.72 m/s, the crouch map puts the query at the 225 cm/s cap, so the rate query / pose speed
+    // (~0.92) plays Crouch_Loop_F (2.47 m/s at rate 1) at ~2.27 m/s and the planted feet slide ~45 cm/s; the stride warp only shortens.
+    // crouchCapsuleRate: a LOOP clip of PSD_*_Crouch_Walk_Loops while the chooser stance is Crouch scales its query speed by
+    // ChooserState::crouchRateScale (capsule per mapped speed of the crouch map, >= 1) before the rate bounds, so the loop root follows the
+    // capsule up to maxPlayRate. Every other clip, database and stance keeps the plain rate.
+    bool crouchCapsuleRate = true;
 
     // ST-1 (slow walk start tail; same recording, replay tests/LocoMatcherTest.cpp). false = the UE DoNotInterrupt behaviour bit for bit. A start
     // from rest is IsStarting on its first stick update only (the game capsule reaches its slow target within ~3 feeds), so the chooser returns the
@@ -730,6 +740,7 @@ inline void TestGuardsOff(MatcherConfig& c)
     if (has("slowwalk")) c.slowWalkLoops = false;
     if (has("steadyrun")) c.steadyRunLoops = false;
     if (has("slowcrouch")) c.slowCrouchLoops = false;
+    if (has("crouchrate")) c.crouchCapsuleRate = false;
     if (has("starttail")) c.slowWalkStartTail = false;
     if (has("slideinto")) c.slideIntoHandover = false;
     if (has("rise")) c.crouchToStandHoldS = 0.0f;
@@ -2013,8 +2024,12 @@ public:
                 aState.gait == 0 && m_dbCrouchWalkLoops[static_cast<uint32_t>(bestDb)] && (cl.flags & kClipLoop))
                 rateMin = std::min(rateMin, m_cfg.crouchWalkMinPlayRate);
 #endif
+            // CR-5 (MatcherConfig::crouchCapsuleRate): a crouch walk loop plays its root at the capsule speed, not at the mapped query speed
+            const float rateQueryScale = m_cfg.crouchCapsuleRate && m_cfg.maxPlayRate - m_cfg.minPlayRate > 1e-4f && aState.stance == 1 &&
+                    m_dbCrouchWalkLoops[static_cast<uint32_t>(bestDb)] && (cl.flags & kClipLoop) && aState.crouchRateScale > 1.0f
+                ? aState.crouchRateScale : 1.0f;
             const auto rate = rate2::Calculate(db, static_cast<uint32_t>(bestDb),
-                static_cast<uint32_t>(bestRow), m_raw.data(), rateMin, m_cfg.maxPlayRate);
+                static_cast<uint32_t>(bestRow), m_raw.data(), rateMin, m_cfg.maxPlayRate, 1.0f, rateQueryScale);
             if (!jump)
             {
                 // continuing pose result (bIsContinuingPoseSearch): its database may differ from the previous one

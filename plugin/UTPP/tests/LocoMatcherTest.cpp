@@ -534,6 +534,31 @@ void CrouchRateChecks(const std::vector<Frame>& aFr, const std::vector<Frame>& a
           double(d.size()));
 }
 
+// CR-5 (MatcherConfig::crouchCapsuleRate): at the full crouch stick the capsule moves at ~2.72 m/s while the crouch map puts the query at the
+// 225 cm/s crouch cap, so the plain rate (query / pose speed, ~0.92) played Crouch_Loop_F at ~2.27 m/s and the planted feet slid ~45 cm/s (the
+// stride warp only shortens). The rate now plays the loop root at the capsule speed. Crouch_Loop_F root speed at rate 1: 227 cm/s / 0.919.
+constexpr float kCrouchLoopFRootMs = 2.47f;
+float FullCrouchRootOverCapsule(const std::vector<Frame>& aFr)
+{
+    float lo = 9.f;
+    for (size_t i = At(aFr, kCwalkFull0); i < At(aFr, kCwalkFull1); ++i)
+        if (aFr[i].gait == 1 && aFr[i].clip == "M_Neutral_Crouch_Loop_F" && aFr[i].capsuleMs > 2.0f)
+            lo = std::fmin(lo, aFr[i].rate * kCrouchLoopFRootMs / aFr[i].capsuleMs);
+    return lo;
+}
+void CrouchCapsuleRateChecks(const std::vector<Frame>& aFr, const std::vector<Frame>& aOff)
+{
+    const float lo = FullCrouchRootOverCapsule(aFr);
+    Check(lo >= 0.97f && lo < 9.f, "CR-5 full crouch walk: Crouch_Loop_F root at its play rate keeps up with the capsule (min root / capsule)", lo);
+    const float off = FullCrouchRootOverCapsule(aOff);
+    Check(off < 0.9f, "CR-5 negative control (crouchCapsuleRate off): the plain rate leaves the loop root behind the capsule (min root / capsule)", off);
+    // only crouched loops change: the stand run / sprint / jumps / walk are bit-identical
+    const auto d = Diff(aFr, aOff);
+    PrintDiff("CR-5 crouchCapsuleRate on vs off", d);
+    Check(!d.empty() && AllWithin(d, {{59.0, 69.6}, {73.7, 79.1}, {83.0, 88.1}}), "CR-5 identity: on / off differ only in the crouch segments (differing frames)",
+          double(d.size()));
+}
+
 // ST-1 (MatcherConfig::slowWalkStartTail): the two slow starts from rest of the feed (cwalk_slow 60.99, crouch stick 49 cm/s; walk 98.49, stand
 // stick 104 cm/s) pick a Start clip on their IsStarting update and play its acceleration (0.2 / 0.3 s clip time, ~0.25 / 0.35 s at the clamped
 // 0.85), then hand over to the loop database the chooser returns, where the CR-3 / G1 floor 0.5 applies; without the rule the Start tail is held
@@ -827,20 +852,27 @@ int main(int argc, char** argv)
         Variant off = prod;
         off.cfg.slowCrouchLoops = false;
         CrouchRateChecks(fr, Replay(*model, rows, off));
+        Variant noCrouchRate = prod;
+        noCrouchRate.cfg.crouchCapsuleRate = false;
+        const std::vector<Frame> frPlainCrouchRate = Replay(*model, rows, noCrouchRate);
+        CrouchCapsuleRateChecks(fr, frPlainCrouchRate);
         Variant noTail = prod;
         noTail.cfg.slowWalkStartTail = false;
         StartTailChecks(fr, Replay(*model, rows, noTail));
         Variant noHold = prod;
         noHold.cfg.crouchToStandHoldS = 0.0f;
         RiseChecks(fr, Replay(*model, rows, noHold));
-        Variant noStop = prod;
+        // STOP runs on the plain crouch rate (CR-5 off): the feed's only re-picked stop is a crouched one that the CR-5 rate no longer re-picks,
+        // and the commit mechanism needs that re-pick to be verified
+        Variant noStop = noCrouchRate;
         noStop.cfg.stopCommitTailS = 0.0f;
         const std::vector<Frame> frNoStop = Replay(*model, rows, noStop);
         // production holds only the standing stops (stopCommitCrouch off): the recorded feed's stops that a re-pick crossed are crouched,
         // so production equals commit-off here; the mechanism is verified with the crouched stops held too
-        Check(Diff(fr, frNoStop).empty(), "STOP production (standing stops only): identical to commit-off on this feed, whose re-picked stop is crouched (differing frames)",
-              double(Diff(fr, frNoStop).size()));
-        Variant stopCrouch = prod;
+        Check(Diff(frPlainCrouchRate, frNoStop).empty(),
+              "STOP production (standing stops only): identical to commit-off on this feed, whose re-picked stop is crouched (differing frames)",
+              double(Diff(frPlainCrouchRate, frNoStop).size()));
+        Variant stopCrouch = noCrouchRate;
         stopCrouch.cfg.stopCommitCrouch = true;
         StopChecks(Replay(*model, rows, stopCrouch), frNoStop, *model);
         SlideChecks(fr, "prod", prod.cfg.slideEntryMaxS > 0.0f);
