@@ -1519,6 +1519,8 @@ struct LegContext
 LegContext g_legCtx; // last feed (status / tests)
 bool g_pelvisPlacementOn = false; // pelvis stage of the foot locker (false = the leg tail without it; default off until its pops are resolved)
 uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis stage
+bool g_firmFeetOn = true;        // firm feet in turns and stops (CET mm.firmFeet, default on; mm/FootLocker.hpp FirmFeetConfig)
+FirmFeetConfig g_firmFeetCfg;    // its limits (SetFirmFeetParams; applied to the foot locker every feed while it is on)
 
 LegContext ComputeLegContextLocked(const FeedInput& aIn, float aCapsuleSpeed)
 {
@@ -1873,6 +1875,11 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
         pol.standingStopGate = g_effGate == 0 && !g_holdActive && aIn.tppActive && noMove;
         pol.classStop = aCtx.clipClass == steer::kClassStop;
         pol.classIdle = aCtx.clipClass == steer::kClassIdle;
+        pol.classTurn = FootSlipGroup(aCtx.clipClass) == 2;
+        pol.firmFeet = g_firmFeetOn;
+        pol.firmGate = g_effGate == 0 && !g_holdActive && aIn.tppActive;
+        if (g_firmFeetOn)
+            g_footLock.SetFirmFeetConfig(g_firmFeetCfg);
         ApplyFootFeedPolicy(g_footLock, pol);
         // Pelvis stage (mm/PelvisPlacement.hpp, run by the foot locker after its foot pass): the pelvis moves so that every ankle
         // target is reachable, then both legs are solved again. Only with ground placement allowed (gate open, no hold, grounded,
@@ -7307,6 +7314,53 @@ void SetPelvisPlacement(bool aOn)
 {
     std::lock_guard lock(g_mutex);
     g_pelvisPlacementOn = aOn; // read at the next feed
+}
+
+bool SetFirmFeet(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    g_firmFeetOn = aOn; // read at the next feed (switched off: every latch ends there)
+    return true;
+}
+
+bool FirmFeet()
+{
+    std::lock_guard lock(g_mutex);
+    return g_firmFeetOn;
+}
+
+bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg, float aReleaseSpeed, float aLatchSpeed)
+{
+    FirmFeetConfig c = g_firmFeetCfg;
+    if (!(aLimit < 0.0f)) // a negative value keeps the current one
+        c.limit = aLimit;
+    if (!(aHandBackSpeed < 0.0f))
+        c.handBackSpeed = aHandBackSpeed;
+    if (!(aKneeMarginDeg < 0.0f))
+        c.kneeMargin = aKneeMarginDeg * 0.017453293f;
+    if (!(aReleaseSpeed < 0.0f))
+        c.releaseSpeed = aReleaseSpeed;
+    if (!(aLatchSpeed < 0.0f))
+        c.latchSpeed = aLatchSpeed;
+    if (!FirmFeetConfig::Valid(c))
+        return false;
+    std::lock_guard lock(g_mutex);
+    g_firmFeetCfg = c;
+    return true;
+}
+
+void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds, uint64_t* aHandBacks)
+{
+    std::lock_guard lock(g_mutex);
+    const FootLockDiagnostics& d = g_footLock.Diagnostics();
+    if (aLatches)
+        *aLatches = d.firmLatches;
+    if (aUpdates)
+        *aUpdates = d.firmUpdates;
+    if (aLegBounds)
+        *aLegBounds = d.firmLegBounds;
+    if (aHandBacks)
+        *aHandBacks = d.firmHandBacks;
 }
 
 void SetAirStepDownReach(bool aOn)

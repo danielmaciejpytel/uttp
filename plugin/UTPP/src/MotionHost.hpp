@@ -432,6 +432,21 @@ std::string CrouchExcludeTags();
 // reason=radius|clamp|tidy|handover, feet line phase S + " replant= active= liftL= liftR="; status feet segment replant= ... .
 bool SetFootReplant(int32_t aMask);
 int32_t FootReplantMask();
+// Firm feet in turns and stops (CET mm.firmFeet, default on; mm/FootLocker.hpp FirmFeetConfig): upright (stand / sprint stance) on the
+// ground at up to the latch speed, a planted foot with a firm contact in a turn, pivot, reface, turn in place or stop clip stays fixed
+// in the world up to the hold limit (instead of the soft slip start), lowered by the leg reach and knee fold limits; the contact end
+// releases it through the blend-out, a standing capsule after those clips hands the hold back at the hand-back speed. Off = the previous
+// leg tail bit for bit. Always true.
+bool SetFirmFeet(bool aOn);
+bool FirmFeet();
+// Hold limit (m, 0.01..0.35), hand-back speed (m/s, 0.01..10), knee fold margin (deg above the animated flexion, 0..57), release
+// speed (m/s, 0.1..100) and latch capsule speed (m/s, 0..100); a negative value keeps the current one. False = invalid / NaN,
+// previous kept. C++ API (tools, tests).
+bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg = -1.0f, float aReleaseSpeed = -1.0f,
+                       float aLatchSpeed = -1.0f);
+// Foot locker counters of the firm feet since its last reset: locks latched, locked-foot updates with a hold, of them lowered by a leg
+// limit, latches ended by the hand-back (any pointer may be null).
+void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds, uint64_t* aHandBacks);
 // Radii (m, 0.02..0.15: the 15 cm foot-correction guard), relock ratios (0..0.95), step speeds (m/s, 0.2..10), lift (m, 0..0.1);
 // the other replant constants keep their defaults. False = invalid / NaN, previous kept. Applies from the next step.
 bool SetFootReplantParams(float aRadius, float aStopsRadius, float aRatio, float aStopsRatio, float aStepSpeed, float aStopsStepSpeed,

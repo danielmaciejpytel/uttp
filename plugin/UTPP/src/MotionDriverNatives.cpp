@@ -582,6 +582,17 @@ void Native_SetMMOverlayInertialSwitch(RED4ext::IScriptable*, RED4ext::CStackFra
     if (aOut)
         *aOut = ok;
 }
+// firm feet in turns and stops (CET utpp_motion mm.firmFeet; DLL default on). Logged in the setting-call form the offline replay applies.
+void Native_SetMMFirmFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = motionhost::SetFirmFeet(on);
+    pluginlog::LogInfo("UTPPSetMMFirmFeet(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // body yaw offset per body (CET utpp_motion mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale): deg, + = left, -20..20 each
 void Native_SetMotionBodyYawOffsets(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -773,6 +784,8 @@ void RegisterNatives()
     auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMOverlayInertialSwitch", "UTPPSetMMOverlayInertialSwitch",
                                                  &Native_SetMMOverlayInertialSwitch);
     o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);
+    auto* o11 = RED4ext::CGlobalFunction::Create("UTPPSetMMFirmFeet", "UTPPSetMMFirmFeet", &Native_SetMMFirmFeet);
+    o11->flags = flags; o11->AddParam("Bool", "on"); o11->SetReturnType("Bool"); rtti->RegisterFunction(o11);
 }
 
 void Install(const std::wstring& aDllDir)

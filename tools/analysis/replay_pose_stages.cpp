@@ -51,6 +51,12 @@
 //                       overlay changes only, so a replay without --aim-camera (overlay always Default) is unchanged by it
 //   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
 //                       mm.stickSpeed setting; the settings log call MotionStickSpeedMode of later sessions is applied as well)
+//   --firm-feet 0|1     firm feet in turns and stops off / on after --settings-log (motionhost::SetFirmFeet, the mm.firmFeet setting;
+//                       the settings log call MMFirmFeet is applied as well); adds one FIRMFEET line (latches, held updates, of them
+//                       lowered by a leg limit, hand-backs)
+//   --firm-limit L      hold limit (m), --firm-handback V hand-back speed (m/s), --firm-knee D knee fold margin (deg),
+//                       --firm-release V release speed (m/s) and --firm-latch-speed V latch capsule speed (m/s) of the firm feet
+//                       (motionhost::SetFirmFeetParams; not passed = build default)
 //                       With --settings-log, the driver first gets the values a game session held before its first setting call in
 //                       builds whose defaults were off (lean, head lean, slide, orientation warp, stride warping off, analog stick),
 //                       then the logged calls: an older log without one of these calls replays as recorded with any build default.
@@ -248,6 +254,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMFootReplant") motionhost::SetFootReplant(static_cast<int32_t>(arg(0)));
         else if (name == "MMKneeFix") motionhost::SetKneeFix(static_cast<int32_t>(arg(0)));
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
+        else if (name == "MMFirmFeet") motionhost::SetFirmFeet(flag(0));
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
@@ -275,6 +282,7 @@ void ApplyLogBaseline()
     motiondriver::SetMagTapEnabled(false);
     motionhost::SetAirSteer(false);
     motionhost::SetMeleeGuardSetting(false);
+    motionhost::SetFirmFeet(false);
 }
 // --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped
 FILE* g_motionLog = nullptr;
@@ -401,6 +409,10 @@ int main(int argc, char** argv)
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
+    int32_t firmFeet = -1;                     // -1 = not passed
+    uint64_t firmTotal[4] = {}, firmLast[4] = {}; // --firm-feet: FIRMFEET counters (summed over the foot locker resets)
+    // < 0 = not passed (build defaults)
+    float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f;
     int32_t turnRate = -1;                     // -1 = not passed
     float turnRateMax = -1.0f;                 // < 0 = not passed
     int32_t overlayInertialSwitch = -1;                                          // -1 = not passed
@@ -471,6 +483,18 @@ int main(int argc, char** argv)
             overlayInertialSwitch = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stick-speed") == 0)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--firm-feet") == 0)
+            firmFeet = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--firm-limit") == 0)
+            firmLimit = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-handback") == 0)
+            firmHandBack = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-knee") == 0)
+            firmKnee = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-release") == 0)
+            firmRelease = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-latch-speed") == 0)
+            firmLatch = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--turn-rate") == 0)
             turnRate = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--turn-rate-max") == 0)
@@ -623,6 +647,14 @@ int main(int argc, char** argv)
         motiondriver::SetOverlayInertialSwitch(overlayInertialSwitch != 0);
     if (stickSpeed >= 0)
         motiondriver::SetStickSpeedMode(stickSpeed);
+    if (firmFeet >= 0)
+        motionhost::SetFirmFeet(firmFeet != 0);
+    if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f)
+    {
+        // a value not passed keeps the build default (negative)
+        if (!motionhost::SetFirmFeetParams(firmLimit, firmHandBack, firmKnee, firmRelease, firmLatch))
+            return 2;
+    }
     if (turnRate >= 0)
         motionhost::SetTurnRate(turnRate != 0);
     if (turnRateMax >= 0.0f && !motionhost::SetTurnRateParams(0.9f, turnRateMax))
@@ -987,6 +1019,16 @@ int main(int argc, char** argv)
             clipsSeen.emplace(clip, std::string(db->ClipName(uint32_t(clip))));
         const std::string hs = motionhost::Status();
         const motiondriver::RootProbe rp = motiondriver::TestRootProbe();
+        if (firmFeet >= 0)
+        {
+            uint64_t now[4] = {};
+            motionhost::FirmFeetStats(&now[0], &now[1], &now[2], &now[3]);
+            for (int k = 0; k < 4; ++k)
+            {
+                firmTotal[k] += now[k] >= firmLast[k] ? now[k] - firmLast[k] : now[k];
+                firmLast[k] = now[k];
+            }
+        }
         const float meta[kMetaFloats] = {rows[i].t, rows[i].dt, g_log.stepResult ? 1.f : 0.f, published ? 1.f : 0.f, g_tailValid ? 1.f : 0.f,
                                          float(clip), ct, float(dbi), g_tail.contact[0], g_tail.contact[1], g_tail.rootVel[0],
                                          g_tail.rootVel[1], g_tail.rootYawRate, g_tail.providedRoot ? 1.f : 0.f, g_tail.rootOffsetX,
@@ -1069,6 +1111,10 @@ int main(int argc, char** argv)
                         neutralAim, aimWorldSmoothHz, shooterMode, static_cast<unsigned long long>(neutralFeeds),
                         static_cast<unsigned long long>(smoothFeeds));
         }
+        if (firmFeet >= 0)
+            std::printf("FIRMFEET run=%s on=%d latches=%llu heldUpdates=%llu legBoundUpdates=%llu handBacks=%llu\n", name.c_str(), firmFeet,
+                        static_cast<unsigned long long>(firmTotal[0]), static_cast<unsigned long long>(firmTotal[1]),
+                        static_cast<unsigned long long>(firmTotal[2]), static_cast<unsigned long long>(firmTotal[3]));
         if (turnRate >= 0 || turnRateMax >= 0.0f) // turn clip rate state of the legacy matcher (raised feeds, turns, cap)
             std::printf("TURNRATE run=%s %s\n", name.c_str(), motionhost::TurnRateStatus().c_str());
         if (aimJogQuery)

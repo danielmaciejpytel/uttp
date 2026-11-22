@@ -49,6 +49,10 @@
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
 --                  without a pose jump (native UTPPSetMMStrideWarp).
+--   mm.firmFeet bool, default true ("Firm feet in turns and stops"; DLL default on, the value is sent with the other M.OPTIONS) - a
+--                  planted foot stays fixed on the ground through turns, pivots, turns in place and stops instead of slipping after the
+--                  animation (at walking pace and below); the leg correction may grow up to 30 cm, limited by the leg reach and knee
+--                  bend (native UTPPSetMMFirmFeet).
 --   mm.aimAtCrosshair bool, default true (DLL default on; in game: muzzle slot +Y = weapon entity +Y, barrel vs shot
 --                  pitch error median 4.8 deg / p90 10.9 off -> 0.2-0.6 / p90 1.3 on, Kyubi + pistol) - "Weapon aims at crosshair point":
 --                  the DLL barrel
@@ -92,7 +96,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   lean = true, leanHead = true, leanScale = 0.85, leanHeadScale = 0.9, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.6, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
-  strideWarp = true, overlayInertialSwitch = false }
+  strideWarp = true, overlayInertialSwitch = false, firmFeet = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -912,6 +916,7 @@ M.OPTIONS = {
   { want = "leanCoverage", field = "setLeanCoverage", native = "UTPPSetMotionLeanCoverage",
     arg = function(v) return v == "wide" and 1 or 0 end },
   { want = "strideWarp", field = "setStrideWarp", native = "UTPPSetMMStrideWarp" },
+  { want = "firmFeet", field = "setFirmFeet", native = "UTPPSetMMFirmFeet" },
   { want = "overlayInertialSwitch", field = "setOverlayInertialSwitch", native = "UTPPSetMMOverlayInertialSwitch" },
 }
 function M.ApplyOptions(api)
@@ -1031,6 +1036,12 @@ function M.RegisterSettings(core)
     desc = "Shortens V's steps to her movement speed while she walks, runs or moves crouched, so her feet slide less over the "
       .. "ground. Off = the steps of the animations as they are. Starts, stops, turns, jumps and slides are unchanged.",
     apply = function(v) M.SetOption("strideWarp", v == true) end })
+  core.Register({ key = "mm.firmFeet", section = "animation", type = "bool", default = true,
+    label = "Firm feet in turns and stops",
+    desc = "Keeps V's planted feet fixed on the ground while she turns at walking pace, turns on the spot or stops, so they slide "
+      .. "less. Her legs stretch or bend a little more to reach the planted feet (never beyond what the leg can reach). On "
+      .. "(default); off = the feet may slip a little to follow the animations.",
+    apply = function(v) M.SetOption("firmFeet", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
     label = "Gamepad stick speed",

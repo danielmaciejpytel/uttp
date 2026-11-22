@@ -169,7 +169,8 @@ void DriverOptionTestBase()
 }
 
 // The menu defaults of the release (cet/utpp_motion, cet/utpp_core): lean + lean head (scales 0.85 / 0.9), slide, orientation warp,
-// stride warp, fixed stick speed, pelvis yaw trim 2 deg, body yaw offset Female 4 / Male 0 deg, head lead, walk 1.6 / analog floor 0.82 m/s.
+// stride warp, fixed stick speed, pelvis yaw trim 2 deg, body yaw offset Female 4 / Male 0 deg, head lead, walk 1.6 / analog floor 0.82 m/s,
+// firm feet in turns and stops.
 void DriverOptionShipped()
 {
     motiondriver::SetLean(true);
@@ -184,6 +185,7 @@ void DriverOptionShipped()
     motiondriver::SetHeadLead(true);
     motiondriver::SetWalkSpeed(1.6f);
     motiondriver::SetMinAnalogWalk(0.82f);
+    motionhost::SetFirmFeet(true);
 }
 } // namespace
 

@@ -30,6 +30,7 @@ bool SetClimbRelease(bool aOn);
 bool SetStrafeParams(bool aUnarmed, float aRootTurnMaxDeg, float aRootWarpMaxDeg, float aExitHold, float aJogF);
 bool SetTurnRateParams(float aMin, float aMax);
 void SetMeleeGuardSetting(bool aOn);
+bool SetFirmFeet(bool aOn);
 } // namespace utpp::motionhost
 
 namespace utpp::meleeaim
@@ -57,7 +58,8 @@ inline void LegacyDriverDefaults()
     motiondriver::SetMagTapEnabled(false);
 }
 
-// Host: weapon upper body on, air steering off, climb release on, unarmed strafe off with the walk gait, turn clip max 1.1, melee guard off.
+// Host: weapon upper body on, air steering off, climb release on, unarmed strafe off with the walk gait, turn clip max 1.1, melee guard off,
+// firm feet in turns and stops off.
 inline void LegacyHostDefaults()
 {
     motionhost::SetWeaponUpper(true);
@@ -66,6 +68,7 @@ inline void LegacyHostDefaults()
     motionhost::SetStrafeParams(false, 10.0f, 30.0f, 0.15f, 0.0f);
     motionhost::SetTurnRateParams(0.9f, 1.1f);
     motionhost::SetMeleeGuardSetting(false);
+    motionhost::SetFirmFeet(false);
 }
 
 // Melee aim tilt off (0 / 0, smoothing 10 Hz as before); only for tests that link mm/MeleeAim.cpp.

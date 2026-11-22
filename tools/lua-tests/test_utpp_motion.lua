@@ -11,7 +11,7 @@ local function fresh()
 end
 local function mock()
   local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    stride = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
+    stride = {}, firm = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -90,6 +90,10 @@ local function mock()
       t.stride[#t.stride + 1] = on
       if t.strideError then error("stride warp native failure") end
       return not t.strideReject
+    end,
+    setFirmFeet = function(on)
+      t.firm[#t.firm + 1] = on
+      return not t.firmReject
     end,
     setWalkSpeed = function(ms)
       t.walk[#t.walk + 1] = ms
@@ -234,6 +238,10 @@ do
   check("registered mm.strideWarp: bool, on by default, animation section, label 'Stride matching'",
     sw ~= nil and sw.type == "bool" and sw.default == true and sw.section == "animation" and sw.label == "Stride matching"
     and type(sw.desc) == "string" and sw.desc:find("slide less", 1, true) ~= nil)
+  local ff = defs["mm.firmFeet"]
+  check("registered mm.firmFeet: bool, on by default, animation section, label 'Firm feet in turns and stops'",
+    ff ~= nil and ff.type == "bool" and ff.default == true and ff.section == "animation"
+    and ff.label == "Firm feet in turns and stops" and type(ff.desc) == "string" and ff.desc:find("slide less", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
@@ -642,6 +650,24 @@ do
   t.strideReject = false
   v.Sync(t.api)
   check("rejected strideWarp retries", #t.stride == 4 and t.stride[4] == true and v.rt.optionsApplied.strideWarp == true)
+end
+
+-- mm.firmFeet (one of M.OPTIONS; DLL default on): on is sent once when motion comes on, then only on a change
+do
+  local v, t = fresh(), mock()
+  check("firmFeet starts on", v.want.firmFeet == true)
+  v.SetEnabled(true)
+  check("firmFeet on is sent when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.firm == 1 and t.firm[1] == true and v.rt.optionsApplied.firmFeet == true)
+  check("steady firmFeet is not resent", v.Sync(t.api) == "same" and #t.firm == 1)
+  v.SetOption("firmFeet", false, t.api)
+  check("firmFeet switched off is sent once", #t.firm == 2 and t.firm[2] == false and v.rt.optionsApplied.firmFeet == false)
+  t.firmReject = true
+  v.SetOption("firmFeet", true, t.api)
+  check("rejected firmFeet is never acknowledged", #t.firm == 3 and v.rt.optionsApplied.firmFeet == false)
+  t.firmReject = false
+  v.Sync(t.api)
+  check("rejected firmFeet retries", #t.firm == 4 and t.firm[4] == true and v.rt.optionsApplied.firmFeet == true)
 end
 
 -- turn steering is one fixed behaviour of the DLL: no option is registered, and the stored keys of the earlier choice
