@@ -20,7 +20,7 @@ return {
     ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "false",
     ["bodyturn.turnRate"] = "true",
-    ["bodyturn.turnRateMax"] = "1.5",
+    ["bodyturn.turnRateMax"] = "1.1499999999999999",
     ["bodyturn.weaponTurn"] = "true",
     ["camera.aim.autoSwap"] = "true",
     ["camera.aim.boomFrame"] = "0.45000000000000001",
@@ -238,11 +238,11 @@ return {
     "apply mm.database(\"utpp_base\",\"ok\")",
     "apply bodyturn.weaponTurn(true,\"ok\")",
     "native UTPPSetMMTurnRate(true)",
-    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.5)",
+    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.1499999999999999)",
     "apply bodyturn.turnRate(true,\"ok\")",
     "native UTPPSetMMTurnRate(true)",
-    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.5)",
-    "apply bodyturn.turnRateMax(1.5,\"ok\")",
+    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.1499999999999999)",
+    "apply bodyturn.turnRateMax(1.1499999999999999,\"ok\")",
     "native UTPPSetMMStrafe(true)",
     "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
     "apply bodyturn.aimStrafe(true,\"ok\")",
@@ -462,11 +462,11 @@ return {
     "apply mm.database(\"alt_db\",\"ok\")",
     "apply bodyturn.weaponTurn(true,\"ok\")",
     "native UTPPSetMMTurnRate(true)",
-    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.5)",
+    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.1499999999999999)",
     "apply bodyturn.turnRate(true,\"ok\")",
     "native UTPPSetMMTurnRate(true)",
-    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.7)",
-    "apply bodyturn.turnRateMax(1.7,\"ok\")",
+    "native UTPPSetMMTurnRateParams(0.90000000000000002,1.1000000000000001)",
+    "apply bodyturn.turnRateMax(1.1000000000000001,\"ok\")",
     "native UTPPSetMMStrafe(true)",
     "native UTPPSetMMStrafeParams(true,10,30,0.14999999999999999,3.2999999999999998)",
     "apply bodyturn.aimStrafe(true,\"ok\")",
@@ -772,10 +772,10 @@ return {
       ["type"] = "bool"
     },
     ["bodyturn.turnRateMax"] = {
-      ["default"] = "1.5",
+      ["default"] = "1.1499999999999999",
       ["hasApply"] = true,
       ["hold"] = false,
-      ["max"] = 2,
+      ["max"] = 1.1499999999999999,
       ["min"] = 1,
       ["onOff"] = false,
       ["section"] = "bodyturn",
@@ -2288,7 +2288,7 @@ return {
     ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "false",
     ["bodyturn.turnRate"] = "true",
-    ["bodyturn.turnRateMax"] = "1.5",
+    ["bodyturn.turnRateMax"] = "1.1499999999999999",
     ["bodyturn.weaponTurn"] = "true",
     ["camera.aim.autoSwap"] = "true",
     ["camera.aim.boomFrame"] = "0.45000000000000001",
@@ -2911,7 +2911,7 @@ return {
     "apply mm.database(\"utpp_base\",\"ok\")",
     "apply bodyturn.weaponTurn(true,\"ok\")",
     "apply bodyturn.turnRate(true,\"ok\")",
-    "apply bodyturn.turnRateMax(1.5,\"ok\")",
+    "apply bodyturn.turnRateMax(1.1499999999999999,\"ok\")",
     "apply bodyturn.aimStrafe(true,\"ok\")",
     "apply bodyturn.aimStrafeUnarmed(true,\"ok\")",
     "apply bodyturn.aimChestAlign(true,\"ok\")",
@@ -3092,7 +3092,7 @@ mm.climbRelease=false\r\
 mm.database=utpp_base\r\
 bodyturn.weaponTurn=true\r\
 bodyturn.turnRate=true\r\
-bodyturn.turnRateMax=1.5\r\
+bodyturn.turnRateMax=1.15\r\
 bodyturn.aimStrafe=true\r\
 bodyturn.aimStrafeUnarmed=true\r\
 bodyturn.aimChestAlign=true\r\
@@ -3485,7 +3485,7 @@ vehicle.jumpOutSidePush=true\r\
     ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "true",
     ["bodyturn.turnRate"] = "true",
-    ["bodyturn.turnRateMax"] = "1.7",
+    ["bodyturn.turnRateMax"] = "1.1000000000000001",
     ["bodyturn.weaponTurn"] = "true",
     ["camera.aim.autoSwap"] = "true",
     ["camera.aim.boomFrame"] = "0.45000000000000001",
@@ -3704,7 +3704,7 @@ mm.climbRelease=false\r\
 mm.database=alt_db\r\
 bodyturn.weaponTurn=true\r\
 bodyturn.turnRate=true\r\
-bodyturn.turnRateMax=1.7\r\
+bodyturn.turnRateMax=1.1\r\
 bodyturn.aimStrafe=true\r\
 bodyturn.aimStrafeUnarmed=true\r\
 bodyturn.aimChestAlign=true\r\
@@ -3896,8 +3896,6 @@ other.module=42\r\
     "/utpp/animation|switch|mm.strideWarp",
     "/utpp/animation|selector|mm.stickSpeed",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",
-    "/utpp/bodyturn|switch|bodyturn.turnRate",
-    "/utpp/bodyturn|float|bodyturn.turnRateMax",
     "/utpp/bodyturn|switch|bodyturn.aimStrafe",
     "/utpp/bodyturn|switch|bodyturn.aimStrafeUnarmed",
     "/utpp/bodyturn|switch|bodyturn.aimChestAlign",

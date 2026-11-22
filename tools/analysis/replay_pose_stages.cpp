@@ -51,6 +51,11 @@
 //                       then the logged calls: an older log without one of these calls replays as recorded with any build default.
 //                       The settings log calls MMSteerMode / MMSteerActiveOnly of test builds are ignored (turn steering has no
 //                       option: the newest layer steered, carried through the layer mix).
+//   --turn-rate 0|1     turn clip rate of the legacy matcher off / on after --settings-log (motionhost::SetTurnRate, the bodyturn.turnRate
+//                       setting); not passed: the build default (on)
+//   --turn-rate-max M   turn clip rate cap after --settings-log (motionhost::SetTurnRateParams(0.9, M), bodyturn.turnRateMax; the
+//                       settings log call MMTurnRateParams is applied as well); either option adds one TURNRATE line (the host
+//                       turn rate status: raised feeds, turns, cap)
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -364,6 +369,8 @@ int main(int argc, char** argv)
     int32_t capsuleQuery = -1, velocityPredicates = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
+    int32_t turnRate = -1;                     // -1 = not passed
+    float turnRateMax = -1.0f;                 // < 0 = not passed
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
@@ -422,6 +429,10 @@ int main(int argc, char** argv)
             strideWarp = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stick-speed") == 0)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--turn-rate") == 0)
+            turnRate = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--turn-rate-max") == 0)
+            turnRateMax = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-camera") == 0)
             aimCameraPose = std::atoi(argv[i + 1]);
     }
@@ -558,6 +569,13 @@ int main(int argc, char** argv)
         motiondriver::SetStrideWarp(strideWarp != 0);
     if (stickSpeed >= 0)
         motiondriver::SetStickSpeedMode(stickSpeed);
+    if (turnRate >= 0)
+        motionhost::SetTurnRate(turnRate != 0);
+    if (turnRateMax >= 0.0f && !motionhost::SetTurnRateParams(0.9f, turnRateMax))
+    {
+        std::fprintf(stderr, "--turn-rate-max %g rejected\n", static_cast<double>(turnRateMax));
+        return 2;
+    }
     int32_t lastAimCameraPose = -1, lastAimCameraState = -1;
     if (aimCameraPose >= 0)
         motiondriver::SetAimGameUpper(false); // the script setting mm.aimGameUpper (default false); the DLL default is true
@@ -963,6 +981,8 @@ int main(int argc, char** argv)
                         neutralAim, aimWorldSmoothHz, shooterMode, static_cast<unsigned long long>(neutralFeeds),
                         static_cast<unsigned long long>(smoothFeeds));
         }
+        if (turnRate >= 0 || turnRateMax >= 0.0f) // turn clip rate state of the legacy matcher (raised feeds, turns, cap)
+            std::printf("TURNRATE run=%s %s\n", name.c_str(), motionhost::TurnRateStatus().c_str());
         if (airFeed) // only with the option: the scripts refuse a tool that was asked for it and printed no AIRFEED line
             std::printf("AIRFEED run=%s forwarded=%llu withAirFields=%llu\n", name.c_str(), static_cast<unsigned long long>(airFeeds),
                         static_cast<unsigned long long>(airFeedRows));
