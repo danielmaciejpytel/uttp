@@ -3000,6 +3000,18 @@ void Native_FeedAir(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, 
     t_feedAir.fall = fall;
 }
 
+// Moving platform flag for the NEXT UTPPFeedLocomotion call on the same thread (scripts/utpp.reds UTPPFeedFromLocomotion sends it right
+// before the feed): a moving platform (elevator) carries V. Consumed by that feed (FeedInput.onMovingPlatform, mm/MovingPlatform.hpp).
+thread_local bool t_feedPlatform = false;
+
+void Native_FeedMovingPlatform(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool onPlatform = false;
+    RED4ext::GetParameter(aFrame, &onPlatform);
+    aFrame->code++;
+    t_feedPlatform = onPlatform;
+}
+
 void Native_MMAirWantsProbe(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     aFrame->code++;
@@ -3165,6 +3177,8 @@ void Native_FeedLocomotion(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, 
         in.psmFall = t_feedAir.fall;
         t_feedAir.valid = false;
     }
+    in.onMovingPlatform = t_feedPlatform; // moving platform: UTPPFeedMovingPlatform right before this feed
+    t_feedPlatform = false;
     utpp::motiondriver::FeedAirFromInput(in); // UTPP-MOTION SEAM air: UTPPFeedAir fields -> one-shot v2 AirFeed of this feed's Step (v2 mutex only; v1 untouched)
     motionhost::Feed(in);
     aimofs::OnFeed(tpp, static_cast<uint32_t>(psmBlock)); // 0.6.3 aim offset guards (UpperBody, melee, vehicle, TPP)
@@ -4117,6 +4131,11 @@ void PostRegisterTypes()
         a0->AddParam("Float", "distToGround");
         a0->AddParam("Int32", "fallState");
         rtti->RegisterFunction(a0);
+        // moving platform flag (declaration: scripts/utpp.reds UTPPFeedMovingPlatform; keep them in sync)
+        auto* ap = RED4ext::CGlobalFunction::Create("UTPPFeedMovingPlatform", "UTPPFeedMovingPlatform", &Native_FeedMovingPlatform);
+        ap->flags = flags;
+        ap->AddParam("Bool", "onPlatform");
+        rtti->RegisterFunction(ap);
         auto* a1 = RED4ext::CGlobalFunction::Create("UTPPMMAirWantsProbe", "UTPPMMAirWantsProbe", &Native_MMAirWantsProbe);
         a1->flags = flags;
         a1->SetReturnType("Bool");

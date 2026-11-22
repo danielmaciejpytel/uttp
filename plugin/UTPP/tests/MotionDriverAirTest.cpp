@@ -28,6 +28,13 @@
 //   V (vehicle batch, CAR-1 / J4) vehicle exit: v2 steps every feed of the v1 exit window (no skip 'gate'), chooser stance Stand through
 //     the exit animation (detail 0, latched exit workspot); unmount + ballistic arc vz0 +6: InAir Jumps from the 2nd airborne feed, light landing.
 //     Mutations UTPP_VEHEXIT_MUTATION=2 (utpp_motion_driver_air_vehexit_mut2) and UTPP_TRAJV2_HEAVY_MUTATION=1 (utpp_motion_driver_air_heavy_mut1) fail V / hood.
+//   L moving platform (elevator): a 6 s ride up / down at 3 m/s (0.5 s ramps), standing and walking, PSM Stand, the platform flag on
+//     (FeedInput::onMovingPlatform, mm/MovingPlatform.hpp), through the runtime path (FeedAirFromInput, then Feed). The game's
+//     contact and velocity during a ride are not recorded, so every plausible report is covered: contact kept with the platform vz,
+//     contact flickering every 2nd feed, contact lost for the whole ride, contact lost with vz 0. On every feed: motion steps OnGround,
+//     no Jumps / Lands database pick, the runtime AirState owns nothing. Guard: a standing jump and a 1.2 m drop with the flag on keep
+//     their air (A through the runtime path: the jump exactly, the drop from its 4th airborne feed at the latest). Mutation
+//     UTPP_PLATFORM_MUTATION=1 (no conditioning = the feed as the game sends it) fails L (utpp_motion_driver_air_platform_mut1).
 //   K (vehicle batch, J2) runtime-faithful probing (MakeRuntimeProbe: no probe on grounded / rising feeds, take-off feed PSM Jump
 //     18 on the ground): flat run jump and standing jump TimeToLand within 0.1 s on the rising feeds and no Jumps_Far chooser
 //     database while the true time to land < 1.0 s (A-G also checked on those feeds); drop guard: a 1.5 m walk-off never uses the
@@ -1027,6 +1034,128 @@ int main(int argc, char** argv)
         Check(consumed == 1 && consumedAt == static_cast<int>(s.touchdown),
               "J landing blend deficit bypass consumed once, by the touchdown feed, on the runtime path",
               "consumed " + std::to_string(consumed) + " at feed " + std::to_string(consumedAt) + " (touchdown " + std::to_string(s.touchdown) + ")");
+    }
+    // L moving platform (elevator): see the header. contact 0 kept, 1 flicker (lost on every 2nd ride feed), 2 lost on every ride feed;
+    // vzSent false: the capsule velocity carries no platform vz (lost contact only).
+    {
+        struct Ride
+        {
+            std::string name;
+            float v;
+            bool walk;
+            int contact;
+            bool vzSent;
+        };
+        std::vector<Ride> rides;
+        for (const float v : {3.0f, -3.0f})
+            for (const bool walk : {false, true})
+            {
+                const std::string base = std::string(v > 0 ? "up" : "down") + (walk ? "_walk" : "_stand");
+                rides.push_back({"elev_" + base + "_contact", v, walk, 0, true});
+                rides.push_back({"elev_" + base + "_flicker", v, walk, 1, true});
+                rides.push_back({"elev_" + base + "_lost", v, walk, 2, true});
+                rides.push_back({"elev_" + base + "_lost_vz0", v, walk, 2, false});
+            }
+        int failedRides = 0;
+        for (const Ride& rd : rides)
+        {
+            // 60 feeds stopped (flag on from feed 30), ride: 0.5 s ramp, 5 s at speed, 0.5 s ramp, 60 feeds stopped (flag off for the last 30)
+            std::vector<motionhost::FeedInput> feeds;
+            const int ramp = 30, cruise = 300, before = 60, after = 60;
+            const int n = before + 2 * ramp + cruise + after;
+            for (int i = 0; i < n; ++i)
+            {
+                Sf f;
+                if (rd.walk)
+                {
+                    f.vy = 1.5f;
+                    f.mvy = 1.0f;
+                }
+                const int k = i - before;
+                const bool riding = k >= 0 && k < 2 * ramp + cruise;
+                float vz = 0.0f;
+                if (riding)
+                    vz = rd.v * (k < ramp ? float(k + 1) / ramp : (k >= ramp + cruise ? float(2 * ramp + cruise - k) / ramp : 1.0f));
+                f.vz = rd.vzSent ? vz : 0.0f;
+                if (riding && (rd.contact == 2 || (rd.contact == 1 && k % 2 == 1)))
+                {
+                    f.onGround = false;
+                    f.dist = (k % 4 == 1) ? 0.02f : -2.0f; // the cabin floor right below the feet, probed now and then
+                }
+                motionhost::FeedInput in = ToInput(f);
+                in.haveAir = true;
+                in.onGround = f.onGround;
+                in.distToGround = f.dist;
+                in.psmFall = 0;
+                in.onMovingPlatform = i >= 30 && i < n - 30;
+                feeds.push_back(in);
+            }
+            Prime(Scenario{{}, {Sf{}}});
+            int air = 0, airDb = 0, owns = 0, notStepped = 0, first = -1;
+            std::string firstDb;
+            for (int i = 0; i < n; ++i)
+            {
+                motiondriver::FeedAirFromInput(feeds[size_t(i)]);
+                g_stepped = false;
+                motionhost::Feed(feeds[size_t(i)]);
+                const motiondriver::AirDiag d = motiondriver::AirDiagnostics();
+                const std::string pk = StatusField(motiondriver::Status(), "pick=clip:");
+                const size_t sl = pk.find("/db");
+                const std::string dbn = sl == std::string::npos ? "-" : DbN(*db, std::atoi(pk.substr(sl + 3).c_str()));
+                const bool own = motionhost::AirOwnsForTest();
+                const bool wrongDb = dbn.find("Jumps") != std::string::npos || dbn.find("Lands") != std::string::npos;
+                if (i < 5)
+                    continue;
+                notStepped += g_stepped ? 0 : 1;
+                air += g_stepped && d.movementMode == 1 ? 1 : 0;
+                airDb += wrongDb ? 1 : 0;
+                owns += own ? 1 : 0;
+                if (first < 0 && (!g_stepped || d.movementMode == 1 || wrongDb || own))
+                {
+                    first = i;
+                    firstDb = dbn;
+                }
+            }
+            char dd[240];
+            std::snprintf(dd, sizeof dd, "%d feeds: InAir %d, Jumps/Lands picks %d, runtime AirOwns %d, not stepped %d, first bad feed %d (db %s)", n, air,
+                          airDb, owns, notStepped, first, firstDb.c_str());
+            const bool ok = air == 0 && airDb == 0 && owns == 0 && notStepped == 0;
+            failedRides += ok ? 0 : 1;
+            Check(ok, "[" + rd.name + "] L elevator ride: OnGround on every feed, no air picks, runtime AirState owns nothing", dd);
+        }
+        std::printf("L elevator rides failed: %d / %zu\n", failedRides, rides.size());
+        // guard: a real jump and a real drop with the platform flag on keep their air (A on the runtime path)
+        for (const Scenario& s : {sc[0], sc[2]})
+        {
+            Prime(s);
+            int bad = -1, notStepped = 0;
+            for (size_t i = 0; i < s.fr.size(); ++i)
+            {
+                const Sf& f = s.fr[i];
+                motionhost::FeedInput in = ToInput(f);
+                in.haveAir = f.airFeed;
+                in.onGround = f.onGround;
+                in.distToGround = f.dist;
+                in.psmFall = f.fall;
+                in.onMovingPlatform = true;
+                motiondriver::FeedAirFromInput(in);
+                g_stepped = false;
+                motionhost::Feed(in);
+                if (i + 5 < s.takeoff || i >= s.touchdown + 3)
+                    continue;
+                const motiondriver::AirDiag d = motiondriver::AirDiagnostics();
+                notStepped += g_stepped ? 0 : 1;
+                // the drop's first airborne feed still says PSM Stand (the game does not fall on a platform there): it stays OnGround and the
+                // PSM Fall feeds after it run the short contact-loss grace of a step-down (kGroundDropPsmFallS, 2 feeds) - InAir from the 4th
+                // airborne feed at the latest. The jump: InAir exactly on the airborne feeds.
+                const bool airSpan = i >= s.takeoff && i < s.touchdown;
+                const bool mayLag = s.psmLeadsLate && i < s.takeoff + 3;
+                if (bad < 0 && g_stepped && (d.movementMode == 1) != airSpan && !(mayLag && d.movementMode == 0))
+                    bad = static_cast<int>(i);
+            }
+            Check(notStepped == 0 && bad < 0, "[" + s.name + "] L guard: with the platform flag on the air details keep the air (InAir on the airborne feeds)",
+                  "first wrong mode feed " + std::to_string(bad) + ", not stepped " + std::to_string(notStepped));
+        }
     }
     motionhost::SetMotionHooks(nullptr);
     motiondriver::Shutdown();

@@ -55,6 +55,9 @@ struct FeedInput
     bool onGround = true;
     float distToGround = -2.0f;
     int32_t psmFall = 0;
+    // scripts/utpp.reds UTPPFeedMovingPlatform, sent right before this feed: a moving platform (elevator) carries V
+    // (IsOnMovingPlatform or the PSM flag IsPlayerInsideMovingElevator). Read through mm/MovingPlatform.hpp only.
+    bool onMovingPlatform = false;
     // Internal v1 -> v2 handoff, filled after this feed's AirState update. Not script inputs.
     // Zero means unavailable (standalone v2 callers retain their MapConfig default).
     float predictedGravityUp = 0.0f;
