@@ -61,6 +61,9 @@
 //   --turn-rate-max M   turn clip rate cap after --settings-log (motionhost::SetTurnRateParams(0.9, M), bodyturn.turnRateMax; the
 //                       settings log call MMTurnRateParams is applied as well); either option adds one TURNRATE line (the host
 //                       turn rate status: raised feeds, turns, cap)
+//   --aim-game-upper 0|1  mm.aimGameUpper off / on (motiondriver::SetAimGameUpper), set after --settings-log and after the
+//                       --aim-camera script default (false); not passed: unchanged. On, the published pose keeps the motion upper body
+//                       without the aim offset (the game's upper body is not recorded): barrel measurements of it are not the shown pose.
 //   --capsule-forecast 0|1  capsule forecast for turning and partial-stick starts (motiondriver::SetCapsuleForecast, the
 //                       mm.capsuleForecast setting; the settings log call MMCapsuleForecast is applied as well). Off / not passed: unchanged.
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
@@ -388,6 +391,7 @@ int main(int argc, char** argv)
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
     int32_t aimCameraAlt = -1;                 // --aim-camera-alt: second overlay pose of a drawn weapon, < 0 = not passed
     uint64_t aimCameraDrawnFeeds = 0;
+    int32_t aimGameUpper = -1;                 // --aim-game-upper: < 0 = not passed
     int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
     bool forecastDump = false;                 // --forecast-dump 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
@@ -456,6 +460,8 @@ int main(int argc, char** argv)
             aimCameraPose = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-camera-alt") == 0)
             aimCameraAlt = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-game-upper") == 0)
+            aimGameUpper = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--capsule-forecast") == 0)
             capsuleForecast = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--forecast-dump") == 0)
@@ -606,6 +612,8 @@ int main(int argc, char** argv)
     int32_t lastAimCameraPose = -1, lastAimCameraState = -1;
     if (aimCameraPose >= 0)
         motiondriver::SetAimGameUpper(false); // the script setting mm.aimGameUpper (default false); the DLL default is true
+    if (aimGameUpper >= 0)
+        motiondriver::SetAimGameUpper(aimGameUpper != 0);
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     if (turnFootPhase >= 0)
@@ -1021,6 +1029,9 @@ int main(int argc, char** argv)
         if (aimCameraPose >= 0)
             std::printf("AIMCAM run=%s pose=%d feeds=%llu aimFeeds=%llu\n", name.c_str(), aimCameraPose,
                         static_cast<unsigned long long>(aimCameraFeeds), static_cast<unsigned long long>(aimCameraAimFeeds));
+        if (aimGameUpper >= 0)
+            std::printf("AIMGAMEUPPER run=%s on=%d handback=%s\n", name.c_str(), aimGameUpper,
+                        StatusField(motiondriver::Status(), " handback=").c_str());
         if (aimOptions)
         {
             uint64_t neutralFeeds = 0, smoothFeeds = 0;

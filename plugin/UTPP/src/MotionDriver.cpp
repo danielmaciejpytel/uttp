@@ -6768,7 +6768,10 @@ bool ApplyLocked(integ::PoseSnapshot& aSnap)
     if (handbackUsed || fadingAim || g_weaponUpperFrame || fadingWeapon || reloadHandback || reloadCorrectionTail || meleeUpper)
     {
         if (handbackUsed)
+        {
             ++g_aimHandback;
+            UTPP_STAGE_TRACE(GameUpper); // the game's upper body (its graph + aimofs) replaces the finished motion upper body
+        }
         if (!sameBones)
         {
             const integ::UpperMask m =
