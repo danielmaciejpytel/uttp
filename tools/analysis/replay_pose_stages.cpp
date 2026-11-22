@@ -66,6 +66,10 @@
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
 //                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
 //                       (inspection only; the other outputs are unchanged)
+//   --aim-jog-query 1   after every feed ask the host for the aim jog target with the feed's stick and hand the answer to the driver, as
+//                       the locomotion script does right after each feed (utpp.reds UTPPUpdateAimSpeed: UTPPMMAimJogTarget, which also
+//                       sets motiondriver::SetAimJogOff); without it the driver keeps the vanilla aim walk mapping while aiming. Adds
+//                       one AIMJOG line (queries, feeds with a jog target). Off / not passed: unchanged.
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -390,6 +394,8 @@ int main(int argc, char** argv)
     uint64_t aimCameraDrawnFeeds = 0;
     int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
     bool forecastDump = false;                 // --forecast-dump 1
+    bool aimJogQuery = false;                  // --aim-jog-query 1
+    uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -456,6 +462,8 @@ int main(int argc, char** argv)
             aimCameraPose = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-camera-alt") == 0)
             aimCameraAlt = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-jog-query") == 0)
+            aimJogQuery = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--capsule-forecast") == 0)
             capsuleForecast = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--forecast-dump") == 0)
@@ -726,6 +734,14 @@ int main(int argc, char** argv)
         feedUs.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - feed0).count());
         if (capsuleStats)
             capsuleStatReplay.AfterFeed(rows[i].loco, i + 1 < rows.size() ? double(rows[i + 1].t) : 1e30);
+        if (aimJogQuery)
+        {
+            // the script's query right after the feed: the next feed's mapping sees the answer (Main.cpp Native_MMAimJogTarget)
+            const float jog = motionhost::AimJogTarget(rows[i].mvx, rows[i].mvy);
+            motiondriver::SetAimJogOff(!(jog > 0.0f));
+            ++aimJogQueries;
+            aimJogOnFeeds += jog > 0.0f ? 1 : 0;
+        }
         const bool published = ReadPublished();
         if (forecastOut)
         {
@@ -1031,6 +1047,9 @@ int main(int argc, char** argv)
         }
         if (turnRate >= 0 || turnRateMax >= 0.0f) // turn clip rate state of the legacy matcher (raised feeds, turns, cap)
             std::printf("TURNRATE run=%s %s\n", name.c_str(), motionhost::TurnRateStatus().c_str());
+        if (aimJogQuery)
+            std::printf("AIMJOG run=%s queries=%llu jogFeeds=%llu\n", name.c_str(), static_cast<unsigned long long>(aimJogQueries),
+                        static_cast<unsigned long long>(aimJogOnFeeds));
         if (airFeed) // only with the option: the scripts refuse a tool that was asked for it and printed no AIRFEED line
             std::printf("AIRFEED run=%s forwarded=%llu withAirFields=%llu\n", name.c_str(), static_cast<unsigned long long>(airFeeds),
                         static_cast<unsigned long long>(airFeedRows));
