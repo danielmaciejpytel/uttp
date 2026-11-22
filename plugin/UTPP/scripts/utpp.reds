@@ -70,6 +70,12 @@ public native func UTPPFeedLocomotionExtra(walkToggled: Bool, capsulePos: Vector
 // onGround = IsOnGround(), distToGround = downward raycast (m below the feet; -1 no hit, -2 not probed), fallState = PSM.Fall
 // (read before the game writes it this frame: the previous frame's value).
 public native func UTPPFeedAir(onGround: Bool, distToGround: Float, fallState: Int32) -> Void
+// moving platform flag of the NEXT UTPPFeedLocomotion call (sent right before it, UTPPFeedFromLocomotion): a moving platform
+// (elevator) carries V - IsOnMovingPlatform() or PSM.IsPlayerInsideMovingElevator. The game's own state machine does not fall
+// there when the ground contact drops; the DLL reads that feed in the platform frame (in contact, no vertical velocity).
+public native func UTPPFeedMovingPlatform(onPlatform: Bool) -> Void
+// the moving platform flag of the last locomotion feed (false once the feeds stop for 0.25 s): the CET camera pivot reads it
+public native func UTPPMMOnMovingPlatform() -> Bool
 // True when the next air feed should carry a raycast: airborne (last air feed), descending, mm.airProbe on, every 2nd feed.
 public native func UTPPMMAirWantsProbe() -> Bool
 // fade-out time (s) for hard closures (PSM block, TPP off, stale feed; default 0.12) and the time the gate must
@@ -1084,6 +1090,7 @@ public func UTPPFeedFromLocomotion(stateName: CName, timeDelta: Float, scriptInt
   haveTarget = tpp && UTPPOwnMoveTarget(cameraYaw, playerYaw, move, targetYaw);
   UTPPFeedLocomotionExtra(walkToggled, player.GetWorldPosition());
   UTPPFeedAirFromLocomotion(player, scriptInterface); // AIR HOLD stage: right before the feed
+  UTPPFeedMovingPlatform(UTPPOnMovingPlatform(scriptInterface)); // right before the feed, like the air fields
   let tier2Slow: Bool = UTPPIsTier2Slow(player, scriptInterface);
   UTPPFeedMotionTier2Slow(tier2Slow); // right before the feed, like the air fields
   UTPPFeedLocomotion(velocity, move, cameraYaw, playerYaw, UTPPLocoStateId(stateName), tpp, timeDelta, haveTarget, targetYaw, UTPPPsmBlockMask(scriptInterface));
@@ -1094,6 +1101,15 @@ public func UTPPFeedFromLocomotion(stateName: CName, timeDelta: Float, scriptInt
   UTPPUpdateWalkSpeed(player, scriptInterface, stateName, walkToggled, moving, tpp, tier2Slow); // walk toggle speed (0 = vanilla)
   UTPPUpdateAnalogFloor(player, scriptInterface, stateName, move, tpp, walkToggled); // minimum analog walk speed (no 'moving' gate; 1.0 = nothing while off)
   UTPPUpdateStickSpeed(player, scriptInterface, stateName, move, tpp, walkToggled, tier2Slow); // fixed walk / run speeds (1.0 = nothing in analog mode)
+}
+
+// A moving platform (elevator cabin) carries V: the physics flag, or the elevator's own PSM flag while it moves.
+public func UTPPOnMovingPlatform(scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  if scriptInterface.IsOnMovingPlatform() {
+    return true;
+  }
+  let bb: ref<IBlackboard> = scriptInterface.localBlackboard;
+  return IsDefined(bb) && bb.GetBool(GetAllBlackboardDefs().PlayerStateMachine.IsPlayerInsideMovingElevator);
 }
 
 // AIR HOLD stage: the air fields of this frame's feed. PSM.Fall is read here, before LocomotionAirEvents writes it

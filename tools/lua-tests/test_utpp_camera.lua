@@ -3057,6 +3057,246 @@ do
     check("pivotFast default: the same step is clamped to the lag bound (no snap), the base keeps V's velocity",
           pvNew.snapEv ~= nil and pvNew.snapEv.kind == "clamp" and pvNew.base > 0.5 and pvNew.base < 1.5 - 1e-6 and pvNew.vb ~= 0, string.format("%.4f", pNew.z))
   end
+  -- 2026-11-22 curb / stair steps on the ground: recorded capsule z of a curb crossed at a run (feed 20261114-123454, 399.70 - 400.24 s:
+  -- +13.6 / +12.5 / +6.5 cm up on the ground, -12.1 / -7.6 / -12.8 cm down through two frames of the game's fall state, two 32 ms frames).
+  -- The previous rule armed the fast mode twice and the camera itself stepped 8 - 15 cm per frame; with the air flag the fast mode stays
+  -- off (the spring takes the snap), also when the fall state covers all three descent frames. A real 2 m fall in the air still arms it.
+  do
+    local CURB = {
+      { 399.704450, 55.3578415, false }, { 399.721855, 55.3549347, false }, { 399.735827, 55.3500977, false }, { 399.752592, 55.34552, false },
+      { 399.768796, 55.3410339, false }, { 399.786181, 55.3422928, false }, { 399.802282, 55.3444519, false }, { 399.818919, 55.3460617, false },
+      { 399.836645, 55.3463364, false }, { 399.852329, 55.346611, false }, { 399.868865, 55.4826431, false }, { 399.886011, 55.6080627, false },
+      { 399.902948, 55.6731186, false }, { 399.919160, 55.7045135, false }, { 399.936823, 55.709671, false }, { 399.953411, 55.6882553, true },
+      { 399.985686, 55.5672684, false }, { 400.002492, 55.4913025, true }, { 400.035699, 55.3632584, false }, { 400.053740, 55.364624, false },
+      { 400.069164, 55.3661957, false }, { 400.086557, 55.3675613, false }, { 400.102342, 55.3691101, false }, { 400.118973, 55.3705215, false },
+      { 400.135964, 55.369751, false }, { 400.153029, 55.3687744, false }, { 400.168868, 55.367775, false }, { 400.186368, 55.3665237, false },
+      { 400.202867, 55.3653107, false }, { 400.219071, 55.3657761, false }, { 400.235978, 55.3691254, false },
+    }
+    local function curb(over, airOf, jumpOf)
+      local c = over and CM.config(over) or cfg
+      local pv = CM.newPivot()
+      for _ = 1, 30 do CM.pivotStep(pv, c, 1 / 60, V(0, 0, CURB[1][2]), nil, false, nil, 0, false, false) end
+      local armed, maxStep, events, prevP = 0, 0, 0, nil
+      local steps = {}
+      for i = 2, #CURB do
+        local dt = CURB[i][1] - CURB[i - 1][1]
+        local air = CURB[i][3]
+        if airOf then air = airOf(i, air) end
+        local jump = nil
+        if jumpOf then jump = jumpOf(i) end
+        local p = CM.pivotStep(pv, c, dt, V(0, 0, CURB[i][2]), nil, false, nil, 0, false, air, nil, nil, nil, jump)
+        if pv.fastOn then armed = armed + 1 end
+        if pv.snapEv then events = events + 1; pv.snapEv = nil end
+        if prevP then
+          local d = math.abs(p.z - prevP)
+          steps[#steps + 1] = d
+          maxStep = math.max(maxStep, d)
+        end
+        prevP = p.z
+      end
+      return armed, maxStep, events, steps
+    end
+    local aOld, mOld = curb({ pivotFastGround = false })
+    local aNew, mNew, eNew = curb()
+    print(string.format("  curb 399.87 s: camera step per frame max %.1f cm (fast frames %d) before, %.1f cm (fast frames %d) after",
+          mOld * 100, aOld, mNew * 100, aNew))
+    check(string.format("curb (recorded 399.87 s): the previous rule armed the fast mode (%d frames, camera step max %.1f cm per frame)", aOld, mOld * 100),
+          aOld > 0 and mOld > 0.08, string.format("%d frames %.3f m", aOld, mOld))
+    check(string.format("curb (recorded 399.87 s): the fast mode does not arm, camera step max %.1f cm per frame (under a third of before), no snap / clamp", mNew * 100),
+          aNew == 0 and mNew < mOld / 3 and eNew == 0, string.format("%d frames %.3f m %d events", aNew, mNew, eNew))
+    -- the game's fall state over all three descent frames (399.953 - 400.002 s, 0.066 s) and on the step-up frames: still no fast mode
+    local aFl, mFl = curb(nil, function(i, air) return air or (CURB[i][1] > 399.94 and CURB[i][1] < 400.01) end)
+    check(string.format("curb with the fall state on every descent frame: no fast mode (camera step max %.1f cm)", mFl * 100), aFl == 0 and mFl < mOld / 3,
+          string.format("%d frames %.3f m", aFl, mFl))
+    local aUp = curb(nil, function(i, air) return air or (CURB[i][1] > 399.88 and CURB[i][1] < 399.89) end)
+    check("curb with the fall state on one step-up frame: no fast mode", aUp == 0, tostring(aUp))
+    -- (2026-11-22) the fall state (jump = false, CM.pivotAirInput) on any single step-up frame - also the 2nd frame of the rising run,
+    -- where a late jump flag is accepted (jump = true only): no fast mode, the camera step as without the flicker
+    for _, tUp in ipairs({ 399.869, 399.886, 399.903, 399.919, 399.937 }) do
+      local function isUp(i) return math.abs(CURB[i][1] - tUp) < 0.001 end
+      local aU, mU = curb(nil, function(i, air) return air or isUp(i) end, function(i) return false end)
+      print(string.format("  curb, fall state on the step-up frame %.3f s only: fast frames %d, camera step max %.1f cm", tUp, aU, mU * 100))
+      check(string.format("curb with the fall state on the step-up frame %.3f s only: no fast mode, camera step max %.1f cm (as without it %.1f)", tUp, mU * 100, mNew * 100),
+            aU == 0 and mU <= mNew + 1e-6, string.format("%d frames %.3f m", aU, mU))
+      if tUp == 399.886 then
+        -- the known limit: a JUMP state there reads as a take-off whose flag came one frame late (none in 520 recorded fast rises)
+        local aJ, mJ = curb(nil, function(i, air) return air or isUp(i) end, function(i) return isUp(i) end)
+        print(string.format("  curb, jump state on the 2nd step-up frame only (limit, not expected in the game): fast frames %d, camera step max %.1f cm", aJ, mJ * 100))
+      end
+    end
+    -- a jump take-off (in the air from the first fast frame, rising): arms on the same frame as without the air flag
+    do
+      local function jump(withAir)
+        local dt = 1 / 60
+        local pv = CM.newPivot()
+        for _ = 1, 10 do CM.pivotStep(pv, cfg, dt, V(0, 0, 0), nil, false, nil, 0, false, withAir and false or nil) end
+        local z, vz, out = 0, 5.5, {}
+        for _ = 1, 72 do
+          z = math.max(0, z + vz * dt); vz = vz - 16 * dt
+          out[#out + 1] = CM.pivotStep(pv, cfg, dt, V(0, 0, z), nil, false, nil, 0, false, withAir and z > 0 or nil).z
+        end
+        return out
+      end
+      local a, b = jump(true), jump(false)
+      local same = #a == #b
+      for i = 1, #a do if a[i] ~= b[i] then same = false; break end end
+      check("jump take-off in the air: the pivot is bit for bit the rule without the air flag", same)
+    end
+    -- a real fall: V walks off a 2 m ledge (in the air throughout, g 16 m/s^2): fast mode arms on the same frame as without the
+    -- air flag (the speed reaches pivotFastVz after the air time already exceeds pivotFastAirT), bit for bit the same pivot, no snap
+    for _, fps in ipairs({ 30, 60, 144 }) do
+      local function drop(withAir)
+        local dt = 1 / fps
+        local pv = CM.newPivot()
+        for _ = 1, 10 do CM.pivotStep(pv, cfg, dt, V(0, 0, 0), nil, false, nil, 0, false, withAir and false or nil) end
+        local z, vz, out, armed, events = 0, 0, {}, false, 0
+        for _ = 1, math.floor(1.5 * fps) do
+          local inAir = z > -2
+          if inAir then vz = vz - 16 * dt; z = math.max(-2, z + vz * dt) end
+          local p = CM.pivotStep(pv, cfg, dt, V(0, 0, z), nil, false, nil, 0, false, withAir and inAir or nil)
+          out[#out + 1] = p.z
+          if pv.fastOn then armed = true end
+          if pv.snapEv then events = events + 1; pv.snapEv = nil end
+        end
+        return out, armed, events, out[#out]
+      end
+      local a, armedA, evA, lastA = drop(true)
+      local b = drop(false)
+      local same = #a == #b
+      for i = 1, #a do if a[i] ~= b[i] then same = false; break end end
+      check(string.format("real 2 m fall %d fps: the fast mode arms, the pivot is bit for bit the rule without the air flag, no snap, settles at the stance height", fps),
+            armedA and same and evA == 0 and math.abs(lastA - (-2 + STAND)) < 1e-3, string.format("armed %s same %s events %d end %.4f", tostring(armedA), tostring(same), evA, lastA))
+    end
+    -- a lift / climb on the ground (no air): a sustained 3.5 m/s rise arms the fast mode after pivotFastGroundDz m of travel
+    do
+      local dt = 1 / 60
+      local pv = CM.newPivot()
+      for _ = 1, 10 do CM.pivotStep(pv, cfg, dt, V(0, 0, 0), nil, false, nil, 0, false, false) end
+      local z, armedAt, events = 0, nil, 0
+      for i = 1, 120 do
+        z = z + 3.5 * dt
+        CM.pivotStep(pv, cfg, dt, V(0, 0, z), nil, false, nil, 0, false, false)
+        if pv.fastOn and armedAt == nil then armedAt = z end
+        if pv.snapEv then events = events + 1; pv.snapEv = nil end
+      end
+      check(string.format("lift on the ground at 3.5 m/s: the fast mode arms after %.2f m of travel (pivotFastGroundDz 0.5), no snap / clamp", armedAt or -1),
+            armedAt ~= nil and armedAt >= 0.5 - 1e-6 and armedAt < 0.6 and events == 0, string.format("%s %d", tostring(armedAt), events))
+    end
+    -- (2026-11-22) a jump whose air flag (a jump state, jump = true) arrives one frame after the take-off (the game's state read a frame
+    -- late): the fast mode arms as without the flag, the pivot within 1 mm of that rule at 30 / 60 / 144 fps. Two frames late is outside
+    -- the rule (the spring lags). The same late flag as a fall state (jump = false) is a curb (see above): it does not arm.
+    for _, fps in ipairs({ 30, 60, 144 }) do
+      local function jump(late)
+        local dt = 1 / fps
+        local pv = CM.newPivot()
+        for _ = 1, 10 do CM.pivotStep(pv, cfg, dt, V(0, 0, 0), nil, false, nil, 0, false, late ~= nil and false or nil) end
+        local z, vz, out, k = 0, 5.5, {}, 0
+        for _ = 1, math.floor(1.2 * fps) do
+          z = math.max(0, z + vz * dt); vz = vz - 16 * dt
+          if z > 0 then k = k + 1 end
+          local air, jump = nil, nil
+          if late ~= nil then air = z > 0 and k > late; jump = air end
+          out[#out + 1] = CM.pivotStep(pv, cfg, dt, V(0, 0, z), nil, false, nil, 0, false, air, nil, nil, nil, jump).z
+        end
+        return out
+      end
+      local ref, one, two = jump(nil), jump(1), jump(2)
+      local d1, d2 = 0, 0
+      for i = 1, #ref do d1 = math.max(d1, math.abs(one[i] - ref[i])); d2 = math.max(d2, math.abs(two[i] - ref[i])) end
+      print(string.format("  jump %d fps: air flag 1 frame late max diff %.4f mm, 2 frames late %.1f mm", fps, d1 * 1000, d2 * 1000))
+      check(string.format("jump %d fps, air flag one frame late: the pivot within 1 mm of the rule without the flag (%.4f mm)", fps, d1 * 1000), d1 <= 1e-3,
+            string.format("%.6f", d1))
+    end
+    -- (2026-11-22) lifts and on-foot climbs: CM.pivotAirInput gives nil on a moving platform and in a climb / vault / ladder, so the arming
+    -- is the rule without the ground gate (the travel rule pivotFastGroundDz built 30 - 37 cm of lag and a catch-up lurch there); on the
+    -- platform the pivot also rides with the cabin from its first frame (CM.pivotStep plat). Lifts accelerate at 4 m/s^2, cruise 1.5 s,
+    -- brake, then 1 s standing; V stands in the cabin (flag on) throughout.
+    -- Columns: rule without the flag (air nil), the ground gate (air false), the fix (CM.pivotAirInput + plat). Lag = max |V - base|; lurch = max per-frame
+    -- |base step - V step|; step = max per-frame base step. The fixed column must be no worse than the first (+5 %).
+    do
+      local a18, j18 = CM.pivotAirInput(18, false, false)
+      local a21, j21 = CM.pivotAirInput(21, false, false)
+      local a14, j14 = CM.pivotAirInput(14, false, false)
+      local a22, j22 = CM.pivotAirInput(22, false, false)
+      local a1, j1 = CM.pivotAirInput(1, false, false)
+      local aP, jP = CM.pivotAirInput(18, false, true)
+      check("pivotAirInput jump: true in Jump 18 .. HoverJump 21, false in Fall 14 / DodgeAir 22 / on the ground, nil with the air nil",
+            a18 == true and j18 == true and a21 == true and j21 == true and a14 == true and j14 == false and a22 == true and j22 == false
+            and a1 == false and j1 == false and aP == nil and jP == nil)
+    end
+    check("pivotAirInput: ground false, air true, vehicle hold / platform / climb / vault / ladder nil",
+          CM.pivotAirInput(1, false, false) == false and CM.pivotAirInput(14, false, false) == true and CM.pivotAirInput(18, false, false) == true
+          and CM.pivotAirInput(6, false, false) == true and CM.pivotAirInput(14, true, false) == nil and CM.pivotAirInput(1, false, true) == nil
+          and CM.pivotAirInput(8, false, false) == nil and CM.pivotAirInput(9, false, false) == nil and CM.pivotAirInput(10, false, false) == nil
+          and CM.pivotAirInput(13, false, false) == nil and CM.pivotAirInput(nil, nil, nil) == false)
+    local function ride(prof, fps, air, plat)
+      local dt = 1 / fps
+      local pv = CM.newPivot()
+      for _ = 1, 10 do CM.pivotStep(pv, cfg, dt, V(0, 0, 0), nil, false, nil, 0, false, air, nil, nil, plat) end
+      local lag, lurch, step, events, prevZ, prevB = 0, 0, 0, 0, 0, pv.base
+      local n = math.floor(prof.T * fps)
+      for i = 1, n do
+        local z = prof.z(i * dt)
+        CM.pivotStep(pv, cfg, dt, V(0, 0, z), nil, false, nil, 0, false, air, nil, nil, plat)
+        lag = math.max(lag, math.abs(z - pv.base))
+        lurch = math.max(lurch, math.abs((pv.base - prevB) - (z - prevZ)))
+        step = math.max(step, math.abs(pv.base - prevB))
+        if pv.snapEv then events = events + 1; pv.snapEv = nil end
+        prevZ, prevB = z, pv.base
+      end
+      return lag, lurch, step, events
+    end
+    local function liftProfile(vmax)
+      local a = 4.0 -- m/s^2
+      local tA, cruise, t0 = vmax / a, 1.5, 0.2
+      local zA = 0.5 * a * tA * tA
+      local tEnd = t0 + 2 * tA + cruise
+      return { T = tEnd + 1.0, z = function(t)
+        local u = t - t0
+        if u <= 0 then return 0 end
+        if u < tA then return 0.5 * a * u * u end
+        if u < tA + cruise then return zA + vmax * (u - tA) end
+        local w = math.min(u - tA - cruise, tA)
+        return zA + vmax * cruise + vmax * w - 0.5 * a * w * w
+      end }
+    end
+    local climb = { T = 1.5, z = function(t) -- 1.5 m at 4 m/s (0.375 s), from 0.2 s
+      local u = t - 0.2
+      if u <= 0 then return 0 end
+      return math.min(1.5, 4 * u)
+    end }
+    local cases = {
+      { "lift 2 m/s", liftProfile(2), CM.pivotAirInput(1, false, true), true },
+      { "lift 3.5 m/s", liftProfile(3.5), CM.pivotAirInput(1, false, true), true },
+      { "lift 5 m/s", liftProfile(5), CM.pivotAirInput(1, false, true), true },
+      { "lift 8 m/s", liftProfile(8), CM.pivotAirInput(1, false, true), true },
+      { "climb 1.5 m at 4 m/s", climb, CM.pivotAirInput(8, false, false), nil },
+    }
+    for _, fps in ipairs({ 30, 60 }) do
+      for _, c in ipairs(cases) do
+        local lM, uM, sM, eM = ride(c[2], fps, nil)
+        local lG, uG, sG = ride(c[2], fps, false)
+        local lF, uF, sF, eF = ride(c[2], fps, c[3], c[4])
+        print(string.format("  %s %d fps: lag / lurch / step cm  rule without flag %.1f / %.1f / %.1f  ground gate %.1f / %.1f / %.1f  fixed %.1f / %.1f / %.1f",
+              c[1], fps, lM * 100, uM * 100, sM * 100, lG * 100, uG * 100, sG * 100, lF * 100, uF * 100, sF * 100))
+        check(string.format("%s %d fps: lag %.1f cm, lurch %.1f cm, step %.1f cm no worse than the rule without the flag (%.1f / %.1f / %.1f, +5 %%)",
+              c[1], fps, lF * 100, uF * 100, sF * 100, lM * 100, uM * 100, sM * 100),
+              lF <= lM * 1.05 + 1e-6 and uF <= uM * 1.05 + 1e-6 and sF <= sM * 1.05 + 1e-6 and eF <= eM)
+      end
+      -- the ground gate column is measurably worse on the fast lifts (the case the fix is for)
+      local lG5 = ride(liftProfile(5), fps, false)
+      local lF5, uF5 = ride(liftProfile(5), fps, CM.pivotAirInput(1, false, true), true)
+      check(string.format("lift 5 m/s %d fps: the ground gate lags %.1f cm, the platform ride %.1f cm (lurch %.2f cm)", fps, lG5 * 100, lF5 * 100, uF5 * 100),
+            lG5 > lF5 + 0.1 and lF5 < 0.02 and uF5 < 0.01)
+      -- platformFollow = false: the flag is ignored (the rule without the ground gate exactly)
+      local cfgKeep = cfg
+      cfg = CM.config({ platformFollow = false })
+      local lOff = ride(liftProfile(5), fps, nil, true)
+      local lNil = ride(liftProfile(5), fps, nil, nil)
+      cfg = cfgKeep
+      check(string.format("platformFollow = false %d fps: the platform flag is ignored (lag %.1f cm)", fps, lOff * 100), lOff == lNil)
+    end
+  end
 end
 
 -- ================================================================ 2026-11-03 jump-out landing: the governed vertical follow (CM.jumpOutStep)

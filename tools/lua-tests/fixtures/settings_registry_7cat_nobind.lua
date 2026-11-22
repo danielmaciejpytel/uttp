@@ -107,6 +107,7 @@ return {
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
+    ["mm.bodyHeightSmooth"] = "true",
     ["mm.bodyYawOffsetFemale"] = "4",
     ["mm.bodyYawOffsetMale"] = "0",
     ["mm.capsuleForecast"] = "false",
@@ -290,6 +291,7 @@ return {
     "native UTPPSetMMAimWorldSmoothing(true,12)",
     "native UTPPSetMMNeutralAimOffset(false)",
     "native UTPPSetMMPelvisPlacement(false)",
+    "native UTPPSetMMBodyHeightSmooth(true)",
     "native UTPPSetMMHandBackBlend(false)",
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
@@ -315,6 +317,7 @@ return {
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
+    "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -518,6 +521,7 @@ return {
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
+    "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -1575,6 +1579,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.bodyHeightSmooth"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.bodyYawOffsetFemale"] = {
       ["default"] = "4",
       ["hasApply"] = true,
@@ -2410,6 +2422,7 @@ return {
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
+    ["mm.bodyHeightSmooth"] = "true",
     ["mm.bodyYawOffsetFemale"] = "4",
     ["mm.bodyYawOffsetMale"] = "0",
     ["mm.capsuleForecast"] = "false",
@@ -2618,6 +2631,7 @@ return {
     "mm.aimWorldSmooth",
     "mm.neutralAim",
     "mm.pelvisPlacement",
+    "mm.bodyHeightSmooth",
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
@@ -2809,6 +2823,7 @@ return {
     "mm.aimWorldSmooth",
     "mm.neutralAim",
     "mm.pelvisPlacement",
+    "mm.bodyHeightSmooth",
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
@@ -2990,6 +3005,7 @@ return {
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(false,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
+    "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -3181,6 +3197,7 @@ mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=false\r\
 mm.pelvisPlacement=false\r\
+mm.bodyHeightSmooth=true\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
@@ -3447,6 +3464,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.aimWorldSmooth",
       "mm.neutralAim",
       "mm.pelvisPlacement",
+      "mm.bodyHeightSmooth",
       "mm.handBackBlend",
       "mm.stepDownReach",
       "mm.farJumpGravity",
@@ -3625,6 +3643,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.airProbe"] = "true",
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
+    ["mm.bodyHeightSmooth"] = "true",
     ["mm.bodyYawOffsetFemale"] = "4",
     ["mm.bodyYawOffsetMale"] = "0",
     ["mm.capsuleForecast"] = "false",
@@ -3802,6 +3821,7 @@ mm.leanHeadScale=0.9\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=false\r\
 mm.pelvisPlacement=false\r\
+mm.bodyHeightSmooth=true\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
@@ -3985,6 +4005,7 @@ other.module=42\r\
     "/utpp/motion|switch|mm.aimWorldSmooth",
     "/utpp/motion|switch|mm.neutralAim",
     "/utpp/motion|switch|mm.pelvisPlacement",
+    "/utpp/motion|switch|mm.bodyHeightSmooth",
     "/utpp/motion|switch|mm.handBackBlend",
     "/utpp/motion|switch|mm.stepDownReach",
     "/utpp/motion|switch|mm.farJumpGravity",

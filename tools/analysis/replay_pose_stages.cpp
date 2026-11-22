@@ -66,6 +66,11 @@
 //                       replay keeps the state of the earlier replays for them, whatever the build default.
 //                       The settings log calls MMSteerMode / MMSteerActiveOnly of test builds are ignored (turn steering has no
 //                       option: the newest layer steered, carried through the layer mix).
+//   --body-height-smooth 0|1  body height smoothing on uneven ground (motionhost::SetBodyHeightSmooth, the mm.bodyHeightSmooth setting;
+//                       the settings log call MMBodyHeightSmooth is applied as well). The game runs the stage where the pose is drawn,
+//                       with the drawn world height; here it runs after each feed on the published pose, with the drawn height of
+//                       --draw-z next (default: the next feed's capsule z, the capsule after the tick's movement) or same (this feed's
+//                       capsule z) and the gate the host published. One BODYHEIGHT line. Off / not passed: output unchanged.
 //   --turn-rate 0|1     turn clip rate of the legacy matcher off / on after --settings-log (motionhost::SetTurnRate, the bodyturn.turnRate
 //                       setting); not passed: the build default (on)
 //   --turn-rate-max M   turn clip rate cap after --settings-log (motionhost::SetTurnRateParams(0.9, M), bodyturn.turnRateMax; the
@@ -121,6 +126,7 @@
 #undef main
 #include "../../plugin/UTPP/src/mm/ExitPoseHistory.hpp"
 #include "../../plugin/UTPP/src/mm/MotionBlendStack.hpp"
+#include "../../plugin/UTPP/src/mm/BodyHeightRuntime.hpp"
 
 namespace utpp::motiondriver
 {
@@ -132,6 +138,7 @@ bool SetAimWorldSmoothing(bool aOn, float aHz);
 namespace utpp::motionhost
 {
 void TestSetPelvisPlacement(bool aOn);
+void SetBodyHeightSmooth(bool aOn);
 }
 
 namespace
@@ -257,6 +264,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMFirmFeet") motionhost::SetFirmFeet(flag(0));
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
+        else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
         else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
@@ -418,6 +426,8 @@ int main(int argc, char** argv)
     int32_t overlayInertialSwitch = -1;                                          // -1 = not passed
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
+    int32_t bodyHeight = -1;                   // --body-height-smooth: < 0 = not passed (the settings log / build default)
+    bool drawZNext = true;                     // --draw-z next (default) | same
     int32_t aimCameraAlt = -1;                 // --aim-camera-alt: second overlay pose of a drawn weapon, < 0 = not passed
     uint64_t aimCameraDrawnFeeds = 0;
     int32_t aimGameUpper = -1;                 // --aim-game-upper: < 0 = not passed
@@ -501,6 +511,10 @@ int main(int argc, char** argv)
             turnRateMax = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-camera") == 0)
             aimCameraPose = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--body-height-smooth") == 0)
+            bodyHeight = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--draw-z") == 0)
+            drawZNext = std::strcmp(argv[i + 1], "same") != 0;
         else if (std::strcmp(argv[i], "--aim-camera-alt") == 0)
             aimCameraAlt = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-game-upper") == 0)
@@ -683,6 +697,14 @@ int main(int argc, char** argv)
         std::fprintf(forecastOut, "# t valid posX posY posZ d35X d35Y d35Z d70X d70Y d70Z accel\n");
     }
     motionhost::TestSetPelvisPlacement(pelvis);
+    if (bodyHeight >= 0)
+        motionhost::SetBodyHeightSmooth(bodyHeight != 0);
+    // body height stage (the game's animation-thread step, here once per feed on the published pose): tracker + counters
+    mm::bodyheight::Filter bodyHeightFilter;
+    uint32_t bodyHeightSerial = ~0u;
+    uint64_t bodyHeightRows = 0, bodyHeightApplied = 0, bodyHeightAllowed = 0;
+    double bodyHeightAbsMax = 0.0;
+    std::vector<double> bodyHeightAbs;
     // --qpc-feed: feed time t -> QueryPerformanceCounter ticks (offset by 1 s so the first stamp is not 0, which the host reads as unset)
     LARGE_INTEGER qpcHz{};
     QueryPerformanceFrequency(&qpcHz);
@@ -796,6 +818,31 @@ int main(int argc, char** argv)
             aimJogOnFeeds += jog > 0.0f ? 1 : 0;
         }
         const bool published = ReadPublished();
+        if (mm::bodyheight::rt::Enabled())
+        {
+            const uint32_t gate = mm::bodyheight::rt::g_gate.load(std::memory_order_acquire);
+            if ((gate >> 8) != bodyHeightSerial)
+            {
+                bodyHeightSerial = gate >> 8;
+                bodyHeightFilter.Reset();
+            }
+            const size_t zi = drawZNext ? std::min(i + 1, inputs.size() - 1) : i;
+            const bool haveZ = inputs[zi].haveExtra && std::isfinite(inputs[zi].capsulePos[2]);
+            float off = 0.0f;
+            if (haveZ)
+                off = bodyHeightFilter.Step(bodyHeightRows ? rows[i].dt : 0.0f, inputs[zi].capsulePos[2], (gate & 1u) != 0,
+                                              (gate & 2u) != 0);
+            else
+                bodyHeightFilter.Reset();
+            ++bodyHeightRows;
+            bodyHeightAllowed += (gate & 1u) != 0 ? 1 : 0;
+            if (published && mm::bodyheight::rt::ApplyToSnapshot(g_read, off))
+            {
+                ++bodyHeightApplied;
+                bodyHeightAbs.push_back(std::fabs(double(off)) * 100.0);
+                bodyHeightAbsMax = std::max(bodyHeightAbsMax, std::fabs(double(off)) * 100.0);
+            }
+        }
         if (forecastOut)
         {
             const auto fp = motiondriver::TestForecastProbe();
@@ -1055,6 +1102,20 @@ int main(int argc, char** argv)
     if (driftLeft > 0.0)
         drifts[driftCls].push_back(driftMax);
     const uint64_t liveHistorySearches = motiondriver::TestLiveHistorySearches();
+    if (bodyHeightRows)
+    {
+        std::sort(bodyHeightAbs.begin(), bodyHeightAbs.end());
+        const double p99 = bodyHeightAbs.empty() ? 0.0 : bodyHeightAbs[std::min(bodyHeightAbs.size() - 1, size_t(0.99 * double(bodyHeightAbs.size())))];
+        const auto& fd = bodyHeightFilter.Diagnostics();
+        std::printf("BODYHEIGHT draw=%s rows=%llu allowed=%llu applied=%llu offAbsP99Cm=%.2f offAbsMaxCm=%.2f resets=%llu hitches=%llu "
+                    "clamps=%llu legSolves=%llu legClamps=%llu ankleErrMaxMm=%.2f\n",
+                    drawZNext ? "next" : "same", static_cast<unsigned long long>(bodyHeightRows),
+                    static_cast<unsigned long long>(bodyHeightAllowed), static_cast<unsigned long long>(bodyHeightApplied), p99,
+                    bodyHeightAbsMax, static_cast<unsigned long long>(fd.resets), static_cast<unsigned long long>(fd.hitches),
+                    static_cast<unsigned long long>(fd.clamps), static_cast<unsigned long long>(mm::bodyheight::rt::g_legSolves.load()),
+                    static_cast<unsigned long long>(mm::bodyheight::rt::g_legClamps.load()),
+                    double(mm::bodyheight::rt::g_maxAnkleError.load()) * 1000.0);
+    }
     if (forecastOut)
         std::fclose(forecastOut);
     motionhost::SetMotionHooks(nullptr);

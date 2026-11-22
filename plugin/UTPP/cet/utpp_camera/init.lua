@@ -1272,6 +1272,25 @@ end
 -- running episode, they never start one). A DLL without the natives (or cfg.ragdollCam = false) gives nil = the old camera; a missing
 -- native is retried every 5 s (not every frame: a failing pcall builds an error string).
 local RAG_KNOCK_DETAILED = { [29] = true, [31] = true }
+-- Moving platform (elevator) under V for the camera pivot (CM.pivotAirInput): Game.UTPPMMOnMovingPlatform() is the flag of the last
+-- locomotion feed (IsOnMovingPlatform or the moving elevator state; false once the feeds stop). Held for platformHold s after it
+-- drops so a flicker at the cabin's start / stop does not switch the fast-fall rule. A missing native = no platform (logged once; retried
+-- every 5 s like the ragdoll natives, not every frame: a failing pcall builds an error string).
+local PLATFORM_HOLD = 0.3
+function M.PlatformRead(G)
+  if G.platNaAt ~= nil and (G.clock or 0) < G.platNaAt then return false end
+  local ok, on = pcall(function() return Game.UTPPMMOnMovingPlatform() end)
+  if not ok or type(on) ~= "boolean" then
+    G.platNaAt = (G.clock or 0) + 5
+    M.LogOnce("platNa", "camera: Game.UTPPMMOnMovingPlatform unavailable (" .. tostring(on) .. ") - moving platforms use the ground rule")
+    return false
+  end
+  G.platNaAt = nil
+  local clock = G.clock or 0
+  if on then G.platAt = clock end
+  return G.platAt ~= nil and clock - G.platAt <= PLATFORM_HOLD
+end
+
 function M.RagdollRead(G, det, vhHeld)
   if M.cfg.ragdollCam == false then return nil end
   if G.ragNaAt ~= nil and G.clock < G.ragNaAt then return nil end
@@ -4177,6 +4196,9 @@ if type(registerForEvent) == "function" then
         end
         G.ragN = G.updN
         local ragIn = M.RagdollRead(G, det, vh.held) -- ragdoll camera (nil = natives absent / switched off)
+        -- the player is in the air (on foot only; nil during a vehicle hold, a climb / vault / ladder and on a moving platform: see air below)
+        local platIn = not vh.held and M.PlatformRead(G)
+        local airIn, jumpIn = CM.pivotAirInput(det, vh.held, platIn)
         res = CM.solve(M.S, {
           ragdoll = ragIn,
           dt = dt, playerPos = ppos, playerQ = playerQ, bodyYaw = bodyYaw,
@@ -4195,8 +4217,11 @@ if type(registerForEvent) == "function" then
           zoom = M.rt.zoom * (1 - poseW), -- zoom masked by the aim pose (and the unarmed zoom pose)
           raycast = rayFn, crouch = crouch, slide = slide, stanceFast = G.stanceFast == true,
           -- (P7 F2): LocomotionDetailed SlideFall 6 / Fall 14 / Jump 18 ... DodgeAir 22 (adapter::PsmAir): the slide pivot's exit blend
-          -- into the air is short and the pivot base follows the take-off (CM.pivotStep)
-          air = det == 6 or (det >= 14 and det <= 22),
+          -- into the air is short and the pivot base follows the take-off (CM.pivotStep); on foot it also keeps the fast-fall mode off on
+          -- curbs and stair steps (cfg.pivotFastGround). Not passed (nil) during a vehicle hold: an exit launch arms the fast mode as before.
+          air = airIn,
+          jump = jumpIn, -- air is a jump state: a jump flag one frame late still arms the fast mode, a fall state on a curb does not
+          platform = platIn, -- a moving platform (elevator) carries V: the pivot rides with the cabin (CM.pivotStep plat)
           -- the orbit is hidden while held (override / release blend): no limiter lag there. Vehicle hold:
           -- only then - a hold that still shows the orbit (mount start, before the pull-out) keeps the world yaw like free
           -- look (holdYaw: no whip when the mount animation turns V to the door)

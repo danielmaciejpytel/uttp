@@ -354,6 +354,10 @@ do
   check(string.format("F2: no squat after the take-off: the pivot falls at most 2 cm after its first peak (%.3f m)", worstSquat), worstSquat <= 0.02, worstSquat)
   check(string.format("F2 (mutation): the base spring stepping back to pivotSmooth at the end of the exit blend squats 0.08 m or more (%.3f m)", worstSquatNoRamp), worstSquatNoRamp >= 0.08, worstSquatNoRamp)
   -- the air exit is only for the slide pivot exit: a jump from the standing / crouching ground is bit for bit the same with and without the flag
+  -- (2026-11-22: the flag also gates the fast-fall arming on uneven ground, cfg.pivotFastGround - off here, so only the slide exit is compared;
+  -- test_utpp_camera.lua covers a jump with the gate)
+  local cfgF2 = cfg
+  cfg = CM.config({ pivotFastGround = false })
   local function jump(aAir, aCrouch)
     local pv = CM.newPivot()
     local zs = {}
@@ -375,6 +379,7 @@ do
     for i = 1, #a do if a[i] ~= b[i] then same = false end end
     check(string.format("F2: a jump from the %s ground is bit for bit the same with and without the air flag", cr and "crouching" or "standing"), same)
   end
+  cfg = cfgF2
   -- the exit blend on the ground keeps slideBlend (the flag is not set there)
   local pv1, pv2 = CM.newPivot(), CM.newPivot()
   local pos = { x = 0, y = 0, z = 0 }

@@ -41,6 +41,7 @@
 #include "mm/FootLocker.hpp"
 #include "mm/GameIntegration.hpp"
 #include "mm/MeleeFullBody.hpp" // melee full body (2026-11-09)
+#include "mm/MovingPlatform.hpp" // moving platform (elevator) feed conditioning
 #include "mm/VaultShoulder.hpp" // vault shoulder limiter (2026-11-15)
 #include "mm/VaultTorso.hpp" // vault torso limiter (2026-11-10)
 #include "mm/BaseMatcher.hpp"
@@ -55,6 +56,7 @@
 #include "mm/Steering.hpp"
 #include "mm/Strafe.hpp"
 #include "ragdoll/RagdollEpisode.hpp" // ragdoll episode: game-owned feed
+#include "mm/BodyHeightRuntime.hpp" // body height smoothing (option, default on): gate + leg rig for the animation-thread stage
 #include "mm/VehicleTransition.hpp" // vehicle batch W1 P2: mount pop / exit hand-in (CAR-5 / MOTO-3, MOTO-6 / CAR-1 step 5)
 
 namespace utpp::motionhost
@@ -1464,6 +1466,13 @@ bool InitMatcherLocked()
     }
     if (ok)
         g_offsetRoot.Init(g_db, g_cfg.firstBodyBone, EffectiveOffsetCfgLocked()); // optional: failure = 0.3.2 pose path
+    {
+        // leg chains for the body height stage (animation thread); an invalid rig leaves the stage without effect
+        bodyheight::LegRig legRig;
+        if (!(ok && legRig.Init(g_db)))
+            legRig = bodyheight::LegRig{};
+        bodyheight::rt::PublishRig(legRig);
+    }
     if (ok)
         g_stanceGuard.Init(g_db, g_stanceCfg); // optional (0.3.6): failure = 0.3.5 pose path
     return ok;
@@ -1521,6 +1530,13 @@ bool g_pelvisPlacementOn = false; // pelvis stage of the foot locker (false = th
 uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis stage
 bool g_firmFeetOn = true;        // firm feet in turns and stops (CET mm.firmFeet, default on; mm/FootLocker.hpp FirmFeetConfig)
 FirmFeetConfig g_firmFeetCfg;    // its limits (SetFirmFeetParams; applied to the foot locker every feed while it is on)
+// Body height smoothing (mm/BodyHeightRuntime.hpp; option, default on): the stage runs on the animation thread with the drawn height;
+// the feed only publishes its gate (ground locomotion of this feed) and a reset request (teleport, hand-back).
+bool g_bodyHeightOn = true; // the menu default (mm.bodyHeightSmooth)
+bool g_bodyHeightAllowed = false; // set by the leg pipeline of this feed
+bool g_bodyHeightPlatform = false; // a moving platform carries V (FeedInput.onMovingPlatform of the last real feed): no smoothing
+bool g_bodyHeightReset = true;    // consumed by the next publish (first publish starts a fresh tracker)
+uint64_t g_bodyHeightTeleports = 0;
 
 LegContext ComputeLegContextLocked(const FeedInput& aIn, float aCapsuleSpeed)
 {
@@ -1669,6 +1685,7 @@ void MotionHandbackLocked() // UTPP-MOTION SEAM
     if (!g_motionHeldMatcher) // UTPP-MOTION SEAM
         return; // UTPP-MOTION SEAM
     g_motionHeldMatcher = false; // UTPP-MOTION SEAM
+    g_bodyHeightReset = g_bodyHeightOn; // body height smoothing restarts at the hand-back
     g_airHoldGroundReplantLeft = 0.0f; // never carry a v1 landing-step policy across v2 ownership
     g_airLandGroundBlendLeft = 0.0f; // never blend a cached v1 Land pose across an independently owned v2 span
     g_airLandGroundBlendPending = false;
@@ -1924,6 +1941,18 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
         pose = g_footLock.Output();
     }
     g_legPipelineOutput = pose;
+    if (g_bodyHeightOn)
+    {
+        // body height smoothing gate: ground locomotion (gate open, no hold, grounded, stand / crouch / sprint, small vz), not a traversal
+        // frame, third person; an offset-root teleport restarts the tracker
+        g_bodyHeightAllowed = aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && g_motionFrame.travFrame) && aIn.tppActive;
+        const uint64_t tp = g_offsetRoot.Diagnostics().teleports;
+        if (tp != g_bodyHeightTeleports)
+        {
+            g_bodyHeightTeleports = tp;
+            g_bodyHeightReset = true;
+        }
+    }
 }
 
 // Crossfade the pose before StanceGuard / FootLocker so both feet are solved against the final Hips pose.
@@ -1983,6 +2012,11 @@ void PublishLocked(float aWeight)
     g_snap.rig = g_rig;
     g_snap.publishTicks = Qpc();
     g_snap.sequence = ++g_publishes;
+    if (g_bodyHeightOn)
+    {
+        bodyheight::rt::PublishGate(g_bodyHeightAllowed && aWeight > 0.0f, g_bodyHeightReset, g_bodyHeightPlatform);
+        g_bodyHeightReset = false;
+    }
     // Restore v1's canonical mask on every publish: v2 may replace the mask in this reused snapshot
     // (e.g. arms-only Reload). Its previous frame must not change later Aim or v2 -> v1 ownership.
     std::memcpy(g_snap.upperBits, g_upperMask.bits, sizeof g_snap.upperBits);
@@ -3736,27 +3770,92 @@ void ExitDiagLocked(const FeedInput& aIn, int32_t aRawLoco, int aPsmDetail, floa
         g_exitDiagT = -1.0f;
 }
 
+// Moving platform ride summary (always on, info): one line when the script flag turns on and one when it turns off, with what the game
+// sent during the ride (raw contact losses, raw vertical velocity range) and how many feeds were conditioned (mm/MovingPlatform.hpp).
+struct PlatformRide
+{
+    bool on = false;
+    uint32_t feeds = 0, airFeeds = 0, lost = 0, conditioned = 0;
+    float vzMin = 0.0f, vzMax = 0.0f, seconds = 0.0f;
+};
+PlatformRide g_platformRide;
+
+void PlatformLogLocked(const FeedInput& aRawIn, bool aConditioned)
+{
+    PlatformRide& r = g_platformRide;
+    const float vz = std::isfinite(aRawIn.velWorld[2]) ? aRawIn.velWorld[2] : 0.0f;
+    if (aRawIn.onMovingPlatform && !r.on)
+    {
+        r = PlatformRide{};
+        r.on = true;
+        r.vzMin = r.vzMax = vz;
+        if (g_log)
+        {
+            char line[200];
+            std::snprintf(line, sizeof line, "UTPP PLATFORM on: onGround=%d vz=%.2f detail=%d", aRawIn.haveAir ? (aRawIn.onGround ? 1 : 0) : -1,
+                          static_cast<double>(vz), PsmDetailOf(aRawIn.psmBlock));
+            g_log(line);
+        }
+    }
+    if (r.on && aRawIn.onMovingPlatform)
+    {
+        ++r.feeds;
+        r.airFeeds += aRawIn.haveAir ? 1 : 0;
+        r.lost += aRawIn.haveAir && !aRawIn.onGround ? 1 : 0;
+        r.conditioned += aConditioned ? 1 : 0;
+        r.vzMin = std::fmin(r.vzMin, vz);
+        r.vzMax = std::fmax(r.vzMax, vz);
+        r.seconds += std::isfinite(aRawIn.dt) ? std::clamp(aRawIn.dt, 0.0f, 0.25f) : 0.0f;
+    }
+    else if (r.on)
+    {
+        r.on = false;
+        if (g_log)
+        {
+            char line[260];
+            std::snprintf(line, sizeof line,
+                          "UTPP PLATFORM off: %.1f s, feeds=%u airFeeds=%u contactLost=%u vz=%.2f..%.2f conditioned=%u", static_cast<double>(r.seconds),
+                          r.feeds, r.airFeeds, r.lost, static_cast<double>(r.vzMin), static_cast<double>(r.vzMax), r.conditioned);
+            g_log(line);
+        }
+    }
+}
+
 void Feed(const FeedInput& aRawIn)
 {
     // Ragdoll episode (ragdoll/RagdollEpisode.hpp): while the engine owns V's body the feed carries the existing game-owned state of
     // knockdown (LocomotionDetailed 29, integ::PsmDetailReleases). The gate closes, HoldBlocker reports release:detail and the normal
     // gate fader fades MM out and, after the episode, back in through the reopen hold; v2 yields on the same detail (psm-release).
     // Idle: the flag is false and aRaw is aRawIn itself, nothing changes.
-    std::optional<FeedInput> ragdollFeed;
+    std::optional<FeedInput> conditionedFeed;
     if (ragdoll::GameOwned())
     {
-        ragdollFeed = aRawIn;
-        ragdollFeed->psmBlock = ragdoll::GameOwnedPsmBlock(aRawIn.psmBlock);
+        conditionedFeed = aRawIn;
+        conditionedFeed->psmBlock = ragdoll::GameOwnedPsmBlock(aRawIn.psmBlock);
     }
     else if (ragdoll::GetUpOwns())
     {
         // native get-up (ragdoll/GetUpPlayer.hpp): the knockdown detail the script injects is removed again, so the gate can open and MM
         // (v1 weight filled below) owns V while the clip is published. Vehicle / death / scene bits stay and still close the gate.
-        ragdollFeed = aRawIn;
-        ragdollFeed->psmBlock = ragdoll::GetUpPsmBlock(aRawIn.psmBlock);
+        conditionedFeed = aRawIn;
+        conditionedFeed->psmBlock = ragdoll::GetUpPsmBlock(aRawIn.psmBlock);
     }
-    const FeedInput& aRaw = ragdollFeed ? *ragdollFeed : aRawIn;
+    // Moving platform (elevator, mm/MovingPlatform.hpp): the feed in the platform frame (in contact, no vertical velocity), the same
+    // conditioning motiondriver::FeedAirFromInput applies. Flag off: nothing changes.
+    const bool platformFeed = mm::platform::Applies(conditionedFeed ? *conditionedFeed : aRawIn);
+    if (platformFeed)
+    {
+        if (!conditionedFeed)
+            conditionedFeed = aRawIn;
+        mm::platform::Condition(*conditionedFeed);
+    }
+    const FeedInput& aRaw = conditionedFeed ? *conditionedFeed : aRawIn;
     std::lock_guard lock(g_mutex);
+    g_bodyHeightAllowed = false; // set again by the leg pipeline of this feed
+    if (!aRawIn.synthetic)
+        g_bodyHeightPlatform = aRawIn.onMovingPlatform; // body height smoothing passes the height through on a moving platform
+    if (!aRawIn.synthetic)
+        PlatformLogLocked(aRawIn, platformFeed);
     if (aRawIn.synthetic && g_synthGuardOn)
     {
         g_synthGuardOn = false;
@@ -7361,6 +7460,17 @@ void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds,
         *aLegBounds = d.firmLegBounds;
     if (aHandBacks)
         *aHandBacks = d.firmHandBacks;
+}
+
+void SetBodyHeightSmooth(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    if (g_bodyHeightOn != aOn)
+        g_bodyHeightReset = aOn;
+    g_bodyHeightOn = aOn;
+    bodyheight::rt::SetEnabled(aOn); // the animation-thread stage restarts its tracker on every toggle
+    if (aOn)
+        bodyheight::rt::PublishGate(false, true);
 }
 
 void SetAirStepDownReach(bool aOn)

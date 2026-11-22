@@ -36,6 +36,7 @@ local EXPECTED = {
   ["mm.motionDriver"] = true, ["mm.pistol1h"] = true, ["mm.pistolAuto"] = true, ["mm.aimGameUpper"] = false,
   ["mm.slide"] = true, ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.85,
   ["mm.leanHeadScale"] = 0.9, ["mm.selectionGuards"] = true, ["mm.debug"] = false,
+  ["mm.bodyHeightSmooth"] = true, -- smoothed body height on uneven ground (2026-11-22): on by default
   -- Crosshair (2026-10-30): the UTPP crosshair is on by default
   ["crosshair.impl"] = true, ["crosshair.color"] = "standard",
 }
