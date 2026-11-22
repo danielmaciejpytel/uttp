@@ -38,6 +38,7 @@
 #include "MeshArmClavicleLimit.hpp"
 #include "NativeShootTransfer.hpp"
 #include "Overlay.hpp"
+#include "PoseStageTrace.hpp"
 #include "OverlayFile.hpp"
 #include "SupportGrip.hpp"
 
@@ -601,6 +602,7 @@ private:
         auto aIn = input; // same-frame target conversion never mutates the caller's
                           // actor-space inputs
         const auto t0 = std::chrono::steady_clock::now();
+        UTPP_STAGE_TRACE_BEGIN();
         FrameInfo info;
         if (!m_ready || !aOut || aNumBones != m_n)
             return false;
@@ -788,6 +790,7 @@ private:
                     li.legsShare[side] = m_legSwing.Share(side, legsRaw);
                 }
             ov::ComposeLayers(sk, m_ov->Masks(), li, *m_scratch, *m_lay);
+            UTPP_STAGE_TRACE(Layering);
             KeepLowerFootHeight(li, info);
             // Mesh-space arms put the whole locomotion Spine3 deviation into the clavicle (Turn_180 aim-align, heavy
             // landing, slide: 59-84 deg -> shoulder skin balloon). MEASUREMENT ONLY: the runtime limit (180 deg) never engages
@@ -907,6 +910,8 @@ private:
                     femshoulder::Apply(sk, *m_lay, *m_tmp, m_rig, m_spine3, m_shootClavL, m_shootClavR, requested,
                                        contactParams, posture, composedPistol1H || composedUnarmed);
                 info.fem.applied = posture.applied;
+                if (posture.applied)
+                    UTPP_STAGE_TRACE(Feminine);
                 info.fem.reason = posture.reason;
                 info.fem.requested = requested;
                 info.fem.arm[0] = posture.left; info.fem.arm[1] = posture.right;
@@ -952,6 +957,8 @@ private:
             // inertialized overlay switch: the composed pose with its posture passes, before grip IK and the aim offset
             if (m_ovSwitchOn)
                 info.overlaySwitchActive = InertializeOverlaySwitch(aDt);
+            if (info.overlaySwitchActive)
+                UTPP_STAGE_TRACE(OverlaySwitch);
             // Recoil is a weapon-local delta on THIS frame's authored arms.
             // Caching the pre-shot arms freezes Ready while the machine advances into Aim
             // and would also freeze locomotion once moving recoil is admitted.
@@ -1053,8 +1060,13 @@ private:
             // not engaged (loop off or no aim point, nothing left to fade) = the open-loop aim offset bit for bit
             const bool barrelLoop = BarrelLoopBegin(aIn, info, aDt);
             const bool aoNeutralOnly = ApplyAimOffset(sk, aIn, info, aDt, barrelLoop);
+            if (info.aoApplied)
+                UTPP_STAGE_TRACE(AimOffset);
             if (barrelLoop && !aoNeutralOnly)
+            {
                 ApplyBarrelLoop(sk, aIn, info, aDt, shootActive);
+                UTPP_STAGE_TRACE(BarrelLoop);
+            }
             if (aIn.capturePoseDiagnostics)
                 CaptureStageDelta(aimBefore, *m_lay, info.aimDelta);
 #endif
@@ -1077,6 +1089,7 @@ private:
             }
             else if (sgEntry)
             {
+                UTPP_STAGE_TRACE(SupportGrip);
                 info.stockWeight = stockW;
                 if (stockW > ov::kZeroWeight && m_pocketBone >= 0)
                 {
@@ -1247,6 +1260,7 @@ private:
                         std::memcpy(m_lay->b, m_tmp->b, sizeof(ov::Xf) * static_cast<size_t>(sk.n));
                         info.grip = candidate;
                         info.shootApplied = true;
+                        UTPP_STAGE_TRACE(ShootAdditive);
                         info.shootPre = m_shootFallback.get();
                         info.shootScale = reachable;
                         actionApplied = true;
@@ -1288,6 +1302,7 @@ private:
                                                              sgEntry != nullptr && !routeOn && m_release.prevApplied,
                                                              info.gripFromOverlay, sgSlide, aDt, m_gripParams, m_release);
 #endif
+                UTPP_STAGE_TRACE(GripIK);
                 if (aIn.capturePoseDiagnostics)
                     CaptureStageDelta(gripBefore, *m_lay, info.gripDelta);
             }
