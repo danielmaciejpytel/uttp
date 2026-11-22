@@ -604,6 +604,38 @@ inline void ApplyChainAxisTurn(const Skeleton& aSk, Pose& aPose, const int* aBon
     }
 }
 
+// Turn of a mesh-space rotation delta (aAfter * aBefore^-1) about the unit axis aAxis, radians (twist part, sign of the axis).
+inline float TwistAboutAxisRad(const Quat& aBefore, const Quat& aAfter, const Vec3& aAxis)
+{
+    Quat d = math::QuatMul(aAfter, math::QuatInv(aBefore));
+    if (d.w < 0.0f)
+        d = Quat{-d.x, -d.y, -d.z, -d.w};
+    return 2.0f * std::atan2(d.x * aAxis.x + d.y * aAxis.y + d.z * aAxis.z, d.w);
+}
+
+// ApplyChainAxisTurn with the turn split by aWeights (one per bone, summing to 1) instead of evenly; the last bone still turns by
+// aAngleRad in all.
+inline void ApplyChainAxisTurnWeighted(const Skeleton& aSk, Pose& aPose, const int* aBones, int aCount, const Vec3& aAxis, float aAngleRad,
+                                       const float* aWeights)
+{
+    if (aCount <= 0 || !std::isfinite(aAngleRad) || aAngleRad == 0.0f)
+        return;
+    Quat ms[kMaxBones];
+    for (int k = 0; k < aCount; ++k)
+    {
+        const int b = aBones[k];
+        const float a = 0.5f * aAngleRad * aWeights[k];
+        if (b < 0 || b >= aSk.n || a == 0.0f)
+            continue;
+        const float s = std::sin(a);
+        const Quat rq{aAxis.x * s, aAxis.y * s, aAxis.z * s, std::cos(a)};
+        MeshRotations(aSk, aPose, ms);
+        const int p = aSk.parent[b];
+        const Quat newMs = math::QuatMul(rq, ms[b]);
+        aPose.b[b].r = p < 0 ? math::QuatNormalize(newMs) : math::QuatNormalize(math::QuatMul(math::QuatInv(ms[p]), newMs));
+    }
+}
+
 // ---- spine rotation (branch B, Enable_SpineRotation): yaw / count on each listed bone, mesh space about +Z -----
 inline void ApplySpineYaw(const Skeleton& aSk, Pose& aPose, const int* aBones, int aCount, float aYawRad,
                           float aClampRad = 0.5f * math::kPi)

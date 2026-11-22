@@ -45,6 +45,10 @@
 //          A base pose with its own head turn plus the grid stays within the head-vs-chest yaw of the grid alone at the cap (+0.5),
 //          or the base turn where that is larger; a grid turn against it is not cut.
 //          Mutations 20 (no cap), 21 (grid sign flipped), 22 (hard switch at the aim exit), 23 (no total cap) each fail a check.
+//      7o) neutral aim grid, the camera crosses behind the back (side change of the clamp, 120 deg catch-up): Head <= 9 deg per frame.
+//      7p) neutral aim grid under the body lean: lean weight 1 narrows the head-vs-chest cap by kNeutralGridLeanCapShare with the chest
+//          heading unchanged (mutation 24 fails); a head twist added after the grid (the lean) is turned back to what the grid left,
+//          a turn back towards the straight stance is kept (mutation 25 fails).
 //  10) barrel pitch loop (src/mm/BarrelPitchLoop.hpp, aim pitch plan 2026-10-30 sections 2.B / 3 / 5): camera of camera_math.lua
 //      (aim boom 1.1 / 0.45 / 0.05, boomPitchScale 0.35), pitch -60..+60 step 5 x d {50, 25, 10, 5, 2} (floor hit / 2 m clamp),
 //      Rifle / Pistol1H / Pistol2H x stand / crouch, 0.5 s per cell. Signed pitch error = elevation(WeaponRight +Y) -
@@ -1668,6 +1672,40 @@ static void TestBody(const char* aTag, const char* aDbPath, const char* aOvPath,
             Check(maxSpine <= 6.0f && maxHead <= 6.0f && endShare > 0.999f,
                   F("%s 7n: aim exit hand-over: Spine3 step %.2f, Head step %.2f deg/frame (<= 6), grid share %.3f at the end", aTag, maxSpine,
                     maxHead, endShare));
+            // 7o) the camera crosses behind the back (yaw +100 -> +170 -> -170 -> -140): the side of the clamp changes, the yaw catches
+            // up over 120 deg. The grid turns the head ~1.5 deg per deg of yaw, so the catch-up runs at kNeutralGridYawRateDegPerSec
+            // (at the aiming rate of 480 deg/s the head swung 12-18 deg per frame in the recorded sessions).
+            {
+                std::vector<math::Quat> qs;
+                auto settle = [&](float aYaw, int aFrames) {
+                    in.neutralAoYawDeg = aYaw;
+                    for (int f = 0; f < aFrames; ++f)
+                        ev->Evaluate(dt, r, in, out.data(), n);
+                };
+                settle(100.0f, 60);
+                settle(170.0f, 30);
+                settle(-170.0f, 30);
+                mesh(out, qs);
+                float prevH = yawOf(qs[hd]), maxStep = 0.0f;
+                const float startH = wrap(prevH - yawOf(qr[hd]));
+                in.neutralAoYawDeg = -140.0f;
+                int frames = 0;
+                for (int f = 0; f < 60; ++f)
+                {
+                    ev->Evaluate(dt, r, in, out.data(), n, &inf);
+                    mesh(out, qs);
+                    const float h = yawOf(qs[hd]);
+                    maxStep = std::max(maxStep, std::fabs(wrap(h - prevH)));
+                    if (std::fabs(wrap(h - prevH)) > 0.05f)
+                        frames = f + 1;
+                    prevH = h;
+                }
+                const float endH = wrap(prevH - yawOf(qr[hd]));
+                std::printf("INFO AO7o %s side change behind the back: Head %+.2f -> %+.2f, max step %.2f deg/frame, moving %d frames\n", aTag,
+                            startH, endH, maxStep, frames);
+                Check(startH > 40.0f && endH < -40.0f && maxStep <= 9.0f,
+                      F("%s 7o: side change behind the back: Head %+.2f -> %+.2f, max step %.2f deg/frame (<= 9)", aTag, startH, endH, maxStep));
+            }
             // total head-vs-chest cap: a base pose whose own head is already turned (the idle frame with the Head turned in its local
             // frame) plus the grid never turns the head further from the chest than the grid alone at the cap (+0.5), or than the base
             // alone where that is larger; a grid turn against the base turn is not cut. Mutation 23 (no total cap) fails here.
@@ -1752,6 +1790,48 @@ static void TestBody(const char* aTag, const char* aDbPath, const char* aOvPath,
                             sR.pose));
                     Check(m45.in > lim + 5.0f && std::fabs(m45.pose - m45.in) <= 0.75f,
                           F("%s 7n: base alone beyond the cap (%+.2f): the grid at +45 leaves it there (%+.2f, +-0.75)", aTag, m45.in, m45.pose));
+                    // 7p) body lean on a grid frame. (a) Lean weight 1 narrows the head-vs-chest cap by kNeutralGridLeanCapShare while
+                    // the chest keeps its turn (the narrowed part is not handed to the spine yaw). Base: the head turned 5 deg left of the
+                    // straight stance, inside the narrowed limit. Mutation 24 (cap ignores the lean) fails.
+                    std::vector<math::Quat> qn, ql;
+                    const float turnLittle = sgn * (hcZ + 5.0f - b0) / gain;
+                    in.neutralGridLeanWeight = 0.0f;
+                    const Cap ln0 = capProbe(turnLittle, axis, 45.0f);
+                    mesh(p, qn);
+                    in.neutralGridLeanWeight = 1.0f;
+                    const Cap ln1 = capProbe(turnLittle, axis, 45.0f);
+                    mesh(p, ql);
+                    in.neutralGridLeanWeight = 0.0f;
+                    const float limLean = hcZ + hcL * (1.0f - motionpose::kNeutralGridLeanCapShare);
+                    const float spineDiff = std::fabs(wrap(yawOf(ql[sp3]) - yawOf(qn[sp3])));
+                    std::printf("INFO AO7p %s lean weight 0 / 1 at +45: head-vs-chest %+6.2f / %+6.2f (narrowed limit %+.2f), Spine3 diff %.3f\n",
+                                aTag, ln0.pose, ln1.pose, limLean, spineDiff);
+                    Check(ln0.pose > limLean + 5.0f && ln1.in < limLean - 2.0f && ln1.pose <= limLean + 0.5f && ln1.pose >= limLean - 1.0f && spineDiff <= 0.05f,
+                          F("%s 7p: lean weight 1 narrows the cap: %+.2f -> %+.2f (limit %+.2f, +0.5 / -1), Spine3 heading diff %.3f (<= 0.05)",
+                            aTag, ln0.pose, ln1.pose, limLean, spineDiff));
+                    // (b) after the lean (here: an extra Head turn of 15 deg) the head-vs-chest yaw goes back to what the grid left; a turn
+                    // back towards the straight stance is kept. Mutation 25 (no limit after the lean) fails.
+                    capProbe(turnLittle, axis, 45.0f);
+                    ev->ToOv(p.data(), *tmp);
+                    const float hcGridLeft = ev->HeadChestYawOf(*tmp);
+                    auto leaned = [&](float aDeg) {
+                        std::vector<BoneTransform> q = p;
+                        const float h = 0.5f * sgn * aDeg / gain * math::kPi / 180.0f;
+                        math::Quat rq{0.0f, 0.0f, 0.0f, std::cos(h)};
+                        (axis == 0 ? rq.x : axis == 1 ? rq.y : rq.z) = std::sin(h);
+                        q[dbHead].q = math::QuatNormalize(math::QuatMul(q[dbHead].q, rq));
+                        ev->ToOv(q.data(), *tmp);
+                        const float before = ev->HeadChestYawOf(*tmp);
+                        ev->LimitLeanHeadChest(*tmp, hcGridLeft);
+                        return std::make_pair(before, ev->HeadChestYawOf(*tmp));
+                    };
+                    const auto out15 = leaned(15.0f), in10 = leaned(-10.0f);
+                    std::printf("INFO AO7p %s grid weight %.3f, grid left %+6.2f: lean out %+6.2f -> %+6.2f, lean back %+6.2f -> %+6.2f\n", aTag,
+                                ev->NeutralGridAppliedWeight(), hcGridLeft, out15.first, out15.second, in10.first, in10.second);
+                    Check(ev->NeutralGridAppliedWeight() > 0.999f && out15.first > hcGridLeft + 8.0f &&
+                              std::fabs(out15.second - hcGridLeft) <= 0.1f && in10.first < hcGridLeft - 5.0f && in10.second == in10.first,
+                          F("%s 7p: lean on the grid: out %+.2f -> %+.2f (grid left %+.2f, +-0.1), back %+.2f -> %+.2f (kept)", aTag,
+                            out15.first, out15.second, hcGridLeft, in10.first, in10.second));
                 }
             }
         }

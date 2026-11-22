@@ -108,6 +108,8 @@ struct OverlayFrameInputs
     float neutralAoWeight = 0.0f;
     float neutralAoYawDeg = 0.0f;
     float neutralAoPitchDeg = 0.0f;
+    // Body lean weight of the last feed (0..1, mm.lean): narrows the head-vs-chest cap of the neutral aim grid (kNeutralGridLeanCapShare)
+    float neutralGridLeanWeight = 0.0f;
     // World aim smoothing (default off): smoothed minus raw actor-relative aim angles. The root frame path recomputes the angles
     // from the raw point and adds this, so the smoothed direction survives the switch to the root frame.
     bool aimSmoothDeltaValid = false;
@@ -140,6 +142,18 @@ inline constexpr float kAimSpineYawClampDeg = 60.0f;
 // aiming sessions and only added lag.
 inline constexpr float kNeutralGridWeightSpeed = 0.0f;
 inline constexpr float kNeutralGridHeadWeightSpeed = 0.0f;
+// Catch-up rate of the aim offset yaw (deg/s, AimSpineYawFilter) on a neutral-only frame with the grid: the grid turns the head about
+// 1.5 deg per deg of yaw (neck, head and the chest of its samples), so the side change of the clamp behind the back (120 deg of yaw)
+// at the aiming rate (480 deg/s = 8 deg/frame) swung the head 12-18 deg per frame at 60 fps; 300 deg/s keeps it near 8.
+inline constexpr float kNeutralGridYawRateDegPerSec = 300.0f;
+// Neutral aim grid under the body lean (mm.lean). The lean is a mesh-space additive applied after this evaluator, so it acts on bones
+// the grid and the spine yaw have already turned; its run-turn samples twisted the head against the chest by up to ~14 deg (p99) on
+// top of the grid's total cap, which on the forward-bent running chest doubled the neck stretch. Two limits, grid frames only:
+// (a) the total head-vs-chest cap narrows by this share of the lean weight (neutralGridLeanWeight); the narrowed part is not handed to
+//     the spine yaw, so the chest keeps its turn and only the head looks less far towards the camera;
+// (b) after the lean the head-vs-chest yaw may move back towards the straight stance, never further out than the grid left it
+//     (LimitLeanHeadChest, weighted by the applied grid weight).
+inline constexpr float kNeutralGridLeanCapShare = 0.5f;
 
 // Fix batch 2 (AO) x reload contacts: the stationary pistol reload puts the hands and the weapon on the absolute NATIVE model
 // positions (NativeReloadContactsRuntime FinishCore) while Spine..Spine3 stay MM. An aim offset that keeps tilting the MM torso
@@ -227,6 +241,7 @@ struct FrameInfo
     float aoGridShare = 0.0f;
     float aoGridYawDeg = 0.0f;
     float aoSpineYawDeg = 0.0f;
+    float aoSrcYawDeg = 0.0f; // raw yaw the aim offset filter was stepped with (the frame of the drawn root)
     // head-vs-chest yaw (deg, + = left, ov::HeadChestYawDeg) on a grid frame: before the grid, after it, after the total cap
     float aoHeadChestInDeg = 0.0f;
     float aoHeadChestGridDeg = 0.0f;
@@ -618,6 +633,7 @@ private:
     {
         auto aIn = input; // same-frame target conversion never mutates the caller's
                           // actor-space inputs
+        m_gridAppliedWeight = 0.0f; // set again by ApplyAimOffset on a grid frame of this evaluation
         const auto t0 = std::chrono::steady_clock::now();
         UTPP_STAGE_TRACE_BEGIN();
         FrameInfo info;
@@ -1597,6 +1613,31 @@ public:
     float NeutralGridHeadChestCapDeg(int aSide) const { return m_gridHeadChestCap[aSide == 0 ? 0 : 1]; }
     // head-vs-chest yaw (deg) of the straight stance the limits count from (the neutral standing pose)
     float NeutralGridHeadChestZeroDeg() const { return m_gridHeadChestZero; }
+    // applied weight of the neutral aim grid in the last evaluation (aim offset weight x grid share; 0 = no grid frame)
+    float NeutralGridAppliedWeight() const { return m_gridAppliedWeight; }
+    // Body lean on a grid frame (kNeutralGridLeanCapShare (b)): aPose (overlay space) after the lean, aBeforeDeg its head-vs-chest yaw
+    // before the lean. The head-vs-chest yaw is clamped to the straight stance +- |aBeforeDeg - straight|, weighted by the applied grid
+    // weight; the correction turns Neck, Neck1 and Head about the chest's up axis (as the total cap). No grid frame: no change.
+    void LimitLeanHeadChest(ov::Pose& aPose, float aBeforeDeg) const
+    {
+#if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 25
+        (void)aPose;
+        (void)aBeforeDeg;
+        return; // mutation 25: the lean keeps its head-vs-chest twist on grid frames
+#else
+        if (!m_gridReady || !(m_gridAppliedWeight > 0.0f))
+            return;
+        const float z = m_gridHeadChestZero, lim = std::fabs(aBeforeDeg - z), after = HeadChestYawOf(aPose);
+        const float turn = (std::clamp(after, z - lim, z + lim) - after) * m_gridAppliedWeight;
+        if (!(std::fabs(turn) > 0.0f) || !std::isfinite(turn))
+            return;
+        math::Quat ms[ov::kMaxBones];
+        ov::MeshRotations(m_ov->Skel(), aPose, ms);
+        const math::Quat c = math::QuatMul(ms[m_gridChest], math::QuatInv(m_gridChestRef));
+        const math::Vec3 up = math::QuatRotate(c, math::Vec3{0.0f, 0.0f, 1.0f});
+        ov::ApplyChainAxisTurn(m_ov->Skel(), aPose, m_gridNeckChain, 3, up, turn * math::kPi / 180.0f);
+#endif
+    }
     // head-vs-chest yaw (deg, + = left, ov::HeadChestYawDeg) of a pose in the overlay space (ToOv); 0 without the grid
     float HeadChestYawOf(const ov::Pose& aPose) const
     {
@@ -1649,6 +1690,7 @@ private:
         const bool srcHave = neutralOnly ? true : aIn.haveAim;
         const float srcYaw = neutralOnly ? aIn.neutralAoYawDeg : aIn.aimYawDeg;
         const float srcPitch = neutralOnly ? aIn.neutralAoPitchDeg : aIn.aimPitchDeg;
+        aInfo.aoSrcYawDeg = srcYaw;
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 3
         constexpr float kYawClampDeg = 360.0f; // mutation 3: no clamp
 #else
@@ -1657,8 +1699,9 @@ private:
         AimSpineYawFilter::Output ao;
         // world aim target (default off): the angles were recomputed from the world direction for this root, the jump band ran on it
         const bool worldTracked = !neutralOnly && aIn.aimSmoothDeltaValid;
+        const float yawRate = neutralOnly && m_gridReady ? kNeutralGridYawRateDegPerSec : kAoYawRateDegPerSec;
         const bool have = m_aoFilter.Step(srcHave, a, srcYaw, srcPitch, aDt, kYawClampDeg,
-                                          aIn.machine.overlay == ov::PoseOverlay::Rifle ? 1 : 0, aIn.aoSuppress, ao, worldTracked);
+                                          aIn.machine.overlay == ov::PoseOverlay::Rifle ? 1 : 0, aIn.aoSuppress, ao, worldTracked, yawRate);
         if (!have || a <= ov::kZeroWeight)
             return neutralOnly;
         float alpha = ao.release < 1.0f ? std::min(a, ao.release) : a; // = a bit for bit while a target drives the AO
@@ -1779,25 +1822,54 @@ private:
             math::Quat ms[ov::kMaxBones];
             ov::MeshRotations(aSk, *m_lay, ms);
             const float hcIn = ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
+            math::Quat msPre[ov::kMaxBones]; // before the grid: its own split of the head turn over the neck chain (lean narrowing)
+            std::copy_n(ms, aSk.n, msPre);
             m_gridState.Apply(aSk, *m_lay, m_grid, gy, ao.pitchDeg, alpha * g, aDt, kNeutralGridWeightSpeed, kNeutralGridHeadWeightSpeed);
             ov::MeshRotations(aSk, *m_lay, ms);
             const float hcGrid = ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 23
-            const float hcOut = hcGrid; // mutation 23: no total cap (the clip's head turn adds to the grid's)
+            const float hcSpill = hcGrid; // mutation 23: no total cap (the clip's head turn adds to the grid's)
+            const float hcOut = hcGrid;
 #else
-            const float hcOut =
+            // hcSpill: the full cap, its excess goes to the spine yaw; hcOut: the cap narrowed by the body lean (no spill of the rest)
+            const float hcSpill =
                 ov::NeutralGridHeadChestClampDeg(hcIn, hcGrid, m_gridHeadChestCap[0], m_gridHeadChestCap[1], m_gridHeadChestZero);
+#if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 24
+            const float narrow = 1.0f; // mutation 24: the cap ignores the body lean
+#else
+            const float narrow = 1.0f - kNeutralGridLeanCapShare * std::clamp(aIn.neutralGridLeanWeight, 0.0f, 1.0f);
+#endif
+            const float hcOut = narrow < 1.0f ? ov::NeutralGridHeadChestClampDeg(hcIn, hcGrid, m_gridHeadChestCap[0] * narrow,
+                                                                                 m_gridHeadChestCap[1] * narrow, m_gridHeadChestZero)
+                                              : hcSpill;
 #endif
             if (hcOut != hcGrid)
             {
                 const math::Quat c = math::QuatMul(ms[m_gridChest], math::QuatInv(m_gridChestRef));
                 const math::Vec3 up = math::QuatRotate(c, math::Vec3{0.0f, 0.0f, 1.0f});
-                ov::ApplyChainAxisTurn(aSk, *m_lay, m_gridNeckChain, 3, up, (hcOut - hcGrid) * math::kPi / 180.0f);
+                if (hcSpill != hcGrid)
+                    ov::ApplyChainAxisTurn(aSk, *m_lay, m_gridNeckChain, 3, up, (hcSpill - hcGrid) * math::kPi / 180.0f);
+                if (hcOut != hcSpill)
+                {
+                    // the lean narrowing takes back the grid's own turn where the grid put it (mostly Neck and Head): an even split
+                    // would twist Neck1 against its neighbours
+                    float h[4] = {ov::TwistAboutAxisRad(msPre[m_gridChest], ms[m_gridChest], up), 0.0f, 0.0f, 0.0f};
+                    for (int k = 0; k < 3; ++k)
+                        h[k + 1] = ov::TwistAboutAxisRad(msPre[m_gridNeckChain[k]], ms[m_gridNeckChain[k]], up);
+                    const float dir = (hcOut - hcSpill) < 0.0f ? 1.0f : -1.0f; // sign of the grid turn being taken back
+                    float w[3], sum = 0.0f;
+                    for (int k = 0; k < 3; ++k)
+                        sum += (w[k] = std::max(0.0f, dir * (h[k + 1] - h[k])));
+                    for (int k = 0; k < 3; ++k)
+                        w[k] = sum > 1e-3f ? w[k] / sum : 1.0f / 3.0f;
+                    ov::ApplyChainAxisTurnWeighted(aSk, *m_lay, m_gridNeckChain, 3, up, (hcOut - hcSpill) * math::kPi / 180.0f, w);
+                }
             }
             aInfo.aoHeadChestInDeg = hcIn;
             aInfo.aoHeadChestGridDeg = hcGrid;
             aInfo.aoHeadChestOutDeg = hcOut;
-            spineYaw = (1.0f - g) * yaw + g * ramp - (hcOut - hcGrid) / alpha; // alpha > 0 here (the early return above)
+            spineYaw = (1.0f - g) * yaw + g * ramp - (hcSpill - hcGrid) / alpha; // alpha > 0 here (the early return above)
+            m_gridAppliedWeight = alpha * g;
         }
         aInfo.aoSpineYawDeg = spineYaw;
         const ov::Regions& r = m_ov->Masks();
@@ -2355,6 +2427,7 @@ private:
     ov::AimOffsetState m_gridState;
     bool m_gridReady = false;
     bool m_gridActive = false;
+    float m_gridAppliedWeight = 0.0f; // NeutralGridAppliedWeight
     float m_gridHeadAtCap[2] = {0.0f, 0.0f};
     // total head-vs-chest cap of the grid: Spine3, Head, the neck chain that takes the correction, the X0_Y0 reference mesh rotations
     // and the limits (left, right; > 0)

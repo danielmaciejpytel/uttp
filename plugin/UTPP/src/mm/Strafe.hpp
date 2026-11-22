@@ -542,6 +542,7 @@ struct NeutralAoInput
     float prevAoYawDeg = 0.0f; // the same one frame before
     float slotWeight = 0.0f;   // weight of the game-owned upper body slot (0..1)
     float disableAo = 0.0f;    // Disable_AO curve of the playing clip (0..1)
+    float bodyYawRateDegPerSec = 0.0f; // turn rate of the body (the actor yaw), deg/s
 };
 
 inline bool NeutralAoEnabled(const NeutralAoInput& aIn, const NeutralAoConfig& aCfg)
@@ -574,6 +575,15 @@ inline float NeutralAoTargetAlpha(const NeutralAoInput& aIn, const NeutralAoConf
     return 1.0f - d;
 }
 
+// The weight scales a head / spine turn towards the camera of up to the aim offset yaw clamp (60 deg). While the body turns, a fade
+// starts because the body turns the camera out of (or into) the 110 deg sector, and the head turn it unwinds (or winds up) goes the
+// same way as the body: a 0.2 s fade of 60 deg added 300 deg/s to a running turn (10-12 deg of head per frame at 60 fps). While the
+// body turns faster than kNeutralAoBodyTurnDegPerSec the weight moves at most kNeutralAoTurnRateDegPerSec / turn per second, turn =
+// min(|yaw|, 60 deg): fadeS up to 40 deg of turn, up to 0.3 s for the full 60. A body that stands (the camera orbits) keeps fadeS.
+inline constexpr float kNeutralAoTurnRateDegPerSec = 200.0f;
+inline constexpr float kNeutralAoTurnMaxDeg = 60.0f;
+inline constexpr float kNeutralAoBodyTurnDegPerSec = 90.0f;
+
 class NeutralAoBlend
 {
 public:
@@ -584,7 +594,11 @@ public:
         const float target = NeutralAoTargetAlpha(aIn, aCfg);
         if (!(aDt > 0.0f) || !std::isfinite(aDt))
             return m_alpha;
-        const float step = aCfg.fadeS > 1e-4f ? aDt / aCfg.fadeS : 1.0f;
+        float step = aCfg.fadeS > 1e-4f ? aDt / aCfg.fadeS : 1.0f;
+        const float turn = std::isfinite(aIn.aoYawDeg) ? std::min(std::fabs(aIn.aoYawDeg), kNeutralAoTurnMaxDeg) : kNeutralAoTurnMaxDeg;
+        const bool bodyTurns = std::isfinite(aIn.bodyYawRateDegPerSec) && std::fabs(aIn.bodyYawRateDegPerSec) > kNeutralAoBodyTurnDegPerSec;
+        if (bodyTurns && turn > 1e-3f)
+            step = std::min(step, kNeutralAoTurnRateDegPerSec * aDt / turn);
         m_alpha += std::clamp(target - m_alpha, -step, step);
         if (m_alpha < 1e-5f && target <= 0.0f)
             m_alpha = 0.0f;

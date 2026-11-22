@@ -35,10 +35,10 @@ add_test(NAME utpp_motion_pose_test COMMAND utpp_motion_pose_test ${UTPP_POSEV2_
 # 7 = handback does not end the latch (7h), 11 = the pitch of a returning target is followed at once (7i),
 # 18 = the barrel pitch loop never applies (src/mm/BarrelPitchLoop.hpp, test 10), 20 = the neutral grid without its cap,
 # 21 = the grid sampled with the flipped sign, 22 = a hard switch between the grid and the sweep path, 23 = no total
-# head-vs-chest cap of the grid (7n).
+# head-vs-chest cap of the grid (7n), 24 = the cap ignores the body lean, 25 = no head-vs-chest limit after the body lean (7p).
 # Each build MUST report a [FAIL] line.
 # removed 2026-11-05 (review R8), which cheaper test kills the same site: utpp_mm_aospineyaw_mut5, _mut6, _mut11
-foreach(_m 7 18 20 21 22 23)
+foreach(_m 7 18 20 21 22 23 24 25)
   add_executable(utpp_motion_pose_mut${_m} tests/MotionPoseTest.cpp src/mm/MotionPose.hpp src/mm/MotionAdapter.hpp src/mm/Overlay.hpp
                  src/mm/OverlayFile.hpp src/mm/GripIK.hpp src/mm/IdleBreaks.hpp src/mm/Inertializer.hpp)
   target_compile_options(utpp_motion_pose_mut${_m} PRIVATE ${UTPP_WARNINGS} /EHsc)

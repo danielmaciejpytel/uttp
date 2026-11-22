@@ -115,8 +115,10 @@ public:
     // world space) and were recomputed for this frame's root. A step of them is then a turn of the root, which the angles compensate in
     // the same frame: no jump band on them (the side change of the clamp, a re-acquire after the latch, a weapon class change and a
     // gap still catch up).
+    // aYawRateDegPerSec: the catch-up rate of the yaw (kAoYawRateDegPerSec; the neutral aim grid passes a slower one, its head turns
+    // more than one degree per degree of yaw).
     bool Step(bool aHaveAim, float aWeight, float aRawYawDeg, float aRawPitchDeg, float aDt, float aClampDeg,
-              int aContext, bool aSuppress, Output& aOut, bool aWorldTracked = false)
+              int aContext, bool aSuppress, Output& aOut, bool aWorldTracked = false, float aYawRateDegPerSec = kAoYawRateDegPerSec)
     {
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 19
         aWorldTracked = false; // mutation 19: world-tracked angles still run the root-relative jump band
@@ -207,7 +209,7 @@ public:
 #endif
                 if (m_yawSlew)
                 {
-                    const float maxStep = kAoYawRateDegPerSec * catchUpDt;
+                    const float maxStep = aYawRateDegPerSec * catchUpDt;
                     if (std::fabs(d) <= maxStep)
                     {
                         m_yaw = target;

@@ -260,6 +260,46 @@ void NeutralAoTest()
     for (int i = 0; i < 12; ++i)
         b.Step(in, disabled, dt);
     Check(b.Alpha() == 0.0f, "neutral AO: option off reaches 0 within the fade time");
+
+    // A full turn (the camera leaves the 110 deg sector, the turn sits at the 60 deg clamp) while the body turns at 340 deg/s (a running
+    // turn) fades no faster than kNeutralAoTurnRateDegPerSec of turn: weight step x 60 deg <= 200 deg/s x dt (a 0.2 s fade unwound 5 deg
+    // per frame at 60 fps on top of the body's own turn), done within 0.3 s plus a frame; fading in towards a camera at 100 deg the same;
+    // a body that stands keeps the 0.2 s fade.
+    sf::NeutralAoInput wide = in;
+    wide.aoYawDeg = wide.prevAoYawDeg = 100.0f;
+    wide.bodyYawRateDegPerSec = -340.0f;
+    sf::NeutralAoBlend f;
+    for (int i = 0; i < 60; ++i)
+        f.Step(wide, cfg, dt);
+    Check(f.Alpha() == 1.0f, "neutral AO: full weight at 100 deg after 1 s");
+    sf::NeutralAoInput gone = wide;
+    gone.aoYawDeg = gone.prevAoYawDeg = 120.0f;
+    float prev = f.Alpha(), maxTurnStep = 0.0f;
+    int frames = 0;
+    for (int i = 0; i < 30 && f.Alpha() > 0.0f; ++i)
+    {
+        f.Step(gone, cfg, dt);
+        maxTurnStep = std::max(maxTurnStep, std::fabs(f.Alpha() - prev) * 60.0f);
+        prev = f.Alpha();
+        ++frames;
+    }
+    Check(maxTurnStep <= 200.0f * dt + 1e-3f && f.Alpha() == 0.0f && frames <= 19,
+          "neutral AO: a 60 deg turn fades out at <= 200 deg/s of turn (<= 3.33 deg per frame), within 0.3 s");
+    std::printf("INFO neutral AO fade of a 60 deg turn: %.3f deg per frame, %d frames\n", maxTurnStep, frames);
+    prev = 0.0f;
+    maxTurnStep = 0.0f;
+    for (int i = 0; i < 30; ++i)
+    {
+        f.Step(wide, cfg, dt);
+        maxTurnStep = std::max(maxTurnStep, std::fabs(f.Alpha() - prev) * 60.0f);
+        prev = f.Alpha();
+    }
+    Check(maxTurnStep <= 200.0f * dt + 1e-3f && f.Alpha() == 1.0f, "neutral AO: fading in towards a camera at 100 deg at <= 200 deg/s of turn");
+    sf::NeutralAoInput still = gone;
+    still.bodyYawRateDegPerSec = 0.0f;
+    for (int i = 0; i < 12; ++i)
+        f.Step(still, cfg, dt);
+    Check(f.Alpha() == 0.0f, "neutral AO: a standing body fades a 60 deg turn out in 0.2 s");
 }
 
 // Rest framing dead band of the neutral aim offset pitch: no pitch from the rest framing pitch (-15 deg) up to level, the camera
