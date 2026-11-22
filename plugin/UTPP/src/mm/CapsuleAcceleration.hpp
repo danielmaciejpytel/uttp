@@ -34,6 +34,7 @@ struct Prediction
     float maxSpeed = 0.f;     // physical speed cap; only straight full-stick forecasts
     float crouchWeight = 0.f;
     SpeedPoints stand{0, {}, {}}, crouch{0, {}, {}};
+    bool turning = false;     // capsule forecast: the direction follows the controller yaw rate (Trajectory::Update)
 
     bool Active() const
     {

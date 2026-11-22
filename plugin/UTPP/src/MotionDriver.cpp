@@ -339,6 +339,7 @@ int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of 
 bool g_overlayInertialSwitchOn = false; // SetOverlayInertialSwitch (default off)
 int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
+bool g_capsuleForecastOn = false; // SetCapsuleForecast (MapConfig::capsuleForecast, mm.capsuleForecast)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
 // Slide feed (CET mm.slide -> SetSlide, default ON like the setting; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 reaches the
@@ -2364,6 +2365,12 @@ void SetStepDownReach(bool aOn)
     g_stepDownReachOn = aOn; // the native also switches the runtime air state (motionhost::SetAirStepDownReach)
 }
 
+void SetCapsuleForecast(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_capsuleForecastOn = aOn;
+}
+
 void SetFarJumpGravityScale(bool aOn)
 {
     std::lock_guard lock(g_m);
@@ -2565,6 +2572,29 @@ uint64_t TestLiveHistorySearches()
 {
     std::lock_guard lock(g_m);
     return g_liveHistSearches;
+}
+
+ForecastProbe TestForecastProbe()
+{
+    std::lock_guard lock(g_m);
+    ForecastProbe r;
+    if (!g_bundle)
+        return r;
+    const auto& tr = g_bundle->map.traj;
+    if (tr.NumHistory() == 0)
+        return r;
+    const auto now = tr.Prediction(0);
+    r.valid = true;
+    const auto p35 = tr.PositionAt(now.t + .35f), p70 = tr.PositionAt(now.t + .7f);
+    const float cur[3] = {now.pos.x, now.pos.y, now.pos.z}, a[3] = {p35.x, p35.y, p35.z}, b[3] = {p70.x, p70.y, p70.z};
+    for (int i = 0; i < 3; ++i)
+    {
+        r.pos[i] = cur[i];
+        r.d35[i] = a[i] - cur[i];
+        r.d70[i] = b[i] - cur[i];
+    }
+    r.accel = g_bundle->map.capsuleAccelModel;
+    return r;
 }
 
 uint64_t TestTurnFootPhaseSearches()
@@ -5507,6 +5537,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
                       utpp::mm::air::kStepDownMaxSeconds == adapter::kGroundDropStepMaxS,
                   "the runtime air state and the chooser mapping agree on a step-down");
     mc.stepDownReach = g_stepDownReachOn; // SetStepDownReach (same switch as the runtime air state)
+    mc.capsuleForecast = g_capsuleForecastOn; // SetCapsuleForecast
     mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam
     // the exit window of the gate can close on the first open feed; the grace keeps its own short tail
     g_exitAirTail = aRaw.vehicleExitWindow ? 0.6f : std::fmax(0.0f, g_exitAirTail - std::fmax(aRaw.dt, 0.0f));

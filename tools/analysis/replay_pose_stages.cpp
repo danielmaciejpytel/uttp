@@ -61,6 +61,11 @@
 //   --turn-rate-max M   turn clip rate cap after --settings-log (motionhost::SetTurnRateParams(0.9, M), bodyturn.turnRateMax; the
 //                       settings log call MMTurnRateParams is applied as well); either option adds one TURNRATE line (the host
 //                       turn rate status: raised feeds, turns, cap)
+//   --capsule-forecast 0|1  capsule forecast for turning and partial-stick starts (motiondriver::SetCapsuleForecast, the
+//                       mm.capsuleForecast setting; the settings log call MMCapsuleForecast is applied as well). Off / not passed: unchanged.
+//   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
+//                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
+//                       (inspection only; the other outputs are unchanged)
 //   --motion-log 1      also write <out prefix>.motion.log: the driver's MOTION trace lines (the game log format, 2 Hz plus every pick
 //                       change), each stamped with the feed time as a wall time of 2000-01-01 (00:00:00 = feed time 0); the world
 //                       slide tools rebuild the contact track from it exactly as they do from a game log (no effect on the pose)
@@ -234,6 +239,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
+        else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
     }
@@ -382,6 +388,8 @@ int main(int argc, char** argv)
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
     int32_t aimCameraAlt = -1;                 // --aim-camera-alt: second overlay pose of a drawn weapon, < 0 = not passed
     uint64_t aimCameraDrawnFeeds = 0;
+    int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
+    bool forecastDump = false;                 // --forecast-dump 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -448,6 +456,10 @@ int main(int argc, char** argv)
             aimCameraPose = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-camera-alt") == 0)
             aimCameraAlt = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--capsule-forecast") == 0)
+            capsuleForecast = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--forecast-dump") == 0)
+            forecastDump = std::atoi(argv[i + 1]) != 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -599,6 +611,16 @@ int main(int argc, char** argv)
     if (turnFootPhase >= 0)
         motiondriver::SetTurnFootPhase(turnFootPhase != 0);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
+    if (capsuleForecast >= 0)
+        motiondriver::SetCapsuleForecast(capsuleForecast != 0);
+    FILE* forecastOut = nullptr;
+    if (forecastDump && out != "-")
+    {
+        forecastOut = std::fopen((out + ".forecast.txt").c_str(), "w");
+        if (!forecastOut)
+            return 7;
+        std::fprintf(forecastOut, "# t valid posX posY posZ d35X d35Y d35Z d70X d70Y d70Z accel\n");
+    }
     motionhost::TestSetPelvisPlacement(pelvis);
     // --qpc-feed: feed time t -> QueryPerformanceCounter ticks (offset by 1 s so the first stamp is not 0, which the host reads as unset)
     LARGE_INTEGER qpcHz{};
@@ -705,6 +727,13 @@ int main(int argc, char** argv)
         if (capsuleStats)
             capsuleStatReplay.AfterFeed(rows[i].loco, i + 1 < rows.size() ? double(rows[i + 1].t) : 1e30);
         const bool published = ReadPublished();
+        if (forecastOut)
+        {
+            const auto fp = motiondriver::TestForecastProbe();
+            std::fprintf(forecastOut, "%.6f %d %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\n", double(rows[i].t), fp.valid ? 1 : 0,
+                         double(fp.pos[0]), double(fp.pos[1]), double(fp.pos[2]), double(fp.d35[0]), double(fp.d35[1]), double(fp.d35[2]),
+                         double(fp.d70[0]), double(fp.d70[1]), double(fp.d70[2]), double(fp.accel));
+        }
         if (rows[i].t < from || rows[i].t > to)
             continue;
         {
@@ -947,6 +976,8 @@ int main(int argc, char** argv)
     if (driftLeft > 0.0)
         drifts[driftCls].push_back(driftMax);
     const uint64_t liveHistorySearches = motiondriver::TestLiveHistorySearches();
+    if (forecastOut)
+        std::fclose(forecastOut);
     motionhost::SetMotionHooks(nullptr);
     motionhost::TestSetQpcTicks(-1);
     if (g_motionLog)
