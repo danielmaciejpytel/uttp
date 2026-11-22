@@ -336,6 +336,7 @@ float g_neutralAoPrevYawDeg = 0.0f;
 bool g_neutralAoPrevValid = false;
 float g_neutralAoPitchDeg = 0.0f; // last camera-target pitch, held while only the camera yaw is known
 int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of the blend stack, else 0 / 1
+bool g_overlayInertialSwitchOn = false; // SetOverlayInertialSwitch (default off)
 int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
@@ -780,6 +781,7 @@ struct LoadDone
     char sha[17] = {};
     char err[192] = {};
     char lean[112] = {}; // lean pack: "none" / "ok:<mapped>/<mismatch>" / "fail:<why>"
+    int ovSwitchLegRoots = -1; // thigh bones of the overlay switch leg blend (pose evaluator), -1 = no evaluator
 };
 LoadDone g_loadDone;
 char g_loadBuf[768] = {};
@@ -1647,6 +1649,8 @@ void NoteLoadDoneLocked(Body aBody, const Bundle* b, const char* aOutcome, float
     d.ovOk = b->ovOk;
     d.styleOk = b->styleOk;
     d.travOk = b->travOk;
+    if (b->evalOk)
+        d.ovSwitchLegRoots = b->eval.OverlaySwitchLegRoots();
     if (b->res.dbParsed)
     {
         d.bones = b->db.NumBones();
@@ -1688,6 +1692,13 @@ void EmitLoadDoneLocked()
                   installed && g_map.ok ? 1 : 0, installed ? g_map.mapped : 0u, installed ? g_map.numDbBones : 0u, d.lean, d.err);
     ++g_loadLines;
     g_log(g_loadBuf);
+    if (installed && d.ovSwitchLegRoots >= 0 && d.ovSwitchLegRoots != 2)
+    {
+        // the overlay switch blends the legs found over the longer leg time; a missing thigh name leaves that leg on the arm time
+        std::snprintf(g_loadBuf, sizeof(g_loadBuf), "UTPP mm.motionDriver warning body=%s overlay switch leg roots=%d (expected 2)",
+                      BodyName(d.body), d.ovSwitchLegRoots);
+        g_log(g_loadBuf);
+    }
 #endif
 }
 
@@ -1749,6 +1760,8 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
                 g_bundle->eval.SetHandBackBlend(g_handBackBlendReq != 0);
             if (g_bundle->evalOk && g_strideWarpReq >= 0)
                 g_bundle->eval.SetStrideWarp(g_strideWarpReq != 0);
+            if (g_bundle->evalOk)
+                g_bundle->eval.SetOverlayInertialSwitch(g_overlayInertialSwitchOn);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
             g_budgetTripped = false;
             g_budgetPauseLeft = 0.0f;
@@ -2317,6 +2330,15 @@ void SetHandBackBlend(bool aOn)
     g_handBackBlendReq = aOn ? 1 : 0;
     if (g_bundle && g_bundle->evalOk)
         g_bundle->eval.SetHandBackBlend(aOn);
+}
+
+bool SetOverlayInertialSwitch(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_overlayInertialSwitchOn = aOn;
+    if (g_bundle && g_bundle->evalOk)
+        g_bundle->eval.SetOverlayInertialSwitch(aOn);
+    return true;
 }
 
 bool SetStrideWarp(bool aOn)

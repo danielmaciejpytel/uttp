@@ -292,6 +292,10 @@ bool SetOrientWarp(bool aOn);
 // state of the installed bundle (else the requested one).
 bool SetStrideWarp(bool aOn);
 bool StrideWarp();
+// Inertialized overlay switch (CET mm.overlayInertialSwitch; MotionPose SetOverlayInertialSwitch; default off): a weapon class or
+// style change swaps the overlay pose at once and the composed pose is inertialized instead of the 0.2 / 0.3 s crossfades: arms and
+// hands relative to the chest over 0.2 s, legs, pelvis and root over 0.4 s (kOverlaySwitchLegFactor). Applied to the installed bundle at once and to every bundle loaded later. Always true.
+bool SetOverlayInertialSwitch(bool aOn);
 // Run pelvis yaw trim (CET mm.pelvisYawTrim; mm/OrientWarp.hpp PelvisTrim): aDeg (+ = left, -10..10, default 0) turns the pelvis of
 // the v2 pose while V walks / runs / sprints forward on the ground (chest, head and feet keep their direction; the motion forward
 // loops carry the pelvis ~5 deg to the right, +5 squares it). Not while aiming / weapon drawn / air / crouch / slide / traversal;

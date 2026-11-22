@@ -133,6 +133,7 @@ return {
     ["mm.motionDriver"] = "true",
     ["mm.neutralAim"] = "false",
     ["mm.orientWarp"] = "true",
+    ["mm.overlayInertialSwitch"] = "false",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
@@ -292,6 +293,7 @@ return {
     "native UTPPSetMMFarJumpGravity(false)",
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
+    "native UTPPSetMMOverlayInertialSwitch(false)",
     "apply mm.strideWarp(true,\"ok\")",
     "native UTPPSetStickSpeedMode(1)",
     "native UTPPSetMotionStickSpeedMode(1)",
@@ -312,6 +314,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.overlayInertialSwitch(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -512,6 +515,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.overlayInertialSwitch(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -1790,6 +1794,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.overlayInertialSwitch"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.pelvisPlacement"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -2401,6 +2413,7 @@ return {
     ["mm.motionDriver"] = "true",
     ["mm.neutralAim"] = "false",
     ["mm.orientWarp"] = "true",
+    ["mm.overlayInertialSwitch"] = "false",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
@@ -2582,6 +2595,7 @@ return {
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
+    "mm.overlayInertialSwitch",
     "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
@@ -2770,6 +2784,7 @@ return {
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
+    "mm.overlayInertialSwitch",
     "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
@@ -2948,6 +2963,7 @@ return {
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
+    "apply mm.overlayInertialSwitch(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -3136,6 +3152,7 @@ mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
+mm.overlayInertialSwitch=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -3399,6 +3416,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.handBackBlend",
       "mm.stepDownReach",
       "mm.farJumpGravity",
+      "mm.overlayInertialSwitch",
       "mm.leanCoverage",
       "mm.selectionGuards",
       "mm.debug"
@@ -3598,6 +3616,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.motionDriver"] = "false",
     ["mm.neutralAim"] = "false",
     ["mm.orientWarp"] = "true",
+    ["mm.overlayInertialSwitch"] = "false",
     ["mm.pelvisPlacement"] = "false",
     ["mm.pelvisYawTrim"] = "2",
     ["mm.pistol1h"] = "true",
@@ -3748,6 +3767,7 @@ mm.pelvisPlacement=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
+mm.overlayInertialSwitch=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -3928,6 +3948,7 @@ other.module=42\r\
     "/utpp/motion|switch|mm.handBackBlend",
     "/utpp/motion|switch|mm.stepDownReach",
     "/utpp/motion|switch|mm.farJumpGravity",
+    "/utpp/motion|switch|mm.overlayInertialSwitch",
     "/utpp/motion|selector|mm.leanCoverage",
     "/utpp/motion|switch|mm.selectionGuards",
     "/utpp/motion|switch|mm.debug",

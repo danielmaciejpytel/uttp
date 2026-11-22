@@ -58,6 +58,12 @@ foreach(_case IN ITEMS FeminineShouldersAdaptive FemininePoseSwitch FeminineUnar
   add_test(NAME utpp_${_case}_test COMMAND utpp_${_case}_test
     "${_utpp_pmotion_wdb}" "${_utpp_pmotion_wov}" "${_utpp_pmotion_wovdir}/utpp_style_weights_woman.txt")
 endforeach()
+# Inertialized overlay switch (mm.overlayInertialSwitch, off by default): machine keys, continuity, no overshoot and settle within 0.2 s
+# on both bodies.
+add_executable(utpp_mm_overlay_switch_test tests/OverlaySwitchTest.cpp src/mm/MotionPose.hpp src/mm/Overlay.hpp src/mm/Inertializer.hpp)
+target_compile_options(utpp_mm_overlay_switch_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_mm_overlay_switch_test PRIVATE cxx_std_20)
+add_test(NAME utpp_mm_overlay_switch_test COMMAND utpp_mm_overlay_switch_test ${UTPP_POSEV2_TEST_ARGS})
 # Feminine shoulder width consistency (2026-11-02): every clip x weapon pose through the real evaluator; narrowing step bound, reach
 # limits as smooth per-side weights, contacts unchanged. Mutation 1 = atomic pass (legacy fail-closed), 2 = no rise limiter:
 # each MUST report a FAIL line.
