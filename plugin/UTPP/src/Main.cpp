@@ -3013,6 +3013,28 @@ void Native_FeedMovingPlatform(RED4ext::IScriptable*, RED4ext::CStackFrame* aFra
     t_feedPlatform = onPlatform;
 }
 
+// The moving platform flag of the last locomotion feed, for the CET camera pivot (UTPPMMOnMovingPlatform): false when no feed arrived
+// for kPlatformStaleSeconds (vehicle, scene, menu), so a ride that ends without a feed does not stay latched.
+std::atomic<bool> g_platformLast{false};
+std::atomic<int64_t> g_platformTicks{0};
+constexpr double kPlatformStaleSeconds = 0.25;
+
+void Native_MMOnMovingPlatform(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    aFrame->code++;
+    bool r = false;
+    if (g_platformLast.load(std::memory_order_relaxed))
+    {
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        const double age = static_cast<double>(now.QuadPart - g_platformTicks.load(std::memory_order_relaxed)) /
+                           static_cast<double>(util::QpcFrequency());
+        r = age >= 0.0 && age < kPlatformStaleSeconds;
+    }
+    if (aOut)
+        *aOut = r;
+}
+
 void Native_MMAirWantsProbe(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     aFrame->code++;
@@ -3180,6 +3202,12 @@ void Native_FeedLocomotion(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, 
     }
     in.onMovingPlatform = t_feedPlatform; // moving platform: UTPPFeedMovingPlatform right before this feed
     t_feedPlatform = false;
+    {
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        g_platformTicks.store(now.QuadPart, std::memory_order_relaxed);
+        g_platformLast.store(in.onMovingPlatform, std::memory_order_relaxed);
+    }
     utpp::motiondriver::FeedAirFromInput(in); // UTPP-MOTION SEAM air: UTPPFeedAir fields -> one-shot v2 AirFeed of this feed's Step (v2 mutex only; v1 untouched)
     motionhost::Feed(in);
     if (utpp::mm::bodyheight::rt::Enabled()) // body height smoothing (option, default on): player transform for the animation thread
@@ -4140,6 +4168,11 @@ void PostRegisterTypes()
         ap->flags = flags;
         ap->AddParam("Bool", "onPlatform");
         rtti->RegisterFunction(ap);
+        // moving platform flag of the last feed, for the CET camera (declaration: scripts/utpp.reds UTPPMMOnMovingPlatform)
+        auto* apg = RED4ext::CGlobalFunction::Create("UTPPMMOnMovingPlatform", "UTPPMMOnMovingPlatform", &Native_MMOnMovingPlatform);
+        apg->flags = flags;
+        apg->SetReturnType("Bool");
+        rtti->RegisterFunction(apg);
         auto* a1 = RED4ext::CGlobalFunction::Create("UTPPMMAirWantsProbe", "UTPPMMAirWantsProbe", &Native_MMAirWantsProbe);
         a1->flags = flags;
         a1->SetReturnType("Bool");

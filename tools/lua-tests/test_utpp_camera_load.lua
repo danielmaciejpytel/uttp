@@ -1097,20 +1097,71 @@ do
     local minRel = slideJump(UTPP_CAMERA_PATH)
     -- the world z of the camera is pivot + boom offset: the boom offset differs a little from "pivot over the capsule", so the bound is the measured
     -- one of the pre-fix camera (0.75 m) plus the fix (>= 0.95 m at the camera)
-    local from = "airIn = det == 6 or (det >= 14 and det <= 22)"
+    local from = "local airIn, jumpIn = CM.pivotAirInput(det, vh.held, platIn)"
     local a, b = srcFull:find(from, 1, true)
     check("P (mutation setup): the air flag of init.lua is found", a ~= nil)
     local minOld
     if a then
       local mutPath = TMP .. "utpp_camera_mut_air.lua"
       local f = io.open(mutPath, "wb")
-      f:write(srcFull:sub(1, a - 1) .. "airIn = false" .. srcFull:sub(b + 1))
+      f:write(srcFull:sub(1, a - 1) .. "local airIn, jumpIn = false, false" .. srcFull:sub(b + 1))
       f:close()
       minOld = slideJump(mutPath)
       os.remove(mutPath)
     end
     check(string.format("P: a jump out of a slide keeps the pivot over the capsule >= 0.95 m for 0.4 s (%.2f m)", minRel), minRel >= 0.95, string.format("%.3f", minRel))
     check(string.format("P (mutation): without the air flag the same jump dips the pivot below 0.90 m (%.2f m; the pre-fix recording 0.73 .. 0.85)", minOld or 0), minOld ~= nil and minOld < 0.90, tostring(minOld))
+  end
+  -- (2026-11-22) a lift: Game.UTPPMMOnMovingPlatform() answers true -> the pivot rides with the cabin (CM.pivotStep plat, 4 m/s^2 up to
+  -- 5 m/s); without the native (older DLL) the ground rule: the pivot lags the cabin
+  do
+    local function lift(aNative)
+      local W = makeWorld()
+      W.psm.LocomotionDetailed = 1
+      loadCore(W)
+      if aNative then W.env.Game.UTPPMMOnMovingPlatform = function() return true end end
+      local cam
+      withEnv(W, function() cam = dofile(UTPP_CAMERA_PATH) end)
+      W.cameraMod = cam
+      withEnv(W, function() W.handlers.onInit() end)
+      frames(W, 2.0)
+      withEnv(W, function() cam.Toggle() end)
+      frames(W, 1.5)
+      W.speed = 0
+      local base = W.utppWorld().z - W.pos.z
+      local vz, dev = 0, 0
+      frames(W, 2.0, 60, function()
+        dev = math.max(dev, math.abs((W.utppWorld().z - W.pos.z) - base)) -- the last update's camera against the height it saw
+        vz = math.min(5, vz + 4 / 60)
+        W.pos.z = W.pos.z + vz / 60
+      end)
+      return dev
+    end
+    local devOn, devOff = lift(true), lift(false)
+    check(string.format("lift with the platform native: the camera rides with the cabin (height over V within 1 cm, %.2f cm; without the native %.1f cm)",
+          devOn * 100, devOff * 100), devOn <= 0.01 and devOff > 0.1, string.format("%.4f %.4f", devOn, devOff))
+  end
+  -- (2026-11-22) the platform native failing (an older DLL, a load-order error): not called again for 5 s, then retried - it is found
+  -- once it answers (not disabled for the session)
+  do
+    local W = makeWorld()
+    loadCore(W)
+    local cam
+    withEnv(W, function() cam = dofile(UTPP_CAMERA_PATH) end)
+    local calls, fail = 0, true
+    W.env.Game.UTPPMMOnMovingPlatform = function() calls = calls + 1; if fail then error("no native") end; return true end
+    local G, r = { clock = 0 }, {}
+    withEnv(W, function()
+      r[1] = cam.PlatformRead(G)
+      G.clock = 2.0; r[2] = cam.PlatformRead(G)
+      fail = false
+      G.clock = 4.9; r[3] = cam.PlatformRead(G)
+      G.clock = 5.0; r[4] = cam.PlatformRead(G)
+      G.clock = 5.1; r[5] = cam.PlatformRead(G)
+    end)
+    check(string.format("platform native: an error disables it for 5 s only, then it is read again (calls %d)", calls),
+          r[1] == false and r[2] == false and r[3] == false and r[4] == true and r[5] == true and calls == 3,
+          string.format("%s %s %s %s %s calls %d", tostring(r[1]), tostring(r[2]), tostring(r[3]), tostring(r[4]), tostring(r[5]), calls))
   end
   -- (f) the way back to third person while already crouching (V crouched in first person): no clip timing for a crouch that began outside
   do

@@ -317,9 +317,12 @@ CM.DEFAULTS = {
   -- ground and down through one - two frames of the game's fall state), which armed the fast mode and the camera itself stepped 8 - 15 cm per
   -- frame. With the air flag known (CM.pivotStep air ~= nil) the fast mode arms only when V was in the air on every frame of the fast run
   -- and either rises (a jump take-off) or has been in the air for pivotFastAirT s in a row (a fall; a curb drop is 0.02 - 0.07 s), or when
-  -- the fast run has moved V by pivotFastGroundDz m in one direction (a lift, a climb; a curb is up to 0.33 m). air == nil (callers
-  -- without the flag) or pivotFastGround = false: the arming rule above alone.
+  -- the fast run has moved V by pivotFastGroundDz m in one direction (a curb is up to 0.33 m). air == nil (callers without the flag;
+  -- CM.pivotAirInput: vehicle hold, climb / vault / ladder, moving platform) or pivotFastGround = false: the arming rule above alone.
   pivotFastGround = true, pivotFastAirT = 0.1, pivotFastGroundDz = 0.5,
+  -- moving platform (elevator; CM.pivotStep plat, CM.solve inp.platform): the fast mode rides with the cabin while V is on it (no lag,
+  -- no catch-up). false: the flag is ignored.
+  platformFollow = true,
   -- jump-out landing (car jump-out: the rigid fast-fall follow stopped the camera dead in one frame at the
   -- touchdown, 250 - 1400 m/s^2). CM.jumpOutStep, only while the vehicle exit hold is on (pivotStep jo.on) and until it settled: a separate
   -- latched mode that replaces the fast-fall mode and the lag clamp. The base is an acceleration limited follower of V: speed command
@@ -1814,6 +1817,19 @@ end
 
 -- ================================================================ pivot
 function CM.newPivot() return { z = nil, vz = 0, base = nil, vb = 0, crouchW = nil } end
+
+-- The air input of CM.pivotStep for the on-foot camera. det = PSM LocomotionDetailed, vehHeld = a vehicle hold is on, platform = a
+-- moving platform (elevator) carries V. Returns nil - the fast-fall arming without the uneven ground gate (cfg.pivotFastGround) -
+-- during a vehicle hold (an exit launch arms the fast mode as before), a climb / vault / ladder (8 - 13: the capsule rises fast on the
+-- ground and the camera must not lag behind it) and on a moving platform (the cabin carries V: the camera follows it without lag).
+-- Otherwise true in the air (SlideFall 6, Fall 14 .. DodgeAir 22), false on the ground. The second value (the jump input of CM.pivotStep)
+-- is true in a jump state (Jump 18, DoubleJump 19, ChargeJump 20, HoverJump 21), else false; nil with the first.
+function CM.pivotAirInput(det, vehHeld, platform)
+  if vehHeld == true or platform == true then return nil, nil end
+  det = det or 0
+  if det >= 8 and det <= 13 then return nil, nil end
+  return det == 6 or (det >= 14 and det <= 22), det >= 18 and det <= 21
+end
 -- XY follows the player directly, Z springs to the eye height (stairs, crouch) and snaps on large jumps (teleport).
 -- pivotSource "capsule": Z = player Z (spring, snap) + stance height (stand / crouch blended over stanceBlend s);
 -- the FPP camera (eyeZ) is ignored. crouch = PSM crouch state (bool).
@@ -1842,7 +1858,13 @@ function CM.newPivot() return { z = nil, vz = 0, base = nil, vb = 0, crouchW = n
 -- jo (table, optional; jump-out landing, CM.jumpOutStep): { on = the vehicle exit hold is on, ray = raycast(from, to) -> distance|nil
 -- or nil }. While on, and after it until the base settled on V, the jump-out mode replaces the fast-fall mode and the lag clamp (cfg.jumpOutGov).
 -- nil / off: the previous behaviour exactly.
-function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, air, pin, jo)
+-- plat (bool, optional): a moving platform (elevator) carries V. The fast mode (base moves with V, only the offset decays over
+-- pivotFastSmooth) arms at once and stays on while the flag is on, so the camera rides with the cabin from its first frame: no lag builds
+-- up during the acceleration and nothing is caught up later. After the flag the fast mode is left by the usual low-speed rule.
+-- nil / false: the previous behaviour exactly (cfg.platformFollow = false: the flag is ignored).
+-- jump (bool, optional; CM.pivotAirInput): air is a jump state. A jump state that turns on one frame after the rise started still arms
+-- the fast mode on uneven ground (cfg.pivotFastGround); a fall state there does not. nil: the air flag alone.
+function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, air, pin, jo, plat, jump)
   if cfg.pivotSource ~= "fpp" then
     local slideH = cfg.slideHeight or cfg.crouchHeight
     local sl = slide == true and slideH < cfg.crouchHeight
@@ -1946,7 +1968,11 @@ function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, a
           local d, run = stepZ or 0, pv.fastDz or 0
           if run ~= 0 and (d > 0) ~= (run > 0) then run = 0 end
           pv.fastDz = run + d
-          pv.fastAir = air == true and (pv.fastN == 1 or pv.fastAir == true) -- in the air on every frame of this fast run
+          -- in the air on every frame of this fast run. A jump state (jump = true: PSM Jump .. HoverJump) that turns on one frame late
+          -- (on the 2nd frame of a rising run) still counts, so a take-off arms on the same frame as without the air flag. A fall state
+          -- there (a curb step-up: the capsule rises as fast as a take-off, so no height / speed test can tell them apart on that frame)
+          -- never counts. jump == nil: the air flag alone.
+          pv.fastAir = air == true and (pv.fastN == 1 or pv.fastAir == true or (pv.fastN == 2 and vzNow > 0 and jump == true))
         else
           pv.fastT, pv.fastN, pv.slowT, pv.slowN = 0, 0, (pv.slowT or 0) + dt, (pv.slowN or 0) + 1
           pv.fastDz, pv.fastAir = 0, false
@@ -1955,9 +1981,10 @@ function CM.pivotStep(pv, cfg, dt, playerPos, eyeZ, crouch, slide, aimW, fast, a
         local groundOk = air == nil or cfg.pivotFastGround == false
           or (pv.fastAir == true and (vzNow > 0 or (pv.airT or 0) >= (cfg.pivotFastAirT or 0)))
           or abs(pv.fastDz or 0) >= (cfg.pivotFastGroundDz or 0)
-        if not fast and pv.fastN >= 2 and pv.fastT >= armT and pv.slideMode == nil and groundOk then -- not while a slide / its exit blend runs (P7 F2 keeps its own air spring)
+        local platOn = plat == true and cfg.platformFollow ~= false and pv.slideMode == nil
+        if not fast and ((pv.fastN >= 2 and pv.fastT >= armT and pv.slideMode == nil and groundOk) or platOn) then -- not while a slide / its exit blend runs (P7 F2 keeps its own air spring)
           fast, pv.fastOn, pv.ev, pv.fastRamp = true, true, 0, nil
-        elseif fast and pv.slowN >= 2 and pv.slowT >= armT then
+        elseif fast and not platOn and pv.slowN >= 2 and pv.slowT >= armT then
           -- left: V's speed is the base's speed again (V stopped at the touchdown: the base keeps only the offset's own velocity)
           fast, pv.fastOn, pv.fastRamp, pv.vb = false, false, 0, vzNow + (pv.ev or 0)
         end
@@ -2441,7 +2468,7 @@ end
 -- S = CM.newSolver(cfg); in = { dt, playerPos, playerQ, bodyYaw, eyeZ, fppPitch, dyaw, dpitch, freeHeld, moving,
 --   profile (blended), side (shoulder s), w (transition weight), zoom (m), raycast(from, to) -> distance|nil,
 --   crouch (PSM crouch state after CM.stanceFilterStep, pivotSource "capsule"), stanceFast (the last change was a clean in-place
---   edge: CM.pivotStep crouchDelay / crouchBlend / standDelay / standBlend), air (the player is in the air: CM.pivotStep slideAirExit*), slide (the seated slide, also crouch = true; own pivot
+--   edge: CM.pivotStep crouchDelay / crouchBlend / standDelay / standBlend), air (the player is in the air: CM.pivotStep slideAirExit*; CM.pivotAirInput), jump (air is a jump state: CM.pivotAirInput), platform (a moving platform carries V: CM.pivotStep plat), slide (the seated slide, also crouch = true; own pivot
 --   height cfg.slideHeight, scaled in by aimW: the free camera keeps the crouch pivot), followSnap (follow limiter off: vehicle hold),
 --   aim (forced follow, CM.lookStep env.aim), aimW (aim weight), fovDirect (FOV = target, no fovRate lag),
 --   decoupled (free world yaw), refYaw (aim reference: the game's look yaw, nil = body yaw),
@@ -2487,7 +2514,9 @@ function CM.solve(S, inp)
   local aw = clamp(inp.aimW or (inp.aim and 1 or 0), 0, 1)
   local pivot = CM.pivotStep(S.pivot, cfg, dt, inp.playerPos, inp.eyeZ, inp.crouch, inp.slide, aw, inp.stanceFast, inp.air,
     ragPhase == "on", -- (pinned during a ragdoll episode)
-    (inp.jumpOut ~= nil or S.pivot.joOn) and ragPhase ~= "on" and { on = inp.jumpOut == true, ray = inp.raycast } or nil) -- jump-out landing mode
+    (inp.jumpOut ~= nil or S.pivot.joOn) and ragPhase ~= "on" and { on = inp.jumpOut == true, ray = inp.raycast } or nil, -- jump-out landing mode
+    inp.platform, -- a moving platform carries V (the base rides with the cabin)
+    inp.jump) -- air is a jump state (CM.pivotAirInput)
   -- mount pivot continuity (inp.mountArm / inp.mountKeep, see CM.mountShiftStep); nil inputs = no blend
   local mshEv
   pivot, mshEv = CM.mountShiftStep(S, cfg, dt, prevPos, inp.playerPos, pivot, inp.mountArm == true and ragPhase ~= "on",

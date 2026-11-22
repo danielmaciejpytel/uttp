@@ -8,7 +8,7 @@
 //   - game thread (feed / setting): SetEnabled, PublishGate, PublishRig (database load), SetTransformSource (player transform);
 //   - animation thread: Step (one tracker update per frame; concurrent and repeated calls of the same frame reuse the stored offset),
 //     ApplyToSnapshot (pelvis offset + leg solve on the local copy of the published pose).
-// Off (default): no state is stepped and the snapshot is not touched.
+// On by default (mm.bodyHeightSmooth). Off: no state is stepped and the snapshot is not touched.
 #pragma once
 
 #include <atomic>
@@ -22,7 +22,8 @@ namespace utpp::mm::bodyheight::rt
 {
 
 inline std::atomic<bool> g_on{true}; // on by default (the menu default, motionhost g_bodyHeightOn)
-// bit 0: the stage may act (feed gate); bits 8..31: reset serial (teleport, hand-back, toggle)
+// bit 0: the stage may act (feed gate); bit 1: a moving platform carries V (no smoothing, Filter::Step aPlatform);
+// bits 8..31: reset serial (teleport, hand-back, toggle)
 inline std::atomic<uint32_t> g_gate{0};
 inline integ::SeqlockBuffer<LegRig> g_rig;
 // player transform component (game pointer, read on the animation thread through an SEH guard by the DLL); 0 = none
@@ -62,11 +63,11 @@ inline void SetEnabled(bool aOn)
 }
 
 // Game thread, every publish while the stage is on.
-inline void PublishGate(bool aAllowed, bool aReset)
+inline void PublishGate(bool aAllowed, bool aReset, bool aPlatform = false)
 {
     const uint32_t cur = g_gate.load(std::memory_order_relaxed);
     const uint32_t serial = (cur >> 8) + (aReset ? 1u : 0u);
-    g_gate.store((serial << 8) | (aAllowed ? 1u : 0u), std::memory_order_release);
+    g_gate.store((serial << 8) | (aAllowed ? 1u : 0u) | (aPlatform ? 2u : 0u), std::memory_order_release);
 }
 
 inline void PublishRig(const LegRig& aRig) { g_rig.Publish(aRig); }
@@ -101,7 +102,7 @@ inline float Step(int64_t aNow, int64_t aTicksPerSecond, bool aHaveZ, float aZ)
     }
     else if (s.lastTicks == 0 || dt >= kSameFrameSeconds)
     {
-        off = s.filter.Step(static_cast<float>(dt), aZ, (gate & 1u) != 0);
+        off = s.filter.Step(static_cast<float>(dt), aZ, (gate & 1u) != 0, (gate & 2u) != 0);
         s.lastTicks = aNow;
         g_steps.fetch_add(1, std::memory_order_relaxed);
         g_stepsSinceFeed.fetch_add(1, std::memory_order_relaxed);

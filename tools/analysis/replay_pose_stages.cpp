@@ -785,7 +785,8 @@ int main(int argc, char** argv)
             const bool haveZ = inputs[zi].haveExtra && std::isfinite(inputs[zi].capsulePos[2]);
             float off = 0.0f;
             if (haveZ)
-                off = bodyHeightFilter.Step(bodyHeightRows ? rows[i].dt : 0.0f, inputs[zi].capsulePos[2], (gate & 1u) != 0);
+                off = bodyHeightFilter.Step(bodyHeightRows ? rows[i].dt : 0.0f, inputs[zi].capsulePos[2], (gate & 1u) != 0,
+                                              (gate & 2u) != 0);
             else
                 bodyHeightFilter.Reset();
             ++bodyHeightRows;

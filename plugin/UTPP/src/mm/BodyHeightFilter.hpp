@@ -8,7 +8,10 @@
 //     velocity (its catch-up is handled as position). The offset (filtered - measured) is clamped to [minOffset, maxOffset] and the
 //     tracker state with it (no wind-up). While the stage is not allowed (air, vehicle, scenes, hold, traversal, stance outside
 //     stand .. sprint) the offset fades to zero with fadeTau; a height step above resetStep (teleport, stairs warp) or a long gap
-//     restarts the tracker at the measured height (offset 0 at once).
+//     restarts the tracker at the measured height (offset 0 at once). On a moving platform (elevator; the flag held platformHold s
+//     after it drops) the stage passes the height through: the tracker holds no velocity, the offset of the entry is carried and fades
+//     linearly to 0 (also when the flag ends before it reached 0), and the tracker fades in from 0 after the ride on top of it - the
+//     output stays continuous through a flag flicker.
 //   - BodyHeightLegs: applies an offset to a local pose (7 floats per bone: p.xyz, q.xyzw, database order). The pelvis (common
 //     parent of both UpLegs) moves by the offset along model z; both legs are solved again with the shared two-bone solver
 //     (mm/LegIk.hpp) to the ankle positions the pose had before, so the feet stay where they were (model space) and only the knee
@@ -39,12 +42,15 @@ struct Config
     float resetStep = 0.5f;    // m, a height step above this restarts the tracker
     float maxDt = 0.25f;       // s, a longer gap restarts the tracker
     float hitchFactor = 2.0f;  // dt above this x the running median dt does not update the velocity
+    float platformRate = 0.12f; // m/s, linear fade of the offset to 0 when a moving platform starts carrying V (0.4 cm per frame at 30 Hz)
+    float platformHold = 0.3f;  // s, the platform flag is held this long after it drops (a flicker at the cabin's start / stop)
 };
 
 inline bool ValidConfig(const Config& c)
 {
     auto pos = [](float v) { return std::isfinite(v) && v > 0.0f; };
-    return pos(c.posTau) && pos(c.velTau) && pos(c.fadeTau) && pos(c.resetStep) && pos(c.maxDt) && pos(c.hitchFactor) &&
+    return pos(c.posTau) && pos(c.velTau) && pos(c.fadeTau) && pos(c.resetStep) && pos(c.maxDt) && pos(c.hitchFactor) && pos(c.platformRate) &&
+           pos(c.platformHold) &&
            std::isfinite(c.minOffset) && std::isfinite(c.maxOffset) && c.minOffset <= 0.0f && c.maxOffset >= 0.0f;
 }
 
@@ -54,6 +60,7 @@ struct FilterDiag
     uint64_t resets = 0;   // restarts (step / gap / non-finite input)
     uint64_t hitches = 0;  // frames whose velocity update was skipped
     uint64_t clamps = 0;   // frames whose offset hit a bound
+    uint64_t platform = 0; // frames on a moving platform (no smoothing)
 };
 
 class Filter
@@ -67,13 +74,20 @@ public:
         m_p = m_v = m_z = 0.0f;
         m_fade = 0.0f;
         m_offset = 0.0f;
+        m_carry = 0.0f;
+        m_platT = 0.0f;
+        m_onPlat = false;
         m_dtCount = 0;
         m_dtNext = 0;
     }
 
     // One update with the time since the previous update (s), the measured drawn height (m) and whether the stage may act now.
     // Returns the offset to add to the pelvis height (m). A non-positive / non-finite dt leaves the state and returns the last offset.
-    float Step(float aDt, float aZ, bool aAllowed)
+    // aPlatform: a moving platform (elevator) carries V - no smoothing; held platformHold s after it drops. The tracker follows the
+    // measured height with zero velocity (the cabin's motion never enters the velocity estimate), the offset of the entry is carried and
+    // fades linearly to 0 (platformRate, also after the ride until it is 0) and the tracker fades in again from 0 after the ride on top of
+    // it: no step in the output when the flag starts or ends.
+    float Step(float aDt, float aZ, bool aAllowed, bool aPlatform = false)
     {
         if (!std::isfinite(aZ))
         {
@@ -89,6 +103,30 @@ public:
         }
         if (!(aDt > 0.0f) || !std::isfinite(aDt))
             return m_offset;
+        if (aPlatform)
+            m_platT = m_cfg.platformHold;
+        else
+            m_platT = std::fmax(m_platT - aDt, 0.0f);
+        const bool platform = aPlatform || m_platT > 0.0f;
+        if (platform && !m_onPlat)
+            m_carry = m_offset; // the output of the last frame goes on as the carried offset
+        m_onPlat = platform;
+        if (m_carry != 0.0f)
+        {
+            // linear fade to exactly 0 (0.33 s from the -4 cm bound)
+            const float mag = std::fmax(std::fabs(m_carry) - m_cfg.platformRate * aDt, 0.0f);
+            m_carry = m_carry < 0.0f ? -mag : mag;
+        }
+        if (platform)
+        {
+            ++m_diag.platform;
+            PushDt(aDt);
+            m_p = m_z = aZ;
+            m_v = 0.0f;
+            m_fade = 0.0f;
+            m_offset = m_carry;
+            return m_offset;
+        }
         if (std::fabs(aZ - m_z) > m_cfg.resetStep || aDt > m_cfg.maxDt)
         {
             ++m_diag.resets;
@@ -126,6 +164,8 @@ public:
         else if (aAllowed && m_fade > 0.999f)
             m_fade = 1.0f;
         m_offset = o * m_fade;
+        if (m_carry != 0.0f) // after a ride: the carried offset fades out under the tracker fading in
+            m_offset = std::clamp(m_offset + m_carry, m_cfg.minOffset, m_cfg.maxOffset);
         return m_offset;
     }
 
@@ -145,6 +185,7 @@ private:
         m_v = 0.0f;
         m_offset = 0.0f;
         m_fade = 0.0f;
+        m_carry = 0.0f;
     }
     void PushDt(float aDt)
     {
@@ -168,6 +209,9 @@ private:
     float m_p = 0.0f, m_v = 0.0f, m_z = 0.0f;
     float m_fade = 0.0f;
     float m_offset = 0.0f;
+    float m_carry = 0.0f;  // offset carried through a moving platform ride (fades linearly to 0)
+    float m_platT = 0.0f;  // s, platform flag hold left
+    bool m_onPlat = false; // the last step ran the platform branch
     std::array<float, kDtRing> m_dt{};
     int m_dtCount = 0, m_dtNext = 0;
     FilterDiag m_diag;

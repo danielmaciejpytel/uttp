@@ -74,6 +74,8 @@ public native func UTPPFeedAir(onGround: Bool, distToGround: Float, fallState: I
 // (elevator) carries V - IsOnMovingPlatform() or PSM.IsPlayerInsideMovingElevator. The game's own state machine does not fall
 // there when the ground contact drops; the DLL reads that feed in the platform frame (in contact, no vertical velocity).
 public native func UTPPFeedMovingPlatform(onPlatform: Bool) -> Void
+// the moving platform flag of the last locomotion feed (false once the feeds stop for 0.25 s): the CET camera pivot reads it
+public native func UTPPMMOnMovingPlatform() -> Bool
 // True when the next air feed should carry a raycast: airborne (last air feed), descending, mm.airProbe on, every 2nd feed.
 public native func UTPPMMAirWantsProbe() -> Bool
 // fade-out time (s) for hard closures (PSM block, TPP off, stale feed; default 0.12) and the time the gate must

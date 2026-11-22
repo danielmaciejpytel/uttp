@@ -1528,6 +1528,7 @@ uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis sta
 // the feed only publishes its gate (ground locomotion of this feed) and a reset request (teleport, hand-back).
 bool g_bodyHeightOn = true; // the menu default (mm.bodyHeightSmooth)
 bool g_bodyHeightAllowed = false; // set by the leg pipeline of this feed
+bool g_bodyHeightPlatform = false; // a moving platform carries V (FeedInput.onMovingPlatform of the last real feed): no smoothing
 bool g_bodyHeightReset = true;    // consumed by the next publish (first publish starts a fresh tracker)
 uint64_t g_bodyHeightTeleports = 0;
 
@@ -2002,7 +2003,7 @@ void PublishLocked(float aWeight)
     g_snap.sequence = ++g_publishes;
     if (g_bodyHeightOn)
     {
-        bodyheight::rt::PublishGate(g_bodyHeightAllowed && aWeight > 0.0f, g_bodyHeightReset);
+        bodyheight::rt::PublishGate(g_bodyHeightAllowed && aWeight > 0.0f, g_bodyHeightReset, g_bodyHeightPlatform);
         g_bodyHeightReset = false;
     }
     // Restore v1's canonical mask on every publish: v2 may replace the mask in this reused snapshot
@@ -3840,6 +3841,8 @@ void Feed(const FeedInput& aRawIn)
     const FeedInput& aRaw = conditionedFeed ? *conditionedFeed : aRawIn;
     std::lock_guard lock(g_mutex);
     g_bodyHeightAllowed = false; // set again by the leg pipeline of this feed
+    if (!aRawIn.synthetic)
+        g_bodyHeightPlatform = aRawIn.onMovingPlatform; // body height smoothing passes the height through on a moving platform
     if (!aRawIn.synthetic)
         PlatformLogLocked(aRawIn, platformFeed);
     if (aRawIn.synthetic && g_synthGuardOn)

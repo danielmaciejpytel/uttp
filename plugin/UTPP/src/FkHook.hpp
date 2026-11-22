@@ -18,7 +18,7 @@ void RdFkTraceSetBones(int32_t aHips, int32_t aHead, int32_t aFoot);
 uint32_t ApplyPoseSnapshot(void* aUser, uint8_t* aDesc, uint8_t* aBones, uint32_t aCount,
                            uint64_t aMergedRig, const mm::integ::PoseSnapshot& aSnapshot, int64_t aNow);
 
-// Body height smoothing (mm/BodyHeightRuntime.hpp; option, default off). Animation thread, right before ApplyPoseSnapshot on the
+// Body height smoothing (mm/BodyHeightRuntime.hpp; option, default on). Animation thread, right before ApplyPoseSnapshot on the
 // caller's local snapshot: reads the player's world height now (transform component, SEH guarded), steps the tracker once per frame
 // and moves the pelvis of aSnapshot (legs solved back to their ankles). Off: one relaxed load.
 void ApplyBodyHeight(mm::integ::PoseSnapshot& aSnapshot, int64_t aNow);

@@ -299,6 +299,141 @@ static void MockPose()
     PoseCheck(db, "mock rig", poses);
 }
 
+// Moving platform (elevator ride, Filter::Step aPlatform): V steps onto the cabin over a 10 cm sill one frame before the ride (the offset sits near its bound
+// at the entry), the cabin accelerates at 6 m/s^2 to 5 m/s up, cruises, brakes and stands. Variants: the flag one frame late at the
+// start, the flag dropping two frames before the cabin stands. While the flag is on the offset fades to 0 and stays exactly 0; the
+// offset never changes by more than 0.5 cm in one frame from the first platform frame on. Without the flag the same ride moves the offset by more than 0.5 cm.
+static void ElevatorRide(int hz)
+{
+    const float dt = 1.0f / float(hz);
+    const float rideStart = 1.0f, accel = 6.0f, vmax = 5.0f, cruise = 1.0f;
+    const float tAcc = vmax / accel, rideEnd = rideStart + 2.0f * tAcc + cruise;
+    auto cabin = [&](float t) {
+        if (t <= rideStart)
+            return 0.0f;
+        const float u = t - rideStart;
+        if (u < tAcc)
+            return 0.5f * accel * u * u;
+        const float zAcc = 0.5f * accel * tAcc * tAcc;
+        if (u < tAcc + cruise)
+            return zAcc + vmax * (u - tAcc);
+        const float w = std::fmin(u - tAcc - cruise, tAcc);
+        return zAcc + vmax * cruise + vmax * w - 0.5f * accel * w * w;
+    };
+    auto ground = [&](float t) { return (t >= rideStart - 1.5f * dt ? 0.10f : 0.0f) + cabin(t); }; // the sill one frame before the ride
+    struct Variant
+    {
+        const char* name;
+        int lateFrames;  // the flag turns on this many frames after the cabin starts
+        int earlyFrames; // the flag drops this many frames before the cabin stands
+        bool useFlag;
+    };
+    const Variant variants[] = {{"flag on", 0, 0, true}, {"flag one frame late", 1, 0, true}, {"flag drops 2 frames early", 0, 2, true},
+                                {"without the flag", 0, 0, false}};
+    const int n = int(4.5f * float(hz));
+    const int startFrame = int(std::ceil(rideStart * float(hz)));
+    const int endFrame = int(std::ceil(rideEnd * float(hz)));
+    for (const Variant& v : variants)
+    {
+        Filter f;
+        float prev = 0.0f, maxStep = 0.0f, maxRideAbs = 0.0f, entryAbs = 0.0f;
+        bool zeroOnRide = true;
+        for (int i = 0; i < n; ++i)
+        {
+            const float t = float(i) * dt;
+            const bool flag = v.useFlag && i >= startFrame + v.lateFrames && i < endFrame - v.earlyFrames;
+            const float o = f.Step(i ? dt : 0.0f, ground(t), true, flag);
+            if (i == startFrame - 1)
+                entryAbs = std::fabs(o);
+            if (i >= startFrame + v.lateFrames) // from the first platform frame on (before it: the normal smoothing of the sill)
+                maxStep = std::fmax(maxStep, std::fabs(o - prev));
+            prev = o;
+            const bool settledRide = flag && t >= rideStart + 0.4f; // the linear fade from the -4 cm bound takes 0.33 s
+            if (settledRide && o != 0.0f)
+                zeroOnRide = false;
+            if (i >= startFrame && i < endFrame)
+                maxRideAbs = std::fmax(maxRideAbs, std::fabs(o));
+        }
+        char name[200];
+        if (v.useFlag)
+        {
+            std::snprintf(name, sizeof name,
+                          "elevator ride (%s): offset 0 on the ride after 0.4 s, offset step max %.2f cm per frame (<= 0.5), entry offset %.2f cm",
+                          v.name, double(maxStep) * 100.0, double(entryAbs) * 100.0);
+            Check(zeroOnRide && maxStep <= 0.005f && entryAbs > 0.01f, name, hz);
+        }
+        else
+        {
+            std::snprintf(name, sizeof name, "elevator ride without the platform flag: the offset reaches %.2f cm on the ride (> 0.5)",
+                          double(maxRideAbs) * 100.0);
+            Check(maxRideAbs > 0.005f, name, hz);
+        }
+    }
+}
+
+// Platform flag flicker mid-fade (Filter::Step aPlatform; the flag is held platformHold s, the offset of the entry is carried): V steps up
+// a 10 cm sill (the offset near its -4 cm bound, fading), then
+//   on k:    the flag turns on for k frames on the ground and never again,
+//   drop k:  the cabin starts at the sill (6 m/s^2 up to 5 m/s), the flag drops for k frames 3 frames into the ride and comes back,
+//   ends k:  a k-frame ride (the flag on for k frames, the cabin stands after it).
+// k = 1 .. 5. The offset never changes by more than 0.5 cm in one frame from the sill on (before the fix the tracker restart dropped it by
+// 3 - 3.8 cm in one frame), and on the ride it is 0 once the carried offset faded out.
+static void PlatformFlicker(int hz)
+{
+    const float dt = 1.0f / float(hz);
+    const int sill = hz; // the sill frame (1 s of flat ground before)
+    const int n = 3 * hz;
+    for (int kind = 0; kind < 3; ++kind)
+    {
+        float worst = 0.0f, entryMin = 1.0f;
+        bool zeroOnRide = true;
+        for (int k = 1; k <= 5; ++k)
+        {
+            Filter f;
+            float prev = 0.0f, maxStep = 0.0f, z = 0.0f, vz = 0.0f;
+            for (int i = 0; i < n; ++i)
+            {
+                bool flag = false;
+                bool moving = false;
+                if (kind == 0)
+                    flag = i >= sill + 1 && i < sill + 1 + k;
+                else if (kind == 1)
+                {
+                    moving = i > sill;
+                    flag = i > sill && !(i >= sill + 3 && i < sill + 3 + k);
+                }
+                else
+                {
+                    moving = i > sill && i <= sill + k;
+                    flag = moving;
+                }
+                if (moving)
+                {
+                    vz = std::fmin(5.0f, vz + 6.0f * dt);
+                    z += vz * dt;
+                }
+                else
+                    vz = 0.0f;
+                const float o = f.Step(i ? dt : 0.0f, (i >= sill ? 0.10f : 0.0f) + z, true, flag);
+                if (i == sill)
+                    entryMin = std::fmin(entryMin, std::fabs(o));
+                if (i > sill)
+                    maxStep = std::fmax(maxStep, std::fabs(o - prev));
+                if (kind == 1 && float(i - sill) * dt >= 0.4f && o != 0.0f)
+                    zeroOnRide = false;
+                prev = o;
+            }
+            worst = std::fmax(worst, maxStep);
+        }
+        static const char* const kinds[] = {"flag on for 1 - 5 frames on the ground", "flag drops for 1 - 5 frames on a 5 m/s lift",
+                                            "a 1 - 5 frame ride (the flag ends mid-fade)"};
+        char name[240];
+        std::snprintf(name, sizeof name, "platform flicker mid-fade (%s): offset step max %.2f cm per frame (<= 0.5), offset at the sill >= %.2f cm%s",
+                      kinds[kind], double(worst) * 100.0, double(entryMin) * 100.0, kind == 1 ? ", 0 on the ride after 0.4 s" : "");
+        Check(worst <= 0.005f && entryMin > 0.01f && zeroOnRide, name, hz);
+    }
+}
+
 static void Stepper()
 {
     namespace r = rt;
@@ -317,6 +452,13 @@ static void Stepper()
     Check(c == 0.0f && r::g_serialResets.load() >= 2, "stepper: a reset request restarts the tracker");
     const float d = r::Step(now + 2 * tps / 60, tps, false, 0.0f);
     Check(d == 0.0f, "stepper: no height source -> offset 0");
+    // gate bit 1 (a moving platform carries V): a 20 cm rise per frame (a lift) leaves the offset at 0
+    r::PublishGate(true, true, true);
+    float e = 0.0f;
+    for (int i = 0; i < 30; ++i)
+        e = std::fmax(e, std::fabs(r::Step(now + (3 + i) * tps / 60, tps, true, 0.2f * float(i))));
+    r::PublishGate(true, true, false);
+    Check(e == 0.0f, "stepper: the platform gate bit passes the height through (offset 0 on a lift)");
     // snapshot application: melee lower body on the game pose (lowerScale < 1) and weight 0 stay untouched
     MockDb db;
     LegRig rig;
@@ -368,6 +510,10 @@ int main(int argc, char** argv)
     for (int hz : {30, 60, 144})
         Tracker(hz);
     RateIndependence();
+    for (int hz : {30, 60, 144})
+        ElevatorRide(hz);
+    for (int hz : {30, 60})
+        PlatformFlicker(hz);
     HitchGuardAndGate();
     MockPose();
     Stepper();
