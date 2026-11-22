@@ -1822,6 +1822,8 @@ private:
             math::Quat ms[ov::kMaxBones];
             ov::MeshRotations(aSk, *m_lay, ms);
             const float hcIn = ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
+            math::Quat msPre[ov::kMaxBones]; // before the grid: its own split of the head turn over the neck chain (lean narrowing)
+            std::copy_n(ms, aSk.n, msPre);
             m_gridState.Apply(aSk, *m_lay, m_grid, gy, ao.pitchDeg, alpha * g, aDt, kNeutralGridWeightSpeed, kNeutralGridHeadWeightSpeed);
             ov::MeshRotations(aSk, *m_lay, ms);
             const float hcGrid = ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
@@ -1845,7 +1847,23 @@ private:
             {
                 const math::Quat c = math::QuatMul(ms[m_gridChest], math::QuatInv(m_gridChestRef));
                 const math::Vec3 up = math::QuatRotate(c, math::Vec3{0.0f, 0.0f, 1.0f});
-                ov::ApplyChainAxisTurn(aSk, *m_lay, m_gridNeckChain, 3, up, (hcOut - hcGrid) * math::kPi / 180.0f);
+                if (hcSpill != hcGrid)
+                    ov::ApplyChainAxisTurn(aSk, *m_lay, m_gridNeckChain, 3, up, (hcSpill - hcGrid) * math::kPi / 180.0f);
+                if (hcOut != hcSpill)
+                {
+                    // the lean narrowing takes back the grid's own turn where the grid put it (mostly Neck and Head): an even split
+                    // would twist Neck1 against its neighbours
+                    float h[4] = {ov::TwistAboutAxisRad(msPre[m_gridChest], ms[m_gridChest], up), 0.0f, 0.0f, 0.0f};
+                    for (int k = 0; k < 3; ++k)
+                        h[k + 1] = ov::TwistAboutAxisRad(msPre[m_gridNeckChain[k]], ms[m_gridNeckChain[k]], up);
+                    const float dir = (hcOut - hcSpill) < 0.0f ? 1.0f : -1.0f; // sign of the grid turn being taken back
+                    float w[3], sum = 0.0f;
+                    for (int k = 0; k < 3; ++k)
+                        sum += (w[k] = std::max(0.0f, dir * (h[k + 1] - h[k])));
+                    for (int k = 0; k < 3; ++k)
+                        w[k] = sum > 1e-3f ? w[k] / sum : 1.0f / 3.0f;
+                    ov::ApplyChainAxisTurnWeighted(aSk, *m_lay, m_gridNeckChain, 3, up, (hcOut - hcSpill) * math::kPi / 180.0f, w);
+                }
             }
             aInfo.aoHeadChestInDeg = hcIn;
             aInfo.aoHeadChestGridDeg = hcGrid;
