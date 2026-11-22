@@ -50,8 +50,11 @@ struct Sum
 };
 } // namespace
 
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 int main(int argc, char **argv)
 {
+    utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
+    utpp::testdefaults::LegacyHostDefaults();
     if (argc != 4)
     {
         std::puts("usage RestFallbackShareTest <driver-data> <basedb> <woman|man>");

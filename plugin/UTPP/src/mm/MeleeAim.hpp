@@ -37,7 +37,7 @@ using math::Quat;
 using math::Vec3;
 
 inline constexpr float kDegF = aim::kDegF;
-inline constexpr float kDefaultMaxUpDeg = 20.0f;   // the setting's value (DLL default: off)
+inline constexpr float kDefaultMaxUpDeg = 20.0f;   // the setting's value (also the DLL startup value of the runtime)
 inline constexpr float kDefaultMaxDownDeg = 35.0f;
 inline constexpr float kDefaultSmoothHz = 10.0f;
 inline constexpr float kMaxYawDeg = 25.0f;         // yaw part clamp (both sides)

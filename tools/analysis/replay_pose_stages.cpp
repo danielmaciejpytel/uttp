@@ -54,6 +54,10 @@
 //                       With --settings-log, the driver first gets the values a game session held before its first setting call in
 //                       builds whose defaults were off (lean, head lean, slide, orientation warp, stride warping off, analog stick),
 //                       then the logged calls: an older log without one of these calls replays as recorded with any build default.
+//                       The same baseline holds the earlier DLL values of the settings whose calls the game log does not carry in a
+//                       form this parser applies (aim game upper body on, world aim smoothing off, weapon upper body on, Pistol2H
+//                       shot transfer off, magazine top-up off, air steering off, melee guard off): with or without a log entry the
+//                       replay keeps the state of the earlier replays for them, whatever the build default.
 //                       The settings log calls MMSteerMode / MMSteerActiveOnly of test builds are ignored (turn steering has no
 //                       option: the newest layer steered, carried through the layer mix).
 //   --turn-rate 0|1     turn clip rate of the legacy matcher off / on after --settings-log (motionhost::SetTurnRate, the bodyturn.turnRate
@@ -262,6 +266,15 @@ void ApplyLogBaseline()
     motiondriver::SetOrientWarp(false);
     motiondriver::SetStrideWarp(false);
     motiondriver::SetStickSpeedMode(0);
+    // earlier DLL values of settings the parser does not read from a game log (Bool lines without "-> 1", or no log line at all)
+    motiondriver::SetAimGameUpper(true);
+    motiondriver::SetAimWorldSmoothing(false, 0.0f);
+    motiondriver::SetWeaponUpper(true);
+    motionhost::SetWeaponUpper(true);
+    motiondriver::SetShootTransferEnabled(false);
+    motiondriver::SetMagTapEnabled(false);
+    motionhost::SetAirSteer(false);
+    motionhost::SetMeleeGuardSetting(false);
 }
 // --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped
 FILE* g_motionLog = nullptr;
@@ -619,7 +632,7 @@ int main(int argc, char** argv)
     }
     int32_t lastAimCameraPose = -1, lastAimCameraState = -1;
     if (aimCameraPose >= 0)
-        motiondriver::SetAimGameUpper(false); // the script setting mm.aimGameUpper (default false); the DLL default is true
+        motiondriver::SetAimGameUpper(false); // the script setting mm.aimGameUpper (default false, the DLL default too)
     if (aimGameUpper >= 0)
         motiondriver::SetAimGameUpper(aimGameUpper != 0);
     motiondriver::SetEnabled(true);

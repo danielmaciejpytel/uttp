@@ -125,7 +125,7 @@ void FeedRecoilShotLeft(uint32_t aEpoch, int32_t aProfile, bool aAiming);
 // owned / stale> magTapOn=<setting> magTapOff=<refused: setting off>; MOTION trace (only while a gesture ran since the last line):
 // magTap=<weight>/<peak>/<started>.
 bool FeedMagTap();
-// CET mm.shinobiBonusReload "Reload animation during Shinobi bonus" (native UTPPSetMotionMagTap), default OFF: the gesture above plays
+// CET mm.shinobiBonusReload "Reload animation during Shinobi bonus" (native UTPPSetMotionMagTap), default ON: the gesture above plays
 // only while this is on. Process-lifetime flag (not reset by SetEnabled / Load / Shutdown). Off drops a pending request; a running
 // gesture fades out over its remaining time.
 void SetMagTapEnabled(bool aOn);
@@ -138,11 +138,11 @@ void SetAimTarget(bool aEnabled, bool aValid, const float aTargetModel[3]);
 void SetCameraTarget(bool aEnabled, bool aValid, const float aTargetModel[3]);
 // mm.aimGameUpper: while v2 owns the frame with a weapon overlay and the player aims, hand the upper body back to the game
 // graph + aimofs (the snapshot keeps v1's upperScale / upperBits instead of upperScale 1; v2's own aim offset is skipped).
-// Default kAimGameUpperDefault (chosen by the item 2 measurement, see MotionDriver.cpp).
+// Default kAimGameUpperDefault = off, like the setting (see MotionDriver.cpp).
 void SetAimGameUpper(bool aOn);
 void SetGripEnabled(bool aOn);
-void SetShootTransferEnabled(bool aOn); // opt-in Pistol2H Shoot experiment; default off
-// Opt-in head lead (mm/HeadLead.hpp; CET mm.headLead; default off): Neck / Neck1 / Head turn into the turn of the run, applied to
+void SetShootTransferEnabled(bool aOn); // Pistol2H native shot motion on the aim pose (mm.shootTransfer); default on
+// Head lead (mm/HeadLead.hpp; CET mm.headLead; default on): Neck / Neck1 / Head turn into the turn of the run, applied to
 // the published v2 pose (v1-owned frames unchanged). SetHeadLeadParams(leadDegAtRef 0..45, maxLeadDeg 0..45): false on NaN / out
 // of range (nothing changed). Status / MMTRACE: headLead= lead= corr=.
 bool SetHeadLead(bool aOn);
@@ -164,7 +164,7 @@ bool SetShooterMode(bool aOn);
 // LIVE (setting on, v2 enabled, no fallback, bundle loaded); exactly 1.0f otherwise. ShooterModeLive mirrors that flag.
 float ShooterModeSpeedMul(float aMoveX, float aMoveY, int32_t aDetailed);
 bool ShooterModeLive();
-// Walk toggle speed (CET mm.walkSpeed, DLL default 0 = off; mm/MotionAdapter.hpp MapConfig::gameWalkTogglePoint): the capsule speed (game
+// Walk toggle speed (CET mm.walkSpeed, DLL default 1.6 like the setting, 0 = off; mm/MotionAdapter.hpp MapConfig::gameWalkTogglePoint): the capsule speed (game
 // m/s, 0 .. kWalkSpeedMaxMs) the game walk toggle (G) should hold at the full stick. SetWalkSpeed stores it (false on NaN / out of range,
 // nothing changed); the driver maps that speed onto the motion Walk cap while the toggle is on (stand ground, no aim / air / sprint), and
 // the script (utpp.reds UTPPUpdateWalkSpeed) holds the capsule there with one MaxSpeed multiplier = WalkSpeedTarget() / 2.72 (the speed
@@ -174,7 +174,7 @@ bool ShooterModeLive();
 bool SetWalkSpeed(float aMs);
 float WalkSpeedSetting();
 float WalkSpeedTarget();
-// Minimum analog walk speed (CET mm.minWalkSpeed, DLL default 0 = off; mm/MotionAdapter.hpp AnalogWalkFloorMul / MapConfig::analogFloorStick):
+// Minimum analog walk speed (CET mm.minWalkSpeed, DLL default 0.82 like the setting, 0 = off; mm/MotionAdapter.hpp AnalogWalkFloorMul / MapConfig::analogFloorStick):
 // the capsule speed (game m/s at the stand run curve, 0 .. kMinAnalogWalkMaxMs) a small stick tilt is lifted to. SetMinAnalogWalk stores it
 // (false on NaN / out of range, nothing changed); the driver gives the prediction the cap of the lifted speed, and the script (utpp.reds
 // UTPPUpdateAnalogFloor) applies one MaxSpeed multiplier = AnalogFloorMul. AnalogFloorMul is lock-free (reds calls it once per locomotion
@@ -340,7 +340,7 @@ float BodyYawOffset();
 float BodyYawOffsetFor(bool aMale);
 float BodyYawOffsetWeight();
 std::string BodyYawOffsetReason();
-// Barrel pitch loop of the v2 aim offset (aim pitch plan 2026-10-30; CET mm.aimAtCrosshair, DLL default OFF = the open-loop aim offset
+// Barrel pitch loop of the v2 aim offset (aim pitch plan 2026-10-30; CET mm.aimAtCrosshair, DLL default ON; off = the open-loop aim offset
 // bit for bit; mm/BarrelPitchLoop.hpp): closes the loop on the barrel elevation of WeaponRight against the aim point (UTPPSetAimTarget /
 // UTPPSetCameraTarget, P in the pose frame). Off: a running loop fades out (bias / residual at most 1 deg per frame). Always true.
 // SetBarrelAxis: WeaponRight local barrel axis (aim::AxisVector: 1 X, 2 Y default, 3 Z, negative opposite; false = invalid, kept),

@@ -694,14 +694,14 @@ do -- v2 owns its Aim setting regardless of module registration order; core pres
   U.SetupMMSettings(function() end, function() end, { setMotionMagTap = function(on) uCalls[#uCalls+1] = on end })
   check("shinobi mag tap: stored ON -> exactly one native call (true) at boot", #uCalls == 1 and uCalls[1] == true
     and U.mm.motionMagTap == true)
-  -- stored OFF (a player's choice): nothing is sent, the DLL already starts with it off
+  -- stored OFF (a player's choice): sent once at boot, the DLL starts with it on
   f = assert(io.open(tmp2, "w")); f:write("core.defaultsRevision=3\nmm.shinobiBonusReload=false\n"); f:close()
   local V = load()
   V.SETTINGS_FILE = tmp2
   V.Load()
   local vCalls = {}
   V.SetupMMSettings(function() end, function() end, { setMotionMagTap = function(on) vCalls[#vCalls+1] = on end })
-  check("shinobi mag tap: stored OFF -> no native call at boot, the choice is kept", #vCalls == 0
+  check("shinobi mag tap: stored OFF -> one native call (false) at boot, the choice is kept", #vCalls == 1 and vCalls[1] == false
     and V.Get("mm.shinobiBonusReload") == false and V.mm.motionMagTap == false)
   local P = load()
   os.remove(tmp2)
@@ -709,7 +709,7 @@ do -- v2 owns its Aim setting regardless of module registration order; core pres
   P.SetupMMSettings(function() end, function() end, {})
   P.Set("mm.shinobiBonusReload", true)
   check("shinobi mag tap: missing API -> stored only, not marked as sent", P.Get("mm.shinobiBonusReload") == true
-    and P.mm.motionMagTap == false)
+    and P.mm.motionMagTap == nil)
   local lv, grp = P.MenuPlacement("mm.shinobiBonusReload")
   check("shinobi mag tap: shown in the Combat group of the standard menu", lv == "player" and grp == "combat")
   os.remove(tmp2)

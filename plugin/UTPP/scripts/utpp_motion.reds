@@ -38,7 +38,7 @@ public native func UTPPFeedMMRecoilShotLeft(weaponEpoch: Uint32, recoilProfile: 
 // One line: enabled, body, db loaded, fallback reason, last pick, feed p95 us.
 public native func UTPPGetMotionStatus() -> String
 // the motion set-motionfix item 2: while aiming with a weapon overlay, hand the upper body back to the game + aim offset
-// (true, default in the DLL) or keep the motion overlay + motion aim offset (false). CET setting mm.aimGameUpper.
+// (true) or keep the motion overlay + motion aim offset (false, default in the DLL). CET setting mm.aimGameUpper.
 public native func UTPPSetMotionAimGameUpper(on: Bool) -> Void
 // Slide feed (default off; CET setting mm.slide): PSM LocomotionDetailed Slide (5, sprint -> crouch) reaches the the motion set
 // chooser as MovementMode Sliding + Stance Crouch + MovementDirection (Forward / Other) + MovementMode_LastFrame (exit rows), motion

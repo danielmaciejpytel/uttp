@@ -10319,8 +10319,10 @@ void RunUnit(const char* aName, void (*aFn)(int, char**, const std::vector<uint6
 }
 } // namespace
 
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 int main(int argc, char** argv)
 {
+    utpp::testdefaults::LegacyHostDefaults(); // scenarios below were tuned with the earlier DLL startup values
     // "--units=a,b" is removed from argv (the sections read the extra database arguments from argv[2..])
     for (int i = 1; i < argc;)
     {

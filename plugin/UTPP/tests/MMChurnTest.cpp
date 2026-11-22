@@ -388,9 +388,12 @@ GaitHoldRun RunGaitReturnHoldTimed(float aRampPerS, bool aUneven)
 }
 } // namespace
 
+#include "LegacyDllDefaults.hpp" // earlier DLL startup values for the scenarios below
 int main(int argc, char** argv)
 {
     DriverOptionBaseline();
+    utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
+    utpp::testdefaults::LegacyHostDefaults();
     if (argc < 4)
     {
         std::printf("usage: utpp_mm_loco_churn_test <data dir> <v1 database> <slice dir>\n");

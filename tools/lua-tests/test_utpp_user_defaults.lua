@@ -149,10 +149,10 @@ do
     and v2.want.aimGameUpper == false and v2.want.slide == true and v2.want.orientWarp == true and v2.want.lean == true
     and v2.want.leanHead == true and near(v2.want.leanScale, 0.85) and near(v2.want.leanHeadScale, 0.9) and v2.want.debug == false)
   local fresh = dofile(UTPP_MOTION_PATH)
-  check("v2 module starts with aim true and scales 1.0 acknowledged (0.85 / 0.90 differ and are sent), slide/orient/lean/leanHead/stick unknown (sent once)",
-    fresh.rt.aimApplied == true and fresh.rt.slideApplied == nil and fresh.rt.orientWarpApplied == nil
-    and fresh.rt.leanApplied == nil and fresh.rt.leanHeadApplied == nil and fresh.rt.stickSpeedApplied == nil and fresh.rt.leanScaleApplied == 1.0
-    and fresh.rt.leanHeadScaleApplied == 1.0)
+  check("v2 module starts with aim, slide/orient/lean/leanHead, the lean scales and stick unknown (each sent once)",
+    fresh.rt.aimApplied == nil and fresh.rt.slideApplied == nil and fresh.rt.orientWarpApplied == nil
+    and fresh.rt.leanApplied == nil and fresh.rt.leanHeadApplied == nil and fresh.rt.stickSpeedApplied == nil and fresh.rt.leanScaleApplied == nil
+    and fresh.rt.leanHeadScaleApplied == nil)
   -- with mm.motionDriver ON by default the switches are pushed while the settings register (as for a stored mm.motionDriver=true), the sync adds the glue
   check("motion registration already sent the defaults (motion is on at registration)", t.aim[#t.aim] == false and t.slide[#t.slide] == true
     and t.orient[#t.orient] == true and t.lean[#t.lean] == true and t.leanHead[#t.leanHead] == true and v2.rt.aimApplied == false

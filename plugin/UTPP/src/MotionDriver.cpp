@@ -228,16 +228,16 @@ float g_aimTgt[3] = {0, 0, 0};
 bool g_cameraTargetValid = false;
 float g_cameraTarget[3] = {0, 0, 0};
 double g_cameraTargetTime = 0;
-// mm.aimGameUpper default: chosen by the item 2 measurement on the real 2026-10-13 dump (unit test 12c, progress file):
-// the open-loop v2 AO leaves the WeaponRight barrel ~9 deg off the aim target (mean 9.3, pitch 0) against v1 game pose +
-// aimofs errAfter median 1.9 deg in the same log -> the game upper body + aimofs while aiming is the default.
-constexpr bool kAimGameUpperDefault = true;
+// mm.aimGameUpper default: off, like the setting (the motion aim pose and the motion aim offset own the upper body while aiming).
+// With the closed barrel loop (mm.aimAtCrosshair) the motion aim leaves the barrel about 0.9 deg (Pistol2H) / 3.9 deg (Rifle,
+// medians) off the aim target; on hands the upper body back to the game graph and its aim offset while aiming.
+constexpr bool kAimGameUpperDefault = false;
 bool g_aimGameUpper = kAimGameUpperDefault;
 bool g_aimingNow = false;
-// Opt-in head lead (CET mm.headLead -> SetHeadLead, default OFF): mm/HeadLead.hpp turns Neck / Neck1 / Head into the turn
+// Head lead (CET mm.headLead -> SetHeadLead, default ON like the setting): mm/HeadLead.hpp turns Neck / Neck1 / Head into the turn
 // (motion BS_Relaxed_Lean_Head equivalent). Step per v2 feed (heading rate, gates), Apply on the published v2 pose
 // (ApplyLocked) before the aim offset / finish stages. v1-owned frames are not covered. OFF: no code path touches the pose.
-bool g_headLeadOn = false;
+bool g_headLeadOn = true;
 hlead::Params g_hlParams;
 hlead::HeadLead g_hl;
 hlead::Skeleton g_hlSk;
@@ -252,10 +252,10 @@ owarp::Params g_owParams;
 owarp::OrientWarp g_ow;
 owarp::Skeleton g_owSk;
 const void* g_owSkBundle = nullptr;
-// Run pelvis yaw trim (CET mm.pelvisYawTrim -> SetPelvisYawTrim, deg, default 0 = nothing): mm/OrientWarp.hpp PelvisTrim. Step per
+// Run pelvis yaw trim (CET mm.pelvisYawTrim -> SetPelvisYawTrim, deg, default 2 like the setting; 0 = nothing): mm/OrientWarp.hpp PelvisTrim. Step per
 // v2 feed (gates, forward-locomotion weight, feed dt), applied in FrameLocked on the leg-tail copy together with the orientation warp
 // (root +trim, torso -trim: only the pelvis turns). 0: no code path touches the frame, the pose and the root yaw are bit-identical.
-float g_pelvisTrimDeg = 0.0f;
+float g_pelvisTrimDeg = 2.0f;
 // Feminine shoulder narrowing in metres per side (CET mm.shoulderWidth -> cm per side -> SetFeminineShoulderCm); default = MotionPose.hpp constant.
 float g_femShoulderM = motionpose::kFeminineShoulderAmount;
 bool g_femFigureOn = true;
@@ -264,20 +264,20 @@ owarp::PelvisTrim g_pt;
 owarp::Skeleton g_ptSk;
 const void* g_ptSkBundle = nullptr;
 const char* g_ptWhy = "off"; // trace pt=<deg>/<weight>/<reason>: first gate that holds the weight down, else the motion reason
-// Body yaw offset (CET mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale -> SetBodyYawOffsets, deg, default 0 = nothing): mm/OrientWarp.hpp
+// Body yaw offset (CET mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale -> SetBodyYawOffsets, deg, default 4 / 0 like the settings; 0 = nothing): mm/OrientWarp.hpp
 // BodyYawOffset. One value per body (BodyIndex of the installed bundle: 0 = female V, 1 = male V), the one of the bundle's body is used
 // (BodyOffsetDegLocked). Step per v2 feed (gates, feed dt), applied in FrameLocked as an addition to the visual root yaw of the leg-tail
 // frame only (the whole pose turns as one rigid unit; no pose edit). 0: no code path touches the frame, the root yaw is bit-identical.
-float g_bodyOffsetDeg[2] = {0.0f, 0.0f};
+float g_bodyOffsetDeg[2] = {4.0f, 0.0f};
 owarp::BodyOffsetParams g_boParams;
 owarp::BodyYawOffset g_bo;
 const char* g_boWhy = "off"; // trace bo=<deg>/<weight>/<reason>: first gate that holds the weight down, else "ok"
 // Aim pitch plan 2026-10-30 seam C: closed barrel pitch loop of the v2 aim offset (MotionPose OverlayFrameInputs::barrelLoop; CET
-// mm.aimAtCrosshair -> SetBarrelLoop, DLL default OFF = the open-loop aim offset bit for bit). Barrel axis of WeaponRight (the same id
+// mm.aimAtCrosshair -> SetBarrelLoop, DLL default ON like the setting; off = the open-loop aim offset bit for bit). Barrel axis of WeaponRight (the same id
 // as aimofs, UTPPSetAimOffsetAxis) and the muzzle length along it (UTPPSetMotionBarrelMuzzle). The aim point P reaches the evaluator in
 // the pose (visual root) frame: FrameInputsLocked = the actor point (no root frame), PrepareRootOverlay = InversePoint of the same
 // actor point with the frame ComputeAim uses for the aim angles (one point, one frame for the sweep angles and the loop).
-bool g_barrelLoop = false;
+bool g_barrelLoop = true;
 int32_t g_barrelAxis = aim::kDefaultBarrelAxis;
 float g_barrelMuzzle = aim::Params{}.muzzleOffset;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -325,8 +325,14 @@ static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "dodge::SampleDodge wr
 // The state lives in the Bundle. OFF and idle (weight 0): no code path touches the pose, it is bit-identical.
 bool g_leanSetting = true;
 bool g_leanHeadSetting = true; // mm.leanHead (default ON like the setting): the motion head layer replaces the head lead while the lean is on
-lrt::Params g_leanParams;
-motionpose::WorldAimTargetParams g_worldAimParams; // SetAimWorldSmoothing (default off)
+lrt::Params g_leanParams = [] {
+    lrt::Params p;
+    p.scale = 0.85f;     // SetLeanParams: the amounts of the settings mm.leanScale / mm.leanHeadScale
+    p.headScale = 0.9f;
+    return p;
+}();
+// SetAimWorldSmoothing: on at 12 Hz like the setting mm.aimWorldSmooth
+motionpose::WorldAimTargetParams g_worldAimParams{true, 12.0f};
 motionpose::WorldAimTargetFilter g_worldAim;       // world aim direction of the aim offset while on
 // Neutral aim offset (SetNeutralAimOffset, default off): in a strafe / shooter facing without aiming the spine follows the camera
 // through the aim offset (mm/Strafe.hpp NeutralAoBlend). Off: the blend stays reset and OverlayFrameInputs::neutralAoWeight 0.
@@ -363,12 +369,12 @@ std::atomic<int64_t> g_fnDrivingNs{0};
 std::atomic<int> g_fnLastGait{-1};
 // Walk toggle speed (SetWalkSpeed, CET mm.walkSpeed; MotionAdapter.hpp MapConfig::gameWalkTogglePoint) and the Tier2 Slow feed flag
 // (FeedTier2Slow). g_walkSpeedLive = target > 0 AND v2 can run (enabled, no fallback, bundle): the lock-free gate WalkSpeedTarget reads,
-// refreshed with the Shooter live flag.
-std::atomic<float> g_walkSpeed{0.0f};
+// refreshed with the Shooter live flag. Starts at 1.6 m/s like the setting (0 = off).
+std::atomic<float> g_walkSpeed{1.6f};
 std::atomic<bool> g_walkSpeedLive{false};
 // Minimum analog walk speed (SetMinAnalogWalk, CET mm.minWalkSpeed; MotionAdapter.hpp AnalogWalkFloorMul): g_minAnalogWalkLive = setting > 0
-// AND v2 can run, refreshed with the walk speed flag (AnalogFloorMul gate).
-std::atomic<float> g_minAnalogWalk{0.0f};
+// AND v2 can run, refreshed with the walk speed flag (AnalogFloorMul gate). Starts at 0.82 m/s like the setting (0 = off).
+std::atomic<float> g_minAnalogWalk{0.82f};
 std::atomic<bool> g_minAnalogWalkLive{false};
 // Fixed stick speed (SetStickSpeedMode, CET mm.stickSpeed; MotionAdapter.hpp MapConfig::stickSpeedFixed): read by every Step; starts
 // fixed like the setting (the MapConfig member default stays analog for the offline tools).
@@ -462,9 +468,9 @@ std::atomic<bool> g_slideHandling{false}; // lock-free copy for OwnsSlide (read 
 bool g_slideFrame = false;                // the frame of the last Step is a slide frame (FrameLocked)
 uint64_t g_slideFrames = 0;               // slide frames stepped (status)
 bool g_aimUpperFade = true, g_aimUpperTail = false;
-bool g_weaponUpperOn = true, g_weaponUpperFrame = false, g_weaponUpperTail = false;
+bool g_weaponUpperOn = false, g_weaponUpperFrame = false, g_weaponUpperTail = false; // mm.weaponUpper, default off like the setting
 int32_t g_weaponAction = 0;
-bool g_shootTransferEnabled = false; // explicit opt-in; never changes the installed default
+bool g_shootTransferEnabled = true; // mm.shootTransfer, default on like the setting
 integ::GamePoseSample g_shootLastReady{}, g_shootBase{};
 bool g_shootLastReadyValid = false, g_shootBaseValid = false;
 int64_t g_shootEventTicks = 0;
@@ -560,9 +566,10 @@ float g_magTapPeak = 0.0f;      // highest weight since the last MOTION trace li
 float g_magTapMoved = 0.0f, g_magTapErr = 0.0f, g_magTapMovedMax = 0.0f; // last frame: hand displacement / full-weight target error (m)
 float g_magTapTravel = -1.0f;   // hand -> magazine distance (m) at the last owned request (> kMaxTravel = dropped by distance)
 uint64_t g_magTapUnowned = 0;   // requests dropped because MM did not own the arms (FPP, vehicle, ADS / low-ready hand-back, ...)
-// CET mm.shinobiBonusReload (SetMagTapEnabled, native UTPPSetMotionMagTap), default OFF: while off every request is refused at once.
+// CET mm.shinobiBonusReload (SetMagTapEnabled, native UTPPSetMotionMagTap), default ON like the setting: while off every request is
+// refused at once.
 // Process lifetime: never reset by SetEnabled / Load / ResetMagTap / Shutdown (CET sends it once and caches what it sent).
-bool g_magTapEnabled = false;
+bool g_magTapEnabled = true;
 uint64_t g_magTapOff = 0;       // requests refused because the setting is off
 #ifdef UTPP_MOTION_DRIVER_TEST_FAULTS
 MagTapProbe g_magTapProbe;      // unit test target only: the same-frame pre / post pose of the last main-path Step

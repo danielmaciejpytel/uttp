@@ -9,9 +9,9 @@
 --   mm.pistolAuto bool, default true - model-tag and Ready/Aim policy in Glue.
 --   mm.pistol1h bool, default true - fallback for unknown/conflicting models, or manual pose when auto is off.
 --   mm.debug    bool, default true - always draw the status window (it is also drawn while the CET overlay is open).
---   mm.aimGameUpper bool, default false (the DLL default is true: the first Sync sends false) - the motion set-motionfix item 2: while aiming with a weapon overlay the upper body comes
---                  from the game + the aim offset (native UTPPSetMotionAimGameUpper; the DLL default is the same, so no
---                  call is made until the value differs from it).
+--   mm.aimGameUpper bool, default false (DLL default false too; the value is sent once after start-up, then on every change) - the
+--                  motion set-motionfix item 2: while aiming with a weapon overlay the upper body comes from the game + the aim
+--                  offset (native UTPPSetMotionAimGameUpper).
 --   mm.slide    bool, default true - slide feed (sprint -> crouch slide, PSM LocomotionDetailed 5): the slide
 --                  databases play instead of the held pose. Native UTPPSetMotionSlide (DLL default on; the value is sent once after
 --                  start-up, then on every change). It only takes effect with a bundle that carries the chooser.json "slide" section
@@ -33,11 +33,11 @@
 --                  straight (native UTPPSetMotionShoulderNarrow). Male V: no effect (the narrowing is female only).
 --                  Replaces mm.shoulderNarrow (cm per side 0 .. 4): utpp_core converts a stored value on load
 --                  (width = 5 - 2 * narrow) and drops the old key. Console (per side, 0 .. 5): GetMod("utpp_motion").SetShoulderNarrow(cm).
---   mm.pelvisYawTrim float -10 .. 10, default 2 (against the ~5 deg right hip bias of the run clips; DLL default 0) - run pelvis yaw trim in degrees (+ = left): turns the
+--   mm.pelvisYawTrim float -10 .. 10, default 2 (against the ~5 deg right hip bias of the run clips; DLL default 2) - run pelvis yaw trim in degrees (+ = left): turns the
 --                  pelvis while V walks / runs / sprints forward (the forward loops carry it ~5 deg to the right; +5 squares it),
 --                  chest, head and feet keep their direction; not while aiming / weapon drawn (native UTPPSetMotionPelvisYawTrim).
 --   mm.bodyYawOffsetFemale float -20 .. 20, default 4, and mm.bodyYawOffsetMale float -20 .. 20, default 0 (in-game look; DLL default
---                  0 / 0) - body yaw offset in degrees (+ = left) of female V / male V: turns the whole character (hips, torso, head,
+--                  4 / 0) - body yaw offset in degrees (+ = left) of female V / male V: turns the whole character (hips, torso, head,
 --                  legs, feet) about its visual root against the over-the-shoulder camera parallax; the DLL uses the value of the body
 --                  in play; the movement direction is unchanged; off while aiming / during weapon actions (native
 --                  UTPPSetMotionBodyYawOffsets(female, male), both values in one call). Replace mm.bodyYawOffset (one value for both
@@ -49,18 +49,18 @@
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
 --                  without a pose jump (native UTPPSetMMStrideWarp).
---   mm.aimAtCrosshair bool, default true (DLL default off; in game: muzzle slot +Y = weapon entity +Y, barrel vs shot
+--   mm.aimAtCrosshair bool, default true (DLL default on; in game: muzzle slot +Y = weapon entity +Y, barrel vs shot
 --                  pitch error median 4.8 deg / p90 10.9 off -> 0.2-0.6 / p90 1.3 on, Kyubi + pistol) - "Weapon aims at crosshair point":
 --                  the DLL barrel
 --                  pitch loop of the motion aim offset (native UTPPSetMotionBarrelLoop) together with utpp_camera's crosshair point feed
 --                  (SetAimPoint: the native aim / camera targets = the hit point P of the camera ray). P is switched on only while motion is on,
 --                  the setting is on and the DLL acknowledged the loop (never P alone: open loop from the chest at a near P); re-checked
 --                  every Sync (camera module loaded later, motion off -> P off, an older DLL without the native -> P off).
---   mm.walkSpeed float 0 .. 3.5, default 1.6 (m/s; the game walk point the motion speed map puts on the motion set Walk cap, DLL default 0 = off) - capsule speed at the full stick while
+--   mm.walkSpeed float 0 .. 3.5, default 1.6 (m/s; the game walk point the motion speed map puts on the motion set Walk cap, DLL default 1.6; 0 = off) - capsule speed at the full stick while
 --                  the game walk toggle (G) is on (native UTPPSetMotionWalkSpeed; reds UTPPUpdateWalkSpeed holds the capsule there with one
 --                  MaxSpeed multiplier = walkSpeed / 2.72, the speed the unmodified toggle gives in game 2.5; the motion driver maps it onto the
 --                  motion set Walk cap). 0 = vanilla toggle speed. Third person, on the ground, motion driving only; sprint, aim walk, crouch, air: untouched.
---   mm.minWalkSpeed float 0 .. 1.6, default 0.82 (m/s at the stand run curve, the |mv| 0.455 point; DLL default 0 = off) - minimum capsule speed of
+--   mm.minWalkSpeed float 0 .. 1.6, default 0.82 (m/s at the stand run curve, the |mv| 0.455 point; DLL default 0.82; 0 = off) - minimum capsule speed of
 --                  a small stick tilt (native UTPPSetMotionMinAnalogWalk; reds UTPPUpdateAnalogFloor lifts the capsule with one MaxSpeed multiplier
 --                  1 .. 4 = the fraction of the full-stick speed raised to this one, the motion driver gives the prediction the lifted cap). 0 = the
 --                  game's own slow speeds. Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, air: untouched.
@@ -70,8 +70,8 @@
 --                  The motion driver gets the same mode (native UTPPSetMotionStickSpeedMode 1 / 0, DLL default 1) for its prediction;
 --                  both are sent for every fresh session.
 --                  Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, walk toggle, Tier2 Slow, air: untouched.
---   mm.leanScale float 0 .. 2, default 0.85 (DLL default 1) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
---   mm.leanHeadScale float 0 .. 2, default 0.9 (DLL default 1) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
+--   mm.leanScale float 0 .. 2, default 0.85 (DLL default 0.85) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
+--   mm.leanHeadScale float 0 .. 2, default 0.9 (DLL default 0.9) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
 --   mm.selectionGuards bool, default true (developer option; DLL default on, so no call is made at the default) - clip selection guards of the
 --                  motion matcher as a group (native UTPPSetMotionSelectionGuards); off = every guard off, for A/B tests.
 -- Debug line: UTPPMotionGlue:Status() = glue state + " | " + Game.UTPPGetMotionStatus() (enabled, body, db loaded, fallback
@@ -88,16 +88,17 @@ M.SYNC_PERIOD = 1.0    -- s between checks that the glue matches the settings (c
 M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown [P]
 
 -- wanted state (settings) and what the glue reported last; slide / orientWarp / lean / leanHead / stickSpeed / strideWarp start at the DLL defaults
-M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = true, slide = true, orientWarp = true,
-  lean = true, leanHead = true, leanScale = 1.0, leanHeadScale = 1.0, pelvisYawTrim = 0, shoulderNarrow = 2.5,
-  feminineFigure = true, bodyYawOffsetFemale = 0, bodyYawOffsetMale = 0, barrelLoop = false, walkSpeed = 0, minAnalogWalk = 0, stickSpeed = "fixed", selectionGuards = true,
+M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
+  lean = true, leanHead = true, leanScale = 0.85, leanHeadScale = 0.9, pelvisYawTrim = 2, shoulderNarrow = 2.5,
+  feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.6, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = false, pelvisPlacement = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
   strideWarp = true, overlayInertialSwitch = false }
--- slide / orientWarp / lean / leanHead / stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
+-- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
+-- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
-  nativeOnly = false, aimApplied = true, slideApplied = nil, orientWarpApplied = nil,
-  leanApplied = nil, leanHeadApplied = nil, leanScaleApplied = 1.0, leanHeadScaleApplied = 1.0, pelvisYawTrimApplied = 0, shoulderNarrowApplied = 2.5,
-  feminineFigureApplied = true, bodyYawOffsetApplied = { 0, 0 }, barrelLoopApplied = false, walkSpeedApplied = 0, minAnalogWalkApplied = 0, stickSpeedApplied = nil, aimPointApplied = nil,
+  nativeOnly = false, aimApplied = nil, slideApplied = nil, orientWarpApplied = nil,
+  leanApplied = nil, leanHeadApplied = nil, leanScaleApplied = nil, leanHeadScaleApplied = nil, pelvisYawTrimApplied = nil, shoulderNarrowApplied = 2.5,
+  feminineFigureApplied = true, bodyYawOffsetApplied = nil, barrelLoopApplied = nil, walkSpeedApplied = nil, minAnalogWalkApplied = nil, stickSpeedApplied = nil, aimPointApplied = nil,
   pistolAutoApplied = nil, selectionGuardsApplied = true, optionsApplied = {}, errors = 0 }
 
 -- no file system paths in the log: a Lua error text names the script file with its full path (user name included); a path in
@@ -210,11 +211,11 @@ function M.Sync(api)
     M.overrideApplied = {}
     M.ApplyPistolAuto(api)
     M.ApplyWeaponOverrides(api)
-    -- The new session can reset the native aim flag to its default (true): forget the old acknowledgement before the settings
+    -- A new session sends the aim flag again: forget the old acknowledgement before the settings
     -- are pushed. The settings go to the DLL BEFORE the glue enables it (these natives need only M.want.enabled, not an
     -- enabled glue), so its first enabled frame already runs with the wanted values and not with its own defaults. A failed
     -- enable returns below and the next Sync takes this whole branch again.
-    M.rt.aimApplied = true
+    M.rt.aimApplied = nil
     M.ApplyAimGameUpper(api)
     M.ApplySlide(api)
     M.ApplyOrientWarp(api)
@@ -372,7 +373,7 @@ function M.SetWeaponPoseOverride(record, ready, aim)
   return true
 end
 
--- The native defaults to true. The acknowledgement cache is independent of the stored preference.
+-- The native defaults to false. The acknowledgement cache is independent of the stored preference.
 function M.ApplyAimGameUpper(api)
   if not M.want.enabled then return false end
   local v = M.want.aimGameUpper
@@ -484,7 +485,7 @@ function M.SetSelectionGuards(on, api)
   return M.want.selectionGuards
 end
 
--- Run pelvis yaw trim: a process-lifetime DLL value (default 0), same contract as the orientation warp: nothing is called while the
+-- Run pelvis yaw trim: a process-lifetime DLL value (default 2), same contract as the orientation warp: nothing is called while the
 -- wanted value equals what the DLL holds. nil / non-numeric / NaN -> 0; otherwise clamped to -10 .. 10 (the native rejects more).
 local function trimDeg(v)
   local x = tonumber(v)
@@ -601,7 +602,7 @@ function M.SetShoulderWidth(v, api)
   return M.SetShoulderNarrow(M.ShoulderNarrowFromWidth(v), api)
 end
 
--- Body yaw offset, one value per body (female V, male V): the same contract as the pelvis trim (DLL default 0 / 0, nothing called
+-- Body yaw offset, one value per body (female V, male V): the same contract as the pelvis trim (DLL default 4 / 0, nothing called
 -- while the wanted pair equals what the DLL holds; both values go in one call, the DLL uses the one of the body in play).
 -- nil / non-numeric / NaN -> 0; otherwise clamped to -20 .. 20 (the native rejects more).
 local function bodyOffsetDeg(v)
@@ -650,7 +651,7 @@ function M.SetBodyYawOffset(v, api)
   return M.want.bodyYawOffsetFemale
 end
 
--- Walk toggle speed (mm.walkSpeed): the same contract as the trims (process-lifetime DLL value, default 0 = off, nothing called while
+-- Walk toggle speed (mm.walkSpeed): the same contract as the trims (process-lifetime DLL value, default 1.6, 0 = off, nothing called while
 -- the wanted value equals what the DLL holds, only while motion is on). nil / non-numeric / NaN -> 0; otherwise clamped to 0 .. 3.5 (the native
 -- rejects more).
 local function walkSpeedMs(v)
@@ -686,7 +687,7 @@ function M.SetWalkSpeed(v, api)
   return M.want.walkSpeed
 end
 
--- Minimum analog walk speed (mm.minWalkSpeed): the same contract as the walk speed (process-lifetime DLL value, default 0 = off,
+-- Minimum analog walk speed (mm.minWalkSpeed): the same contract as the walk speed (process-lifetime DLL value, default 0.82, 0 = off,
 -- nothing called while the wanted value equals what the DLL holds, only while motion is on). nil / non-numeric / NaN -> 0; otherwise clamped
 -- to 0 .. 1.6 (the native rejects more).
 local function minAnalogWalkMs(v)
@@ -770,7 +771,7 @@ function M.SetStickSpeed(v, api)
   return M.want.stickSpeed
 end
 
--- Barrel pitch loop + crosshair point (mm.aimAtCrosshair). The DLL loop: the same contract as the trims (DLL default off, called only
+-- Barrel pitch loop + crosshair point (mm.aimAtCrosshair). The DLL loop: the same contract as the trims (DLL default on, called only
 -- while motion is on and the wanted value differs from what the DLL holds). The crosshair point of utpp_camera (CM.AIM_POINT, shipped
 -- off) follows the ACKNOWLEDGED loop: on only with motion on + setting on + native accepted, off otherwise; recomputed on every call.
 -- api.cameraModule() (offline tests) or GetMod("utpp_camera"); a missing / older camera module keeps P off and is retried next Sync.
@@ -825,8 +826,8 @@ function M.SetBarrelLoop(v, api)
   return M.want.barrelLoop
 end
 
--- Lean: three process-lifetime DLL values (defaults on / on / scale 1); lean and head lean are sent once while unknown, the scales while
--- they differ from the DLL default; afterwards each only when the wanted value changes.
+-- Lean: three process-lifetime DLL values (defaults on / on / scales 0.85, 0.9); lean, head lean and the scales are sent once while
+-- unknown; afterwards each only when the wanted value changes.
 local unpackArgs = table.unpack or unpack
 local function leanCall(api, field, native, ...)
   local ok, accepted
@@ -898,7 +899,7 @@ function M.SetLeanHeadScale(v, api)
   return M.want.leanHeadScale
 end
 
--- Optional motion behaviours, all off in the DLL by default (their settings may default to on): setting key -> want field, native, argument conversion. Sent again whenever the
+-- Optional motion behaviours, DLL defaults = the setting defaults: setting key -> want field, native, argument conversion. Sent again whenever the
 -- wanted value differs from the last accepted one (a fresh session sends all of them before the glue is enabled).
 M.OPTIONS = {
   { want = "aimWorldSmooth", field = "setAimWorldSmoothing", native = "UTPPSetMMAimWorldSmoothing", hz = 12 },
@@ -971,7 +972,7 @@ function M.RegisterSettings(core)
     apply = function(v) M.SetPistolAuto(v == true) end })
   core.Register({ key = "mm.aimGameUpper", section = "motion", type = "bool", default = false,
     label = "motion: game upper body while aiming",
-    desc = "While aiming a gun, the upper body comes from the game with the aim correction (on target). Off = motion aim pose and motion aim offset (about 9 deg off target in the offline measurement).",
+    desc = "While aiming a gun, the upper body comes from the game with the aim correction. Off (default) = the motion aim pose and the motion aim offset.",
     apply = function(v) M.SetAimGameUpper(v == true) end })
   core.Register({ key = "mm.slide", section = "motion", type = "bool", default = true,
     label = "motion: sprint slide (experimental)",

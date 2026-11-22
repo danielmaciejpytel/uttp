@@ -3,7 +3,7 @@
 // Usage: utpp_magtap_driver_test <data dir (flat motion-derived files as MotionDriverTest)>
 // Uses utpp_motion_woman_knee_slide.* (slide bundle: the gesture on slide frames too). Missing files FAIL.
 // Checks:
-//  I) CET mm.shinobiBonusReload (SetMagTapEnabled), default OFF: refused / no frame edited until switched on; on -> plays; switched off
+//  I) CET mm.shinobiBonusReload (SetMagTapEnabled), DLL default ON (= the setting): switched off -> refused / no frame edited; on -> plays; switched off
 //     with an accepted request -> never plays; the flag survives SetEnabled(false) + bundle reload (all later checks run with it on);
 //  A) the WeaponRight frame of the real overlays (INFO: left grip, model up / forward, right hand in WeaponRight space);
 //  B) per two-handed overlay (Rifle, Pistol2H Ready, standing; Pistol1H Ready: left hand ~0.95 m away -> no gesture, kMaxTravel):
@@ -20,7 +20,7 @@
 //     stays under the roll range, so the full kSlideDelaySeconds), then the gesture plays and reaches the target; standing requests
 //     (B) start on the first Step; pistol requests on slide frames (G) never wait.
 // Mutations (tests/magtap.cmake): UTPP_MAGTAP_MUTATION=1 (trigger ignored) MUST fail B; =2 (naive restart) MUST fail E;
-// =3 (driver only: the mm.shinobiBonusReload setting ignored in FeedMagTap) MUST fail "I off by default"; =4 (no slide wait) MUST fail
+// =3 (driver only: the mm.shinobiBonusReload setting ignored in FeedMagTap) MUST fail "I off: requests refused"; =4 (no slide wait) MUST fail
 // "F ... the start waits".
 #include <algorithm>
 #include <array>
@@ -353,18 +353,19 @@ int main(int argc, char** argv)
         }
     };
 
-    // ---- I) CET mm.shinobiBonusReload "Reload animation during Shinobi bonus", default OFF: a fresh driver (no SetMagTapEnabled call)
-    // refuses every request and never edits a frame; on -> the gesture plays (the rest of this test runs with it on); a request
+    // ---- I) CET mm.shinobiBonusReload "Reload animation during Shinobi bonus": a fresh driver (no SetMagTapEnabled call) starts on like
+    // the setting; switched off it refuses every request and never edits a frame; on -> the gesture plays (the rest of this test runs with it on); a request
     // accepted while on and the option switched off before the next Step never plays; the flag survives SetEnabled(false) / Load.
     {
         (void)motiondriver::SetOverlayInputs(1, 1, false, false);
         settle(60);
         const std::string st0 = motiondriver::Status();
-        Check(StatusField(st0, " magTapOn=") == "0", "I status: magTapOn=0 by default", StatusField(st0, " magTapOn="));
+        Check(StatusField(st0, " magTapOn=") == "1", "I status: magTapOn=1 by default (= mm.shinobiBonusReload)", StatusField(st0, " magTapOn="));
+        motiondriver::SetMagTapEnabled(false);
         const bool fedOff = motiondriver::FeedMagTap();
         const GestureRun off = Gesture(rig, bn, magtap::Kind::Rifle, 40, 20, &Stand60, false);
         Check(!fedOff && off.edited == 0 && off.peakW == 0.0f && off.notIdenticalAfter == 0,
-              "I off by default: requests refused, no frame edited (bit-identical)", Desc(off));
+              "I off: requests refused, no frame edited (bit-identical)", Desc(off));
         motiondriver::SetMagTapEnabled(true);
         settle(10);
         const GestureRun on = Gesture(rig, bn, magtap::Kind::Rifle, 40, -1, &Stand60);
@@ -476,7 +477,7 @@ int main(int argc, char** argv)
         const GestureRun fpp = blocked(0), gate = blocked(1);
         Check(fpp.edited == 0 && fpp.peakW == 0.0f, "D TPP off for 3 Steps: the request is dropped, never played later", Desc(fpp));
         Check(gate.edited == 0 && gate.peakW == 0.0f, "D gate closed (vehicle / scene) for 3 Steps: dropped, never played later", Desc(gate));
-        // ADS with the game-owned upper body (aimGameUpper default on): not owned -> dropped
+        // ADS with the game-owned upper body (aimGameUpper on): not owned -> dropped
         (void)motiondriver::SetAimGameUpper(true);
         (void)motiondriver::SetOverlayInputs(1, 2, false, false);
         settle(30);

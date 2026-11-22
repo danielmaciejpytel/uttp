@@ -23,7 +23,7 @@ if(DEFINED _utpp_mdmotion_data_native)
   target_compile_features(utpp_magtap_driver_test PRIVATE cxx_std_20)
   add_test(NAME utpp_magtap_driver_test COMMAND utpp_magtap_driver_test "${_utpp_mdmotion_data_native}")
   # mutation 1 MUST fail "B ... the gesture plays", mutation 2 MUST fail "E second request in the fall", mutation 3 (driver only:
-  # the CET mm.shinobiBonusReload setting ignored in FeedMagTap) MUST fail "I off by default", mutation 4 (no slide wait) MUST fail
+  # the CET mm.shinobiBonusReload setting ignored in FeedMagTap) MUST fail "I off: requests refused", mutation 4 (no slide wait) MUST fail
   # "F rifle on slide frames: the start waits"
 # removed 2026-11-05 (review R9), which cheaper test kills the same site: utpp_magtap_mut1, _mut2, _mut4
   foreach(_m 3)
@@ -33,5 +33,5 @@ if(DEFINED _utpp_mdmotion_data_native)
     target_compile_features(utpp_magtap_driver_mut${_m} PRIVATE cxx_std_20)
     add_test(NAME utpp_magtap_driver_mut${_m} COMMAND utpp_magtap_driver_mut${_m} "${_utpp_mdmotion_data_native}")
   endforeach()
-  set_tests_properties(utpp_magtap_driver_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL I off by default")
+  set_tests_properties(utpp_magtap_driver_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL I off: requests refused")
 endif()
