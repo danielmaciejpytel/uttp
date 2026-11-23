@@ -158,6 +158,9 @@ struct ChooserState
     float headingLagDeg = 0.0f;
     // The step was a start from rest toward a direction away from the facing (the rule then acts only while a start clip plays).
     bool headingStepFromRest = false;
+    // Shooter mode drives the strafe rotation mode on the ground (the facing is held on the camera, the travel direction turns against
+    // it). Written by adapter::MapToChooser; a hand-built state leaves it false (MatcherConfig::strafeSectorDelayS then never acts).
+    bool shooterStrafe = false;
 };
 
 inline cancelstart::State CancellationState(const ChooserState& state)
@@ -594,6 +597,16 @@ struct MatcherConfig
     //     sessions). 0.15 lets the slalom window churn again.
     float loopDwellS = 0.5f;
     float loopDwellOverride = 0.2f;
+    //  1b. strafeSectorDelayS / strafeSectorDelayOverride (Shooter mode, ChooserState::shooterStrafe): with the facing held on the camera a
+    //     turning stick sweeps the travel direction through the direction loops of a *_Loops database (F, F_L_20, FL, LL / LR, BL, B, BR,
+    //     RL / RR, FR, F_R_20) and the shuffles between the hip sides; a 360 deg stick turn in 3 s picked every one of them in turn (11 clip
+    //     changes in 3 s, 3.3-3.7 per second in the game). A clip of a *_Loops database younger than strafeSectorDelayS gives way to another
+    //     clip of a *_Loops database only when that one is better by more than strafeSectorDelayOverride. Stick edges (gait / movement
+    //     state), air, slides and forced interrupts search as before; every other mode is untouched. 0 = off.
+    //     Replay of the recorded Shooter session (both bodies, 120 deg/s): 0.35 s with override 1.0 (above the cost scale of these loops,
+    //     ~0.1-0.4, so in effect a minimum time per direction) 8 changes in 3 s; override 0.3 left 9 (= the 3.0 per second bound), 0.15 none.
+    float strafeSectorDelayS = 0.35f;
+    float strafeSectorDelayOverride = 1.0f;
     // freshEventBias 0.025: half of the first value keeps the same reduction of clip changes over replays of six recorded sessions while a
     // Walk start under an accelerating capsule is no longer kept against a better start (toe drift of the starts back to the unguarded level)
     float freshEventS = 0.2f;
@@ -759,6 +772,14 @@ struct MatchResult
 // off value (0 / false) after Init copied the configuration. Unset = the configuration as given.
 inline void TestGuardsOff(MatcherConfig& c)
 {
+    // UTPP_TEST_STRAFE_SECTOR = "<delay s>,<override>": the Shooter sector delay of the replay tools (tuning only)
+    if (const char* s = std::getenv("UTPP_TEST_STRAFE_SECTOR"); s && *s)
+    {
+        char* end = nullptr;
+        c.strafeSectorDelayS = std::strtof(s, &end);
+        if (end && *end == ',')
+            c.strafeSectorDelayOverride = std::strtof(end + 1, nullptr);
+    }
     const char* e = std::getenv("UTPP_TEST_GUARD_OFF");
     if (!e || !*e)
         return;
@@ -783,6 +804,7 @@ inline void TestGuardsOff(MatcherConfig& c)
     if (has("leadfoot")) c.airKeepLeadFootS = 0.0f;
     if (has("standjump")) c.standingJumpMaxSpeedCmS = 0.0f;
     if (has("jumpout")) c.jumpOutNoBack = c.jumpOutFallHandover = false;
+    if (has("strafesector")) c.strafeSectorDelayS = 0.0f;
 }
 // Replay tools only: UTPP_TEST_CROUCH_STOP = the option list of ApplyCrouchStopOptions, applied after Init copied the configuration.
 inline void ApplyCrouchStopOptions(MatcherConfig& c, std::string_view aList);
@@ -911,6 +933,9 @@ public:
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbStandRunLoops[d] = aDb->DbName(d).starts_with("PSD_Dense_Stand_Run_Loops") ||
                                    aDb->DbName(d).starts_with("PSD_Sparse_Stand_Run_Loops") ? 1 : 0;
+        m_dbDirectionLoops.assign(aDb->NumDatabases(), 0); // MatcherConfig::strafeSectorDelayS: the *_Loops databases (walk, run, sprint, crouch)
+        for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
+            m_dbDirectionLoops[d] = aDb->DbName(d).ends_with("_Loops") ? 1 : 0;
         m_dbCrouchWalkLoops.assign(aDb->NumDatabases(), 0); // CR-3 (MatcherConfig::slowCrouchLoops)
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbCrouchWalkLoops[d] = aDb->DbName(d).starts_with("PSD_Dense_Crouch_Walk_Loops") ||
@@ -1207,6 +1232,7 @@ public:
     // knobs at 0 / false. Takes effect on the next Update; no other state is touched.
     void SetSelectionGuards(bool aOn) { m_guardsOn = aOn; }
     bool SelectionGuards() const { return m_guardsOn; }
+    uint64_t StrafeSectorHolds() const { return m_strafeSectorHolds; }
     // Authored ROOT, not a name suffix or the already steered blended root rate.
     // Zero means an invalid clip, a non-reface, or no meaningful authored turn.
     int StartTurnDirection(int32_t aClip) const
@@ -2123,6 +2149,19 @@ public:
                 bestDb = contDb;
                 bestRow = contRow;
                 bestEntry = contEntry;
+            }
+            // churn guard 1b (MatcherConfig::strafeSectorDelayS): in Shooter mode a young direction clip of a *_Loops database gives way to
+            // another one only by a clear margin (ShooterModeTest mutation 18 drops ChooserState::shooterStrafe)
+            if (jump && m_guardsOn && aState.shooterStrafe && res.interrupt == Interrupt::DoNotInterrupt &&
+                m_cfg.strafeSectorDelayS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.strafeSectorDelayS && !aForce &&
+                aState.movementMode == 0 && last.movementMode == 0 && aState.movementState == 1 && m_dbDirectionLoops[static_cast<uint32_t>(bestDb)] &&
+                m_dbDirectionLoops[static_cast<uint32_t>(contDb)] && bestCost > contBestCost - m_cfg.strafeSectorDelayOverride)
+            {
+                jump = false;
+                bestDb = contDb;
+                bestRow = contRow;
+                bestEntry = contEntry;
+                ++m_strafeSectorHolds;
             }
             // Queries in the search loop are scratch per database. Rebuild the winner
             // while continuing candidates still refer to the previous player; the last
@@ -3253,6 +3292,8 @@ private:
     std::vector<float> m_clipStopApproachCmS; // stopBrakeGate: clip index -> approach root speed of a Stop clip (cm/s, 0 = no Stop clip)
     std::vector<uint8_t> m_dbHasStop;         // stopBrakeGate: database index -> 1 = indexes a Stop clip
     float m_stopGateRefCmS = 0.0f;            // stopBrakeGate: chooser speed of this update on the ground (0 = gate off)
+    std::vector<uint8_t> m_dbDirectionLoops;  // strafeSectorDelayS: database index -> 1 = a *_Loops database
+    uint64_t m_strafeSectorHolds = 0;         // strafeSectorDelayS: updates whose jump the sector delay held
     std::vector<uint8_t> m_dbWalkStarts;      // ST-1: database index -> 1 = PSD_Dense / Sparse_*_Walk_Starts (stand and crouch)
     std::vector<float> m_clipAccelEndS;       // ST-1: clip index -> clip time where its acceleration ends (-1 = not a walk-start clip)
     std::vector<int32_t> m_dbWalkSibling;    // G10: Stand_Run_Loops database index -> the Stand_Walk_Loops database of the same LOD (-1 = none)

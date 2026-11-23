@@ -724,6 +724,29 @@ void OpenFeedCase(Rt& rt, const std::vector<FeedFile>& aFeeds, bool aShooterMode
             }
             Check(sideN > 0 && sideOk * 100 >= sideN * 60, tag + f.name + ": side sector 70-110 deg plays an LL / LR / RL / RR clip on >= 60 % of the frames",
                      std::to_string(sideOk) + "/" + std::to_string(sideN));
+            if (aShooterMode)
+            {
+                // sector delay (MatcherConfig::strafeSectorDelayS): the facing stays on the camera while the stick turns 360 deg in 3 s
+                // (scenario step arc_120, feed time 11.5-14.5 s; arc_90 7.5-11.5 s): the clip changes stay within the 3.0 per second bound of
+                // the game harness (mutation 18, no delay: arc_90 3.25 per second on this database, 3.7 per second in the game at 120 deg/s)
+                const auto changesPerS = [&](float aT0, float aT1) {
+                    // changes per step length, as the harness counts them
+                    int32_t last = -2;
+                    size_t changes = 0, n = 0;
+                    for (size_t i = 0; i < f.fr.size(); ++i)
+                        if (f.fr[i].t >= aT0 && f.fr[i].t <= aT1 && tail.out[i].stepped)
+                        {
+                            changes += last != -2 && tail.out[i].clip != last;
+                            last = tail.out[i].clip;
+                            ++n;
+                        }
+                    return n > 10 ? double(changes) / double(aT1 - aT0) : -1.0;
+                };
+                const double c120 = changesPerS(11.5f, 14.5f), c90 = changesPerS(7.5f, 11.5f);
+                Check(c120 >= 0.0 && c120 <= 3.0 && c90 >= 0.0 && c90 <= 3.0,
+                      tag + f.name + ": turning stick at 90 / 120 deg/s: clip changes <= 3.0 per second (direction sector delay)",
+                      "arc_90 " + Fmt(c90, 2) + " /s, arc_120 " + Fmt(c120, 2) + " /s");
+            }
         }
         if (!aShooterMode)
         {
