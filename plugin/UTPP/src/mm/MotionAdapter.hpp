@@ -1008,8 +1008,8 @@ struct MapConfig
     bool directionalStartSlowMargin = true; // the half-future margin of slow targets (motiontraj::IsStartingDirectional)
     // ShouldTurnInPlace angle (degrees). motiontraj::kTurnInPlaceDeg (50) = the previous angle; the rest / shot turn admission keeps it.
     float turnInPlaceDeg = motiontraj::kTurnInPlacePredicateDeg;
-    // Aim rotation sub-mode (mm.aimRotation, default off): while aiming in the strafe rotation mode, IsPivoting uses aimPivotDeg in
-    // place of the strafe 30 deg and is held off while a pivot / start pick is not older than aimPivotGateS
+    // Aim rotation sub-mode (mm.aimRotation, default off): while aiming in the strafe rotation mode, IsPivoting uses aimPivotDeg (10)
+    // in place of the strafe 30 deg and is held off while a pivot / start pick is not older than aimPivotGateS
     // (motiontraj::IsPivotingAim). Everything else of the strafe mode (facing, sprint cone, trajectory) is unchanged.
     // false = the strafe IsPivoting, bit for bit.
     bool aimRotation = false;

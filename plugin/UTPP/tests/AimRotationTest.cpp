@@ -1,7 +1,9 @@
 // Aim rotation sub-mode (MapConfig::aimRotation, mm.aimRotation): while aiming in the strafe rotation mode IsPivoting uses the Aim
-// pivot threshold (MapConfig::aimPivotDeg, reference 0) and the pivot / start elapsed-time gate (MapConfig::aimPivotGateS 0.5 s).
-// Checks: the predicate thresholds 0 / 15 against the strafe 30; the velocity floor; the gate holds a new pivot while a pivot / start
-// pick is young and releases it after; MapToChooser off (default) and on without aiming give the strafe IsPivoting and the same
+// pivot threshold (MapConfig::aimPivotDeg, default 10; the reference uses 0) and the pivot / start elapsed-time gate
+// (MapConfig::aimPivotGateS 0.5 s).
+// Checks: the predicate thresholds 0 / 10 / 15 against the strafe 30; the default threshold ignores the small turn angle of straight
+// movement (within 2 deg) that threshold 0 reports as a pivot; the velocity floor; the gate holds a new pivot while a pivot / start
+// pick is young and releases it after, a gate of 0 holds nothing; MapToChooser off (default) and on without aiming give the strafe IsPivoting and the same
 // chooser state, bit for bit; on while aiming follows the reported turn angle at the configured threshold; the gate reaches
 // MapToChooser through MapContext (currentDbPivots / currentDbStarts / currentPickAgeS).
 #include "../src/mm/MotionAdapter.hpp"
@@ -77,6 +79,23 @@ int main()
     Check(IsPivotingAim(true, Dir(90.0f), vel, 0.0f, true, 0.51f, 0.5f), "gate: released after 0.5 s");
     Check(IsPivotingAim(true, Dir(90.0f), vel, 0.0f, false, 0.0f, 0.5f), "gate: a young loop pick does not hold");
     Check(IsPivotingAim(true, Dir(90.0f), vel, 0.0f, true, 0.01f, -1.0f), "gate: a negative gate time disables the gate");
+    Check(IsPivotingAim(true, Dir(90.0f), vel, 0.0f, true, 0.0f, 0.0f), "gate: a gate of 0 holds nothing (not even the pick frame)");
+    // default threshold: straight movement with a small turn angle (the game feed stays within about 2 deg) is no pivot
+    {
+        const adapter::MapConfig def;
+        bool straightNo = true, zeroYes = true;
+        for (float a : {-2.0f, -1.0f, -0.5f, 0.3f, 1.5f, 2.0f})
+        {
+            straightNo = straightNo && !IsPivotingAim(true, Dir(a), vel, def.aimPivotDeg, false, 1.0e9f, def.aimPivotGateS);
+            zeroYes = zeroYes && IsPivotingAim(true, Dir(a), vel, 0.0f, false, 1.0e9f, def.aimPivotGateS);
+        }
+        Check(def.aimPivotDeg == motiontraj::kPivotAim && motiontraj::kPivotAim == 10.0f, "default aim threshold 10 deg");
+        Check(straightNo, "default threshold: straight movement (|turn| <= 2 deg) is no pivot");
+        Check(zeroYes, "threshold 0: the same straight movement reports a pivot");
+        Check(IsPivotingAim(true, Dir(12.0f), vel, def.aimPivotDeg, false, 1.0e9f, def.aimPivotGateS) &&
+                  !IsPivoting(true, Dir(12.0f), vel, RotationMode::Strafe),
+              "default threshold: a 12 deg turn pivots (strafe 30 does not)");
+    }
 
     // MapToChooser: off identity
     adapter::MapConfig off;
@@ -98,7 +117,7 @@ int main()
     Check(aimFlagOff, "aiming keeps the strafe rotation mode");
 
     // MapToChooser on while aiming: IsPivoting follows the reported turn angle at the configured threshold
-    for (float thr : {0.0f, 15.0f})
+    for (float thr : {0.0f, 10.0f, 15.0f})
     {
         adapter::MapConfig c = on;
         c.aimPivotDeg = thr;

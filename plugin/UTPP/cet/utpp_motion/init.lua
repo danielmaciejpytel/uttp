@@ -49,7 +49,7 @@
 --                  acceleration when V starts away from the facing, with a partly tilted stick or while the camera turns (the
 --                  straight full-stick start already does); developer option (native UTPPSetMMCapsuleForecast).
 --   mm.aimRotation bool, default false (DLL default off) - while aiming and moving, a change of the movement direction may pick a
---                  pivot animation at any angle (the strafe threshold is 30 deg), but not within 0.5 s of a pivot or start pick;
+--                  pivot animation from 10 deg (the strafe threshold is 30 deg), but not within 0.5 s of a pivot or start pick;
 --                  developer option (native UTPPSetMMAimRotation).
 --   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
@@ -1118,7 +1118,7 @@ function M.RegisterSettings(core)
     apply = function(v) M.SetOption("capsuleForecast", v == true) end })
   core.Register({ key = "mm.aimRotation", section = "motion", type = "bool", default = false,
     label = "motion: aim rotation mode (experimental)",
-    desc = "While aiming and moving, a change of the movement direction may pick a pivot animation at any angle, but not within half a second of the last pivot or start. Off (default) = the strafe pivot angle.",
+    desc = "While aiming and moving, a change of the movement direction may pick a pivot animation from a smaller angle, but not within half a second of the last pivot or start. Off (default) = the strafe pivot angle.",
     apply = function(v) M.SetOption("aimRotation", v == true) end })
   core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
     choices = { { "standard", "Standard" }, { "wide", "Wide" } },

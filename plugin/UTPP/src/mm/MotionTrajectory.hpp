@@ -52,7 +52,7 @@ inline constexpr float kMovingTolerance = 10.0f;  // IsMoving: Trj_FutureVelocit
 inline constexpr float kStartingMargin = 100.0f;  // IsStarting: |Future|xy >= |Velocity|xy + 100
 inline constexpr float kPivotOrient = 45.0f;      // IsPivoting OrientToMovement
 inline constexpr float kPivotStrafe = 30.0f;      // IsPivoting Strafe
-inline constexpr float kPivotAim = 0.0f;          // IsPivoting Aim (the reference value: any turn angle while moving)
+inline constexpr float kPivotAim = 10.0f;         // IsPivoting Aim (the reference uses 0; see IsPivotingAim)
 inline constexpr float kPivotAimGateS = 0.5f;     // no new pivot within this time of a pivot / start pick (state elapsed-time gate)
 inline constexpr float kTurnInPlaceDeg = 50.0f;   // turn admission angle (rest turn, shot turn) and the previous ShouldTurnInPlace angle
 #ifndef UTPP_TURN_IN_PLACE_PREDICATE_DEG
@@ -623,14 +623,19 @@ inline bool IsPivoting(bool aMoving, V3 aFuture, V3 aVelocity, RotationMode aMod
     return SizeXY(aVelocity) > kHasVelocity && std::fabs(TurnAngle(aFuture, aVelocity)) >= thr && aMoving;
 #endif
 }
-// Aim rotation sub-mode (MapConfig::aimRotation): IsPivoting with the Aim threshold aPivotDeg (the reference uses 0) and the
-// state elapsed-time gate of the reference transitions: while the playing pick comes from a Pivots or Starts database and is not
-// older than aGateS, no new pivot is reported (the beginning of a pivot or start is not broken by the next one). The velocity floor
+// Aim rotation sub-mode (MapConfig::aimRotation): IsPivoting with the Aim threshold aPivotDeg and the state elapsed-time gate of
+// the reference transitions: while the playing pick comes from a Pivots or Starts database and is not older than aGateS, no new
+// pivot is reported (the beginning of a pivot or start is not broken by the next one; aGateS <= 0 = no gate). The velocity floor
 // of IsPivoting applies.
+// Threshold: the reference uses 0, which keeps the Pivots databases in the search on every moving frame. Its capsule turns its
+// velocity over a few tenths of a second, so there they are picked mostly during real turns. The game's velocity follows the
+// input within one or two feeds and the turn angle of straight movement stays within about 2 deg, so at 0 the straight tails of
+// pivot clips won near ties against the loops while V moved straight (a pivot every ~0.5 s). Any threshold from 5 to 30 deg
+// removes that and reacts within the same feeds (the input direction changes in steps); kPivotAim is 10.
 inline bool IsPivotingAim(bool aMoving, V3 aFuture, V3 aVelocity, float aPivotDeg, bool aCurrentPivotOrStart, float aPickAgeS,
                           float aGateS)
 {
-    if (aCurrentPivotOrStart && aPickAgeS <= aGateS)
+    if (aGateS > 0.0f && aCurrentPivotOrStart && aPickAgeS <= aGateS)
         return false;
     return SizeXY(aVelocity) > kHasVelocity && std::fabs(TurnAngle(aFuture, aVelocity)) >= aPivotDeg && aMoving;
 }
