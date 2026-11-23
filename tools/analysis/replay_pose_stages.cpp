@@ -87,6 +87,8 @@
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
 //                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
 //                       (inspection only; the other outputs are unchanged)
+//   --crouch-stop LIST  crouch stop options of the chooser switched on (motion::ApplyCrouchStopOptions names, comma separated; set as
+//                       UTPP_TEST_CROUCH_STOP for the matcher's Init). Not passed: the build configuration.
 //   --lean-pack 0|1     1: the driver loads the motion lean pack <data>\utpp_lean_<body>.bin for both bodies, as the game does from the
 //                       mod data folder, so the lean body / head layers run and the head lead gives way to the lean head layer when the
 //                       settings ask for both (mm.lean + mm.leanHead, the menu defaults). Not passed / 0: no lean pack (earlier replays:
@@ -553,6 +555,8 @@ int main(int argc, char** argv)
             swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
             leanPack = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--crouch-stop") == 0)
+            _putenv_s("UTPP_TEST_CROUCH_STOP", argv[i + 1]);
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;

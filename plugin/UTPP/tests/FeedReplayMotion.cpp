@@ -29,6 +29,7 @@
 // Accumulate); per-bone angular step (bones >= 2) max / p99 per frame; pops = steps above that bone's max step in the
 // source clips sampled with the same SamplePose at 1/60 s (data-derived); Evaluate wall time.
 // --no-g10: MatcherConfig::steadyRunLoops off (steady Run gait rules, ChooserMatcher.hpp G10), for before / after runs.
+// --crouch-stop LIST: crouch stop options switched on (motion::ApplyCrouchStopOptions), for before / after runs.
 // --facing game|motion: adapter::MapConfig::facingSource (Game = feed playerYaw, MotionActor = motion CMC actor yaw, MotionAdapter.hpp).
 #include <algorithm>
 #include <chrono>
@@ -126,6 +127,7 @@ std::string FlKey(const std::string& aClip)
     return std::string(gait) + "/" + type;
 }
 bool g_steadyRun = true; // --no-g10: MatcherConfig::steadyRunLoops off (the motion behaviour; before / after comparison)
+std::string g_crouchStop; // --crouch-stop LIST (ApplyCrouchStopOptions)
 
 // Rotation angle (deg) between two unit quaternions: 4 atan2(|a - s b|, |a + s b|), s = sign(a.b) (no acos floor).
 double QuatAngleDeg(const math::Quat& a, const math::Quat& b)
@@ -803,6 +805,7 @@ void RunFeed(const MotionDatabase& db, const chooser::Table& table, const Feed& 
     std::string err;
     MatcherConfig cfg;
     cfg.steadyRunLoops = g_steadyRun;
+    ApplyCrouchStopOptions(cfg, g_crouchStop);
     if (!drv.Init(&db, &table, cfg, 2, err))
     {
         CHECK(false, "%s: MotionAdapter init: %s", f.name.c_str(), err.c_str());
@@ -1115,6 +1118,8 @@ int main(int argc, char** argv)
             pc.slide = true;
         else if (a == "--no-g10")
             g_steadyRun = false;
+        else if (a == "--crouch-stop" && i + 1 < argc)
+            g_crouchStop = argv[++i];
         else if (a == "--footlock")
             g_fl.on = true;
         else if (a == "--brief")

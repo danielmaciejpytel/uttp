@@ -456,7 +456,34 @@ struct MatcherConfig
     // crouchCapsuleRate: a LOOP clip of PSD_*_Crouch_Walk_Loops while the chooser stance is Crouch scales its query speed by
     // ChooserState::crouchRateScale (capsule per mapped speed of the crouch map, >= 1) before the rate bounds, so the loop root follows the
     // capsule up to maxPlayRate. Every other clip, database and stance keeps the plain rate.
-    bool crouchCapsuleRate = true;
+    // Off by default: with it on the loop phase at the stick release changes and the crouch stop of the stance test (66.949) enters
+    // Crouch_Stop_F_Lfoot late in its settle (hips 0.77 -> 0.47 m within ~0.35 s, a planted foot floats 3 cm); see crouchStopLegFade.
+    bool crouchCapsuleRate = false;
+    // CR-6 (crouch stop entry; tests/LocoStanceTest.cpp crouch stop edges). false = the ordinary per-bone fade bit for bit. A crouch stop clip
+    // settles the Hips 25-30 cm below the crouch loop; the leg bones fade in 1/1.5 of the blend time (BlendProfile kLocomotion) while the Hips
+    // take the whole time, so for most of the fade the legs already hold the folded stop shape under a Hips that is still near the loop height:
+    // the feet float above the blend of the layers and the foot height keeping drops the pelvis to make up for it (the planted foot that
+    // floats more keeps the difference). crouchStopLegFade: a NEW pick of a Stop clip of PSD_*_Crouch_Walk_Stops on the ground, crouched before
+    // and after, out of a ground locomotion clip, fades its leg bones over the whole blend time with the Hips (BlendRequest::fullLegFade), and
+    // crouchStopBlendS (> 0) lengthens that blend to at least this time, so the Hips settle at the pace of the stop entries the plain rate
+    // makes (~0.8 s). Every other pick keeps its fade.
+    bool crouchStopLegFade = false;
+    float crouchStopBlendS = 0.0f;
+    // crouchStopLowerFeet: the same crouch stop entries take the foot height permission of a stance fade (BlendRequest::stanceChange): a
+    // floating foot is lowered through its leg instead of by a pelvis drop of the smaller float alone.
+    bool crouchStopLowerFeet = false;
+    // CR-7 (crouch stop query weights). false = the database's own schema weights. The crouch stop database uses the PSS_Default schema (current
+    // root velocity weight 1, like one pose channel) where the stand stop databases use PSS_Stop (current velocity, direction and heading weight
+    // 10, the coming trajectory 5, the pose channels 1 / 0.3). crouchStopStopWeights: the cost of a row of PSD_*_Crouch_Walk_Stops is taken
+    // with the normalized PSS_Stop weight of each channel both schemas share (same kind, sample time, bone, cardinality; PSS_Default's
+    // velocity direction at 1 s has no PSS_Stop counterpart and gets weight 0), i.e. every dimension of the stored row and of the query is
+    // multiplied by sqrt(PSS_Stop normalized weight / PSS_Default normalized weight). Needs both schemas in the bundle; otherwise inactive.
+    bool crouchStopStopWeights = false;
+    // Stop entry brake gate (stand and crouch stops). 0 = off, bit for bit. A NEW Stop row on the ground is not a candidate when its authored
+    // root speed is below (1 - stopBrakeGate) x min(chooser speed, the clip's approach speed = median root speed of its frames at or above
+    // half the peak); the continuing pose is not affected, and when the gate would leave no Stop row of a database the search stays
+    // ungated there. Measured with 0.25: the 66.949 crouch stop passes, but the stand stops get worse (stop lock path p95 +4 / +8 cm).
+    float stopBrakeGate = 0.0f;
 
     // ST-1 (slow walk start tail; same recording, replay tests/LocoMatcherTest.cpp). false = the UE DoNotInterrupt behaviour bit for bit. A start
     // from rest is IsStarting on its first stick update only (the game capsule reaches its slow target within ~3 feeds), so the chooser returns the
@@ -757,7 +784,28 @@ inline void TestGuardsOff(MatcherConfig& c)
     if (has("standjump")) c.standingJumpMaxSpeedCmS = 0.0f;
     if (has("jumpout")) c.jumpOutNoBack = c.jumpOutFallHandover = false;
 }
+// Replay tools only: UTPP_TEST_CROUCH_STOP = the option list of ApplyCrouchStopOptions, applied after Init copied the configuration.
+inline void ApplyCrouchStopOptions(MatcherConfig& c, std::string_view aList);
+inline void TestCrouchStopOn(MatcherConfig& c)
+{
+    if (const char* e = std::getenv("UTPP_TEST_CROUCH_STOP"); e && *e)
+        ApplyCrouchStopOptions(c, e);
+}
 #endif
+
+// Crouch stop options switched ON by name (offline tools and tests; comma separated): rate (crouchCapsuleRate), legfade (crouchStopLegFade),
+// long (crouchStopBlendS 0.8), fade (legfade + long), lower (crouchStopLowerFeet), schema (crouchStopStopWeights), gate (stopBrakeGate 0.25).
+inline void ApplyCrouchStopOptions(MatcherConfig& c, std::string_view aList)
+{
+    const std::string list = "," + std::string(aList) + ",";
+    const auto has = [&](const char* n) { return list.find(std::string(",") + n + ",") != std::string::npos; };
+    if (has("rate")) c.crouchCapsuleRate = true;
+    if (has("fade") || has("legfade")) c.crouchStopLegFade = true;
+    if (has("fade") || has("long")) c.crouchStopBlendS = 0.8f;
+    if (has("lower")) c.crouchStopLowerFeet = true;
+    if (has("schema")) c.crouchStopStopWeights = true;
+    if (has("gate")) c.stopBrakeGate = 0.25f;
+}
 
 class ChooserMatcher
 {
@@ -775,6 +823,7 @@ public:
         m_cfg = aCfg;
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
         TestGuardsOff(m_cfg);
+        TestCrouchStopOn(m_cfg);
 #endif
         uint32_t maxRows = 0;
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
@@ -866,6 +915,46 @@ public:
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbCrouchWalkLoops[d] = aDb->DbName(d).starts_with("PSD_Dense_Crouch_Walk_Loops") ||
                                      aDb->DbName(d).starts_with("PSD_Sparse_Crouch_Walk_Loops") ? 1 : 0;
+        // CR-6 / CR-7 (MatcherConfig::crouchStopLegFade, crouchStopStopWeights): the crouch walk stop databases, by name
+        m_dbCrouchStops.assign(aDb->NumDatabases(), 0);
+        for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
+            m_dbCrouchStops[d] = aDb->DbName(d).starts_with("PSD_Dense_Crouch_Walk_Stops") ||
+                                 aDb->DbName(d).starts_with("PSD_Sparse_Crouch_Walk_Stops") ? 1 : 0;
+        // CR-7: per-dimension factor sqrt(stop schema normalized weight / own normalized weight) of every crouch stop database whose schema
+        // differs from the stand walk stop schema; a channel without a counterpart in the stop schema gets 0. Empty = the stored metric.
+        m_stopWeightMul.assign(aDb->NumDatabases(), {});
+        if (m_cfg.crouchStopStopWeights)
+        {
+            int32_t stopSchema = -1;
+            for (uint32_t d = 0; d < aDb->NumDatabases() && stopSchema < 0; ++d)
+                if (aDb->DbName(d).starts_with("PSD_Dense_Stand_Walk_Stops") || aDb->DbName(d).starts_with("PSD_Sparse_Stand_Walk_Stops"))
+                    stopSchema = static_cast<int32_t>(aDb->Db(d).schema);
+            for (uint32_t d = 0; d < aDb->NumDatabases() && stopSchema >= 0; ++d)
+            {
+                if (!m_dbCrouchStops[d] || aDb->Db(d).schema == static_cast<uint32_t>(stopSchema))
+                    continue;
+                const SchemaRecord& own = aDb->Schema(aDb->Db(d).schema);
+                const SchemaRecord& stop = aDb->Schema(static_cast<uint32_t>(stopSchema));
+                std::vector<float> mul(own.dims, 0.0f);
+                for (uint32_t c = own.firstChannel; c < own.firstChannel + own.numChannels; ++c)
+                {
+                    const ChannelRecord& a = aDb->Channel(c);
+                    for (uint32_t s = stop.firstChannel; s < stop.firstChannel + stop.numChannels; ++s)
+                    {
+                        const ChannelRecord& b = aDb->Channel(s);
+                        if (a.kind != b.kind || a.components != b.components || a.bone != b.bone || a.originBone != b.originBone ||
+                            a.cardinality != b.cardinality || a.inputQuery != b.inputQuery || a.velocitySpace != b.velocitySpace ||
+                            (a.flags & kChanTrajectory) != (b.flags & kChanTrajectory) || std::fabs(a.tSample - b.tSample) > 1e-3f ||
+                            !(a.weightNorm > 0.0f) || !(b.weightNorm >= 0.0f))
+                            continue;
+                        for (uint32_t k = 0; k < a.cardinality && a.dataOffset + k < own.dims; ++k)
+                            mul[a.dataOffset + k] = std::sqrt(b.weightNorm / a.weightNorm);
+                        break;
+                    }
+                }
+                m_stopWeightMul[d] = std::move(mul);
+            }
+        }
         // ST-1 (MatcherConfig::slowWalkStartTail): the walk-start databases (stand and crouch) and the end of each of their clips' acceleration,
         // the first frame whose 0.1 s root speed reaches startTailAccelFraction of the clip's steady speed (mean root speed of its second half)
         m_dbWalkStarts.assign(aDb->NumDatabases(), 0);
@@ -939,6 +1028,39 @@ public:
         m_clipStop.assign(aDb->NumClips(), 0);
         for (uint32_t c = 0; c < aDb->NumClips(); ++c)
             m_clipStop[c] = steer::ClassifyClip(aDb->ClipName(c)) == steer::kClassStop ? 1 : 0;
+        // stopBrakeGate: approach speed (cm/s) of every Stop clip = median root speed of its frames at or above half the peak
+        m_clipStopApproachCmS.assign(aDb->NumClips(), 0.0f);
+        {
+            std::vector<float> sp;
+            const float rfps = aDb->Header().fps;
+            for (uint32_t c = 0; c < aDb->NumClips(); ++c)
+            {
+                if (!m_clipStop[c])
+                    continue;
+                const MotionClipRecord& cl = aDb->Clip(c);
+                sp.clear();
+                float peak = 0.0f;
+                for (uint32_t f = cl.firstFrame; f < cl.firstFrame + cl.numFrames; ++f)
+                {
+                    const auto& rd = aDb->Root(f);
+                    sp.push_back(std::sqrt(rd.dx * rd.dx + rd.dy * rd.dy) * rfps * 100.0f);
+                    peak = std::max(peak, sp.back());
+                }
+                sp.erase(std::remove_if(sp.begin(), sp.end(), [&](float v) { return !(v >= 0.5f * peak); }), sp.end());
+                if (sp.empty())
+                    continue;
+                std::nth_element(sp.begin(), sp.begin() + static_cast<std::ptrdiff_t>(sp.size() / 2), sp.end());
+                m_clipStopApproachCmS[c] = sp[sp.size() / 2];
+            }
+            m_dbHasStop.assign(aDb->NumDatabases(), 0);
+            for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
+            {
+                const DatabaseRecord& D = aDb->Db(d);
+                for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+                    if (m_clipStop[aDb->Entry(e).clip] && m_clipStopApproachCmS[aDb->Entry(e).clip] > 0.0f)
+                        m_dbHasStop[d] = 1;
+            }
+        }
         // turnCommit: clip time at which less than 1 deg of the authored root turn of a pivot / moving-turn clip is left (-1 = no such clip)
         m_clipTurnEndS.assign(aDb->NumClips(), -1.0f);
         for (uint32_t c = 0; c < aDb->NumClips(); ++c)
@@ -1226,6 +1348,7 @@ public:
         m_sinceFastS = aState.gait >= 1 || aState.speed2dCmS > m_cfg.walkTransitionFastCmS ? 0.0f : m_sinceFastS + aDt;
         m_sinceSlowS = aState.speed2dCmS <= m_cfg.runTransitionSlowCmS ? 0.0f : m_sinceSlowS + aDt;
         m_speedCmS = aState.speed2dCmS;
+        m_stopGateRefCmS = m_cfg.stopBrakeGate > 0.0f && aState.movementMode == 0 && std::isfinite(aState.speed2dCmS) ? aState.speed2dCmS : 0.0f;
         m_traj = aTraj;
         m_numTraj = aNumTraj;
         m_hist = aHist;
@@ -1708,7 +1831,7 @@ public:
             const RowRecord& rr = db.Row(db.Db(d).firstRow + static_cast<uint32_t>(cc.localRow));
             // fix/slide-exit (MatcherConfig::slideExitBiasS): an exit clip older than that competes without its addends
             const bool exitBiasOver = m_cfg.slideExitBiasS > 0.0f && m_dbSlideExit[d] && m_slideExitAge > m_cfg.slideExitBiasS;
-            const float c = db.RowCost(d, static_cast<uint32_t>(cc.localRow), m_query.data()) +
+            const float c = DbRowCost(d, static_cast<uint32_t>(cc.localRow)) +
                             (exitBiasOver ? 0.0f : rr.costAddend + rr.continuingAddend) +
                             (fallBias && m_fallClip[static_cast<uint32_t>(m_cur.clip)] ? m_cfg.airFallBias : 0.0f) -
                             (freshEvent ? m_cfg.freshEventBias : 0.0f);
@@ -1867,8 +1990,9 @@ public:
             queryTime += std::chrono::steady_clock::now() - tq0;
             const uint32_t marked = MarkExcluded(d, startTurnDirection);
             const float bound = m_cfg.boundedSearch ? bestCost : std::numeric_limits<float>::max();
-            MotionSearchResult r = m_cfg.useAabb ? db.SearchAabb(d, m_query.data(), m_excluded.data(), bound)
-                                             : db.SearchLinear(d, m_query.data(), m_excluded.data(), bound);
+            MotionSearchResult r = !m_stopWeightMul[d].empty() ? SearchStopWeighted(d, bound) // MatcherConfig::crouchStopStopWeights
+                                   : m_cfg.useAabb             ? db.SearchAabb(d, m_query.data(), m_excluded.data(), bound)
+                                                               : db.SearchLinear(d, m_query.data(), m_excluded.data(), bound);
             if (fallBias) // exact: the biased rows (bias < 0) are re-evaluated with their addend, the rest keeps the bound search
                 FallBiasSearch(d, r);
             ClearExcluded(d, marked);
@@ -2099,8 +2223,20 @@ public:
                     res.blend.blendTime = std::fmax(res.blend.blendTime, m_cfg.blendSlideFamily);
                     res.blend.fullLegFade = true;
                 }
+                // CR-6 (MatcherConfig::crouchStopLegFade): a crouch stop entered out of crouched ground locomotion fades its legs with the Hips
+                bool crouchStopEntry = false;
+                if ((m_cfg.crouchStopLegFade || m_cfg.crouchStopBlendS > 0.0f || m_cfg.crouchStopLowerFeet) && m_cur.valid && m_cur.db >= 0 && m_haveLastState && aState.movementMode == 0 && last.movementMode == 0 &&
+                    aState.stance == 1 && last.stance == 1 && m_dbCrouchStops[static_cast<uint32_t>(bestDb)] && m_clipStop[en.clip] &&
+                    m_dbFadeFrom[static_cast<uint32_t>(m_cur.db)] && !m_dbSlideExit[static_cast<uint32_t>(m_cur.db)] &&
+                    !m_clipStop[static_cast<uint32_t>(m_cur.clip)])
+                {
+                    crouchStopEntry = true;
+                    res.blend.fullLegFade = res.blend.fullLegFade || m_cfg.crouchStopLegFade;
+                    if (m_cfg.crouchStopBlendS > 0.0f)
+                        res.blend.blendTime = std::fmax(res.blend.blendTime, m_cfg.crouchStopBlendS);
+                }
                 res.blend.stanceChange = m_cur.valid && m_haveLastState && aState.movementMode == 0 && last.movementMode == 0 &&
-                    (aState.stance != last.stance || std::abs(m_stanceTransitionDirection[en.clip]) == 1);
+                    (aState.stance != last.stance || std::abs(m_stanceTransitionDirection[en.clip]) == 1 || (crouchStopEntry && m_cfg.crouchStopLowerFeet));
 #if UTPP_FOOTSINK_MUTATION == 4 // mutation 4: no ground fade is ever flagged (the KeepFootHeight permission stays the stance fades')
                 res.blend.groundFade = false;
 #elif UTPP_FOOTSINK_MUTATION == 5 // mutation 5: every fade is flagged, slide / jump / air / traversal clips included
@@ -2704,7 +2840,80 @@ private:
                 n += en.numRows;
             }
         }
+        // MatcherConfig::stopBrakeGate: no NEW Stop row inside the clip's own braking while the chooser speed is still above it
+        if (m_stopGateRefCmS > 0.0f && m_dbHasStop[d])
+        {
+            const DatabaseRecord& D = m_db->Db(d);
+            const float fps = m_db->Header().fps;
+            const float keep = 1.0f - m_cfg.stopBrakeGate;
+            const auto braking = [&](const EntryRecord& en, uint32_t aRow) {
+                const auto& rd = m_db->Root(m_db->Row(en.firstRow + aRow).frame);
+                const float v = std::sqrt(rd.dx * rd.dx + rd.dy * rd.dy) * fps * 100.0f;
+                return v < keep * std::min(m_stopGateRefCmS, m_clipStopApproachCmS[en.clip]);
+            };
+            bool anyLeft = false; // fallback: a gate that would leave no Stop row of the database does not apply
+            for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries && !anyLeft; ++e)
+            {
+                const EntryRecord& en = m_db->Entry(e);
+                if (!m_clipStop[en.clip])
+                    continue;
+                const uint32_t r0 = en.firstRow - D.firstRow;
+                for (uint32_t r = 0; r < en.numRows && !anyLeft; ++r)
+                    anyLeft = !m_excluded[r0 + r] && !(m_db->Row(en.firstRow + r).flags & kRowBlock) && !braking(en, r);
+            }
+            for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries && anyLeft; ++e)
+            {
+                const EntryRecord& en = m_db->Entry(e);
+                if (!m_clipStop[en.clip])
+                    continue;
+                const uint32_t r0 = en.firstRow - D.firstRow;
+                for (uint32_t r = 0; r < en.numRows; ++r)
+                    if (!m_excluded[r0 + r] && braking(en, r))
+                    {
+                        m_excluded[r0 + r] = 1;
+                        ++n;
+                    }
+            }
+        }
         return n;
+    }
+
+    // Row cost of database d against m_query: the stored metric, or the PSS_Stop weights of MatcherConfig::crouchStopStopWeights.
+    float DbRowCost(uint32_t d, uint32_t aLocalRow) const
+    {
+        const std::vector<float>& mul = m_stopWeightMul[d];
+        if (mul.empty())
+            return m_db->RowCost(d, aLocalRow, m_query.data());
+        const float* f = m_db->Features(d, aLocalRow);
+        float s = 0.0f;
+        for (uint32_t k = 0; k < static_cast<uint32_t>(mul.size()); ++k)
+        {
+            const float t = mul[k] * (m_query[k] - f[k]);
+            s += t * t;
+        }
+        return s;
+    }
+    // Linear search of database d with DbRowCost (same rules as MotionDatabase::SearchLinear: BLOCK rows and m_excluded rows skipped, row
+    // cost addend added, ties -> lowest local row, only rows cheaper than aBound).
+    MotionSearchResult SearchStopWeighted(uint32_t d, float aBound) const
+    {
+        MotionSearchResult r;
+        r.cost = aBound;
+        const DatabaseRecord& D = m_db->Db(d);
+        for (uint32_t row = 0; row < D.numRows; ++row)
+        {
+            const RowRecord& rr = m_db->Row(D.firstRow + row);
+            if ((rr.flags & kRowBlock) || m_excluded[row])
+                continue;
+            ++r.rowsEvaluated;
+            const float c = DbRowCost(d, row) + rr.costAddend;
+            if (c < r.cost)
+            {
+                r.cost = c;
+                r.localRow = static_cast<int32_t>(row);
+            }
+        }
+        return r;
     }
 
     void ClearExcluded(uint32_t d, uint32_t aMarked)
@@ -3039,6 +3248,11 @@ private:
     float m_sinceSlowS = 1.0e9f;             // G10: seconds since the last update with chooser speed <= runTransitionSlowCmS
     std::vector<uint8_t> m_dbStandRunLoops;  // G10: database index -> 1 = PSD_Dense / Sparse_Stand_Run_Loops
     std::vector<uint8_t> m_dbCrouchWalkLoops; // CR-3: database index -> 1 = PSD_Dense / Sparse_Crouch_Walk_Loops
+    std::vector<uint8_t> m_dbCrouchStops;     // CR-6 / CR-7: database index -> 1 = PSD_Dense / Sparse_Crouch_Walk_Stops
+    std::vector<std::vector<float>> m_stopWeightMul; // CR-7: database index -> per-dimension cost factors (empty = the stored metric)
+    std::vector<float> m_clipStopApproachCmS; // stopBrakeGate: clip index -> approach root speed of a Stop clip (cm/s, 0 = no Stop clip)
+    std::vector<uint8_t> m_dbHasStop;         // stopBrakeGate: database index -> 1 = indexes a Stop clip
+    float m_stopGateRefCmS = 0.0f;            // stopBrakeGate: chooser speed of this update on the ground (0 = gate off)
     std::vector<uint8_t> m_dbWalkStarts;      // ST-1: database index -> 1 = PSD_Dense / Sparse_*_Walk_Starts (stand and crouch)
     std::vector<float> m_clipAccelEndS;       // ST-1: clip index -> clip time where its acceleration ends (-1 = not a walk-start clip)
     std::vector<int32_t> m_dbWalkSibling;    // G10: Stand_Run_Loops database index -> the Stand_Walk_Loops database of the same LOD (-1 = none)
