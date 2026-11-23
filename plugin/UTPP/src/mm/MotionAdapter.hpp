@@ -1012,7 +1012,8 @@ struct MapConfig
     // braking) on the ground while the input is held and the capsule moves, outside the landing window; without kStartsStops only a
     // turn is reshaped (the speed is the game speed while the two velocities are aligned); kStartsStops = the speed too, also from rest
     // and after the input is released; kLoopRate = loop clips play at the capsule speed (capsuleSpeedRate Both with scope 1, when
-    // capsuleSpeedRate is off).
+    // capsuleSpeedRate is off); kDirectionOnly = only the heading is converted (the speed is the game speed); kSteadyLoopRate = the loop
+    // rate only while the capsule speed holds (speedconv::UpdateSteady).
     // 0 = the game velocity everywhere, bit for bit.
     int speedConverter = 0;
     speedconv::Limits speedConverterLimits;
@@ -2103,7 +2104,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         lim.acceleration = motiontraj::MotionMaxAcceleration(c.cmc, gait, sp);
         if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
             lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
-        velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed);
+        velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
     }
     m.traj.Update(dt, velQ, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);
     m.capsuleAccelModel = m.traj.CapsuleAcceleration();
@@ -2281,6 +2282,14 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     m.rateSpeedScale = m.querySpeed.rate && chooserSpeed > 1.0f
                            ? CapsuleRateScaleForMode(EffectiveCapsuleRate(c), CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
                            : 1.0f;
+    // speedconv::kSteadyLoopRate: the converter's loop rate only while the capsule speed holds on the ground with the input held, outside
+    // the landing window (a start, a stop or a speed change plays at the mapped query rate)
+    if ((c.speedConverter & speedconv::kSteadyLoopRate) && c.capsuleSpeedRate == CapsuleRateMode::Off)
+    {
+        const bool eligible = st.movementMode == 0 && !st.justLanded && !motiontraj::IsZero(st.acceleration);
+        if (!speedconv::UpdateSteady(m.speedConverter, sp, dt, eligible))
+            m.rateSpeedScale = 1.0f;
+    }
     WriteRateSpeedScale(s, m.rateSpeedScale);
     WriteCrouchRateScale(s, c, st.stance);
     WriteDirectionalInputs(s, st);

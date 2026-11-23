@@ -295,6 +295,28 @@ int main()
         const V3 g0 = speedconv::Step(p0, fast, true, true, dt, lim, false), g1 = speedconv::Step(p1, fast, true, true, dt, lim, true);
         Check("converter: aligned speed-up follows the game speed unless the speed is shaped",
               g0.x == 700.0f && std::fabs(g1.x - (500.0f + 800.0f * dt)) < 0.01f);
+        // direction only: a 90 deg turn keeps the game speed with the heading part way; an exact reversal does not stall
+        speedconv::State q0 = s;
+        V3 h0{};
+        for (int i = 0; i < 6; ++i)
+            h0 = speedconv::Step(q0, V3{0.0f, 450.0f, 0.0f}, true, true, dt, lim, false, true);
+        Check("converter direction only: 0.1 s into a 90 deg turn the speed is the game speed, the heading part way",
+              std::fabs(motiontraj::SizeXY(h0) - 450.0f) < 0.01f && HeadingDeg(h0) > 10.0f && HeadingDeg(h0) < 80.0f);
+        speedconv::State q1 = s;
+        V3 h1{};
+        for (int i = 0; i < 60; ++i)
+            h1 = speedconv::Step(q1, back, true, true, dt, lim, false, true);
+        Check("converter direction only: a reversal turns through within 1 s", h1.x < -440.0f);
+        // steady-speed filter: a held speed is steady, a start ramp is not
+        speedconv::State f0;
+        bool steady = false, ramp = false;
+        for (int i = 0; i < 60; ++i)
+            steady = speedconv::UpdateSteady(f0, 500.0f + ((i & 1) ? 2.5f : -2.5f), dt, true);
+        speedconv::State f1;
+        for (int i = 0; i < 30; ++i)
+            ramp = speedconv::UpdateSteady(f1, 700.0f * float(i) * dt, dt, true) || ramp;
+        Check("converter steady filter: a held speed with feed jitter is steady, a start ramp is not", steady && !ramp);
+        Check("converter steady filter: an ineligible feed is not steady", !speedconv::UpdateSteady(f0, 500.0f, dt, false));
         // inactive / divergence: the game velocity
         speedconv::State u = s;
         const V3 d = speedconv::Step(u, back, true, false, dt, lim);

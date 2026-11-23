@@ -19,6 +19,11 @@ namespace utpp::mm::speedconv
 inline constexpr int kQuery = 1;       // converted velocity for the query trajectory and the predicates
 inline constexpr int kStartsStops = 2; // also from rest and after the input is released (else those feeds use the game velocity)
 inline constexpr int kLoopRate = 4;    // play rate of loop clips from the capsule speed (capsuleSpeedRate Both, scope loops only)
+inline constexpr int kDirectionOnly = 8;  // only the heading is converted, the speed is the game speed (without kStartsStops)
+inline constexpr int kSteadyLoopRate = 16; // kLoopRate only while the capsule speed holds (not on starts, stops, speed changes, landings)
+// kSteadyLoopRate: the capsule speed counts as steady while its filtered rate of change stays below this (cm/s^2 on the query scale)
+inline constexpr float kSteadyAccelCmS2 = 150.0f;
+inline constexpr float kSteadyFilterS = 0.1f; // time constant of that filter (s)
 
 struct Limits
 {
@@ -36,7 +41,28 @@ struct State
 {
     bool valid = false;
     motiontraj::V3 vel{};
+    // kSteadyLoopRate: the previous speed (< 0 = none) and the filtered rate of change of the speed
+    float steadyPrevSpeed = -1.0f;
+    float steadyAccel = 0.0f;
 };
+
+// kSteadyLoopRate: one feed of the steady-speed filter. aEligible: on the ground, input held, outside the landing window. Returns true
+// while the speed holds (the filtered |d speed / dt| below kSteadyAccelCmS2); any ineligible feed restarts the filter.
+inline bool UpdateSteady(State& s, float aSpeedCmS, float aDt, bool aEligible)
+{
+    if (!aEligible || !(aDt > 0.0f) || !std::isfinite(aSpeedCmS) || s.steadyPrevSpeed < 0.0f)
+    {
+        s.steadyPrevSpeed = aEligible && std::isfinite(aSpeedCmS) ? aSpeedCmS : -1.0f;
+        s.steadyAccel = 1.0e9f; // not steady until the filter has seen the speed hold
+        return false;
+    }
+    // signed rate of change, filtered (the feed-to-feed jitter of a held speed averages out)
+    const float a = (aSpeedCmS - s.steadyPrevSpeed) / aDt;
+    const float k = std::min(aDt / kSteadyFilterS, 1.0f);
+    s.steadyAccel = s.steadyAccel >= 1.0e8f ? a : s.steadyAccel + (a - s.steadyAccel) * k;
+    s.steadyPrevSpeed = aSpeedCmS;
+    return std::fabs(s.steadyAccel) < kSteadyAccelCmS2;
+}
 
 inline void Reset(State& s, motiontraj::V3 aGame)
 {
@@ -50,8 +76,10 @@ inline constexpr float kAlignedCos = 0.9659258f; // 15 deg
 
 // One feed. aGame: the game velocity on the query scale (cm/s, z kept as is); aInput: the move input is held; aActive: false = the
 // converted velocity is the game velocity (air, slide, a scope that excludes this feed); aShapeSpeed: the speed also follows the
-// acceleration / braking limits on a straight line (else only through a turn). Returns the converted velocity.
-inline motiontraj::V3 Step(State& s, motiontraj::V3 aGame, bool aInput, bool aActive, float aDt, const Limits& l, bool aShapeSpeed = true)
+// acceleration / braking limits on a straight line (else only through a turn); aDirectionOnly (without aShapeSpeed): only the heading
+// is converted, the speed is always the game speed. Returns the converted velocity.
+inline motiontraj::V3 Step(State& s, motiontraj::V3 aGame, bool aInput, bool aActive, float aDt, const Limits& l, bool aShapeSpeed = true,
+                           bool aDirectionOnly = false)
 {
     using motiontraj::V3;
 #if UTPP_SPEED_CONVERTER_MUTATION == 1
@@ -72,7 +100,16 @@ inline motiontraj::V3 Step(State& s, motiontraj::V3 aGame, bool aInput, bool aAc
         Reset(s, aGame);
         return aGame;
     }
-    if (target > motiontraj::kHasVelocity && aInput)
+    if (aDirectionOnly && !aShapeSpeed && target > motiontraj::kHasVelocity && aInput && prev > motiontraj::kHasVelocity)
+    {
+        // direction only: the heading error to the game velocity decays at the friction rate (the small-angle behaviour of the CMC
+        // friction term), the speed is the game speed; a reversal turns along an arc to the side of the error instead of stalling
+        const float err = motiontraj::NormalizeAxis(motiontraj::YawOf(game) - motiontraj::YawOf(v));
+        const float yaw = motiontraj::YawOf(v) + err * std::min(aDt * l.friction, 1.0f);
+        const float r = yaw / motiontraj::kRad2Deg;
+        v = V3{std::cos(r) * target, std::sin(r) * target, 0.0f};
+    }
+    else if (target > motiontraj::kHasVelocity && aInput)
     {
         // CMC CalcVelocity with input: friction pulls the velocity towards the wanted direction, the acceleration adds along it
         const V3 dir = motiontraj::SafeNormal(game);
