@@ -1173,6 +1173,13 @@ add_executable(utpp_motion_adapter_unit_directional_test tests/DirectionalInputs
 target_compile_options(utpp_motion_adapter_unit_directional_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 target_compile_features(utpp_motion_adapter_unit_directional_test PRIVATE cxx_std_20)
 add_test(NAME utpp_motion_adapter_unit_directional_test COMMAND utpp_motion_adapter_unit_directional_test)
+# mutation 1: the speed converter passes the game velocity through (must FAIL its reversal / turn checks)
+add_executable(utpp_motion_adapter_unit_directional_test_mut1 tests/DirectionalInputsTest.cpp src/mm/MotionAdapter.hpp src/mm/SpeedConverter.hpp)
+target_compile_options(utpp_motion_adapter_unit_directional_test_mut1 PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_motion_adapter_unit_directional_test_mut1 PRIVATE cxx_std_20)
+target_compile_definitions(utpp_motion_adapter_unit_directional_test_mut1 PRIVATE UTPP_SPEED_CONVERTER_MUTATION=1)
+add_test(NAME utpp_motion_adapter_unit_directional_test_mut1 COMMAND utpp_motion_adapter_unit_directional_test_mut1)
+set_tests_properties(utpp_motion_adapter_unit_directional_test_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL converter: a reversal reaches")
 
 # ---- step-down reach for deeper steps and the chooser time to land at the reference gravity (mm/MotionAdapter.hpp, mm/ChooserMatcher.hpp; off by default) ----
 add_executable(utpp_motion_adapter_unit_step_down_test tests/StepDownReachTest.cpp src/mm/MotionAdapter.hpp src/mm/ChooserMatcher.hpp)
