@@ -20,7 +20,8 @@
 //   - one leg solve (shared two-bone solver) per frame for the body height offset, the pelvis offset and the foot goals. A leg
 //     whose knee would fold more than kneeFreeDeg over the animation gets a shorter ground correction instead of a broken knee.
 // The stage fades in / out with fadeTau per foot (a missing or inconsistent trace: hit more than maxGroundDelta above or maxGroundDrop
-// below the capsule).
+// below the capsule; down to maxGroundDropFollow while the drawn capsule descends steadily: a stair down, not a ledge ahead on level
+// ground).
 // Model space: character frame, z up (the frame is turned about z only, so model z is world z).
 #pragma once
 
@@ -40,7 +41,7 @@ struct Config
 {
     float heightStiffness = 1000.0f; // planting plane height spring
     float normalStiffness = 450.0f;  // planting plane normal spring
-    float maxPenetration = 0.20f;    // m, the smoothed plane stays at most this below the traced ground
+    float maxPenetration = 0.05f;    // m, the smoothed plane stays at most this below the traced ground
     float deadHeight = 0.005f;       // m, subtracted from the ground height under the ball
     float deadAngleDeg = 2.0f;       // deg, subtracted from the plane tilt
     float maxPitchDeg = 25.0f;       // deg, foot pitch to the surface (heading frame)
@@ -48,8 +49,9 @@ struct Config
     float kneeFreeDeg = 60.0f;       // deg, extra knee flexion over the animation
     float minKneeDeg = 25.0f;        // deg, smallest interior knee angle
     float maxGroundDelta = 0.35f;    // m, a hit higher above the capsule height is not used (car roof, crate, body)
-    float maxGroundDrop = 0.55f;     // m, a hit deeper below the capsule height is not used (a step down a stair seen ahead of a lagging
-                                     // drawn capsule still counts, a ledge does not)
+    float maxGroundDrop = 0.35f;     // m, a hit deeper below the capsule height is used only while the drawn capsule descends steadily
+    float maxGroundDropFollow = 0.55f; // m, ... down to this depth (a step down a stair seen ahead of the descending capsule; on level
+    float minDescentRate = 0.2f;     // m/s, ... ground a ledge ahead is not followed), descending = steady rate below -minDescentRate
     float fadeTau = 0.08f;           // s, per-foot fade in / out
     float maxDt = 0.25f;             // s, a longer gap restarts the stage
     float pelvisStiffness = 100.0f;  // pelvis offset spring
@@ -72,6 +74,7 @@ inline bool ValidConfig(const Config& c)
     return pos(c.heightStiffness) && pos(c.normalStiffness) && nonneg(c.maxPenetration) && nonneg(c.deadHeight) &&
            nonneg(c.deadAngleDeg) && pos(c.maxPitchDeg) && c.maxPitchDeg < 80.0f && pos(c.maxRollDeg) && c.maxRollDeg < 80.0f &&
            nonneg(c.kneeFreeDeg) && nonneg(c.minKneeDeg) && pos(c.maxGroundDelta) && pos(c.maxGroundDrop) && pos(c.fadeTau) &&
+           std::isfinite(c.maxGroundDropFollow) && c.maxGroundDropFollow >= c.maxGroundDrop && pos(c.minDescentRate) &&
            pos(c.maxDt) &&
            pos(c.pelvisStiffness) && nonneg(c.maxDrop) && nonneg(c.maxCompensation) && nonneg(c.heelLift) && c.heelLift <= 1.0f &&
            std::isfinite(c.reach) && c.reach > 0.5f && c.reach <= 1.0f && std::isfinite(c.softReach) && c.softReach > 0.5f &&
@@ -479,9 +482,11 @@ public:
                 n = math::Vec3{fs.nx, fs.ny, fs.nz};
                 const float nl = detail::Len(n);
                 g = fs.z - m_cfg.bias;
+                const float drop = aSamples->capZ - g;
                 valid = fs.hit != 0 && std::isfinite(g) && std::isfinite(fs.x) && std::isfinite(fs.y) && std::isfinite(nl) && nl > 1e-3f &&
                         std::isfinite(aSamples->capZ) && g - aSamples->capZ <= m_cfg.maxGroundDelta &&
-                        aSamples->capZ - g <= m_cfg.maxGroundDrop;
+                        (drop <= m_cfg.maxGroundDrop ||
+                         (drop <= m_cfg.maxGroundDropFollow && m_vz < -m_cfg.minDescentRate));
                 if (valid)
                 {
                     n = n * (1.0f / nl);

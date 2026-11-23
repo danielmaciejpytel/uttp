@@ -352,6 +352,50 @@ static void PlaneJump()
     Check(worst60 < 0.06f && std::fabs(at[0] - at[2]) < 0.01f && std::fabs(at[1] - at[2]) < 0.005f, name);
 }
 
+static void RisingPlaneLimit()
+{
+    // a swinging foot over a rising step edge: on the first update after the trace jumps 17 cm the planting plane is at most
+    // maxPenetration below the new ground (the foot is not dragged through the step while the height spring catches up)
+    const auto pose = MockPose(12.0f, 18.0f);
+    Stage st;
+    Run([](float, float) { return 0.0f; }, pose, 60, 0.5f, [](float) { return 0.0f; }, 0.0f, &st);
+    const Outcome o = Run([](float, float y) { return y > 0.06f ? 0.17f : 0.0f; }, pose, 60, 1.0f / 60.0f, [](float) { return 0.0f; }, 0.0f,
+                          &st);
+    const float lag = 0.17f - o.plan.foot[0].h;
+    char name[200];
+    std::snprintf(name, sizeof name, "rising step 17 cm: plane %.1f cm below the new ground on the first update (limit 5 cm)",
+                  double(lag) * 100);
+    Check(o.plan.foot[0].w > 0.99f && lag <= 0.051f, name);
+}
+
+static void LedgeAndStairDown()
+{
+    // ground 45 cm below the capsule under the right ball: on level ground (a ledge ahead) it is not followed; while the capsule
+    // descends steadily (stairs down, the trace ahead of the capsule) it is (the plane trails the sinking ground by the height spring lag)
+    const auto pose = MockPose(12.0f, 18.0f);
+    {
+        Stage st;
+        const Outcome o = Run([](float, float y) { return y < -0.06f ? -0.45f : 0.0f; }, pose, 60, 1.0f, [](float) { return 0.0f; }, 0.0f,
+                              &st);
+        const float r = o.after.leg[1].ball.z - o.anim.leg[1].ball.z;
+        char name[200];
+        std::snprintf(name, sizeof name, "ledge 45 cm on level ground: right foot weight %.2f, right ball %.1f cm, left weight %.2f",
+                      double(o.plan.foot[1].w), double(r) * 100, double(o.plan.foot[0].w));
+        Check(o.plan.foot[1].w == 0.0f && std::fabs(r) < 0.01f && o.plan.foot[0].w > 0.99f, name);
+    }
+    {
+        float tNow = 0.0f;
+        const float v = 1.0f;
+        Ground h = [&tNow, v](float, float y) { return (y < -0.06f ? -0.45f : 0.0f) - v * tNow; };
+        Stage st;
+        const Outcome o = Run(h, pose, 60, 1.0f, [&tNow, v](float t) { tNow = t; return -v * t; }, 0.0f, &st);
+        char name[200];
+        std::snprintf(name, sizeof name, "ground 45 cm below while descending 1 m/s: right foot weight %.2f, plane %.1f cm", double(o.plan.foot[1].w),
+                      double(o.plan.foot[1].h) * 100);
+        Check(o.plan.foot[1].w > 0.99f && o.plan.foot[1].h < -0.37f && o.plan.foot[1].h > -0.47f, name);
+    }
+}
+
 static void BadTraces()
 {
     MockDb db;
@@ -594,6 +638,8 @@ int main(int argc, char** argv)
     CurbSnap();
     SteadyDescent();
     PlaneJump();
+    RisingPlaneLimit();
+    LedgeAndStairDown();
     BadTraces();
     Limits();
     PlatformAndGate();
