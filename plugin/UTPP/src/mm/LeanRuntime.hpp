@@ -81,6 +81,11 @@ struct Signals // one per v2 feed
     // Wide coverage only (Coverage::Wide; ignored by the default gate): weaponAction = a reload / shot / hipfire / weapon action
     // (weaponBusy without the plain drawn weapon); weaponDrawn = a weapon is in the hands.
     bool weaponAction = false, weaponDrawn = false;
+    // Body frame of the lateral acceleration: when set, the lean follows the acceleration to the right of the character facing
+    // (bodyRightX, bodyRightY = world unit right of the actor) instead of to the right of the velocity heading. Used while the
+    // character faces the camera and runs sideways or backwards (strafe rotation), where the heading frame leans the wrong way.
+    bool bodyFrame = false;
+    float bodyRightX = 1.0f, bodyRightY = 0.0f;
 };
 
 // Gate coverage of the lean (Params::coverage).
@@ -244,7 +249,9 @@ public:
             }
             else if (m_sinceChange > aP.staleS)
                 m_axHeld = m_ayHeld = 0.0f;
-            const float aRight = heading ? std::clamp(m_axHeld * hy - m_ayHeld * hx, -aP.maxAccel, aP.maxAccel) : 0.0f;
+            const bool body = aS.bodyFrame && std::isfinite(aS.bodyRightX) && std::isfinite(aS.bodyRightY);
+            const float rx = body ? aS.bodyRightX : hy, ry = body ? aS.bodyRightY : -hx;
+            const float aRight = heading ? std::clamp(m_axHeld * rx + m_ayHeld * ry, -aP.maxAccel, aP.maxAccel) : 0.0f;
             const float k = aP.accelTc > 1e-4f ? 1.0f - std::exp(-dt / aP.accelTc) : 1.0f;
             m_aLP += (aRight - m_aLP) * k;
         }

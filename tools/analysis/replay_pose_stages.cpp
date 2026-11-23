@@ -91,6 +91,11 @@
 //                       mod data folder, so the lean body / head layers run and the head lead gives way to the lean head layer when the
 //                       settings ask for both (mm.lean + mm.leanHead, the menu defaults). Not passed / 0: no lean pack (earlier replays:
 //                       lean unavailable, the head lead runs instead). Either value adds one LEANPACK line (requested, loaded).
+//   --lean-scale B,H    body / head lean amounts after --settings-log (motiondriver::SetLeanParams, the mm.leanScale / mm.leanHeadScale
+//                       settings); not passed: the log / build default
+//   --lean-coverage C   lean coverage 0 standard / 1 wide after --settings-log (motiondriver::SetLeanCoverage, mm.leanCoverage)
+//   --force-drawn 1     every feed reports a drawn weapon (PSM weapon known + drawn bits; probe of weapon-in-hand locomotion on
+//                       sessions recorded without one; only the motion side sees the flag, the game's weapon layer is not replayed)
 //   --aim-jog-query 1   after every feed ask the host for the aim jog target with the feed's stick and hand the answer to the driver, as
 //                       the locomotion script does right after each feed (utpp.reds UTPPUpdateAimSpeed: UTPPMMAimJogTarget, which also
 //                       sets motiondriver::SetAimJogOff); without it the driver keeps the vanilla aim walk mapping while aiming. Adds
@@ -141,6 +146,7 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
+bool SetLeanCoverage(int32_t aCoverage);
 float TestAoGridShare();
 void TestAoDiag(float aOut[15]);
 }
@@ -456,6 +462,9 @@ int main(int argc, char** argv)
     int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
     bool forecastDump = false;                 // --forecast-dump 1
     int32_t leanPack = -1;                     // --lean-pack: < 0 = not passed (no lean pack)
+    float leanScaleBody = -1.0f, leanScaleHead = -1.0f; // --lean-scale B,H: < 0 = not passed
+    int32_t leanCoverage = -1;                 // --lean-coverage: < 0 = not passed
+    bool forceDrawn = false;                   // --force-drawn 1: every feed reports a drawn weapon
     int leanLoaded = -1;                       // with --lean-pack: lean pack state of the bundles seen (LEANPACK line)
     bool aimJogQuery = false;                  // --aim-jog-query 1
     uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
@@ -553,6 +562,18 @@ int main(int argc, char** argv)
             swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
             leanPack = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--lean-scale") == 0)
+        {
+            if (std::sscanf(argv[i + 1], "%f,%f", &leanScaleBody, &leanScaleHead) != 2)
+            {
+                std::fprintf(stderr, "--lean-scale %s rejected (B,H)\n", argv[i + 1]);
+                return 2;
+            }
+        }
+        else if (std::strcmp(argv[i], "--lean-coverage") == 0)
+            leanCoverage = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--force-drawn") == 0)
+            forceDrawn = std::atoi(argv[i + 1]) != 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -647,6 +668,8 @@ int main(int argc, char** argv)
                 in.psmFall = std::stoi(v[29]);
                 in.walkToggled = std::stoi(v[30]) != 0;
             }
+            if (forceDrawn)
+                in.psmBlock |= integ::kPsmWeaponKnown | integ::kPsmWeaponDrawn;
             rows.push_back(fr);
             inputs.push_back(in);
         }
@@ -719,6 +742,16 @@ int main(int argc, char** argv)
         motiondriver::SetAimGameUpper(aimGameUpper != 0);
     if (swivelPole >= 0 && !motionhost::SetStancePoleMode(swivelPole))
         return 2;
+    if (leanScaleBody >= 0.0f && !motiondriver::SetLeanParams(leanScaleBody, leanScaleHead))
+    {
+        std::fprintf(stderr, "--lean-scale rejected by the driver\n");
+        return 2;
+    }
+    if (leanCoverage >= 0 && !motiondriver::SetLeanCoverage(leanCoverage))
+    {
+        std::fprintf(stderr, "--lean-coverage %d rejected by the driver\n", leanCoverage);
+        return 2;
+    }
     motiondriver::SetEnabled(true);
     motiondriver::SetLivePoseHistory(liveHistory);
     if (turnFootPhase >= 0)

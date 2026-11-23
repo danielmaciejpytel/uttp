@@ -5012,6 +5012,15 @@ void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::M
     // wide coverage only (the default gate ignores both)
     sg.weaponAction = g_weaponAction == 2 || g_weaponAction == 8 || g_hipFirePoseNow || g_reloadUpperWeight > 0.0f;
     sg.weaponDrawn = g_weaponUpperFrame || (aF.haveWeapon && aF.weaponDrawn);
+    // strafe rotation (shooter mode, aiming): the character faces the camera, so the lean follows the acceleration to the right of
+    // the actor facing (right(psi) = (cos psi, sin psi), integ yaw convention), not of the velocity heading
+    if (aB.map.st.rotationMode == motiontraj::RotationMode::Strafe && std::isfinite(aF.playerYawDeg))
+    {
+        const float yaw = aF.playerYawDeg * integ::kDegToRad;
+        sg.bodyFrame = true;
+        sg.bodyRightX = std::cos(yaw);
+        sg.bodyRightY = std::sin(yaw);
+    }
     if (aR.clip >= 0 && static_cast<size_t>(aR.clip) < aB.leanClipMap.size())
     {
         sg.curveClip = aB.leanClipMap[static_cast<size_t>(aR.clip)];
