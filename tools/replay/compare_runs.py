@@ -377,7 +377,9 @@ def feed_clock_origin(replay_motion_log, game_log):
     instead of the wall time. When the game driver started at another feed row (its t= then differs from the replay by a
     constant and fewer than 3 lines pair up within CLOCK_TOLERANCE_S), the pick changes (' chg') of the same clip in both traces
     vote on the offset in CLOCK_TOLERANCE_S bins; the winning bin needs at least 3 votes and 30 % of the shorter change list.
-    None when neither way agrees."""
+    A driver time offset can also leave a few lines whose t= values coincide by chance (2 Hz lines of both traces on the same
+    driver times): they agree with each other but sit at the wrong origin. So when both ways give an origin and they differ by more
+    than CLOCK_TOLERANCE_S, the vote wins. None when neither way agrees."""
     import datetime
     import statistics as st
     rep = [e for e in rws.ws.read_motion_log(replay_motion_log) if e['kind'] == 'motion']
@@ -391,10 +393,21 @@ def feed_clock_origin(replay_motion_log, game_log):
         if e['t'] in feed_of and e['t'] not in seen:
             seen.add(e['t'])
             offs.append((e['wall'] - epoch).total_seconds() - feed_of[e['t']])
+    direct = None
     if len(offs) >= 3 and max(offs) - min(offs) <= CLOCK_TOLERANCE_S:
-        return epoch + datetime.timedelta(seconds=st.median(offs)), len(offs), max(offs) - min(offs)
+        direct = (st.median(offs), len(offs), max(offs) - min(offs))
     # the driver started at another feed in the game (its t= differs by a constant): vote on the offsets of the pick changes of the
     # same clip in both traces; the true offset collects the most votes
+    vote = _change_vote(rep, game, day, epoch)
+    pick = vote if vote and (not direct or abs(direct[0] - vote[0]) > CLOCK_TOLERANCE_S) else direct
+    if not pick:
+        return None
+    return epoch + datetime.timedelta(seconds=pick[0]), pick[1], pick[2]
+
+
+def _change_vote(rep, game, day, epoch):
+    """(offset s, votes, spread s) of the same-clip pick change vote of feed_clock_origin, None without a clear winner."""
+    import statistics as st
     rc = [(e['clip_idx'], (e['wall'] - day).total_seconds()) for e in rep if e['chg']]
     gc = [(e['clip_idx'], (e['wall'] - epoch).total_seconds()) for e in game if e['chg']]
     votes = {}
@@ -409,7 +422,7 @@ def feed_clock_origin(replay_motion_log, game_log):
     near = votes[best] + votes.get(best - 1, []) + votes.get(best + 1, [])
     if len(near) < max(3, 0.3 * min(len(rc), len(gc))):
         return None
-    return epoch + datetime.timedelta(seconds=st.median(near)), len(near), max(near) - min(near)
+    return st.median(near), len(near), max(near) - min(near)
 
 
 def step_rates(t, rows, steps, origin):

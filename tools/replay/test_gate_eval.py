@@ -447,6 +447,22 @@ class WindowTest(unittest.TestCase):
             self.assertGreaterEqual(n, 6)
             self.assertLess(abs((origin - t0).total_seconds()), 5e-3)
             self.assertLess(spread, cr.CLOCK_TOLERANCE_S)
+            # driver time offset 0.98 s: a few 2 Hz lines of both traces land on the same t= by chance and agree with each other at the
+            # wrong origin; the pick changes of the same clips place the clock and win
+            with open(game, 'w', encoding='utf-8') as fg, open(rep, 'w', encoding='utf-8') as fr:
+                for k, clip in enumerate((495, 414, 417, 495, 414, 300)):
+                    dt = 31.8 + 2.0 * k
+                    fg.write(change((t0 + datetime.timedelta(seconds=dt)).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], 2.0 * k + 0.016 + 0.98, clip))
+                    fr.write(change((datetime.datetime(2000, 1, 1) + datetime.timedelta(seconds=dt)).strftime('%Y-%m-%d %H:%M:%S.%f'),
+                                    2.0 * k + 0.016, clip))
+                for k in range(4):
+                    dt = 60.0 + 0.5 * k
+                    fg.write(motion((t0 + datetime.timedelta(seconds=dt + 0.98)).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], 0.5 * k + 40.0))
+                    fr.write(motion((datetime.datetime(2000, 1, 1) + datetime.timedelta(seconds=dt)).strftime('%Y-%m-%d %H:%M:%S.%f'),
+                                    0.5 * k + 40.0))
+            origin, n, spread = cr.feed_clock_origin(rep, game)
+            self.assertLess(abs((origin - t0).total_seconds()), 5e-3)   # the chance t= pairs alone would put it 0.98 s late
+            self.assertGreaterEqual(n, 6)
             with open(game, 'w', encoding='utf-8') as fg:   # unrelated changes: no agreement, no clock
                 fg.write(change('2026-11-22 13:29:00.000', 1.0, 1) + change('2026-11-22 13:29:07.000', 2.0, 2))
             self.assertIsNone(cr.feed_clock_origin(rep, game))
