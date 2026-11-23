@@ -459,9 +459,10 @@ struct MatcherConfig
     // crouchCapsuleRate: a LOOP clip of PSD_*_Crouch_Walk_Loops while the chooser stance is Crouch scales its query speed by
     // ChooserState::crouchRateScale (capsule per mapped speed of the crouch map, >= 1) before the rate bounds, so the loop root follows the
     // capsule up to maxPlayRate. Every other clip, database and stance keeps the plain rate.
-    // Off by default: with it on the loop phase at the stick release changes and the crouch stop of the stance test (66.949) enters
-    // Crouch_Stop_F_Lfoot late in its settle (hips 0.77 -> 0.47 m within ~0.35 s, a planted foot floats 3 cm); see crouchStopLegFade.
-    bool crouchCapsuleRate = false;
+    // On by default together with stopBrakeGate: alone, the loop phase at the stick release changes and the crouch stop of the stance test
+    // (66.949) enters Crouch_Stop_F_Lfoot late in its settle (hips 0.77 -> 0.47 m within ~0.35 s, a planted foot floats 3 cm); the brake
+    // gate keeps that late entry out.
+    bool crouchCapsuleRate = true;
     // CR-6 (crouch stop entry; tests/LocoStanceTest.cpp crouch stop edges). false = the ordinary per-bone fade bit for bit. A crouch stop clip
     // settles the Hips 25-30 cm below the crouch loop; the leg bones fade in 1/1.5 of the blend time (BlendProfile kLocomotion) while the Hips
     // take the whole time, so for most of the fade the legs already hold the folded stop shape under a Hips that is still near the loop height:
@@ -486,7 +487,13 @@ struct MatcherConfig
     // root speed is below (1 - stopBrakeGate) x min(chooser speed, the clip's approach speed = median root speed of its frames at or above
     // half the peak); the continuing pose is not affected, and when the gate would leave no Stop row of a database the search stays
     // ungated there. Measured with 0.25: the 66.949 crouch stop passes, but the stand stops get worse (stop lock path p95 +4 / +8 cm).
-    float stopBrakeGate = 0.0f;
+    // 0.25 by default with crouchCapsuleRate.
+    float stopBrakeGate = 0.25f;
+    // Sprint starts without reselection: every entry of PSD_Dense / Sparse_Stand_Sprint_Starts is treated as DisableReselection (its rows
+    // are not picked again while it plays as a candidate, like the entries the bake flags), so a sprint start runs through to its loop.
+    // false = the entry flags of the bake only. Measured on the six default sessions: Male total -1.6 % (start slide p95 -12 %), Female
+    // +0.5 %.
+    bool sprintStartNoReselect = true;
 
     // ST-1 (slow walk start tail; same recording, replay tests/LocoMatcherTest.cpp). false = the UE DoNotInterrupt behaviour bit for bit. A start
     // from rest is IsStarting on its first stick update only (the game capsule reaches its slow target within ~3 feeds), so the chooser returns the
@@ -605,8 +612,10 @@ struct MatcherConfig
     //     state), air, slides and forced interrupts search as before; every other mode is untouched. 0 = off.
     //     Replay of the recorded Shooter session (both bodies, 120 deg/s): 0.35 s with override 1.0 (above the cost scale of these loops,
     //     ~0.1-0.4, so in effect a minimum time per direction) 8 changes in 3 s; override 0.3 left 9 (= the 3.0 per second bound), 0.15 none.
+    //     0.3 is the default: the smallest override that keeps every arc step of that session within 3.0 changes per second (arc_120 3.00,
+    //     arc_90 2.25-2.75 on both bodies; 0.4 / 0.5 / 1.0 hold a direction longer, 2.67 per second).
     float strafeSectorDelayS = 0.35f;
-    float strafeSectorDelayOverride = 1.0f;
+    float strafeSectorDelayOverride = 0.3f;
     // freshEventBias 0.025: half of the first value keeps the same reduction of clip changes over replays of six recorded sessions while a
     // Walk start under an accelerating capsule is no longer kept against a better start (toe drift of the starts back to the unguarded level)
     float freshEventS = 0.2f;
@@ -805,6 +814,8 @@ inline void TestGuardsOff(MatcherConfig& c)
     if (has("standjump")) c.standingJumpMaxSpeedCmS = 0.0f;
     if (has("jumpout")) c.jumpOutNoBack = c.jumpOutFallHandover = false;
     if (has("strafesector")) c.strafeSectorDelayS = 0.0f;
+    if (has("stopgate")) c.stopBrakeGate = 0.0f;
+    if (has("sprintreselect")) c.sprintStartNoReselect = false;
 }
 // Replay tools only: UTPP_TEST_CROUCH_STOP = the option list of ApplyCrouchStopOptions, applied after Init copied the configuration.
 inline void ApplyCrouchStopOptions(MatcherConfig& c, std::string_view aList);
@@ -936,6 +947,21 @@ public:
         m_dbDirectionLoops.assign(aDb->NumDatabases(), 0); // MatcherConfig::strafeSectorDelayS: the *_Loops databases (walk, run, sprint, crouch)
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbDirectionLoops[d] = aDb->DbName(d).ends_with("_Loops") ? 1 : 0;
+        // DisableReselection per entry: the bake's entry flag, or (MatcherConfig::sprintStartNoReselect) any entry of a sprint start database
+        {
+            uint32_t numEntries = 0;
+            for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
+                numEntries = std::max(numEntries, aDb->Db(d).firstEntry + aDb->Db(d).numEntries);
+            m_entryNoReselect.assign(numEntries, 0);
+            for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
+            {
+                const bool sprintStarts = m_cfg.sprintStartNoReselect && (aDb->DbName(d).starts_with("PSD_Dense_Stand_Sprint_Starts") ||
+                                                                          aDb->DbName(d).starts_with("PSD_Sparse_Stand_Sprint_Starts"));
+                const DatabaseRecord& D = aDb->Db(d);
+                for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+                    m_entryNoReselect[e] = sprintStarts || (aDb->Entry(e).flags & kEntryDisableReselection) ? 1 : 0;
+            }
+        }
         m_dbCrouchWalkLoops.assign(aDb->NumDatabases(), 0); // CR-3 (MatcherConfig::slowCrouchLoops)
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbCrouchWalkLoops[d] = aDb->DbName(d).starts_with("PSD_Dense_Crouch_Walk_Loops") ||
@@ -1402,7 +1428,7 @@ public:
             }
             else
                 contValid = t <= len + 1e-4f;
-            if (!contValid && (db.Entry(m_cur.entry).flags & kEntryDisableReselection) &&
+            if (!contValid && m_entryNoReselect[static_cast<uint32_t>(m_cur.entry)] &&
                 steer::ClassifyClip(db.ClipName(static_cast<uint32_t>(m_cur.clip))) == steer::kClassStanceTransition)
             {
                 m_completedNoReselectClip = m_cur.clip;
@@ -2644,7 +2670,7 @@ private:
                 continue;
             const DatabaseRecord& D = m_db->Db(d);
             const EntryRecord& cen = m_db->Entry(m_cand[k].entry);
-            if (!(cen.flags & kEntryDisableReselection))
+            if (!m_entryNoReselect[static_cast<uint32_t>(m_cand[k].entry)])
                 break;
             for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
             {
@@ -3293,6 +3319,7 @@ private:
     std::vector<uint8_t> m_dbHasStop;         // stopBrakeGate: database index -> 1 = indexes a Stop clip
     float m_stopGateRefCmS = 0.0f;            // stopBrakeGate: chooser speed of this update on the ground (0 = gate off)
     std::vector<uint8_t> m_dbDirectionLoops;  // strafeSectorDelayS: database index -> 1 = a *_Loops database
+    std::vector<uint8_t> m_entryNoReselect;   // entry index -> 1 = DisableReselection (bake flag or sprintStartNoReselect)
     uint64_t m_strafeSectorHolds = 0;         // strafeSectorDelayS: updates whose jump the sector delay held
     std::vector<uint8_t> m_dbWalkStarts;      // ST-1: database index -> 1 = PSD_Dense / Sparse_*_Walk_Starts (stand and crouch)
     std::vector<float> m_clipAccelEndS;       // ST-1: clip index -> clip time where its acceleration ends (-1 = not a walk-start clip)
