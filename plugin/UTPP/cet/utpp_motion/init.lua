@@ -45,6 +45,9 @@
 --   mm.bodyHeightSmooth bool, default true (DLL default on) - the drawn pelvis height follows a smoothed ground height on
 --                  rough ground (offset -4 .. +0.5 cm, ground locomotion only); both legs are solved back to their ankles, so the feet
 --                  stay where they are (native UTPPSetMMBodyHeightSmooth).
+--   mm.groundFeet bool, default false (DLL default off) - the feet stand on the traced ground (slopes, steps, stairs): one
+--                  downward trace per foot from the scripts, a planting plane per foot and one leg solve; the pelvis comes
+--                  down only when a foot needs it (native UTPPSetMMGroundFeet).
 --   mm.capsuleForecast bool, default false (DLL default off) - the predicted path of the movement also ramps at the game's own
 --                  acceleration when V starts away from the facing, with a partly tilted stick or while the camera turns (the
 --                  straight full-stick start already does); developer option (native UTPPSetMMCapsuleForecast).
@@ -101,7 +104,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = false, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = false, leanCoverage = "standard",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
@@ -916,6 +919,7 @@ M.OPTIONS = {
   { want = "neutralAim", field = "setNeutralAimOffset", native = "UTPPSetMMNeutralAimOffset" },
   { want = "pelvisPlacement", field = "setPelvisPlacement", native = "UTPPSetMMPelvisPlacement" },
   { want = "bodyHeightSmooth", field = "setBodyHeightSmooth", native = "UTPPSetMMBodyHeightSmooth" },
+  { want = "groundFeet", field = "setGroundFeet", native = "UTPPSetMMGroundFeet" },
   { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
   { want = "stepDownReach", field = "setStepDownReach", native = "UTPPSetMMStepDownReach" },
   { want = "farJumpGravity", field = "setFarJumpGravity", native = "UTPPSetMMFarJumpGravity" },
@@ -1098,6 +1102,10 @@ function M.RegisterSettings(core)
     label = "motion: smooth body height on uneven ground",
     desc = "Softens the small hops of the body when V runs over bumpy ground; the feet stay where they are. On (default) = smoothed. Off = the body follows the ground height exactly.",
     apply = function(v) M.SetOption("bodyHeightSmooth", v == true) end })
+  core.Register({ key = "mm.groundFeet", section = "motion", type = "bool", default = false,
+    label = "motion: feet on uneven ground (experimental)",
+    desc = "Places each foot on the ground under it on slopes, steps and stairs and bends the legs and hips to match. Off (default) = the feet follow the animation height.",
+    apply = function(v) M.SetOption("groundFeet", v == true) end })
   core.Register({ key = "mm.handBackBlend", section = "motion", type = "bool", default = false,
     label = "motion: smooth hand-back (experimental)",
     desc = "When an animation of the game (a climb, a vault, a scene) hands V back to the motion animations, the body carries its last motion into the blend instead of starting from a still pose. Off (default) = the earlier blend.",

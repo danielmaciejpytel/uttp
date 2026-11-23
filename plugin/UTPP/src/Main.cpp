@@ -46,6 +46,7 @@
 #include "mm/AimOffset.hpp"
 #include "mm/AimOffsetRuntime.hpp"
 #include "mm/BodyHeightRuntime.hpp" // body height smoothing option (feed-side transform source)
+#include "mm/GroundFeetRuntime.hpp"  // ground feet option (uses the same transform source)
 #include "mm/MeleeAimRuntime.hpp" // melee aim tilt (2026-11-09)
 #include "mm/MeleeBaseRuntime.hpp" // melee chest base correction (2026-11-13)
 #include "mm/MeleePoseRuntime.hpp" // melee full pose
@@ -890,6 +891,7 @@ int32_t ArmLocked(bool aLogAlways)
             if (shadowcopy::Status() != shadowcopy::ArmStatus::NoShadowBones)
                 LogInfo("UTPP shadow copy arm: pairs=%u status=%s", shadowPairs, shadowcopy::StatusName());
         }
+        utpp::mm::groundfeet::rt::ArmIkJoints(reinterpret_cast<uint64_t>(info.metaRig), hashes, parents); // ground recorder (read only)
         motionhost::OnArmed(info.metaRig, hashes, parents);
         aimofs::OnArmed(info.metaRig, hashes, parents); // 0.6.3 aim offset bones (fail closed)
         utpp::meleeaim::OnArmed(info.metaRig, hashes, parents); // melee aim tilt: Spine1..Neck (fail closed)
@@ -2879,6 +2881,7 @@ void Native_SetMMTrace(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void
     motionhost::SetTrace(value);
     utpp::motiondriver::SetTrace(value); // UTPP-MOTION SEAM motionfix (item 4): MOTION trace line follows mm.trace (v2 frames only)
     g_hot.timing.store(value, std::memory_order_relaxed); // FK detour own-cost timing + reload-contacts funnel line only while tracing
+    utpp::mm::groundfeet::rt::g_record.store(value, std::memory_order_relaxed); // ground recorder: traces under the feet, logged only
     LogInfo("UTPPSetMMTrace(%d)", value ? 1 : 0);
 }
 
@@ -3210,7 +3213,7 @@ void Native_FeedLocomotion(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, 
     }
     utpp::motiondriver::FeedAirFromInput(in); // UTPP-MOTION SEAM air: UTPPFeedAir fields -> one-shot v2 AirFeed of this feed's Step (v2 mutex only; v1 untouched)
     motionhost::Feed(in);
-    if (utpp::mm::bodyheight::rt::Enabled()) // body height smoothing (option, default on): player transform for the animation thread
+    if (utpp::mm::bodyheight::rt::Enabled() || utpp::mm::groundfeet::rt::Enabled()) // body height / ground feet: player transform for the animation thread
         BodyHeightOnFeed(GetPlayerEntityRaw(), in.haveExtra ? in.capsulePos[2] : std::nanf(""),
                          g_hot.timing.load(std::memory_order_relaxed), &MMTraceLog);
     aimofs::OnFeed(tpp, static_cast<uint32_t>(psmBlock)); // 0.6.3 aim offset guards (UpperBody, melee, vehicle, TPP)

@@ -74,6 +74,15 @@ public native func UTPPFeedAir(onGround: Bool, distToGround: Float, fallState: I
 // (elevator) carries V - IsOnMovingPlatform() or PSM.IsPlayerInsideMovingElevator. The game's own state machine does not fall
 // there when the ground contact drops; the DLL reads that feed in the platform frame (in contact, no vertical velocity).
 public native func UTPPFeedMovingPlatform(onPlatform: Bool) -> Void
+// Feet on uneven ground (option mm.groundFeet) and the ground recorder (mm.trace): one downward trace per foot under the points the
+// DLL gives (the published feet), sent right before the feed. UTPPGroundWantsTrace: false while both are off or the stage gate is
+// closed (no trace). UTPPGroundProbePoint: w = 1 valid. UTPPGroundTraceBegin/End: cost of the trace block in microseconds.
+public native func UTPPGroundWantsTrace() -> Bool
+public native func UTPPGroundProbePoint(side: Int32, capsule: Vector4, yawDeg: Float) -> Vector4
+public native func UTPPGroundTraceBegin() -> Void
+public native func UTPPGroundTraceEnd() -> Float
+public native func UTPPFeedGround(hitL: Bool, posL: Vector4, normalL: Vector4, hitR: Bool, posR: Vector4, normalR: Vector4, capsule: Vector4, yawDeg: Float) -> Void
+public native func UTPPGroundRecorderOn() -> Bool
 // the moving platform flag of the last locomotion feed (false once the feeds stop for 0.25 s): the CET camera pivot reads it
 public native func UTPPMMOnMovingPlatform() -> Bool
 // True when the next air feed should carry a raycast: airborne (last air feed), descending, mm.airProbe on, every 2nd feed.
@@ -1091,6 +1100,7 @@ public func UTPPFeedFromLocomotion(stateName: CName, timeDelta: Float, scriptInt
   UTPPFeedLocomotionExtra(walkToggled, player.GetWorldPosition());
   UTPPFeedAirFromLocomotion(player, scriptInterface); // AIR HOLD stage: right before the feed
   UTPPFeedMovingPlatform(UTPPOnMovingPlatform(scriptInterface)); // right before the feed, like the air fields
+  UTPPFeedGroundFromLocomotion(player, playerYaw, timeDelta); // feet on uneven ground / ground recorder (nothing while both are off)
   let tier2Slow: Bool = UTPPIsTier2Slow(player, scriptInterface);
   UTPPFeedMotionTier2Slow(tier2Slow); // right before the feed, like the air fields
   UTPPFeedLocomotion(velocity, move, cameraYaw, playerYaw, UTPPLocoStateId(stateName), tpp, timeDelta, haveTarget, targetYaw, UTPPPsmBlockMask(scriptInterface));
@@ -1101,6 +1111,84 @@ public func UTPPFeedFromLocomotion(stateName: CName, timeDelta: Float, scriptInt
   UTPPUpdateWalkSpeed(player, scriptInterface, stateName, walkToggled, moving, tpp, tier2Slow); // walk toggle speed (0 = vanilla)
   UTPPUpdateAnalogFloor(player, scriptInterface, stateName, move, tpp, walkToggled); // minimum analog walk speed (no 'moving' gate; 1.0 = nothing while off)
   UTPPUpdateStickSpeed(player, scriptInterface, stateName, move, tpp, walkToggled, tier2Slow); // fixed walk / run speeds (1.0 = nothing in analog mode)
+}
+
+@addField(PlayerPuppet)
+public let utppGroundProfileT: Float;
+
+// One downward trace (Static + Terrain) at xy from 0.6 m above to 0.6 m below the capsule height. False = no hit.
+public func UTPPGroundTrace(sqs: ref<SpatialQueriesSystem>, xy: Vector4, capZ: Float, out hit: TraceResult) -> Bool {
+  let filter: QueryFilter;
+  QueryFilter.AddGroup(filter, n"Static");
+  QueryFilter.AddGroup(filter, n"Terrain");
+  let from: Vector4 = Vector4(xy.X, xy.Y, capZ + 0.6, 1.0);
+  let to: Vector4 = Vector4(xy.X, xy.Y, capZ - 0.6, 1.0);
+  return sqs.SyncRaycastByQueryFilter(from, to, filter, hit) && TraceResult.IsValid(hit);
+}
+
+// Feet on uneven ground / ground recorder: a trace under each published foot every frame, handed to the DLL (the stage uses it;
+// with mm.trace on the DLL logs it as a UTPP GRT line). With mm.trace on, every 0.25 s also a stairs profile: 20 traces every
+// 5 cm ahead along the facing, logged as a UTPP GRP line (height above the capsule per point, -9 = no hit).
+public func UTPPFeedGroundFromLocomotion(player: ref<PlayerPuppet>, yawDeg: Float, timeDelta: Float) -> Void {
+  if !UTPPGroundWantsTrace() {
+    return;
+  }
+  let sqs: ref<SpatialQueriesSystem> = GameInstance.GetSpatialQueriesSystem(player.GetGame());
+  if !IsDefined(sqs) {
+    return;
+  }
+  let cap: Vector4 = player.GetWorldPosition();
+  let posL: Vector4;
+  let posR: Vector4;
+  let nL: Vector4 = Vector4(0.0, 0.0, 1.0, 0.0);
+  let nR: Vector4 = Vector4(0.0, 0.0, 1.0, 0.0);
+  let hitL: Bool = false;
+  let hitR: Bool = false;
+  UTPPGroundTraceBegin();
+  let pL: Vector4 = UTPPGroundProbePoint(0, cap, yawDeg);
+  let pR: Vector4 = UTPPGroundProbePoint(1, cap, yawDeg);
+  let hit: TraceResult;
+  if pL.W > 0.5 && UTPPGroundTrace(sqs, pL, cap.Z, hit) {
+    hitL = true;
+    posL = Vector4(hit.position.X, hit.position.Y, hit.position.Z, 1.0);
+    nL = Vector4(hit.normal.X, hit.normal.Y, hit.normal.Z, 0.0);
+  }
+  if pR.W > 0.5 && UTPPGroundTrace(sqs, pR, cap.Z, hit) {
+    hitR = true;
+    posR = Vector4(hit.position.X, hit.position.Y, hit.position.Z, 1.0);
+    nR = Vector4(hit.normal.X, hit.normal.Y, hit.normal.Z, 0.0);
+  }
+  UTPPGroundTraceEnd();
+  UTPPFeedGround(hitL, posL, nL, hitR, posR, nR, cap, yawDeg);
+  if !UTPPGroundRecorderOn() {
+    return;
+  }
+  player.utppGroundProfileT += timeDelta;
+  if player.utppGroundProfileT < 0.25 {
+    return;
+  }
+  player.utppGroundProfileT = 0.0;
+  let yaw: Float = Deg2Rad(yawDeg);
+  let fx: Float = -SinF(yaw);
+  let fy: Float = CosF(yaw);
+  UTPPGroundTraceBegin();
+  let line: String = "UTPP GRP cap=" + FloatToStringPrec(cap.X, 3) + "," + FloatToStringPrec(cap.Y, 3) + "," + FloatToStringPrec(cap.Z, 3)
+    + " yaw=" + FloatToStringPrec(yawDeg, 2) + " step=0.05 h=";
+  let i: Int32 = 0;
+  while i < 20 {
+    let d: Float = 0.05 * Cast<Float>(i);
+    let h: Float = -9.0;
+    if UTPPGroundTrace(sqs, Vector4(cap.X + fx * d, cap.Y + fy * d, cap.Z, 1.0), cap.Z, hit) {
+      h = hit.position.Z - cap.Z;
+    }
+    if i > 0 {
+      line += ",";
+    }
+    line += FloatToStringPrec(h, 3);
+    i += 1;
+  }
+  let us: Float = UTPPGroundTraceEnd();
+  UTPPLogLine(line + " us=" + FloatToStringPrec(us, 1));
 }
 
 // A moving platform (elevator cabin) carries V: the physics flag, or the elevator's own PSM flag while it moves.
