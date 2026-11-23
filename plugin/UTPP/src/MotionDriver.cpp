@@ -358,6 +358,9 @@ bool g_overlayInertialSwitchOn = true; // SetOverlayInertialSwitch (default on, 
 int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_capsuleForecastOn = false; // SetCapsuleForecast (MapConfig::capsuleForecast, mm.capsuleForecast)
+bool g_aimRotationOn = false;     // SetAimRotation (MapConfig::aimRotation, mm.aimRotation)
+int32_t g_prevPickClip = -1;      // clip of the last search result (MapContext::currentPickAgeS)
+float g_pickAgeS = 1.0e9f;        // time since that clip was picked (s); large = no pick since the last reset
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
 bool g_leanHeadOwns = false;    // last StepLocked: the head lead is blocked in favour of the lean head layer
 // Slide feed (CET mm.slide -> SetSlide, default ON like the setting; mm/MotionAdapter.hpp "slide feed"): PSM LocomotionDetailed 5 reaches the
@@ -2399,6 +2402,12 @@ void SetCapsuleForecast(bool aOn)
     g_capsuleForecastOn = aOn;
 }
 
+void SetAimRotation(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_aimRotationOn = aOn;
+}
+
 void SetFarJumpGravityScale(bool aOn)
 {
     std::lock_guard lock(g_m);
@@ -2656,12 +2665,20 @@ struct TestMapOverrides
     int32_t capsuleSpeedQuery = -1, velocityPredicates = -1;
     float turnInPlaceDeg = std::numeric_limits<float>::quiet_NaN();
     int32_t stepDownReach = -1;
+    float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
 };
 TestMapOverrides g_testMapOverrides;
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg)
 {
     std::lock_guard lock(g_m);
-    g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach};
+    g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach,
+                                          g_testMapOverrides.aimPivotDeg, g_testMapOverrides.aimPivotGateS};
+}
+void TestSetMapAimPivot(float aPivotDeg, float aGateS)
+{
+    std::lock_guard lock(g_m);
+    g_testMapOverrides.aimPivotDeg = aPivotDeg;
+    g_testMapOverrides.aimPivotGateS = aGateS;
 }
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth)
 {
@@ -2699,6 +2716,10 @@ void TestApplyMapOverrides(adapter::MapConfig& aMc)
         aMc.turnInPlaceDeg = g_testMapOverrides.turnInPlaceDeg;
     if (g_testMapOverrides.stepDownReach >= 0)
         aMc.stepDownReach = g_testMapOverrides.stepDownReach != 0;
+    if (std::isfinite(g_testMapOverrides.aimPivotDeg))
+        aMc.aimPivotDeg = g_testMapOverrides.aimPivotDeg;
+    if (std::isfinite(g_testMapOverrides.aimPivotGateS))
+        aMc.aimPivotGateS = g_testMapOverrides.aimPivotGateS;
 }
 #endif
 
@@ -5607,7 +5628,11 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     ctx.rootYawValid = std::isfinite(g_rootYawDeg);
     ctx.rootYawDeg = ctx.rootYawValid ? g_rootYawDeg : 0.0f;
     if (g_prevDb >= 0 && static_cast<uint32_t>(g_prevDb) < b.db.NumDatabases())
+    {
         ctx.currentDbPivots = adapter::DatabaseHasPivotsTag(b.db.DbName(static_cast<uint32_t>(g_prevDb)));
+        ctx.currentDbStarts = adapter::DatabaseHasStartsTag(b.db.DbName(static_cast<uint32_t>(g_prevDb)));
+    }
+    ctx.currentPickAgeS = g_prevDb >= 0 ? g_pickAgeS : 1.0e9f;
     adapter::MapConfig mc;
     mc.capsuleBrakingDeceleration = aRaw.capsuleBrakingDeceleration;
     mc.capsuleAcceleration = aRaw.capsuleAcceleration;
@@ -5636,6 +5661,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
                   "the runtime air state and the chooser mapping agree on a step-down");
     mc.stepDownReach = g_stepDownReachOn; // SetStepDownReach (same switch as the runtime air state)
     mc.capsuleForecast = g_capsuleForecastOn; // SetCapsuleForecast
+    mc.aimRotation = g_aimRotationOn; // SetAimRotation
     mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam
     // the exit window of the gate can close on the first open feed; the grace keeps its own short tail
     g_exitAirTail = aRaw.vehicleExitWindow ? 0.6f : std::fmax(0.0f, g_exitAirTail - std::fmax(aRaw.dt, 0.0f));
@@ -6034,11 +6060,15 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_selDiag.cost = r.cost < 1e30f ? r.cost : -1.0f;
     g_selDiag.continuingCost = r.continuingCost < 1e30f ? r.continuingCost : -1.0f;
     g_selDiag.turnHold = r.turnHold;
+    g_selDiag.turnAngleDeg = b.map.st.turnAngle;
     AirStepLocked(b, cs, air, vzFeed, dt);
     g_airDiag.chooserDbMask = r.dbMask;
     g_airDiag.takeoffSeed = airSeedUsed;
     if (r.clip >= 0 && r.database >= 0)
     {
+        // pick age for the aim rotation gate (MapContext::currentPickAgeS): a new clip or database restarts it
+        g_pickAgeS = (r.clip != g_prevPickClip || r.database != g_prevDb) ? 0.0f : g_pickAgeS + std::fmax(dt, 0.0f);
+        g_prevPickClip = r.clip;
         g_prevDb = r.database;
     }
     auto in = FrameInputsLocked(b, cs, f, dt);

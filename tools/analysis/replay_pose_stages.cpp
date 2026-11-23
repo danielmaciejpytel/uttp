@@ -86,6 +86,12 @@
 //                       without the aim offset (the game's upper body is not recorded): barrel measurements of it are not the shown pose.
 //   --capsule-forecast 0|1  capsule forecast for turning and partial-stick starts (motiondriver::SetCapsuleForecast, the
 //                       mm.capsuleForecast setting; the settings log call MMCapsuleForecast is applied as well). Off / not passed: unchanged.
+//   --aim-rotation 0|1  aim rotation sub-mode while aiming (motiondriver::SetAimRotation, the mm.aimRotation setting; the settings
+//                       log call MMAimRotation is applied as well). Off / not passed: unchanged.
+//   --aim-pivot-deg D   with --aim-rotation 1: the Aim pivot threshold (deg, default 10) (test override of MapConfig::aimPivotDeg)
+//   --aim-pivot-gate S  with --aim-rotation 1: the pivot / start elapsed-time gate (s, default 0.5; 0 = no gate)
+//   --force-aim 1       synthetic aim: every feed reads the PSM upper body Aim with a drawn weapon (the recordings have almost no
+//                       aiming while moving); combine with --aim-camera P for the overlay and the aim target. Default off.
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
 //                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
 //                       (inspection only; the other outputs are unchanged)
@@ -93,6 +99,9 @@
 //                       UTPP_TEST_CROUCH_STOP for the matcher's Init). Not passed: the build configuration.
 //   --test-env N=V      set one UTPP_TEST_* switch of the matcher (e.g. UTPP_TEST_GUARD_OFF=crouchrate,stopgate) for this process only;
 //                       repeatable. Lets one side of a before / after comparison differ from the other.
+//   --sel-dump 1        also write <out prefix>.sel.txt: per feed the picked clip / database and the selection diagnostics of the
+//                       driver (pivoting / starting flags, turn angle, searched / jumped / turn hold, interrupt, cost, continuing cost,
+//                       speed, gait, movement state) (inspection only; the other outputs are unchanged)
 //   --lean-pack 0|1     1: the driver loads the motion lean pack <data>\utpp_lean_<body>.bin for both bodies, as the game does from the
 //                       mod data folder, so the lean body / head layers run and the head lead gives way to the lean head layer when the
 //                       settings ask for both (mm.lean + mm.leanHead, the menu defaults). Not passed / 0: no lean pack (earlier replays:
@@ -151,6 +160,7 @@ namespace utpp::motiondriver
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg);
 void TestSetMapStepDownReach(int32_t aOn);
 void SetStepDownReach(bool aOn);
+void TestSetMapAimPivot(float aPivotDeg, float aGateS);
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
@@ -301,6 +311,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
         else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
+        else if (name == "MMAimRotation") motiondriver::SetAimRotation(flag(0));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
     }
@@ -471,6 +482,7 @@ int main(int argc, char** argv)
     int32_t aimGameUpper = -1;                 // --aim-game-upper: < 0 = not passed
     int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
     bool forecastDump = false;                 // --forecast-dump 1
+    bool selDump = false;                      // --sel-dump 1
     int32_t leanPack = -1;                     // --lean-pack: < 0 = not passed (no lean pack)
     float leanScaleBody = -1.0f, leanScaleHead = -1.0f; // --lean-scale B,H: < 0 = not passed
     int32_t leanCoverage = -1;                 // --lean-coverage: < 0 = not passed
@@ -478,6 +490,9 @@ int main(int argc, char** argv)
     int leanLoaded = -1;                       // with --lean-pack: lean pack state of the bundles seen (LEANPACK line)
     bool aimJogQuery = false;                  // --aim-jog-query 1
     uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
+    int32_t aimRotation = -1;                  // --aim-rotation: < 0 = not passed (the settings log / build default)
+    float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
+    bool forceAim = false;                     // --force-aim 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -570,6 +585,8 @@ int main(int argc, char** argv)
             forecastDump = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--step-down-reach") == 0)
             stepDownReach = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--sel-dump") == 0)
+            selDump = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--swivel-pole") == 0)
             swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
@@ -600,6 +617,14 @@ int main(int argc, char** argv)
             }
             _putenv_s(kv.substr(0, eq).c_str(), kv.substr(eq + 1).c_str());
         }
+        else if (std::strcmp(argv[i], "--aim-rotation") == 0)
+            aimRotation = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--aim-pivot-deg") == 0)
+            aimPivotDeg = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-pivot-gate") == 0)
+            aimPivotGateS = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--force-aim") == 0)
+            forceAim = std::atoi(argv[i + 1]) != 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -702,6 +727,11 @@ int main(int argc, char** argv)
     }
     if (inputs.empty())
         return 6;
+    // --force-aim: PSM upper body Aim and a drawn weapon on every feed (the upper body field holds the state + 1)
+    if (forceAim)
+        for (auto& in : inputs)
+            in.psmBlock = (in.psmBlock & ~integ::kPsmUpperFieldMask) | (uint32_t(integ::kPsmUpperBodyAim + 1) << integ::kPsmUpperShift) |
+                          integ::kPsmWeaponKnown | integ::kPsmWeaponDrawn;
     // --ahead recorded: the body turn of the coming tick is the next feed's yaw minus this one (what the game applied after the feed);
     // without it the host derives it from its own body yaw command, which an open-loop replay never issues (0).
     if (aheadRecorded)
@@ -792,7 +822,19 @@ int main(int argc, char** argv)
     }
     if (capsuleForecast >= 0)
         motiondriver::SetCapsuleForecast(capsuleForecast != 0);
+    if (aimRotation >= 0)
+        motiondriver::SetAimRotation(aimRotation != 0);
+    if (std::isfinite(aimPivotDeg) || std::isfinite(aimPivotGateS))
+        motiondriver::TestSetMapAimPivot(aimPivotDeg, aimPivotGateS);
     FILE* forecastOut = nullptr;
+    FILE* selOut = nullptr;
+    if (selDump && out != "-")
+    {
+        selOut = std::fopen((out + ".sel.txt").c_str(), "w");
+        if (!selOut)
+            return 7;
+        std::fprintf(selOut, "# t clip db pivoting starting turnDeg searched jumped turnHold interrupt cost contCost speed gait state\n");
+    }
     if (forecastDump && out != "-")
     {
         forecastOut = std::fopen((out + ".forecast.txt").c_str(), "w");
@@ -1184,6 +1226,14 @@ int main(int argc, char** argv)
         }
         float aod[15];
         motiondriver::TestAoDiag(aod);
+        if (selOut)
+        {
+            const motiondriver::SelectionDiag sd = motiondriver::SelectionDiagnostics();
+            std::fprintf(selOut, "%.4f %d %d %d %d %.2f %d %d %d %d %.4f %.4f %.1f %d %d\n", static_cast<double>(rows[i].t), clip, dbi,
+                         sd.isPivoting ? 1 : 0, sd.isStarting ? 1 : 0, static_cast<double>(sd.turnAngleDeg), sd.searched ? 1 : 0,
+                         sd.jumped ? 1 : 0, sd.turnHold ? 1 : 0, sd.interrupt, static_cast<double>(sd.cost),
+                         static_cast<double>(sd.continuingCost), static_cast<double>(sd.speedCmS), sd.gait, sd.movementState);
+        }
         const float meta[kMetaFloats] = {rows[i].t, rows[i].dt, g_log.stepResult ? 1.f : 0.f, published ? 1.f : 0.f, g_tailValid ? 1.f : 0.f,
                                          float(clip), ct, float(dbi), g_tail.contact[0], g_tail.contact[1], g_tail.rootVel[0],
                                          g_tail.rootVel[1], g_tail.rootYawRate, g_tail.providedRoot ? 1.f : 0.f, g_tail.rootOffsetX,
@@ -1227,6 +1277,8 @@ int main(int argc, char** argv)
     }
     if (forecastOut)
         std::fclose(forecastOut);
+    if (selOut)
+        std::fclose(selOut);
     motionhost::SetMotionHooks(nullptr);
     motionhost::TestSetQpcTicks(-1);
     if (g_motionLog)

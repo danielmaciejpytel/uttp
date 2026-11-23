@@ -632,7 +632,7 @@ local LAYOUT = {
                                "bodyturn.aimStrafeUnarmed", "bodyturn.turnRateMax", "mm.orientWarp",
                                "mm.slide", "mm.lean", "mm.leanHead", "mm.leanCoverage",
                                "mm.selectionGuards", "mm.aimWorldSmooth", "mm.pelvisPlacement", "mm.bodyHeightSmooth", "mm.handBackBlend", "mm.stepDownReach",
-                               "mm.farJumpGravity", "mm.overlayInertialSwitch", "mm.capsuleForecast" } },
+                               "mm.farJumpGravity", "mm.overlayInertialSwitch", "mm.capsuleForecast", "mm.aimRotation" } },
   --   Debug: the diagnostic logs have one visible list in General (the single switches stay diagnostic level,
   -- console only); camera.aim.occlusion stays visible (detection only, the switch saves its rays)
   { "advanced", "debug", { "camera.aim.occlusion" } },

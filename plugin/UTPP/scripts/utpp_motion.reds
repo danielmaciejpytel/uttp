@@ -106,6 +106,8 @@ public native func UTPPSetMMStepDownReach(on: Bool) -> Void
 public native func UTPPSetMMFarJumpGravity(on: Bool) -> Void
 // Predicted start path at the applied capsule acceleration also for turning and partial-stick starts (off by default).
 public native func UTPPSetMMCapsuleForecast(on: Bool) -> Void
+// Aim rotation sub-mode while aiming: own pivot threshold and pivot / start elapsed-time gate (off by default).
+public native func UTPPSetMMAimRotation(on: Bool) -> Void
 public native func UTPPSetMotionLeanCoverage(coverage: Int32) -> Bool
 // Aim offset on a filtered world direction of the target (hz = smoothing rate, 0 = exact tracking with the catch-up limit).
 public native func UTPPSetMMAimWorldSmoothing(on: Bool, hz: Float) -> Bool
