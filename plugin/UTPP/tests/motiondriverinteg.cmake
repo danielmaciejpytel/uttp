@@ -158,6 +158,9 @@ if(EXISTS "${_utpp_dodge_facing_file}" AND EXISTS "${_utpp_dodge_facing_man}")
              "${_utpp_dodge_facing_native}" "${_utpp_dodge_facing_man_native}")
   endforeach()
   set_tests_properties(utpp_loco_dodge_facing_host_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*drawn heading holds")
+  # mutant 2 runs without the dodge facing hold (JUMPPICK 46): with it the matcher keeps its clip after the fixture's dodge (stick 90 deg
+  # off the held facing) and the warp has no new selection to run on under the clip
+  target_compile_definitions(utpp_loco_dodge_facing_host_mut2 PRIVATE UTPP_JUMPPICK_MUTATION=46)
   set_tests_properties(utpp_loco_dodge_facing_host_mut2 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL [^\n]*shipped options 30 Hz: drawn heading holds")
 endif()
 # StanceGuard on a one-feed ground loss reported only by the physics probe: fade instead of a one-feed cut (tests/StanceGroundLossFadeTest.cpp).
@@ -477,7 +480,8 @@ endforeach()
 # 27 no gait return hold, 28 no start upshift hold (MatcherConfig::startUpshiftHoldS), 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell (check D),
 # 31 the gait return hold's rise test per feed instead of per second (check F, uneven frame times), 32 no turn commit (MatcherConfig::turnCommit, check G),
 # 33 no heading catch-up (MatcherConfig::headingCatchUpS, check K: keyboard-like direction keys), 44 no blocked capsule idle (MapConfig::blockedIdleS,
-# the Male wall window), 45 no loop dwell against a shuffle of the same database (MatcherConfig::loopDwellShuffle, the Female loop vs shuffle window);
+# the Male wall window), 45 no loop dwell against a shuffle of the same database (MatcherConfig::loopDwellShuffle, the Female loop vs shuffle window),
+# 46 no dodge facing hold (MatcherConfig::dodgeFacingHoldS), 47 no heading catch-up after the dodge facing hold;
 # each must print a FAIL line of the churn checks. Arguments: <data dir> <v1 database> <slice dir>.
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/data" _utpp_churn_slices)
 add_executable(utpp_mm_loco_churn_rt tests/MMChurnTest.cpp src/MotionHost.cpp src/MotionDriver.cpp src/MutationSelect.hpp)
@@ -486,7 +490,7 @@ target_compile_options(utpp_mm_loco_churn_rt PRIVATE ${UTPP_WARNINGS} /EHsc)
 target_compile_definitions(utpp_mm_loco_churn_rt PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV UTPP_RUNTIME_MUTATION_JUMPPICK)
 target_link_libraries(utpp_mm_loco_churn_rt PRIVATE bcrypt)
 add_test(NAME utpp_mm_loco_churn_test COMMAND utpp_mm_loco_churn_rt "${_utpp_mdmotion_data_native}" "${_utpp_capbrake_v1db}" "${_utpp_churn_slices}")
-foreach(_m 24 25 26 27 28 29 30 31 32 33 44 45)
+foreach(_m 24 25 26 27 28 29 30 31 32 33 44 45 46 47)
     add_test(NAME utpp_mm_loco_churn_mut${_m} COMMAND utpp_mm_loco_churn_rt "${_utpp_mdmotion_data_native}" "${_utpp_capbrake_v1db}" "${_utpp_churn_slices}")
     if(_m EQUAL 32)
         set(_utpp_churn_fail "FAIL turn played through")

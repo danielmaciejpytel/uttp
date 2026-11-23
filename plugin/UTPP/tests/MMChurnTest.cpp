@@ -62,7 +62,8 @@
 // 33 no heading catch-up (check K), 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered),
 // 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered), 44 no blocked
 // capsule idle (flick_180_sprint cruise (Male, wall) 10 > 6), 45 no loop dwell against a shuffle of the same database (sprint_dash
-// dash_right (loop vs shuffle) 7 > 5).
+// dash_right (loop vs shuffle) 7 > 5), 46 no dodge facing hold (MatcherConfig::dodgeFacingHoldS) and 47 no heading catch-up after it
+// (Male sprint_dash dash_right 10 and 7 > 6).
 // Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
@@ -495,6 +496,9 @@ int main(int argc, char** argv)
         // (the swing alone: from its first feed to the dodge impulse, at most two changes; main 5 and 3)
         {"churn_dash_sweep_left.feed", {{"sprint_dash dash_left (stick sweep)", 573.001f, 575.001f, 3}, {"sprint_dash dash_left (swing to the dodge)", 573.05f, 573.50f, 2}}},
         {"churn_dash_sweep_back.feed", {{"sprint_dash dash_back (stick sweep)", 713.182f, 715.182f, 4}, {"sprint_dash dash_back (swing to the dodge)", 713.20f, 713.65f, 2}}},
+        // Male 2026-11-18 13:07, sprint_dash dash_right: the dodge comes during a reversal start, the body turn holds the facing 120 deg off the
+        // travel for 0.6 s (the dodge clip); 10 changes in 2 s before the dodge facing hold (game 9), 6 with it
+        {"churn_dash_facing_man.feed", {{"sprint_dash dash_right (dodge facing, Male)", 427.858f, 429.858f, 6}}, true},
         // check L only (budget 99 = the change count is not checked): Female 2026-11-14 10:00 sprint_again and run_arc_right / accel, 09:02
         // run_arc_left / arc_90, Male 10:45 sprint_start_stop / run_start (game 16.5, 17.6, 16.8 and 15.6 cm)
         {"footlock_sprint_again.feed", {{"sprint_dash sprint_again (foot lock)", 685.775f, 688.775f, 99, false, false, false, -1, 15.0f}}},
