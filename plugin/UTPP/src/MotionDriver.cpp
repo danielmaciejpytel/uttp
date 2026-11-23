@@ -358,7 +358,7 @@ bool g_overlayInertialSwitchOn = true; // SetOverlayInertialSwitch (default on, 
 int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_capsuleForecastOn = false; // SetCapsuleForecast (MapConfig::capsuleForecast, mm.capsuleForecast)
-bool g_aimRotationOn = false;     // SetAimRotation (MapConfig::aimRotation, mm.aimRotation)
+bool g_aimRotationOn = true;      // SetAimRotation (MapConfig::aimRotation, mm.aimRotation)
 int32_t g_prevPickClip = -1;      // clip of the last search result (MapContext::currentPickAgeS)
 float g_pickAgeS = 1.0e9f;        // time since that clip was picked (s); large = no pick since the last reset
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)

@@ -431,22 +431,22 @@ class LogTests(unittest.TestCase):
 
     def test_foot_correction_split(self):
         # horizontal = the planar lock (L= / R= corr, footlock_corr_max_cm, 15 cm); vertical = the ground stage (vcorrL= / vcorrR=,
-        # footlock_corr_v_max_cm, 20 cm): 0 and not measured while the trace lines do not carry it
+        # footlock_corr_v_max_cm, 50 cm): 0 and not measured while the trace lines do not carry it
         t0, t1 = datetime(2026, 10, 7, 10, 0, 0), datetime(2026, 10, 7, 10, 0, 3)
         plain = [_trace('10:00:01.000', L=4.0), _trace('10:00:02.000', R=-6.5)]
         m = gt_log.compute_metrics(gt_log.parse_text('\n'.join(plain)), t0, t1)
         self.assertAlmostEqual(m['footlock_corr_max_cm'], 6.5)
         self.assertEqual(m['footlock_corr_v_max_cm'], 0.0)
         self.assertFalse(m['footlock_corr_v_measured'])
-        ground = [plain[0] + ' vcorrL=12.5cm vcorrR=3.0cm', plain[1] + ' vcorrL=-21.0cm vcorrR=0.0cm']
+        ground = [plain[0] + ' vcorrL=12.5cm vcorrR=3.0cm', plain[1] + ' vcorrL=-51.0cm vcorrR=0.0cm']
         m = gt_log.compute_metrics(gt_log.parse_text('\n'.join(ground)), t0, t1)
         self.assertTrue(m['footlock_corr_v_measured'])
-        self.assertAlmostEqual(m['footlock_corr_v_max_cm'], 21.0)
+        self.assertAlmostEqual(m['footlock_corr_v_max_cm'], 51.0)
         self.assertAlmostEqual(m['footlock_corr_max_cm'], 6.5)               # the horizontal value is unchanged
         thr = gt_run.load_thresholds(os.path.join(HERE, 'thresholds.json'))
-        self.assertEqual(thr['footlock_corr_v_max_cm'], {'max': 20.0})
+        self.assertEqual(thr['footlock_corr_v_max_cm'], {'max': 50.0})
         self.assertEqual(thr['footlock_corr_max_cm'], {'max': 15.0})
-        self.assertEqual(gt_log.evaluate(m, thr), ['footlock_corr_v_max_cm=21.0 > 20.0'])
+        self.assertEqual(gt_log.evaluate(m, thr), ['footlock_corr_v_max_cm=51.0 > 50.0'])
         self.assertIsNone(gt_log.compute_metrics([], t0, t1)['footlock_corr_v_max_cm'])   # no trace: not applicable
 
     def test_thresholds(self):

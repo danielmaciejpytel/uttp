@@ -535,7 +535,7 @@ void Native_SetMMCapsuleForecast(RED4ext::IScriptable*, RED4ext::CStackFrame* aF
     SetCapsuleForecast(v);
     pluginlog::LogInfo("UTPPSetMMCapsuleForecast(%d) -> 1", v ? 1 : 0);
 }
-// aim rotation sub-mode while aiming (MapConfig::aimRotation; CET utpp_motion mm.aimRotation, default off)
+// aim rotation sub-mode while aiming (MapConfig::aimRotation; CET utpp_motion mm.aimRotation, default on)
 void Native_SetMMAimRotation(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     bool v = false;

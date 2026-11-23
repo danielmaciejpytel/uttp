@@ -199,7 +199,7 @@ bool SelectionGuards();
 // query trajectory ramps at the applied capsule acceleration also when the body faces away from the input, at a partial stick and
 // with a turning input. Read on every Step.
 void SetCapsuleForecast(bool aOn);
-// Aim rotation sub-mode (CET mm.aimRotation, default off; MapConfig::aimRotation): while aiming in the strafe rotation mode the
+// Aim rotation sub-mode (CET mm.aimRotation, default on; MapConfig::aimRotation): while aiming in the strafe rotation mode the
 // chooser's IsPivoting uses the Aim pivot threshold and the pivot / start elapsed-time gate (motiontraj::IsPivotingAim). Read on
 // every Step.
 void SetAimRotation(bool aOn);

@@ -784,7 +784,7 @@ enum class FacingSource : uint8_t
 #define UTPP_CAPSULE_SPEED_QUERY_DEFAULT 0
 #endif
 #ifndef UTPP_CAPSULE_SPEED_RATE_DEFAULT
-#define UTPP_CAPSULE_SPEED_RATE_DEFAULT 0
+#define UTPP_CAPSULE_SPEED_RATE_DEFAULT 1
 #endif
 #ifndef UTPP_VELOCITY_PREDICATES_DEFAULT
 #define UTPP_VELOCITY_PREDICATES_DEFAULT 0
@@ -1046,11 +1046,11 @@ struct MapConfig
     bool directionalStartSlowMargin = true; // the half-future margin of slow targets (motiontraj::IsStartingDirectional)
     // ShouldTurnInPlace angle (degrees). motiontraj::kTurnInPlaceDeg (50) = the previous angle; the rest / shot turn admission keeps it.
     float turnInPlaceDeg = motiontraj::kTurnInPlacePredicateDeg;
-    // Aim rotation sub-mode (mm.aimRotation, default off): while aiming in the strafe rotation mode, IsPivoting uses aimPivotDeg (10)
+    // Aim rotation sub-mode (mm.aimRotation, default on): while aiming in the strafe rotation mode, IsPivoting uses aimPivotDeg (10)
     // in place of the strafe 30 deg and is held off while a pivot / start pick is not older than aimPivotGateS
     // (motiontraj::IsPivotingAim). Everything else of the strafe mode (facing, sprint cone, trajectory) is unchanged.
     // false = the strafe IsPivoting, bit for bit.
-    bool aimRotation = false;
+    bool aimRotation = true;
     float aimPivotDeg = motiontraj::kPivotAim;
     float aimPivotGateS = motiontraj::kPivotAimGateS;
 };

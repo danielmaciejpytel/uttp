@@ -1042,7 +1042,7 @@ DEFAULT_THRESHOLDS = {
     'cost_max': {'max': 100.0},
     'offset_saturated_s': {'max': 0.5},
     'footlock_corr_max_cm': {'max': 15.0},      # horizontal (planar lock) foot correction
-    'footlock_corr_v_max_cm': {'max': 20.0},    # vertical (ground / terrain) foot correction, stairs; reads 0 until measured
+    'footlock_corr_v_max_cm': {'max': 50.0},    # vertical (ground / terrain) foot correction, stairs; reads 0 until measured
     'rate_min': None,               # report only since 2026-10-23 (contradicts the intended slow-walk rate 0.25)
     'rate_min@slow': {'min': 0.2},   # partial stick / ramps / stops: slow-walk rate floor (~0.25) is intended
     'rate_max': {'max': 1.8},

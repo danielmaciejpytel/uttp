@@ -51,7 +51,7 @@
 --   mm.capsuleForecast bool, default false (DLL default off) - the predicted path of the movement also ramps at the game's own
 --                  acceleration when V starts away from the facing, with a partly tilted stick or while the camera turns (the
 --                  straight full-stick start already does); developer option (native UTPPSetMMCapsuleForecast).
---   mm.aimRotation bool, default false (DLL default off) - while aiming and moving, a change of the movement direction may pick a
+--   mm.aimRotation bool, default true (DLL default on) - while aiming and moving, a change of the movement direction may pick a
 --                  pivot animation from 10 deg (the strafe threshold is 30 deg), but not within 0.5 s of a pivot or start pick;
 --                  developer option (native UTPPSetMMAimRotation).
 --   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
@@ -104,7 +104,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = false, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "standard",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
@@ -1126,9 +1126,9 @@ function M.RegisterSettings(core)
     label = "motion: predicted path for turning starts (experimental)",
     desc = "The animation choice predicts the path of a start at the game's own acceleration also when V starts away from the facing, or with a partly tilted stick. Off (default) = only straight full-stick starts use it.",
     apply = function(v) M.SetOption("capsuleForecast", v == true) end })
-  core.Register({ key = "mm.aimRotation", section = "motion", type = "bool", default = false,
-    label = "motion: aim rotation mode (experimental)",
-    desc = "While aiming and moving, a change of the movement direction may pick a pivot animation from a smaller angle, but not within half a second of the last pivot or start. Off (default) = the strafe pivot angle.",
+  core.Register({ key = "mm.aimRotation", section = "motion", type = "bool", default = true,
+    label = "motion: aim rotation mode",
+    desc = "While aiming and moving, a change of the movement direction may pick a pivot animation from a smaller angle, but not within half a second of the last pivot or start (default). Off = the strafe pivot angle.",
     apply = function(v) M.SetOption("aimRotation", v == true) end })
   core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
     choices = { { "standard", "Standard" }, { "wide", "Wide" } },

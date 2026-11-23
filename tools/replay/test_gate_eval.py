@@ -81,11 +81,21 @@ class GateTest(unittest.TestCase):
         self.assertEqual(g['verdict'], 'FAIL')
 
     def test_hard_limits(self):
-        # clip changes (mean and busiest window) and Feed cost stay absolute: the same value on both sides still fails
-        for over, key in (({'rt_clip_changes_s': 3.2}, 'rt_clip_changes_s'), ({'rt_clip_step_max': 3.67}, 'rt_clip_step_max'),
-                          ({'rt_feed_p95': 260.0}, 'rt_feed_p95')):
-            before = side(**over)        # same before: no relative change, only the absolute limit can fail
-            g = self.gate(side(**over), before=before)
+        # Feed cost stays absolute: the same value on both sides still fails
+        g = self.gate(side(rt_feed_p95=260.0), before=side(rt_feed_p95=260.0))
+        self.assertEqual(g['verdict'], 'FAIL')
+        self.assertTrue(g['hard'][0].startswith('rt_feed_p95'))
+        # clip changes (mean and busiest scored step) are judged against the baseline (user decision 2026-11-23): the same value
+        # above the limit on both sides is pre-existing; worse than such a baseline, or crossing the limit from below, fails
+        for key, v in (('rt_clip_changes_s', 3.2), ('rt_clip_step_max', 3.67)):
+            g = self.gate(side(**{key: v}), before=side(**{key: v}))
+            self.assertEqual(g['hard'], [], key)
+            self.assertEqual(len(g['preexisting']), 1, key)
+            self.assertIn('already in the baseline', g['preexisting'][0])
+            g = self.gate(side(**{key: v + 0.3}), before=side(**{key: v}))
+            self.assertEqual(g['verdict'], 'FAIL', key)
+            self.assertIn('worse than the baseline', g['hard'][0])
+            g = self.gate(side(**{key: v}), before=side(**{key: 2.5}))
             self.assertEqual(g['verdict'], 'FAIL', key)
             self.assertTrue(g['hard'][0].startswith(key))
         g = ge.evaluate(result(side(rt_corr_max=15.5), side(rt_corr_max=15.5)), None, corr_limit=35.0)['woman']
@@ -122,15 +132,15 @@ class GateTest(unittest.TestCase):
         self.assertTrue(any('vertical foot correction not measured' in n for n in g['notes']))
         g = self.gate(side())                                                      # older results: no key at all
         self.assertTrue(any('not measured' in n for n in g['notes']))
-        # measured: limit 20 cm, judged against the baseline like the horizontal one
-        g = self.gate(side(rt_corr_v_max=18.0, rt_corr_v_measured=1.0), before=side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0))
+        # measured: limit 50 cm (user decision 2026-11-23, stairs), judged against the baseline like the horizontal one
+        g = self.gate(side(rt_corr_v_max=29.0, rt_corr_v_measured=1.0), before=side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0))
         self.assertEqual(g['hard'], [])
         self.assertFalse(any('vertical' in n for n in g['notes']))
-        g = self.gate(side(rt_corr_v_max=21.0, rt_corr_v_measured=1.0), before=side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0))
+        g = self.gate(side(rt_corr_v_max=51.0, rt_corr_v_measured=1.0), before=side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0))
         self.assertEqual(g['verdict'], 'FAIL')
-        self.assertTrue(g['hard'][0].startswith('rt_corr_v_max 21.00 > 20.0'))
-        g = ge.evaluate(result(side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0), side(rt_corr_v_max=21.0, rt_corr_v_measured=1.0)),
-                        None, corr_v_limit=25.0)['woman']
+        self.assertTrue(g['hard'][0].startswith('rt_corr_v_max 51.00 > 50.0'))
+        g = ge.evaluate(result(side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0), side(rt_corr_v_max=51.0, rt_corr_v_measured=1.0)),
+                        None, corr_v_limit=55.0)['woman']
         self.assertEqual(g['hard'], [])
         # the horizontal limit is not affected by the vertical one
         g = self.gate(side(rt_corr_max=16.0, rt_corr_v_max=16.0, rt_corr_v_measured=1.0))
@@ -144,7 +154,9 @@ class GateTest(unittest.TestCase):
         self.assertEqual(g['hard'], [])
         self.assertEqual(len(g['hard_before']), 1)
         self.assertTrue(g['hard_before'][0].startswith('rt_clip_step_max 3.670 > 3.0'))
-        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=3.33), before=b)
+        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=3.33), before=b)     # better, still above: pre-existing
+        self.assertEqual(g['hard'], [])
+        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=3.70), before=b)     # worse than the baseline: FAIL
         self.assertEqual(g['verdict'], 'FAIL')
         # the busiest window anywhere is a report only: no hard limit
         g = self.gate(side(rt_clip_win_max=9.3))
