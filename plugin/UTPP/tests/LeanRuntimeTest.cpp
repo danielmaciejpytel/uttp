@@ -246,6 +246,94 @@ static void TestEstimator(const ln::LeanPack& aPack)
     }
 }
 
+// ---- body frame of the lateral acceleration (strafe rotation: the character faces the camera) ---------------------------------------
+static void TestBodyFrame(const ln::LeanPack& aPack)
+{
+    lr::Params prm;
+    const float dt = 1.0f / 60.0f;
+    // body right = right of the velocity heading: the same lean as the heading frame, frame by frame
+    {
+        lr::LeanRuntime a, b;
+        a.Bind(aPack);
+        b.Bind(aPack);
+        Sim sim;
+        sim.omega = 1.5f;
+        float maxDiff = 0.0f;
+        for (int i = 0; i < 360; ++i)
+        {
+            sim.Tick(dt);
+            a.Step(aPack, prm, Moving(sim.vx, sim.vy), dt);
+            lr::Signals s = Moving(sim.vx, sim.vy);
+            const float sp = std::hypot(sim.vx, sim.vy);
+            s.bodyFrame = true;
+            s.bodyRightX = sim.vy / sp;
+            s.bodyRightY = -sim.vx / sp;
+            b.Step(aPack, prm, s, dt);
+            maxDiff = std::max(maxDiff, std::fabs(a.Tel().lat - b.Tel().lat));
+        }
+        Check(maxDiff < 1e-4f, "body frame = heading frame when the body faces the velocity (max diff " + std::to_string(maxDiff) + ")");
+    }
+    // facing +y, running sideways to the right (+x) and speeding up at 3 m/s^2: the heading frame sees no sideways acceleration,
+    // the body frame leans to the right (towards the acceleration, as the reference lean of the strafing character)
+    for (const bool body : {false, true})
+    {
+        lr::LeanRuntime rt;
+        rt.Bind(aPack);
+        float v = 1.0f, mean = 0.0f;
+        int n = 0;
+        for (int i = 0; i < 60; ++i)
+        {
+            v += 3.0f * dt;
+            lr::Signals s = Moving(v, 0.0f);
+            s.bodyFrame = body;
+            s.bodyRightX = 1.0f;
+            s.bodyRightY = 0.0f;
+            rt.Step(aPack, prm, s, dt);
+            if (i >= 30)
+            {
+                mean += rt.Tel().lat;
+                ++n;
+            }
+        }
+        mean /= static_cast<float>(n);
+        if (body)
+            Check(mean > 0.2f, "body frame: sideways acceleration to the right leans right (lat " + std::to_string(mean) + ")");
+        else
+            Check(std::fabs(mean) < 0.02f, "heading frame: acceleration along the heading gives no lean (lat " + std::to_string(mean) + ")");
+    }
+    // facing +y, running to the right and curving forward (left turn of the velocity): the turn accelerates the body forward, so
+    // the body frame keeps the sideways lean small while the heading frame leans the body to its left (away from the travel)
+    for (const bool body : {false, true})
+    {
+        lr::LeanRuntime rt;
+        rt.Bind(aPack);
+        Sim sim;
+        sim.theta = -0.35f; // heading 20 deg right of +x, curving left through +x
+        sim.omega = 1.5f;
+        float mean = 0.0f;
+        int n = 0;
+        for (int i = 0; i < 28; ++i) // 0.47 s: the heading sweeps -20 .. +20 deg
+        {
+            sim.Tick(dt);
+            lr::Signals s = Moving(sim.vx, sim.vy);
+            s.bodyFrame = body;
+            s.bodyRightX = 1.0f;
+            s.bodyRightY = 0.0f;
+            rt.Step(aPack, prm, s, dt);
+            if (i >= 14)
+            {
+                mean += rt.Tel().lat;
+                ++n;
+            }
+        }
+        mean /= static_cast<float>(n);
+        if (body)
+            Check(std::fabs(mean) < 0.2f, "body frame: a forward acceleration of the body gives little sideways lean (lat " + std::to_string(mean) + ")");
+        else
+            Check(mean < -0.3f, "heading frame: the same curve leans the body to its left (lat " + std::to_string(mean) + ")");
+    }
+}
+
 // ---- polarity of the pack samples ---------------------------------------------------------------------------------------------------
 static void TestPolarity(const ln::LeanPack& aPack, const ov::OverlayFile* aOv)
 {
@@ -604,6 +692,7 @@ int main(int argc, char** argv)
         if (body == 0)
         {
             TestEstimator(pack);
+            TestBodyFrame(pack);
             TestGates(pack, haveOv ? &ovf : nullptr);
             TestCurve(pack);
         }
