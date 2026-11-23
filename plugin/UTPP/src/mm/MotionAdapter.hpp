@@ -1463,6 +1463,18 @@ inline void WriteRateSpeedScale(S& s, float aScale)
     if constexpr (requires { s.rateSpeedScale = aScale; })
         s.rateSpeedScale = aScale;
 }
+// Capsule cm per mapped cm of the crouch map (game gameCrouchPoint m/s -> cmc.crouchSpeed cm/s: 2.7 -> 225, 1.2) while the stance is
+// Crouch, 1 otherwise: the chooser raises the play rate of the crouch loops by it (MatcherConfig::crouchCapsuleRate), so a loop plays its
+// root at the capsule speed instead of the mapped query speed. Never below 1.
+template <class S>
+inline void WriteCrouchRateScale(S& s, const MapConfig& c, int aStance)
+{
+    if constexpr (requires { s.crouchRateScale = 1.0f; })
+    {
+        const float k = aStance == 1 ? SpeedScaleFor(c, 1, c.gameCrouchPoint) : 0.0f;
+        s.crouchRateScale = k > 0.0f && std::isfinite(k) ? std::fmax(1.0f / k, 1.0f) : 1.0f;
+    }
+}
 template <class S>
 inline void WriteDirectionalInputs(S& s, const motiontraj::States& st)
 {
@@ -2200,6 +2212,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
                            ? CapsuleRateScaleForMode(c.capsuleSpeedRate, CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
                            : 1.0f;
     WriteRateSpeedScale(s, m.rateSpeedScale);
+    WriteCrouchRateScale(s, c, st.stance);
     WriteDirectionalInputs(s, st);
     s.verticalVelocityCmS = vel.z;
     s.movementState = st.movementState;

@@ -38,6 +38,8 @@ namespace
 int g_fail = 0, g_checks = 0;
 bool g_report = false;
 bool g_hash = false; // --hash: per-frame FNV-1a of the composed pose bytes (identity of two builds outside the stance fades)
+// --crouch-stop <list>: crouch stop options switched on in every replay (motion::ApplyCrouchStopOptions; inspection)
+std::string g_crouchStop;
 void Check(bool aOk, const char* aWhat, double aA = 0.0, double aB = 0.0)
 {
     ++g_checks;
@@ -305,6 +307,7 @@ std::vector<Frame> Replay(Model& m, const std::vector<Row>& aRows, double aHolst
     motion::ChooserMatcher matcher;
     std::string err;
     motion::MatcherConfig cfg;
+    motion::ApplyCrouchStopOptions(cfg, g_crouchStop);
     if (!matcher.Init(&m.db, &m.table, cfg, err))
     {
         std::printf("FAIL: matcher init %s\n", err.c_str());
@@ -1430,6 +1433,8 @@ int main(int argc, char** argv)
             g_report = true;
         else if (!std::strcmp(argv[i], "--hash"))
             g_hash = true;
+        else if (!std::strcmp(argv[i], "--crouch-stop") && i + 1 < argc)
+            g_crouchStop = argv[++i];
         else if (!std::strcmp(argv[i], "--ankles") && i + 2 < argc)
         {
             ankles.emplace_back(std::strtod(argv[i + 1], nullptr), std::strtod(argv[i + 2], nullptr));

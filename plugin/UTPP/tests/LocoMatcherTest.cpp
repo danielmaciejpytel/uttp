@@ -143,6 +143,7 @@ struct Frame
     std::string clip, db;
     int clipIndex = -1;
     bool jumped = false;
+    bool fullLegFade = false, stanceFade = false; // BlendRequest flags of a jump (CR-6)
     float blend = 0, cost = 0, clipTime = 0, rate = 1;
     float hipsZ = 0, headZ = 0, leanDeg = 0, kneeL = 0, kneeR = 0; // blended base pose, model space (m, deg)
     float armL = 0, armR = 0; // upper arm (Arm -> ForeArm) angle from straight down, model space (deg)
@@ -303,6 +304,8 @@ std::vector<Frame> Replay(Model& m, const std::vector<Row>& aRows, const Variant
         fr.db = std::string(m.db.DbName(uint32_t(res.database)));
         fr.jumped = res.jumped;
         fr.blend = res.jumped ? res.blend.blendTime : 0.0f;
+        fr.fullLegFade = res.jumped && res.blend.fullLegFade;
+        fr.stanceFade = res.jumped && res.blend.stanceChange;
         fr.cost = res.cost;
         fr.clipTime = res.clipTime;
         fr.rate = res.playRate;
@@ -532,6 +535,99 @@ void CrouchRateChecks(const std::vector<Frame>& aFr, const std::vector<Frame>& a
     PrintDiff("CR-3 slowCrouchLoops on vs off", d);
     Check(!d.empty() && AllWithin(d, {{59.0, 69.6}, {73.7, 79.1}, {83.0, 88.1}}), "CR-3 identity: on / off differ only in the crouch segments (differing frames)",
           double(d.size()));
+}
+
+// CR-5 (MatcherConfig::crouchCapsuleRate): at the full crouch stick the capsule moves at ~2.72 m/s while the crouch map puts the query at the
+// 225 cm/s crouch cap, so the plain rate (query / pose speed, ~0.92) played Crouch_Loop_F at ~2.27 m/s and the planted feet slid ~45 cm/s (the
+// stride warp only shortens). The rate now plays the loop root at the capsule speed. Crouch_Loop_F root speed at rate 1: 227 cm/s / 0.919.
+constexpr float kCrouchLoopFRootMs = 2.47f;
+float FullCrouchRootOverCapsule(const std::vector<Frame>& aFr)
+{
+    float lo = 9.f;
+    for (size_t i = At(aFr, kCwalkFull0); i < At(aFr, kCwalkFull1); ++i)
+        if (aFr[i].gait == 1 && aFr[i].clip == "M_Neutral_Crouch_Loop_F" && aFr[i].capsuleMs > 2.0f)
+            lo = std::fmin(lo, aFr[i].rate * kCrouchLoopFRootMs / aFr[i].capsuleMs);
+    return lo;
+}
+void CrouchCapsuleRateChecks(const std::vector<Frame>& aFr, const std::vector<Frame>& aOff)
+{
+    const float lo = FullCrouchRootOverCapsule(aFr);
+    Check(lo >= 0.97f && lo < 9.f, "CR-5 full crouch walk: Crouch_Loop_F root at its play rate keeps up with the capsule (min root / capsule)", lo);
+    const float off = FullCrouchRootOverCapsule(aOff);
+    Check(off < 0.9f, "CR-5 negative control (crouchCapsuleRate off): the plain rate leaves the loop root behind the capsule (min root / capsule)", off);
+    // only crouched loops change: the stand run / sprint / jumps / walk are bit-identical
+    const auto d = Diff(aFr, aOff);
+    PrintDiff("CR-5 crouchCapsuleRate on vs off", d);
+    Check(!d.empty() && AllWithin(d, {{59.0, 69.6}, {73.7, 79.1}, {83.0, 88.1}}), "CR-5 identity: on / off differ only in the crouch segments (differing frames)",
+          double(d.size()));
+}
+
+// CR-6 (MatcherConfig::crouchStopLegFade / crouchStopBlendS / crouchStopLowerFeet), on top of the CR-5 rate: the crouch stop picks out of crouched
+// ground locomotion (the feed's crouch stops 66.949 and 76.462) carry the full leg fade and the lengthened blend; no other pick does, the
+// selection is unchanged (the options act on the fade only), and the lower-feet option flags exactly those picks as a stance fade.
+// The foot heights through these fades are checked in tests/LocoStanceTest.cpp (FS-12..FS-16 with the CR-6 variant).
+// CR-7 (crouchStopStopWeights) and the stop brake gate change the selection: the first only inside crouch stop episodes.
+void CrouchStopChecks(Model& m, const std::vector<Row>& aRows, const Variant& aRate, const std::vector<Frame>& aRateFr)
+{
+    const auto isCrouchStopPick = [&](const Frame& f) {
+        return f.jumped && f.stance == 1 && f.mode == 0 && f.db.find("Crouch_Walk_Stops") != std::string::npos &&
+               steer::ClassifyClip(std::string_view(f.clip)) == steer::kClassStop;
+    };
+    Variant fade = aRate;
+    fade.cfg.crouchStopLegFade = true;
+    fade.cfg.crouchStopBlendS = 0.8f;
+    fade.cfg.crouchStopLowerFeet = true;
+    const std::vector<Frame> fr = Replay(m, aRows, fade);
+    int picks = 0, flagged = 0, stray = 0, longOk = 0, stanceOk = 0, strayStance = 0;
+    for (size_t i = 1; i < fr.size(); ++i)
+    {
+        const Frame& f = fr[i];
+        const bool entry = isCrouchStopPick(f) && fr[i - 1].stance == 1 && fr[i - 1].mode == 0 &&
+                           steer::ClassifyClip(std::string_view(fr[i - 1].clip)) != steer::kClassStop;
+        if (entry)
+        {
+            ++picks;
+            flagged += f.fullLegFade;
+            longOk += f.blend >= 0.8f - 1e-4f;
+            stanceOk += f.stanceFade;
+            std::printf("CR-6 crouch stop pick t %.3f %s ct %.3f blend %.2f fullLegFade %d stance %d\n", f.t, f.clip.c_str(), double(f.clipTime),
+                        double(f.blend), f.fullLegFade ? 1 : 0, f.stanceFade ? 1 : 0);
+        }
+        else if (f.jumped)
+        {
+            stray += f.fullLegFade && f.stance == 1 && f.mode == 0; // a slide family switch may carry it, never a crouched ground pick
+            strayStance += f.stanceFade && f.stance == fr[i - 1].stance && f.stance == 1 && f.mode == 0 &&
+                           std::string_view(f.clip).find("Crouch_Stop") != std::string_view::npos;
+        }
+    }
+    Check(picks >= 2 && flagged == picks && longOk == picks && stanceOk == picks,
+          "CR-6 every crouch stop pick out of crouched locomotion fades its legs with the Hips over >= 0.8 s and takes the stance foot permission (picks, flagged)",
+          picks, flagged + longOk + stanceOk - 2 * picks);
+    Check(stray == 0 && strayStance == 0, "CR-6 no other crouched ground pick takes the full leg fade or the stance permission (stray picks)", stray, strayStance);
+    int offFlagged = 0;
+    for (const Frame& f : aRateFr)
+        offFlagged += isCrouchStopPick(f) && (f.fullLegFade || f.blend > 0.5f + 1e-4f);
+    Check(offFlagged == 0, "CR-6 negative control (options off): no crouch stop pick has the full leg fade or a blend above 0.5 s (picks)", offFlagged);
+    const auto d = Diff(fr, aRateFr);
+    Check(d.empty(), "CR-6 identity: the fade options leave the selection unchanged (differing frames)", double(d.size()));
+
+    // CR-7: the stop weights change only crouch stop episodes (from a frame playing a crouch stop clip to the end of its stick-released episode)
+    Variant sw = aRate;
+    sw.cfg.crouchStopStopWeights = true;
+    const std::vector<Frame> frS = Replay(m, aRows, sw);
+    const auto ds = Diff(frS, aRateFr);
+    PrintDiff("CR-7 crouchStopStopWeights on vs off", ds);
+    bool inside = ds.size() != 1 || ds[0] >= 0.0;
+    for (const double t : ds)
+    {
+        const size_t i = At(frS, t);
+        const bool crouchStop = i < frS.size() && frS[i].stance == 1 &&
+                                (frS[i].db.find("Crouch_Walk_Stops") != std::string::npos || aRateFr[i].db.find("Crouch_Walk_Stops") != std::string::npos ||
+                                 frS[i].moveState == 0);
+        inside = inside && crouchStop;
+    }
+    Check(inside, "CR-7 identity: the stop weights differ only on crouched frames of a crouch stop or the idle after it (differing frames)",
+          double(ds.size()));
 }
 
 // ST-1 (MatcherConfig::slowWalkStartTail): the two slow starts from rest of the feed (cwalk_slow 60.99, crouch stick 49 cm/s; walk 98.49, stand
@@ -827,20 +923,34 @@ int main(int argc, char** argv)
         Variant off = prod;
         off.cfg.slowCrouchLoops = false;
         CrouchRateChecks(fr, Replay(*model, rows, off));
+        Variant noCrouchRate = prod;
+        noCrouchRate.cfg.crouchCapsuleRate = false;
+        const std::vector<Frame> frPlainCrouchRate = Replay(*model, rows, noCrouchRate);
+        // CR-5 is off by default (its crouch stop entry, see CR-6 in tests/LocoStanceTest.cpp): the mechanism is verified switched on
+        Variant crouchRate = prod;
+        crouchRate.cfg.crouchCapsuleRate = true;
+        const std::vector<Frame> frCrouchRate = Replay(*model, rows, crouchRate);
+        CrouchCapsuleRateChecks(frCrouchRate, frPlainCrouchRate);
+        Check(Diff(fr, frPlainCrouchRate).empty(), "CR-5 default off: production equals the plain crouch rate (differing frames)",
+              double(Diff(fr, frPlainCrouchRate).size()));
+        CrouchStopChecks(*model, rows, crouchRate, frCrouchRate);
         Variant noTail = prod;
         noTail.cfg.slowWalkStartTail = false;
         StartTailChecks(fr, Replay(*model, rows, noTail));
         Variant noHold = prod;
         noHold.cfg.crouchToStandHoldS = 0.0f;
         RiseChecks(fr, Replay(*model, rows, noHold));
-        Variant noStop = prod;
+        // STOP runs on the plain crouch rate (CR-5 off): the feed's only re-picked stop is a crouched one that the CR-5 rate no longer re-picks,
+        // and the commit mechanism needs that re-pick to be verified
+        Variant noStop = noCrouchRate;
         noStop.cfg.stopCommitTailS = 0.0f;
         const std::vector<Frame> frNoStop = Replay(*model, rows, noStop);
         // production holds only the standing stops (stopCommitCrouch off): the recorded feed's stops that a re-pick crossed are crouched,
         // so production equals commit-off here; the mechanism is verified with the crouched stops held too
-        Check(Diff(fr, frNoStop).empty(), "STOP production (standing stops only): identical to commit-off on this feed, whose re-picked stop is crouched (differing frames)",
-              double(Diff(fr, frNoStop).size()));
-        Variant stopCrouch = prod;
+        Check(Diff(frPlainCrouchRate, frNoStop).empty(),
+              "STOP production (standing stops only): identical to commit-off on this feed, whose re-picked stop is crouched (differing frames)",
+              double(Diff(frPlainCrouchRate, frNoStop).size()));
+        Variant stopCrouch = noCrouchRate;
         stopCrouch.cfg.stopCommitCrouch = true;
         StopChecks(Replay(*model, rows, stopCrouch), frNoStop, *model);
         SlideChecks(fr, "prod", prod.cfg.slideEntryMaxS > 0.0f);
