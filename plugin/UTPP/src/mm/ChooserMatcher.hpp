@@ -739,9 +739,10 @@ inline void TestGuardsOff(MatcherConfig& c)
     // UTPP_TEST_STRAFE_SECTOR = "<delay s>,<override>": the Shooter sector delay of the replay tools (tuning only)
     if (const char* s = std::getenv("UTPP_TEST_STRAFE_SECTOR"); s && *s)
     {
-        float d = c.strafeSectorDelayS, o = c.strafeSectorDelayOverride;
-        if (std::sscanf(s, "%f,%f", &d, &o) >= 1)
-            c.strafeSectorDelayS = d, c.strafeSectorDelayOverride = o;
+        char* end = nullptr;
+        c.strafeSectorDelayS = std::strtof(s, &end);
+        if (end && *end == ',')
+            c.strafeSectorDelayOverride = std::strtof(end + 1, nullptr);
     }
     const char* e = std::getenv("UTPP_TEST_GUARD_OFF");
     if (!e || !*e)

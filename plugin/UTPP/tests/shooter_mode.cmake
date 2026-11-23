@@ -28,7 +28,8 @@ endforeach()
 # body-turn switch (A7), 10 the root lock has no rate bound, 11 the orbit does not reset the ownership of a hidden offset; with the slide bundle
 # (--slide): 2 no spin suppression, 9 spin suppression follows the windowed shooterModeActive; 12 the CET hip-fire lease is no H2 exclusion, 13 the speed
 # ratio is answered in first person / on skipped feeds, 15 a root reseed drops the held heading, 16 the root does not follow the actor in the air,
-# 17 the speed ratio takes the gait from the stick size instead of the gait the chooser plays.
+# 17 the speed ratio takes the gait from the stick size instead of the gait the chooser plays, 18 the chooser is never told that Shooter mode strafes
+# (no direction sector delay: the arc feed changes the clip more than 3.0 times per second).
 # A setup problem (missing data, a feed that does not load) prints SETUP-ERROR and exits with code 3, never "FAIL ": a mutation build is only
 # killed by a real assertion.
 if(DEFINED _utpp_mdmotion_data_native AND UTPP_MMDB_TEST_FILE)
@@ -37,7 +38,7 @@ if(DEFINED _utpp_mdmotion_data_native AND UTPP_MMDB_TEST_FILE)
     set(_utpp_fn_args "${_utpp_mdmotion_data_native}" "${UTPP_MMDB_TEST_FILE}" "${_utpp_fn_flick}" "${_utpp_fn_arc}")
     set(_utpp_fn_slide_prefix "${_utpp_mdmotion_data}/utpp_motion_woman_knee_twistfix_slide")
     # removed 2026-11-05 (review R6, R7), which cheaper test kills the same site: utpp_ShooterModeStrafeMap_mut5, _mut12, _mut2, _mut9
-    foreach(_m 0 3 4 10 11 13 15 16 17)
+    foreach(_m 0 3 4 10 11 13 15 16 17 18)
         if(_m EQUAL 0)
             set(_tgt utpp_motion_driver_shooter_mode_test)
         else()
