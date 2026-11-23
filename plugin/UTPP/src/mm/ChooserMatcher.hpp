@@ -489,11 +489,13 @@ struct MatcherConfig
     // ungated there. Measured with 0.25: the 66.949 crouch stop passes, but the stand stops get worse (stop lock path p95 +4 / +8 cm).
     // 0.25 by default with crouchCapsuleRate.
     float stopBrakeGate = 0.25f;
-    // Sprint starts without reselection: every entry of PSD_Dense / Sparse_Stand_Sprint_Starts is treated as DisableReselection (its rows
-    // are not picked again while it plays as a candidate, like the entries the bake flags), so a sprint start runs through to its loop.
-    // false = the entry flags of the bake only. Measured on the six default sessions: Male total -1.6 % (start slide p95 -12 %), Female
-    // +0.5 %.
-    bool sprintStartNoReselect = true;
+    // Sprint starts without reselection: entries of PSD_Dense / Sparse_Stand_Sprint_Starts are treated as DisableReselection (their rows
+    // are not picked again while the clip plays as a candidate, like the entries the bake flags), so a sprint start runs through to its loop.
+    // 0 = the entry flags of the bake only (default); 1 = every sprint start entry; 2 = the sprint starts without the reface starts.
+    // Mode 1 measured on the six default sessions: Male total -1.6 % (start slide p95 -12 %), Female +0.5 %, but the Female full-stick
+    // 180 deg sprint start (churn slices flick_180_sprint / accel) changes clips 5 times in 1.5 s = 3.33 per second (bound 3.0): the
+    // excluded reface start is swapped for the opposite side reface start. Off until that is resolved.
+    uint8_t sprintStartNoReselect = 0;
 
     // ST-1 (slow walk start tail; same recording, replay tests/LocoMatcherTest.cpp). false = the UE DoNotInterrupt behaviour bit for bit. A start
     // from rest is IsStarting on its first stick update only (the game capsule reaches its slow target within ~3 feeds), so the chooser returns the
@@ -789,6 +791,9 @@ inline void TestGuardsOff(MatcherConfig& c)
         if (end && *end == ',')
             c.strafeSectorDelayOverride = std::strtof(end + 1, nullptr);
     }
+    // UTPP_TEST_SPRINT_START_DR = "1" / "2": MatcherConfig::sprintStartNoReselect of the replay tools and tests (evaluation only)
+    if (const char* s = std::getenv("UTPP_TEST_SPRINT_START_DR"); s && *s)
+        c.sprintStartNoReselect = static_cast<uint8_t>(std::strtoul(s, nullptr, 10));
     const char* e = std::getenv("UTPP_TEST_GUARD_OFF");
     if (!e || !*e)
         return;
@@ -815,7 +820,7 @@ inline void TestGuardsOff(MatcherConfig& c)
     if (has("jumpout")) c.jumpOutNoBack = c.jumpOutFallHandover = false;
     if (has("strafesector")) c.strafeSectorDelayS = 0.0f;
     if (has("stopgate")) c.stopBrakeGate = 0.0f;
-    if (has("sprintreselect")) c.sprintStartNoReselect = false;
+    if (has("sprintreselect")) c.sprintStartNoReselect = 0;
 }
 // Replay tools only: UTPP_TEST_CROUCH_STOP = the option list of ApplyCrouchStopOptions, applied after Init copied the configuration.
 inline void ApplyCrouchStopOptions(MatcherConfig& c, std::string_view aList);
@@ -959,7 +964,11 @@ public:
                                                                           aDb->DbName(d).starts_with("PSD_Sparse_Stand_Sprint_Starts"));
                 const DatabaseRecord& D = aDb->Db(d);
                 for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
-                    m_entryNoReselect[e] = sprintStarts || (aDb->Entry(e).flags & kEntryDisableReselection) ? 1 : 0;
+                {
+                    const bool sprintStart = sprintStarts && (m_cfg.sprintStartNoReselect == 1 ||
+                                                              aDb->ClipName(aDb->Entry(e).clip).find("Reface") == std::string_view::npos);
+                    m_entryNoReselect[e] = sprintStart || (aDb->Entry(e).flags & kEntryDisableReselection) ? 1 : 0;
+                }
             }
         }
         m_dbCrouchWalkLoops.assign(aDb->NumDatabases(), 0); // CR-3 (MatcherConfig::slowCrouchLoops)

@@ -923,16 +923,22 @@ int main(int argc, char** argv)
         Variant off = prod;
         off.cfg.slowCrouchLoops = false;
         CrouchRateChecks(fr, Replay(*model, rows, off));
+        // the plain crouch rate without the stop brake gate (the configuration before CR-5 and the gate became the default)
         Variant noCrouchRate = prod;
         noCrouchRate.cfg.crouchCapsuleRate = false;
+        noCrouchRate.cfg.stopBrakeGate = 0.0f;
         const std::vector<Frame> frPlainCrouchRate = Replay(*model, rows, noCrouchRate);
-        // CR-5 is off by default (its crouch stop entry, see CR-6 in tests/LocoStanceTest.cpp): the mechanism is verified switched on
-        Variant crouchRate = prod;
+        // the CR-5 rate alone (no gate), against the plain rate
+        Variant crouchRate = noCrouchRate;
         crouchRate.cfg.crouchCapsuleRate = true;
         const std::vector<Frame> frCrouchRate = Replay(*model, rows, crouchRate);
         CrouchCapsuleRateChecks(frCrouchRate, frPlainCrouchRate);
-        Check(Diff(fr, frPlainCrouchRate).empty(), "CR-5 default off: production equals the plain crouch rate (differing frames)",
-              double(Diff(fr, frPlainCrouchRate).size()));
+        // CR-5 is on by default together with the stop brake gate (its late crouch stop entry stays out, see CR-6 in tests/LocoStanceTest.cpp)
+        Check(prod.cfg.crouchCapsuleRate && prod.cfg.stopBrakeGate > 0.0f, "CR-5 default on: production has the crouch capsule rate and the stop brake gate");
+        Variant rateGate = crouchRate;
+        rateGate.cfg.stopBrakeGate = prod.cfg.stopBrakeGate;
+        const auto dRateGate = Diff(fr, Replay(*model, rows, rateGate));
+        Check(dRateGate.empty(), "CR-5 default on: production equals the CR-5 rate with the stop brake gate (differing frames)", double(dRateGate.size()));
         CrouchStopChecks(*model, rows, crouchRate, frCrouchRate);
         Variant noTail = prod;
         noTail.cfg.slowWalkStartTail = false;
@@ -940,13 +946,13 @@ int main(int argc, char** argv)
         Variant noHold = prod;
         noHold.cfg.crouchToStandHoldS = 0.0f;
         RiseChecks(fr, Replay(*model, rows, noHold));
-        // STOP runs on the plain crouch rate (CR-5 off): the feed's only re-picked stop is a crouched one that the CR-5 rate no longer re-picks,
+        // STOP runs on the plain crouch rate (CR-5 and the stop brake gate off): the feed's only re-picked stop is a crouched one that the CR-5 rate no longer re-picks,
         // and the commit mechanism needs that re-pick to be verified
         Variant noStop = noCrouchRate;
         noStop.cfg.stopCommitTailS = 0.0f;
         const std::vector<Frame> frNoStop = Replay(*model, rows, noStop);
-        // production holds only the standing stops (stopCommitCrouch off): the recorded feed's stops that a re-pick crossed are crouched,
-        // so production equals commit-off here; the mechanism is verified with the crouched stops held too
+        // the stop commit holds only the standing stops (stopCommitCrouch off): the recorded feed's stops that a re-pick crossed are crouched,
+        // so the plain rate equals commit-off here; the mechanism is verified with the crouched stops held too
         Check(Diff(frPlainCrouchRate, frNoStop).empty(),
               "STOP production (standing stops only): identical to commit-off on this feed, whose re-picked stop is crouched (differing frames)",
               double(Diff(frPlainCrouchRate, frNoStop).size()));
