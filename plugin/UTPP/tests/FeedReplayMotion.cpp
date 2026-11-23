@@ -30,6 +30,7 @@
 // source clips sampled with the same SamplePose at 1/60 s (data-derived); Evaluate wall time.
 // --no-g10: MatcherConfig::steadyRunLoops off (steady Run gait rules, ChooserMatcher.hpp G10), for before / after runs.
 // --crouch-stop LIST: crouch stop options switched on (motion::ApplyCrouchStopOptions), for before / after runs.
+// --test-env N=V: one UTPP_TEST_* switch of the matcher (e.g. UTPP_TEST_GUARD_OFF=crouchrate,stopgate) for this process only; repeatable.
 // --facing game|motion: adapter::MapConfig::facingSource (Game = feed playerYaw, MotionActor = motion CMC actor yaw, MotionAdapter.hpp).
 #include <algorithm>
 #include <chrono>
@@ -1120,6 +1121,16 @@ int main(int argc, char** argv)
             g_steadyRun = false;
         else if (a == "--crouch-stop" && i + 1 < argc)
             g_crouchStop = argv[++i];
+        else if (a == "--test-env" && i + 1 < argc)
+        {
+            // NAME=VALUE of one UTPP_TEST_* switch of the matcher, set for this process only (one side of a before / after comparison)
+            const std::string kv = argv[++i];
+            const size_t eq = kv.find('=');
+            if (eq == std::string::npos || kv.rfind("UTPP_TEST_", 0) != 0)
+                badArg = true;
+            else
+                _putenv_s(kv.substr(0, eq).c_str(), kv.substr(eq + 1).c_str());
+        }
         else if (a == "--footlock")
             g_fl.on = true;
         else if (a == "--brief")

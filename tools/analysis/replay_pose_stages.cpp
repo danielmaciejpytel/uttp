@@ -91,6 +91,8 @@
 //                       (inspection only; the other outputs are unchanged)
 //   --crouch-stop LIST  crouch stop options of the chooser switched on (motion::ApplyCrouchStopOptions names, comma separated; set as
 //                       UTPP_TEST_CROUCH_STOP for the matcher's Init). Not passed: the build configuration.
+//   --test-env N=V      set one UTPP_TEST_* switch of the matcher (e.g. UTPP_TEST_GUARD_OFF=crouchrate,stopgate) for this process only;
+//                       repeatable. Lets one side of a before / after comparison differ from the other.
 //   --lean-pack 0|1     1: the driver loads the motion lean pack <data>\utpp_lean_<body>.bin for both bodies, as the game does from the
 //                       mod data folder, so the lean body / head layers run and the head lead gives way to the lean head layer when the
 //                       settings ask for both (mm.lean + mm.leanHead, the menu defaults). Not passed / 0: no lean pack (earlier replays:
@@ -586,6 +588,18 @@ int main(int argc, char** argv)
             forceDrawn = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--crouch-stop") == 0)
             _putenv_s("UTPP_TEST_CROUCH_STOP", argv[i + 1]);
+        else if (std::strcmp(argv[i], "--test-env") == 0)
+        {
+            // NAME=VALUE of one UTPP_TEST_* switch of the matcher, set for this process only (one side of a before / after comparison)
+            const std::string kv = argv[i + 1];
+            const size_t eq = kv.find('=');
+            if (eq == std::string::npos || kv.rfind("UTPP_TEST_", 0) != 0)
+            {
+                std::fprintf(stderr, "--test-env needs UTPP_TEST_<name>=<value>, got %s\n", kv.c_str());
+                return 2;
+            }
+            _putenv_s(kv.substr(0, eq).c_str(), kv.substr(eq + 1).c_str());
+        }
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
