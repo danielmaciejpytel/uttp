@@ -335,7 +335,7 @@ M.MIGRATED_KEYS = MIGRATED_KEYS
 -- default (it cannot be told from a value nobody chose); any other stored value is a choice and stays. Save writes the
 -- current revision, so the replacement happens once.
 M.DEFAULTS_REVISION_KEY = "core.defaultsRevision"
-M.DEFAULTS_REVISION = 4
+M.DEFAULTS_REVISION = 5
 M.DEFAULT_CHANGES = {
   { rev = 1, key = "melee.guard", from = false, to = true },
   { rev = 2, key = "body.shadowProxy", from = true, to = false },
@@ -346,6 +346,9 @@ M.DEFAULT_CHANGES = {
   { rev = 3, key = "perspective.scene", from = true, to = false },
   { rev = 3, key = "camera.side", from = 0.5, to = 1 },
   { rev = 4, key = "mm.neutralAim", from = false, to = true },
+  { rev = 5, key = "mm.walkSpeed", from = 1.6, to = 1.9 },
+  { rev = 5, key = "bodyturn.aimJogSpeed", from = 3.3, to = 3.85 },
+  { rev = 5, key = "mm.overlayInertialSwitch", from = false, to = true },
 }
 S.fileRevision = nil
 

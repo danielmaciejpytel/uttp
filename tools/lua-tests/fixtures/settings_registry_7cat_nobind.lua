@@ -3105,7 +3105,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=4\r\
+core.defaultsRevision=5\r\
 core.settingsReset=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
@@ -3729,7 +3729,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=4\r\
+core.defaultsRevision=5\r\
 core.settingsReset=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
