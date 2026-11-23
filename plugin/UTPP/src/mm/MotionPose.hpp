@@ -301,6 +301,9 @@ struct FrameInfo
     float barrelErrAfterDeg = 0.0f;   // barrel - want, after the residual
     float barrelResidualDeg = 0.0f;   // applied residual rotation (residual x aim offset alpha), + = up
     float barrelTargetDist = 0.0f;    // |P - muzzle| (m)
+    float barrelYawBiasDeg = 0.0f;    // applied heading bias (added to the spine yaw of the aim offset, + = left)
+    float barrelYawErrDeg = 0.0f;     // barrel heading - heading of muzzle -> P, after the aim offset (+ = left of P)
+    float barrelYawLearnErrDeg = 0.0f; // the part of it the heading channel learns (minus the lag of the aim offset)
     int32_t barrelAxis = 0;           // axis id used (aim::AxisVector)
     float barrelLoopWeight = 0.0f;    // aim offset alpha the loop worked with
     uint32_t barrelExcluded = 0;      // BarrelExclusion bits (no learning, residual fading)
@@ -1871,6 +1874,8 @@ private:
             spineYaw = (1.0f - g) * yaw + g * ramp - (hcSpill - hcGrid) / alpha; // alpha > 0 here (the early return above)
             m_gridAppliedWeight = alpha * g;
         }
+        if (aBarrel)
+            spineYaw += m_barrelYawCmd; // the heading bias of the barrel loop (BarrelPitchLoop heading channel)
         aInfo.aoSpineYawDeg = spineYaw;
         const ov::Regions& r = m_ov->Masks();
 #if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 3
@@ -1920,8 +1925,14 @@ private:
             }
         }
         m_barrelCmd = m_barrel.Command(m_barrelSlots, m_barrelW, m_barrelSlotCount, run, aDt);
+#if defined(UTPP_POSEV2_AO_MUTATION) && UTPP_POSEV2_AO_MUTATION == 26
+        m_barrelYawCmd = 0.0f; // mutation 26: the heading channel never applies (pitch-only loop)
+#else
+        m_barrelYawCmd = m_barrel.YawApplied();
+#endif
         aInfo.barrelActive = true;
         aInfo.barrelBiasDeg = m_barrelCmd;
+        aInfo.barrelYawBiasDeg = m_barrelYawCmd;
         aInfo.barrelAxis = aIn.barrelAxis;
         return true;
 #endif
@@ -1975,6 +1986,19 @@ private:
         aInfo.barrelExcluded = ex;
         if (ex == 0)
             m_barrel.Learn(m_barrelSlots, m_barrelW, m_barrelSlotCount, m.errDeg, aDt);
+        if (measured && run)
+        {
+            // Heading channel: the barrel heading error minus the lag of the aim offset behind the raw target (its yaw rate limit,
+            // the spine yaw clamp, the world aim smoothing), which the aim offset owns: what is left is the pose's own heading offset
+            // plus the bias already applied, and the bias learns it away.
+            const float rawYaw = aIn.aimYawDeg - (aIn.aimSmoothDeltaValid ? aIn.aimSmoothDeltaYawDeg : 0.0f);
+            const float lag = std::remainder(aInfo.aoYawDeg - rawYaw, 360.0f);
+            const float learnErr = m.yawErrDeg - lag;
+            aInfo.barrelYawErrDeg = m.yawErrDeg;
+            aInfo.barrelYawLearnErrDeg = learnErr;
+            if (ex == 0 && aInfo.aoGridShare <= 0.0f && std::fabs(lag) <= kBarrelYawLearnMaxLagDeg && std::isfinite(learnErr))
+                m_barrel.LearnYaw(m_barrelSlots, m_barrelW, m_barrelSlotCount, learnErr, aDt);
+        }
         // residual of this frame (BarrelLoopBegin stepped it); its next target integrates the error left after it
         const float residual = m_barrel.Residual() * alpha;
         aInfo.barrelResidualDeg = residual;
@@ -2443,6 +2467,7 @@ private:
     float m_barrelW[kBarrelSlotMax]{};
     int m_barrelSlotCount = 0;
     float m_barrelCmd = 0.0f;
+    float m_barrelYawCmd = 0.0f; // heading bias of this frame (BarrelPitchLoop::YawApplied), added to the aim offset's spine yaw
     int m_spine2 = -1;
     std::unique_ptr<ov::Pose> m_aoPre;
     std::unique_ptr<ov::Additive> m_aoAdd, m_aoA, m_aoB;
