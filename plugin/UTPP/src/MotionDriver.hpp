@@ -529,6 +529,7 @@ struct SelectionDiag
     int32_t interrupt = 0; // motion::Interrupt of the update
     bool searched = false, jumped = false, turnHold = false;
     float cost = 0.0f, continuingCost = 0.0f;
+    float turnAngleDeg = 0.0f; // MapState turn angle (input acceleration vs velocity) of that Step
 };
 SelectionDiag SelectionDiagnostics();
 void SetLogger(void (*aLog)(const char*));          // fallback reason lines / the first fault cause

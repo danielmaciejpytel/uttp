@@ -6051,6 +6051,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_selDiag.cost = r.cost < 1e30f ? r.cost : -1.0f;
     g_selDiag.continuingCost = r.continuingCost < 1e30f ? r.continuingCost : -1.0f;
     g_selDiag.turnHold = r.turnHold;
+    g_selDiag.turnAngleDeg = b.map.st.turnAngle;
     AirStepLocked(b, cs, air, vzFeed, dt);
     g_airDiag.chooserDbMask = r.dbMask;
     g_airDiag.takeoffSeed = airSeedUsed;
