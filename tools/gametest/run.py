@@ -114,7 +114,7 @@ def load_plan(path: str) -> dict:
 METRIC_COLUMNS = ['duration_s', 'mm_driver', 'samples', 'trace_coverage', 'motion_samples', 'motion_changes',
                   'motion_transitions_per_s', 'motion_cost_mean', 'motion_cost_max', 'motion_crouch_fraction', 'base_trace_frozen',
                   'trans_lines', 'transitions_per_s', 'cost_mean',
-                  'cost_max', 'offset_saturated_s', 'offset_max_cm', 'footlock_corr_max_cm', 'rate_min',
+                  'cost_max', 'offset_saturated_s', 'offset_max_cm', 'footlock_corr_max_cm', 'footlock_corr_v_max_cm', 'rate_min',
                   'rate_mean', 'rate_max', 'speed_mean', 'speed_max', 'bodyturn_active_s', 'bodyturn_cmds',
                   'bodyturn_err_max_deg', 'cam_yaw_net_deg', 'cam_yaw_abs_deg', 'cam_pl_gap_max_deg',
                   'loco_fraction', 'crouch_fraction', 'stand_fraction', 'gate_lines', 'stick_min', 'stick_max',

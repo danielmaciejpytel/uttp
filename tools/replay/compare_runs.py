@@ -25,6 +25,19 @@ after every feed (stop and start forecasts as in the game); a build that does no
 Other replay options (utpp_replay_pose_stages header): "--air-feed 1" feeds the air fields as the game does; "--motion-log 1" makes the
 --world-slide contact track the reconstruction from the replay's MOTION trace (the game side's model) instead of the tail contact.
 --root <variant root>: replay and world slide read <root>/Data (motion databases included).
+With --world-slide every runtime-path output is also read per feed row (session_windows) and one WINDOW line per session is printed:
+  stepMax = the most driver clip changes per second over the harness steps the in-game gate scored in that session
+  (<run>/gametest/summary.json, PASS / FAIL steps), each step window put on the feed clock through the MOTION trace (needs
+  --motion-log 1: the replay trace and the game log share the driver time t=); the same windows and ratio as the in-game limit
+  (the session mean hides a short burst such as a fast running arc; table row 'clip changes / s, busiest scored step', stepGame =
+  the in-game value of that step, 'sessions without scored steps' counts sessions it could not measure);
+  clipWinMax = the most driver clip changes inside any --clip-window (default 3 s) of feed time / the window, anywhere in the session
+  (a report: it also counts the time between steps and unscored steps; table row 'clip changes / s, busiest window');
+  corrMax = the largest horizontal foot lock correction (cm) with its time, class and clip; corrVMax = the largest vertical (ground)
+  correction when the output carries one ('-' = not measured: the build has no ground stage, the table row reads 0 and 'vertical foot
+  correction measured' 0; a ground stage reports it as the RUNTIME key ikCorrVMaxCm and / or the meta fields corrVL_cm / corrVR_cm);
+  budgetTrips = cost budget trip lines in the --motion-log 1 trace (a trip pauses the motion pose: the pose rows then depend on the
+  machine load, not only on the code; table row 'cost budget trips').
 Exit code 1 when a tool fails or a run reports REPLAY_FAILS != 0.
 """
 import argparse
@@ -44,6 +57,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runtime_world_slide as rws  # noqa: E402
 
 # Reference sessions: Female (all moves, keyboard, crouch) and Male (the same three).
+# Window of the busiest-window clip change measure (s of feed time; the in-game steps that the 3.0 / s limit judges last about 3 s)
+CLIP_WINDOW_S = 3.0
+CLOCK_TOLERANCE_S = 0.05   # spread allowed between the matched trace lines that place the harness steps on the feed clock
 DEFAULT_RUNS = ['woman:20261118-121140', 'woman:20261118-122228', 'woman:20261118-122643',
                 'man:20261118-130756', 'man:20261118-131922', 'man:20261118-132319']
 
@@ -116,6 +132,8 @@ def main():
     ap.add_argument('--aa', type=int, default=0)
     ap.add_argument('--margin')
     ap.add_argument('--margin-out')
+    ap.add_argument('--clip-window', type=float, default=CLIP_WINDOW_S,
+                    help='window (s of feed time) of the busiest-window clip change measure (--world-slide only)')
     a = ap.parse_args()
     work = a.work or os.path.join(a.root, 'Build', 'work', '_tmp', 'compare_runs')
     if a.world_slide:
@@ -156,8 +174,11 @@ def main():
     ws_parts = {}
     if ws_jobs:
         with ProcessPoolExecutor(max_workers=max(1, min(a.jobs, len(ws_jobs)))) as procs:
+            logs_of = {rid: log for lst in sessions.values() for rid, _, log in lst}
             futs = {k: procs.submit(world_slide_parts, out, feed, body, rws.db_path_of(a.root, body),
-                                    'trace' if rws.motion_log_requested(builds[k[0]][2]) else 'tail') for k, (_, out, feed, body) in ws_jobs.items()
+                                    'trace' if rws.motion_log_requested(builds[k[0]][2]) else 'tail', a.clip_window,
+                                    os.path.join(night, k[2]), logs_of[k[2]])
+                    for k, (_, out, feed, body) in ws_jobs.items()
                     if res[(k[0], k[1], 'stages', k[2], 0)][0] == 0}
             for k, f in futs.items():
                 try:
@@ -193,7 +214,13 @@ def main():
             ('pelvis_z_p95', 'replay: pelvis |z| p95, cm (FLPEL)'),
             ('clip_changes_s', 'replay: clip changes / s'),
             ('rt_clip_changes_s', 'runtime: clip changes / s'),
+            ('rt_clip_step_max', 'runtime: clip changes / s, busiest scored step'),
+            ('rt_clip_step_missing', 'runtime: sessions without scored steps'),
+            ('rt_clip_win_max', 'runtime: clip changes / s, busiest window'),
             ('rt_corr_max', 'runtime: foot correction max, cm'),
+            ('rt_corr_v_max', 'runtime: foot correction vertical max, cm'),
+            ('rt_corr_v_measured', 'runtime: vertical foot correction measured'),
+            ('rt_budget_trips', 'runtime: cost budget trips'),
             ('rt_corr_p95', 'runtime: foot correction p95, cm'),
             ('rt_proc_turn', 'runtime: procedural yaw per turn, deg'),
             ('rt_proc_share', 'runtime: procedural yaw share'),
@@ -225,6 +252,21 @@ def main():
             if a.world_slide:
                 parts = [ws_parts.get((side, body, rid)) for rid, _, _ in lst]
                 if all(p is not None for p in parts):
+                    wins = [(rid, p['win']) for (rid, _, _), p in zip(lst, parts)]
+                    for rid, w in wins:
+                        print(window_line(side, body, rid, w))
+                    top = max(wins, key=lambda x: x[1]['clip_rate'])[1]
+                    m['rt_clip_win_max'] = top['clip_rate']
+                    sr = [w['step_rate'] for _, w in wins if w.get('step_rate') is not None]
+                    if sr:
+                        m['rt_clip_step_max'] = max(sr)
+                    m['rt_clip_step_missing'] = float(sum(1 for _, w in wins if w.get('step_rate') is None))
+                    trips = [w['budget_trips'] for _, w in wins if w['budget_trips'] is not None]
+                    if trips:
+                        m['rt_budget_trips'] = float(sum(trips))
+                    vs = [w['corr_v_max'] for _, w in wins if w['corr_v_max'] is not None]
+                    if vs:
+                        m['rt_corr_v_max'] = max(vs)
                     tab = rws.class_table(parts)
                     for cls in rws.ws.CLASSES:
                         t = tab[cls]
@@ -245,6 +287,13 @@ def main():
                          rt_feed_p50=statistics.median(r['feedUsP50'] for v in rts.values() for r in v if r),
                          rt_feed_p95=statistics.median(r['feedUsP95'] for v in rts.values() for r in v if r))
                 m['rt_history'] = sum(r.get('historySearches', 0) for r in firsts)
+                # vertical (ground) foot correction: RUNTIME key ikCorrVMaxCm of a build with a ground stage; without it the
+                # value reads 0 and rt_corr_v_measured = 0 (not measured)
+                vrt = [r['ikCorrVMaxCm'] for r in firsts if 'ikCorrVMaxCm' in r]
+                if vrt:
+                    m['rt_corr_v_max'] = max(vrt + ([m['rt_corr_v_max']] if 'rt_corr_v_max' in m else []))
+                m['rt_corr_v_measured'] = 1.0 if 'rt_corr_v_max' in m else 0.0
+                m.setdefault('rt_corr_v_max', 0.0)
                 for c in ('stop', 'start'):
                     n = sum(r.get(c + 'Picks', 0) for r in firsts) or 1.0
                     nd = sum(r.get(c + 'DriftN', 0) for r in firsts) or 1.0
@@ -287,12 +336,198 @@ def main():
     return 1 if bad else 0
 
 
-def world_slide_parts(prefix, feed, body, db_path=None, contact='tail'):
+def world_slide_parts(prefix, feed, body, db_path=None, contact='tail', window_s=CLIP_WINDOW_S, run_dir=None, game_log=None):
     """Pooled world-slide samples of one runtime-path output (all feed rows); db_path = the database the replay read; contact = tail /
-    trace (runtime_world_slide.offline_session)."""
+    trace (runtime_world_slide.offline_session). Key 'win' = session_windows() of the same output (clip changes per scored harness
+    step and in the busiest window, foot correction maxima with their place, budget trips of the trace file); run_dir / game_log =
+    the recorded session (its harness steps and the game log that places them on the feed clock)."""
     import numpy as np
-    ses, _ = rws.offline_session(prefix, feed, body, db_path=db_path, contact=contact)
-    return rws.pool(ses, np.ones(len(ses.fsec), dtype=bool))
+    ses, m = rws.offline_session(prefix, feed, body, db_path=db_path, contact=contact)
+    parts = rws.pool(ses, np.ones(len(ses.fsec), dtype=bool))
+    steps = harness_steps(run_dir) if run_dir else None
+    parts['win'] = session_windows(m, ses.cls, ses.clip_names, window_s, prefix + '.motion.log', steps, game_log)
+    return parts
+
+
+def harness_steps(run_dir):
+    """Scored steps of a recorded harness session: [dict(label, t0, t1 (wall datetimes), game_rate)] from gametest/summary.json, the
+    steps the in-game gate judged (verdict PASS / FAIL; SKIP steps and the runner's probe walks are left out); game_rate = the
+    in-game motion_transitions_per_s of the step. None when the session has no harness summary."""
+    import datetime
+    p = os.path.join(run_dir, 'gametest', 'summary.json')
+    if not os.path.isfile(p):
+        return None
+    with open(p, encoding='utf-8') as f:
+        summ = json.load(f)
+    out = []
+    for st in summ.get('steps') or []:
+        if st.get('verdict') not in ('PASS', 'FAIL') or not st.get('t0') or not st.get('t1'):
+            continue
+        t0, t1 = (datetime.datetime.fromisoformat(st[k]) for k in ('t0', 't1'))
+        if t1 <= t0:
+            continue
+        out.append(dict(label='%s#%s/%s' % (st.get('scenario'), st.get('run', 1), st.get('step')), t0=t0, t1=t1,
+                        game_rate=(st.get('metrics') or {}).get('motion_transitions_per_s')))
+    return out
+
+
+def feed_clock_origin(replay_motion_log, game_log):
+    """(wall datetime of feed time 0, matched lines, spread s) from the MOTION lines both logs share: the replay driver runs the
+    recorded feeds, so its trace carries the same driver time t= as the game's, stamped with the feed time (2000-01-01 wall time)
+    instead of the wall time. When the game driver started at another feed row (its t= then differs from the replay by a
+    constant and fewer than 3 lines pair up within CLOCK_TOLERANCE_S), the pick changes (' chg') of the same clip in both traces
+    vote on the offset in CLOCK_TOLERANCE_S bins; the winning bin needs at least 3 votes and 30 % of the shorter change list.
+    None when neither way agrees."""
+    import datetime
+    import statistics as st
+    rep = [e for e in rws.ws.read_motion_log(replay_motion_log) if e['kind'] == 'motion']
+    game = [e for e in rws.ws.read_motion_log(game_log) if e['kind'] == 'motion']
+    day, epoch = datetime.datetime(2000, 1, 1), datetime.datetime(1970, 1, 1)
+    feed_of = {}
+    for e in rep:
+        feed_of.setdefault(e['t'], (e['wall'] - day).total_seconds())
+    offs, seen = [], set()
+    for e in game:
+        if e['t'] in feed_of and e['t'] not in seen:
+            seen.add(e['t'])
+            offs.append((e['wall'] - epoch).total_seconds() - feed_of[e['t']])
+    if len(offs) >= 3 and max(offs) - min(offs) <= CLOCK_TOLERANCE_S:
+        return epoch + datetime.timedelta(seconds=st.median(offs)), len(offs), max(offs) - min(offs)
+    # the driver started at another feed in the game (its t= differs by a constant): vote on the offsets of the pick changes of the
+    # same clip in both traces; the true offset collects the most votes
+    rc = [(e['clip_idx'], (e['wall'] - day).total_seconds()) for e in rep if e['chg']]
+    gc = [(e['clip_idx'], (e['wall'] - epoch).total_seconds()) for e in game if e['chg']]
+    votes = {}
+    for ci, gw in gc:
+        for cj, fr in rc:
+            if ci == cj:
+                b = round((gw - fr) / CLOCK_TOLERANCE_S)
+                votes.setdefault(b, []).append(gw - fr)
+    if not votes:
+        return None
+    best = max(votes, key=lambda b: len(votes[b]) + len(votes.get(b - 1, [])) + len(votes.get(b + 1, [])))
+    near = votes[best] + votes.get(best - 1, []) + votes.get(best + 1, [])
+    if len(near) < max(3, 0.3 * min(len(rc), len(gc))):
+        return None
+    return epoch + datetime.timedelta(seconds=st.median(near)), len(near), max(near) - min(near)
+
+
+def step_rates(t, rows, steps, origin):
+    """[(rate, changes, duration s, label, game rate)] of the scored steps: clip changes of the replay (rows = clip_change_rows) inside
+    each step window put on the feed clock / the step duration, as the in-game gate counts a step."""
+    import numpy as np
+    tc = np.asarray(t, dtype=np.float64)[rows] if rows else np.zeros(0)
+    out = []
+    for s in steps:
+        s0, s1 = (s['t0'] - origin).total_seconds(), (s['t1'] - origin).total_seconds()
+        n = int(np.count_nonzero((tc >= s0) & (tc < s1)))
+        out.append((n / (s1 - s0), n, s1 - s0, s['label'], s['game_rate']))
+    return out
+
+
+# ---------------------------------------------------------------- per-window measures of one runtime-path output
+def clip_change_rows(clip):
+    """Row indices where the driver pick clip changes, counted as the RUNTIME line counts them: a row without a pick (clip < 0)
+    neither counts nor resets the last pick (A, -, A is no change)."""
+    out, last = [], -1
+    for i, c in enumerate(clip):
+        c = int(c)
+        if c < 0:
+            continue
+        if last >= 0 and c != last:
+            out.append(i)
+        last = c
+    return out
+
+
+def busiest_window(t, rows, window_s):
+    """(changes, first row, last row) of the window of window_s seconds of feed time [t0, t0 + window_s) that holds the most clip
+    changes (rows = clip_change_rows); (0, None, None) without changes."""
+    best = (0, None, None)
+    j = 0
+    for i in range(len(rows)):
+        while t[rows[i]] - t[rows[j]] >= window_s:
+            j += 1
+        if i - j + 1 > best[0]:
+            best = (i - j + 1, rows[j], rows[i])
+    return best
+
+
+def _name(names, c):
+    c = int(c)
+    return names[c] if 0 <= c < len(names) else '-'
+
+
+def session_windows(m, cls, names, window_s=None, motion_log=None, steps=None, game_log=None):
+    """Window measures of one runtime-path output (m = meta arrays of runtime_world_slide.load_stages, cls = class per feed row,
+    names = clip names of the database):
+      step_rate / step_label / step_n / step_dur / step_game = the most clip changes per second over the scored harness steps of the
+                  session (harness_steps; the same windows and ratio as the in-game limit; the session mean hides a short burst
+                  such as a fast running arc), placed on the feed clock with feed_clock_origin (needs the --motion-log 1 trace and
+                  the game log); step_game = the in-game value of that step. None without steps or without a clock match;
+      clip_rate = most clip changes inside any window of window_s s of feed time / window_s, anywhere in the session (between steps
+                  and in unscored steps too: a report, it runs well above the in-game step values);
+      corr_max / corr_t / corr_cls / corr_clip = the largest horizontal foot lock correction (cm, either foot) and where it is;
+      corr_v_max (cm) = the largest vertical (ground) correction when the output carries one (meta corrVL_cm / corrVR_cm), else None;
+      budget_trips = cost budget trip lines in the trace file (--motion-log 1; None without the file)."""
+    import numpy as np
+    window_s = window_s or CLIP_WINDOW_S
+    t = np.asarray(m['t'], dtype=np.float64)
+    clip = np.nan_to_num(m['clip'], nan=-1).astype(np.int64)
+    rows = clip_change_rows(clip)
+    n, r0, r1 = busiest_window(t, rows, window_s)
+    out = dict(window_s=window_s, changes=len(rows), secs=float(t[-1] - t[0]) if len(t) > 1 else 0.0, clip_rate=n / window_s,
+               clip_n=n, clip_t0=None, clip_t1=None, clip_cls='-', clip_names=[])
+    if n:
+        sel = [r for r in rows if r0 <= r <= r1]
+        k = [str(cls[r]) for r in sel]
+        prev = next((int(c) for c in clip[r0 - 1::-1] if c >= 0), -1) if r0 > 0 else -1   # the pick the window starts from
+        out.update(clip_t0=float(t[r0]), clip_t1=float(t[r1]), clip_cls=max(set(k), key=k.count),
+                   clip_names=[_name(names, prev)] + [_name(names, clip[r]) for r in sel])
+    corr = np.fmax(np.nan_to_num(m.get('corrL_cm', np.full(len(t), np.nan)), nan=0.0),
+                   np.nan_to_num(m.get('corrR_cm', np.full(len(t), np.nan)), nan=0.0))
+    i = int(np.argmax(corr)) if len(corr) else 0
+    out.update(corr_max=float(corr[i]) if len(corr) else 0.0, corr_t=float(t[i]) if len(t) else None,
+               corr_cls=str(cls[i]) if len(t) else '-', corr_clip=_name(names, clip[i]) if len(t) else '-')
+    if 'corrVL_cm' in m or 'corrVR_cm' in m:
+        v = np.fmax(np.nan_to_num(np.abs(m.get('corrVL_cm', np.zeros(len(t)))), nan=0.0),
+                    np.nan_to_num(np.abs(m.get('corrVR_cm', np.zeros(len(t)))), nan=0.0))
+        j = int(np.argmax(v))
+        out.update(corr_v_max=float(v[j]), corr_v_t=float(t[j]), corr_v_cls=str(cls[j]))
+    else:
+        out['corr_v_max'] = None
+    out['budget_trips'] = None
+    if motion_log and os.path.exists(motion_log):
+        with open(motion_log, encoding='utf-8', errors='replace') as f:
+            out['budget_trips'] = sum(1 for ln in f if 'budget trip' in ln)
+    out.update(step_rate=None, step_n=None, step_dur=None, step_label='-', step_game=None, steps=0, clock_lines=0, clock_spread=None)
+    if steps and motion_log and game_log and os.path.exists(motion_log):
+        org = feed_clock_origin(motion_log, game_log)
+        if org:
+            origin, out['clock_lines'], out['clock_spread'] = org
+            rates = step_rates(t, rows, steps, origin)
+            if rates:
+                r = max(rates, key=lambda x: x[0])
+                out.update(step_rate=r[0], step_n=r[1], step_dur=r[2], step_label=r[3], step_game=r[4], steps=len(rates))
+    return out
+
+
+def window_line(side, body, rid, w):
+    """One WINDOW line of the per-session window measures (gate_eval.py reads it back)."""
+    clips = '>'.join(w['clip_names'][:6]) or '-'
+    st = w.get('step_rate')
+    return ('WINDOW %s %s %s stepMax=%s stepN=%s stepDur=%s stepLabel=%s stepGame=%s steps=%d clockLines=%d clockSpread=%s '
+            'window=%.1f changes=%d secs=%.1f clipWinMax=%.3f clipWinN=%d clipWinAt=%s clipWinCls=%s clipWinClips=%s '
+            'corrMax=%.2f corrAt=%s corrCls=%s corrClip=%s corrVMax=%s budgetTrips=%s'
+            % (side, body, rid, '%.3f' % st if st is not None else '-', w.get('step_n') if st is not None else '-',
+               '%.2f' % w['step_dur'] if st is not None else '-', w.get('step_label', '-'),
+               '%.3f' % w['step_game'] if w.get('step_game') is not None else '-', w.get('steps', 0), w.get('clock_lines', 0),
+               '%.3f' % w['clock_spread'] if w.get('clock_spread') is not None else '-',
+               w['window_s'], w['changes'], w['secs'], w['clip_rate'], w['clip_n'],
+               '%.2f-%.2fs' % (w['clip_t0'], w['clip_t1']) if w['clip_t0'] is not None else '-', w['clip_cls'], clips,
+               w['corr_max'], '%.2fs' % w['corr_t'] if w['corr_t'] is not None else '-', w['corr_cls'], w['corr_clip'],
+               '%.2f' % w['corr_v_max'] if w['corr_v_max'] is not None else '-',
+               w['budget_trips'] if w['budget_trips'] is not None else '-'))
 
 
 if __name__ == '__main__':
