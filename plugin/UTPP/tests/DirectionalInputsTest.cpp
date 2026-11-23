@@ -36,6 +36,7 @@ static MoveDirection From(MoveDirection aPrev, float aAngle, const motiontraj::M
 struct WithScale
 {
     float rateSpeedScale = 1.0f;
+    int rateScaleScope = 0;
 };
 struct WithoutScale
 {
@@ -187,6 +188,9 @@ int main()
         WriteRateSpeedScale(a, 1.2f);
         WriteRateSpeedScale(b, 1.2f);
         Check("rate scale written into a state that declares it", a.rateSpeedScale == 1.2f && b.other == 0.0f);
+        WriteRateScaleScope(a, 2);
+        WriteRateScaleScope(b, 2);
+        Check("rate scale scope written into a state that declares it", a.rateScaleScope == 2 && b.other == 0.0f);
         motiontraj::States st;
         st.moveDirection.current = MoveDirection::RL;
         st.moveDirection.last = MoveDirection::F;
@@ -203,6 +207,9 @@ int main()
         const MapConfig d;
         Check("MapConfig defaults: directional inputs and capsule rate off",
               !d.moveDirection && !d.directionalPredicates && (d.capsuleSpeedRate == CapsuleRateMode::Off || UTPP_CAPSULE_SPEED_RATE_DEFAULT != 0));
+        const motion::ChooserState cs;
+        Check("capsule rate scope defaults: every pick in the map, no scale in the chooser state",
+              d.capsuleRateScope == 0 && cs.rateSpeedScale == 1.0f && cs.rateScaleScope == 0);
     }
     std::printf("%d PASS %d FAIL\n", passed, failed);
     return failed ? 1 : 0;

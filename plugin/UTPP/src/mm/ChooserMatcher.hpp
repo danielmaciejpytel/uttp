@@ -116,6 +116,11 @@ struct ChooserState
     // owns input/goal lifetime; 0 disables the policy, +1 is CCW/left, -1 CW/right.
     int startTurnDirection = 0;
     int32_t committedStartTurnClip = -1;
+    // Capsule speed play rate (adapter MapConfig::capsuleSpeedRate): capsule speed per mapped speed at the chooser speed. It scales the
+    // query speed of the play rate only (the search keeps the mapped query); 1 = off. rateScaleScope: which picks take it (0 every pick,
+    // 1 loop clips only, 2 every pick but a start clip).
+    float rateSpeedScale = 1.0f;
+    int rateScaleScope = 0;
     // Slide (motion, sprint -> crouch). FEED fields written by adapter::MapToChooser (the matcher / chooser side that reads them
     // is owned by the motion session; chooser.json "slide" section: MovementMode value sliding_value, inputs MovementDirection
     // and MovementMode_LastFrame). Defaults = no slide: a feed that never slides leaves movementModeLast = the previous frame's
@@ -2134,6 +2139,16 @@ public:
             res.cost = jump ? bestCost : res.continuingCost;
             m_cur.playRate = rate.wanted;
             m_lastRateRatio = rate.ratio;
+            // ChooserState::rateSpeedScale: the rate of the selected pose follows the capsule speed (only the picks of
+            // ChooserState::rateScaleScope); the search above stays on the mapped query
+            if (aState.rateSpeedScale != 1.0f && std::isfinite(aState.rateSpeedScale) && aState.rateSpeedScale > 0.0f && rate.valid &&
+                rate.channels > 0 && rate.poseSpeed > 1e-6f && m_cfg.maxPlayRate - rateMin > 1e-4f && m_cur.clip >= 0 &&
+                (aState.rateScaleScope == 1 ? (db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) != 0
+                 : aState.rateScaleScope == 2 ? m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 0 : true))
+            {
+                m_lastRateRatio = rate.querySpeed * aState.rateSpeedScale / rate.poseSpeed; // rate2::Calculate querySpeedScale
+                m_cur.playRate = std::clamp(m_lastRateRatio, rateMin, m_cfg.maxPlayRate);
+            }
         }
         else
             m_cur.valid = false; // invalid search result: UE resets FMotionMatchingState::SearchResult (no continuing pose)
