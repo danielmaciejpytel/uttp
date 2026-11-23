@@ -49,6 +49,8 @@
 //   --overlay-inertial-switch 0|1  inertialized overlay switch off / on after --settings-log (motiondriver::SetOverlayInertialSwitch,
 //                       the mm.overlayInertialSwitch setting; the settings log call MMOverlayInertialSwitch is applied as well); it acts on
 //                       overlay changes only, so a replay without --aim-camera (overlay always Default) is unchanged by it
+//   --step-down-reach 0|1 short step-downs kept on the ground off / on (the mm.stepDownReach setting: chooser mapping and air
+//                       state, motiondriver::SetStepDownReach + motionhost::SetAirStepDownReach)
 //   --swivel-pole 0|1|2 knee swivel pole of the stance guard: capsule forward / pelvis forward (build default) / foot forward
 //                       (motionhost::SetStancePoleMode)
 //   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
@@ -138,6 +140,8 @@
 namespace utpp::motiondriver
 {
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg);
+void TestSetMapStepDownReach(int32_t aOn);
+void SetStepDownReach(bool aOn);
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
@@ -148,6 +152,7 @@ namespace utpp::motionhost
 {
 void TestSetPelvisPlacement(bool aOn);
 void SetBodyHeightSmooth(bool aOn);
+void SetAirStepDownReach(bool aOn);
 }
 
 namespace
@@ -445,6 +450,7 @@ int main(int argc, char** argv)
     int32_t turnRate = -1;                     // -1 = not passed
     float turnRateMax = -1.0f;                 // < 0 = not passed
     int32_t swivelPole = -1;                   // -1 = not passed
+    int32_t stepDownReach = -1;                // -1 = not passed
     int32_t overlayInertialSwitch = -1;                                          // -1 = not passed
     float aimWorldSmoothHz = -1.0f;            // < 0 = not passed
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
@@ -549,6 +555,8 @@ int main(int argc, char** argv)
             capsuleForecast = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--forecast-dump") == 0)
             forecastDump = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--step-down-reach") == 0)
+            stepDownReach = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--swivel-pole") == 0)
             swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
@@ -724,6 +732,13 @@ int main(int argc, char** argv)
     if (turnFootPhase >= 0)
         motiondriver::SetTurnFootPhase(turnFootPhase != 0);
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
+    if (stepDownReach >= 0)
+    {
+        // the mm.stepDownReach setting: chooser mapping and runtime air state together, as the native switches them
+        motiondriver::SetStepDownReach(stepDownReach != 0);
+        motiondriver::TestSetMapStepDownReach(stepDownReach);
+        motionhost::SetAirStepDownReach(stepDownReach != 0);
+    }
     if (capsuleForecast >= 0)
         motiondriver::SetCapsuleForecast(capsuleForecast != 0);
     FILE* forecastOut = nullptr;
