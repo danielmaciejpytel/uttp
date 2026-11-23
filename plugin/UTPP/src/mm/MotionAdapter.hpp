@@ -2212,6 +2212,12 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
 #endif
     s.dodge = f.psmDetailed == kPsmDodge || dodgeHeld; // dodgeHeld: the decay after it (MapConfig::dodgeGaitHoldS)
     s.psmJump = integ::PsmIsJumpDetail(f.psmDetailed); // fix5/jump: game jump vs walk-off (MatcherConfig::jumpRiseNoOff)
+    // Shooter mode strafes on the ground (MatcherConfig::strafeSectorDelayS); mutation 18: never reported
+#if UTPP_SHOOTER_MODE_MUTATION == 18
+    s.shooterStrafe = false;
+#else
+    s.shooterStrafe = m.shooterModeActive && rot == motiontraj::RotationMode::Strafe && mode == 0 && !slideActive;
+#endif
     s.jumpOutFlight = jumpOutFlight; // fix/jumpout-cam (MatcherConfig::jumpOutNoBack / jumpOutFallHandover)
     // Chooser MovementMode / MovementMode_LastFrame / MovementDirection. Slide off: movementMode = st.movementMode (0 / 1) as
     // before and movementModeLast its previous-frame value. Slide on: MovementMode Sliding and Stance Crouch for the whole PSM
