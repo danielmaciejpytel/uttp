@@ -77,8 +77,8 @@
 --                  The motion driver gets the same mode (native UTPPSetMotionStickSpeedMode 1 / 0, DLL default 1) for its prediction;
 --                  both are sent for every fresh session.
 --                  Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, walk toggle, Tier2 Slow, air: untouched.
---   mm.leanScale float 0 .. 2, default 0.85 (DLL default 0.85) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
---   mm.leanHeadScale float 0 .. 2, default 0.9 (DLL default 0.9) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
+--   mm.leanScale float 0 .. 2, default 0.2 (DLL default 0.2) - amount of the lean on the torso (1 = full strength; first argument of native UTPPSetMotionLeanParams(scale, headScale)).
+--   mm.leanHeadScale float 0 .. 2, default 0.2 (DLL default 0.2) - amount of the head lean (head layer only; second argument of UTPPSetMotionLeanParams; independent of leanScale).
 --   mm.selectionGuards bool, default true (developer option; DLL default on, so no call is made at the default) - clip selection guards of the
 --                  motion matcher as a group (native UTPPSetMotionSelectionGuards); off = every guard off, for A/B tests.
 -- Debug line: UTPPMotionGlue:Status() = glue state + " | " + Game.UTPPGetMotionStatus() (enabled, body, db loaded, fallback
@@ -96,7 +96,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 
 -- wanted state (settings) and what the glue reported last; slide / orientWarp / lean / leanHead / stickSpeed / strideWarp start at the DLL defaults
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
-  lean = true, leanHead = true, leanScale = 0.85, leanHeadScale = 0.9, pelvisYawTrim = 2, shoulderNarrow = 2.5,
+  lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, leanCoverage = "standard",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true }
@@ -833,7 +833,7 @@ function M.SetBarrelLoop(v, api)
   return M.want.barrelLoop
 end
 
--- Lean: three process-lifetime DLL values (defaults on / on / scales 0.85, 0.9); lean, head lean and the scales are sent once while
+-- Lean: three process-lifetime DLL values (defaults on / on / scales 0.2, 0.2); lean, head lean and the scales are sent once while
 -- unknown; afterwards each only when the wanted value changes.
 local unpackArgs = table.unpack or unpack
 local function leanCall(api, field, native, ...)
@@ -1067,13 +1067,15 @@ function M.RegisterSettings(core)
     label = "motion: lean layer head turn",
     desc = "The head lean replaces the head lead while the lean layer is on (they are never combined).",
     apply = function(v) M.SetLeanHead(v == true) end })
-  core.Register({ key = "mm.leanScale", section = "motion", type = "float", default = 0.85, min = 0, max = 2, step = 0.05,
-    label = "motion: lean amount",
-    desc = "Amount of the lean layer (1 = full strength, 0.6 = softer). Scales the torso lean; the head has its own amount.",
+  core.Register({ key = "mm.leanScale", section = "motion", type = "float", default = 0.2, min = 0, max = 2, step = 0.05,
+    label = "Body lean",
+    desc = "How much V's body leans into turns while running or walking (0 = no lean, 1 = full strength, 0.2 = default, a light "
+      .. "lean). The head has its own amount (Head lean).",
     apply = function(v) M.SetLeanScale(v) end })
-  core.Register({ key = "mm.leanHeadScale", section = "motion", type = "float", default = 0.9, min = 0, max = 2, step = 0.05,
-    label = "motion: lean head amount",
-    desc = "Amount of the head lean (1 = full strength, applies to the head layer only; lean amount scales the torso).",
+  core.Register({ key = "mm.leanHeadScale", section = "motion", type = "float", default = 0.2, min = 0, max = 2, step = 0.05,
+    label = "Head lean",
+    desc = "How much V's head tilts into turns while running or walking (0 = no tilt, 1 = full strength, 0.2 = default). "
+      .. "Independent of Body lean.",
     apply = function(v) M.SetLeanHeadScale(v) end })
   core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = true,
     label = "motion: steady aim while turning",

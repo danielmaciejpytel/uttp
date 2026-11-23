@@ -1,6 +1,6 @@
 -- User-chosen defaults (menu screenshots, 2026-10-20): every setting shown in the Mods > UTPP menu has the value the user chose as
 -- its registration default, "Defaults" (utpp_core.ResetAll, the Native Settings restore callback) restores exactly those, a fresh
--- start (no stored settings) sends them to the natives (incl. mm.leanScale / leanHeadScale 0.85 / 0.90) and stored values
+-- start (no stored settings) sends them to the natives (incl. mm.leanScale / leanHeadScale 0.2 / 0.2) and stored values
 -- of existing users still win over the defaults. Real utpp_core + utpp_bodyturn + utpp_body + utpp_motion registry, mocked natives.
 -- Section 6 covers all 167 statically registered keys of the whole reference settings file (also camera, perspective, loothead).
 -- Section 7 registers utpp_vehiclecam into the core (vehicle.* keys, incl. vehicle.forceTppOnEnter and
@@ -34,8 +34,8 @@ local EXPECTED = {
   ["mm.shinobiBonusReload"] = true, -- "Reload animation during Shinobi bonus": on by default since defaults revision 3
   -- Animation v2
   ["mm.motionDriver"] = true, ["mm.pistol1h"] = true, ["mm.pistolAuto"] = true, ["mm.aimGameUpper"] = false,
-  ["mm.slide"] = true, ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.85,
-  ["mm.leanHeadScale"] = 0.9, ["mm.selectionGuards"] = true, ["mm.debug"] = false,
+  ["mm.slide"] = true, ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.2, -- lean amounts 0.2 / 0.2 since defaults revision 6
+  ["mm.leanHeadScale"] = 0.2, ["mm.selectionGuards"] = true, ["mm.debug"] = false,
   ["mm.bodyHeightSmooth"] = true, -- smoothed body height on uneven ground (2026-11-22): on by default
   -- Crosshair (2026-10-30): the UTPP crosshair is on by default
   ["crosshair.impl"] = true, ["crosshair.color"] = "standard",
@@ -131,7 +131,7 @@ do
   check("all " .. count .. " listed keys are registered with the reference default and start on it", #bad == 0, table.concat(bad, "; "))
   check("implementation switches are ON by default (body.impl, mm.enabled)",
     core.Effective("body.impl") == true and core.Effective("mm.enabled") == true)
-  check("mm.leanScale / leanHeadScale defaults 0.85 / 0.90 stay inside 0..2",
+  check("mm.leanScale / leanHeadScale defaults 0.2 / 0.2 stay inside 0..2",
     core.settings.defs["mm.leanScale"].min == 0 and core.settings.defs["mm.leanScale"].max == 2
     and core.settings.defs["mm.leanHeadScale"].max == 2)
 
@@ -148,7 +148,7 @@ do
     sp ~= nil and sp[1] == true and near(sp[2], 3.85) and tp ~= nil and near(tp[2], 1.15))
   check("motion wanted state follows the defaults before the first sync", v2.want.enabled == true and v2.want.pistol1h == true
     and v2.want.aimGameUpper == false and v2.want.slide == true and v2.want.orientWarp == true and v2.want.lean == true
-    and v2.want.leanHead == true and near(v2.want.leanScale, 0.85) and near(v2.want.leanHeadScale, 0.9) and v2.want.debug == false)
+    and v2.want.leanHead == true and near(v2.want.leanScale, 0.2) and near(v2.want.leanHeadScale, 0.2) and v2.want.debug == false)
   local fresh = dofile(UTPP_MOTION_PATH)
   check("v2 module starts with aim, slide/orient/lean/leanHead, the lean scales and stick unknown (each sent once)",
     fresh.rt.aimApplied == nil and fresh.rt.slideApplied == nil and fresh.rt.orientWarpApplied == nil
@@ -162,11 +162,11 @@ do
     and t.enabled == true and t.pistol == true and t.auto == true)
   check("v2 fresh start: every native holds the default (aim false, slide/orient/lean/leanHead true)", t.aim[#t.aim] == false
     and t.slide[#t.slide] == true and t.orient[#t.orient] == true and t.lean[#t.lean] == true and t.leanHead[#t.leanHead] == true)
-  -- registration order leanScale -> leanHeadScale: the first call carries (0.85, 1.0), the last one the final pair
+  -- registration order leanScale -> leanHeadScale: the first call carries (0.2, 1.0), the last one the final pair
   local lastLean = t.leanParams[#t.leanParams]
-  check("motion fresh start: lean amounts reach the native as (0.85, 0.90) (final params call)", #t.leanParams >= 1 and #t.leanParams <= 2
-    and near(lastLean[1], 0.85) and near(lastLean[2], 0.9)
-    and near(v2.rt.leanScaleApplied, 0.85) and near(v2.rt.leanHeadScaleApplied, 0.9))
+  check("motion fresh start: lean amounts reach the native as (0.2, 0.2) (final params call)", #t.leanParams >= 1 and #t.leanParams <= 2
+    and near(lastLean[1], 0.2) and near(lastLean[2], 0.2)
+    and near(v2.rt.leanScaleApplied, 0.2) and near(v2.rt.leanHeadScaleApplied, 0.2))
   local nAim, nSlide, nLean, nParams = #t.aim, #t.slide, #t.lean, #t.leanParams
   check("motion second sync is quiet (acknowledged values are not resent)", v2.Sync(t.api) == "same" and #t.leanParams == nParams
     and #t.aim == nAim and #t.slide == nSlide and #t.lean == nLean)
@@ -185,7 +185,7 @@ do
     if core.Set(key, other, { noSave = true }) ~= nil then changed[#changed + 1] = key end
   end
   check("every listed key could be moved off its default (guards the reset check)", #changed == count, #changed)
-  check("moved values differ from the defaults", core.Get("mm.leanScale") ~= 0.85 and core.Get("mm.trace") == true
+  check("moved values differ from the defaults", core.Get("mm.leanScale") ~= 0.2 and core.Get("mm.trace") == true
     and core.Get("bodyturn.turnRateMax") ~= 1.15 and core.Get("mm.database") ~= "utpp_base")
   -- the Native Settings restore callback is core.ResetAll (BuildNativeSettings: registerRestoreDefaultsCallback)
   check("ResetAll returns true", core.ResetAll() == true)
@@ -196,13 +196,13 @@ do
   check("Defaults restores the reference defaults for all listed keys (core, bodyturn, body and motion keys)", #still == 0, table.concat(still, "; "))
   check("Defaults: implementation switches effective ON again", core.Effective("body.impl") == true and core.Effective("mm.enabled") == true)
   local text = io.open(tmp):read("*a")
-  check("Defaults persists the lean amounts and the database", text:find("mm.leanScale=0.85", 1, true) ~= nil
-    and text:find("mm.leanHeadScale=0.9", 1, true) ~= nil and text:find("mm.database=utpp_base", 1, true) ~= nil)
+  check("Defaults persists the lean amounts and the database", text:find("mm.leanScale=0.2", 1, true) ~= nil
+    and text:find("mm.leanHeadScale=0.2", 1, true) ~= nil and text:find("mm.database=utpp_base", 1, true) ~= nil)
   check("Defaults: database request is utpp_base", rec.dbRequests[#rec.dbRequests] == "utpp_base")
   v2.Sync(t.api)
   local lp = t.leanParams[#t.leanParams]
-  check("Defaults: motion lean amounts end at (0.85, 0.90), switches at the reference defaults",
-    near(lp[1], 0.85) and near(lp[2], 0.9) and t.aim[#t.aim] == false and t.slide[#t.slide] == true and t.lean[#t.lean] == true
+  check("Defaults: motion lean amounts end at (0.2, 0.2), switches at the reference defaults",
+    near(lp[1], 0.2) and near(lp[2], 0.2) and t.aim[#t.aim] == false and t.slide[#t.slide] == true and t.lean[#t.lean] == true
     and t.leanHead[#t.leanHead] == true and t.orient[#t.orient] == true and v2.want.debug == false)
   check("Defaults: core natives end at the reference defaults", rec.trace[#rec.trace][1] == false and rec.feedDump[#rec.feedDump][1] == false
     and rec.weaponUpper[#rec.weaponUpper][1] == false and rec.climbRelease[#rec.climbRelease][1] == false
@@ -288,7 +288,7 @@ local USER_SETTINGS = {
   ["perspective.sceneExit"] = 1.5, ["perspective.animate"] = true, ["perspective.blend"] = 0.8, ["perspective.minGap"] = 0.5,
   ["perspective.log"] = true, ["perspective.userWantsTpp"] = true, ["mm.motionDriver"] = true, ["mm.pistol1h"] = true,
   ["mm.pistolAuto"] = true, ["mm.aimGameUpper"] = false, ["mm.slide"] = true, ["mm.orientWarp"] = true,
-  ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.85, ["mm.leanHeadScale"] = 0.9,
+  ["mm.lean"] = true, ["mm.leanHead"] = true, ["mm.leanScale"] = 0.2, ["mm.leanHeadScale"] = 0.2, -- since defaults revision 6
   ["mm.selectionGuards"] = true, ["mm.debug"] = false, ["mm.enabled"] = true, ["mm.trace"] = false,
   ["mm.footReplant"] = "crouch", ["mm.feedDump"] = false, ["mm.weaponUpper"] = false, ["mm.grip"] = true,
   ["mm.shootTransfer"] = true, ["mm.aimUpperFade"] = true, ["mm.idleHold"] = true, ["mm.kneeFix"] = true,

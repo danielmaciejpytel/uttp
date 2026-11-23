@@ -130,8 +130,8 @@ return {
     ["mm.lean"] = "true",
     ["mm.leanCoverage"] = "\"standard\"",
     ["mm.leanHead"] = "true",
-    ["mm.leanHeadScale"] = "0.90000000000000002",
-    ["mm.leanScale"] = "0.84999999999999998",
+    ["mm.leanHeadScale"] = "0.20000000000000001",
+    ["mm.leanScale"] = "0.20000000000000001",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
     ["mm.neutralAim"] = "true",
@@ -309,11 +309,11 @@ return {
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "v2 setLean(true)",
     "v2 setLeanHead(true)",
-    "v2 setLeanParams(0.84999999999999998,0.90000000000000002)",
+    "v2 setLeanParams(0.20000000000000001,0.20000000000000001)",
     "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
-    "apply mm.leanScale(0.84999999999999998,\"ok\")",
-    "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.leanScale(0.20000000000000001,\"ok\")",
+    "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -517,7 +517,7 @@ return {
     "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
-    "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -1773,7 +1773,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.leanHeadScale"] = {
-      ["default"] = "0.90000000000000002",
+      ["default"] = "0.20000000000000001",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 2,
@@ -1784,7 +1784,7 @@ return {
       ["type"] = "float"
     },
     ["mm.leanScale"] = {
-      ["default"] = "0.84999999999999998",
+      ["default"] = "0.20000000000000001",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 2,
@@ -2445,8 +2445,8 @@ return {
     ["mm.lean"] = "true",
     ["mm.leanCoverage"] = "\"standard\"",
     ["mm.leanHead"] = "true",
-    ["mm.leanHeadScale"] = "0.90000000000000002",
-    ["mm.leanScale"] = "0.84999999999999998",
+    ["mm.leanHeadScale"] = "0.20000000000000001",
+    ["mm.leanScale"] = "0.20000000000000001",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "true",
     ["mm.neutralAim"] = "true",
@@ -3000,8 +3000,8 @@ return {
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
     "apply mm.leanHead(true,\"ok\")",
-    "apply mm.leanScale(0.84999999999999998,\"ok\")",
-    "apply mm.leanHeadScale(0.90000000000000002,\"ok\")",
+    "apply mm.leanScale(0.20000000000000001,\"ok\")",
+    "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -3105,7 +3105,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=5\r\
+core.defaultsRevision=6\r\
 core.settingsReset=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
@@ -3192,8 +3192,8 @@ mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
 mm.leanHead=true\r\
-mm.leanScale=0.85\r\
-mm.leanHeadScale=0.9\r\
+mm.leanScale=0.2\r\
+mm.leanHeadScale=0.2\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
@@ -3666,7 +3666,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.lean"] = "true",
     ["mm.leanCoverage"] = "\"standard\"",
     ["mm.leanHead"] = "true",
-    ["mm.leanHeadScale"] = "0.90000000000000002",
+    ["mm.leanHeadScale"] = "0.20000000000000001",
     ["mm.leanScale"] = "1.1000000000000001",
     ["mm.minWalkSpeed"] = "0.81999999999999995",
     ["mm.motionDriver"] = "false",
@@ -3729,7 +3729,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=5\r\
+core.defaultsRevision=6\r\
 core.settingsReset=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
@@ -3817,7 +3817,7 @@ mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=1.1\r\
-mm.leanHeadScale=0.9\r\
+mm.leanHeadScale=0.2\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\

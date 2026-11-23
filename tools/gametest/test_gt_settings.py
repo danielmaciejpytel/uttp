@@ -415,12 +415,12 @@ class SessionSettingsTests(unittest.TestCase):
               'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'wide', 'mm.orientWarp': False, 'mm.strideWarp': False, 'mm.footReplant': 'always',
               'mm.firmFeet': False, 'mm.bodyHeightSmooth': False, 'mm.neutralAim': False, 'mm.aimWorldSmooth': False, 'bodyturn.aimJog': False,
               'bodyturn.aimJogSpeed': 3.8, 'bodyturn.aimSmooth': False, 'bodyturn.shooterMode': True, 'mm.overlayInertialSwitch': False}
-    LOCO = {'mm.walkSpeed': 1.9, 'mm.minWalkSpeed': 0.82, 'mm.stickSpeed': 'fixed', 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.85,
-            'mm.leanHeadScale': 0.9, 'mm.leanCoverage': 'standard', 'mm.orientWarp': True, 'mm.strideWarp': True,
+    LOCO = {'mm.walkSpeed': 1.9, 'mm.minWalkSpeed': 0.82, 'mm.stickSpeed': 'fixed', 'mm.lean': True, 'mm.leanHead': True, 'mm.leanScale': 0.2,
+            'mm.leanHeadScale': 0.2, 'mm.leanCoverage': 'standard', 'mm.orientWarp': True, 'mm.strideWarp': True,
             'mm.footReplant': 'crouch', 'mm.firmFeet': True, 'mm.bodyHeightSmooth': True, 'mm.neutralAim': True, 'mm.aimWorldSmooth': True,
             'bodyturn.aimJog': True, 'bodyturn.aimJogSpeed': 3.85, 'bodyturn.aimSmooth': True, 'bodyturn.shooterMode': False,
             'mm.overlayInertialSwitch': True}
-    LOCO_TEXT = ('locomotion walkSpeed=1.9 minWalkSpeed=0.82 stickSpeed=fixed lean=true leanHead=true leanScale=0.85 leanHeadScale=0.9 leanCoverage=standard orientWarp=true '
+    LOCO_TEXT = ('locomotion walkSpeed=1.9 minWalkSpeed=0.82 stickSpeed=fixed lean=true leanHead=true leanScale=0.2 leanHeadScale=0.2 leanCoverage=standard orientWarp=true '
                  'strideWarp=true footReplant=crouch firmFeet=true bodyHeightSmooth=true neutralAim=true aimWorldSmooth=true aimJog=true aimJogSpeed=3.85 aimSmooth=true shooterMode=false overlayInertialSwitch=true')
 
     def test_plans(self):

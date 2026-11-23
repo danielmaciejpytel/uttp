@@ -253,11 +253,11 @@ do
     and defs["mm.lean"].section == "motion")
   check("registered mm.leanHead on by default, bool",
     defs["mm.leanHead"] ~= nil and defs["mm.leanHead"].default == true and defs["mm.leanHead"].type == "bool")
-  check("registered mm.leanScale float 0.85 in 0..2",
-    defs["mm.leanScale"] ~= nil and defs["mm.leanScale"].type == "float" and defs["mm.leanScale"].default == 0.85
+  check("registered mm.leanScale float 0.2 in 0..2",
+    defs["mm.leanScale"] ~= nil and defs["mm.leanScale"].type == "float" and defs["mm.leanScale"].default == 0.2
     and defs["mm.leanScale"].min == 0 and defs["mm.leanScale"].max == 2)
-  check("registered mm.leanHeadScale float 0.9 in 0..2 step 0.05, motion section",
-    defs["mm.leanHeadScale"] ~= nil and defs["mm.leanHeadScale"].type == "float" and defs["mm.leanHeadScale"].default == 0.9
+  check("registered mm.leanHeadScale float 0.2 in 0..2 step 0.05, motion section",
+    defs["mm.leanHeadScale"] ~= nil and defs["mm.leanHeadScale"].type == "float" and defs["mm.leanHeadScale"].default == 0.2
     and defs["mm.leanHeadScale"].min == 0 and defs["mm.leanHeadScale"].max == 2 and defs["mm.leanHeadScale"].step == 0.05
     and defs["mm.leanHeadScale"].section == "motion")
 end
@@ -844,13 +844,13 @@ do
 end
 
 -- mm.lean / leanHead / leanScale: same contract as the slide - lean, head lean and the scales are unknown at start (DLL defaults on /
--- on / 0.85 / 0.9) and the wanted values are sent once, then only when they change
+-- on / 0.2 / 0.2) and the wanted values are sent once, then only when they change
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("lean unknown DLL value: enabling motion sends lean and head lean on and the params (0.85, 0.9) once",
+  check("lean unknown DLL value: enabling motion sends lean and head lean on and the params (0.2, 0.2) once",
     v.Sync(t.api) == "enabled" and #t.lean == 1 and t.lean[1] == true and #t.leanHead == 1 and t.leanHead[1] == true
-    and #t.leanParams == 1 and t.leanParams[1][1] == 0.85 and t.leanParams[1][2] == 0.9 and v.rt.leanApplied == true
+    and #t.leanParams == 1 and t.leanParams[1][1] == 0.2 and t.leanParams[1][2] == 0.2 and v.rt.leanApplied == true
     and v.rt.leanHeadApplied == true)
   check("lean: steady sync makes no call", v.Sync(t.api) == "same" and #t.lean == 1 and #t.leanHead == 1 and #t.leanParams == 1)
   v.SetLean(false, t.api)
@@ -859,16 +859,16 @@ do
   v.SetLeanHead(false, t.api)
   check("leanHead off is sent once", #t.leanHead == 2 and t.leanHead[2] == false and v.rt.leanHeadApplied == false)
   v.SetLeanScale(0.6, t.api)
-  check("leanScale 0.6 sends (0.6, 0.9) once (head amount is independent)", #t.leanParams == 2 and t.leanParams[2][1] == 0.6 and t.leanParams[2][2] == 0.9)
+  check("leanScale 0.6 sends (0.6, 0.2) once (head amount is independent)", #t.leanParams == 2 and t.leanParams[2][1] == 0.6 and t.leanParams[2][2] == 0.2)
   check("steady leanScale is not resent", v.Sync(t.api) == "same" and #t.leanParams == 2)
   v.SetLeanScale(0 / 0, t.api)
-  check("NaN leanScale falls back to 1.0 (resent)", v.want.leanScale == 1.0 and #t.leanParams == 3 and t.leanParams[3][1] == 1.0 and t.leanParams[3][2] == 0.9)
+  check("NaN leanScale falls back to 1.0 (resent)", v.want.leanScale == 1.0 and #t.leanParams == 3 and t.leanParams[3][1] == 1.0 and t.leanParams[3][2] == 0.2)
   v.SetLeanScale(nil, t.api)
   check("nil leanScale stays 1.0 without a resend", v.want.leanScale == 1.0 and #t.leanParams == 3)
   v.SetLeanScale(7, t.api)
-  check("leanScale 7 clamps to 2.0", v.want.leanScale == 2.0 and #t.leanParams == 4 and t.leanParams[4][1] == 2.0 and t.leanParams[4][2] == 0.9)
+  check("leanScale 7 clamps to 2.0", v.want.leanScale == 2.0 and #t.leanParams == 4 and t.leanParams[4][1] == 2.0 and t.leanParams[4][2] == 0.2)
   v.SetLeanScale(-1, t.api)
-  check("leanScale -1 clamps to 0", v.want.leanScale == 0 and #t.leanParams == 5 and t.leanParams[5][1] == 0 and t.leanParams[5][2] == 0.9)
+  check("leanScale -1 clamps to 0", v.want.leanScale == 0 and #t.leanParams == 5 and t.leanParams[5][1] == 0 and t.leanParams[5][2] == 0.2)
   v.SetLean(false, t.api)
   v.SetLean(true, t.api)
   check("lean on is sent when it differs from the DLL", #t.lean == 3 and t.lean[3] == true and v.rt.leanApplied == true)
@@ -878,10 +878,10 @@ do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
   v.Sync(t.api)
-  check("leanHeadScale defaults: one params call (0.85, 0.9)", #t.leanParams == 1 and t.leanParams[1][1] == 0.85
-    and t.leanParams[1][2] == 0.9 and v.want.leanHeadScale == 0.9 and v.rt.leanHeadScaleApplied == 0.9)
+  check("leanHeadScale defaults: one params call (0.2, 0.2)", #t.leanParams == 1 and t.leanParams[1][1] == 0.2
+    and t.leanParams[1][2] == 0.2 and v.want.leanHeadScale == 0.2 and v.rt.leanHeadScaleApplied == 0.2)
   v.SetLeanHeadScale(0.5, t.api)
-  check("leanHeadScale 0.5 sends (0.85, 0.5) once", #t.leanParams == 2 and t.leanParams[2][1] == 0.85 and t.leanParams[2][2] == 0.5 and v.rt.leanHeadScaleApplied == 0.5)
+  check("leanHeadScale 0.5 sends (0.2, 0.5) once", #t.leanParams == 2 and t.leanParams[2][1] == 0.2 and t.leanParams[2][2] == 0.5 and v.rt.leanHeadScaleApplied == 0.5)
   check("steady leanHeadScale is not resent", v.Sync(t.api) == "same" and #t.leanParams == 2)
   v.SetLeanScale(0.6, t.api)
   check("leanScale 0.6 after head 0.5 sends (0.6, 0.5) in one call", #t.leanParams == 3 and t.leanParams[3][1] == 0.6 and t.leanParams[3][2] == 0.5)
@@ -931,7 +931,7 @@ do
   check("thrown lean call retries", v.rt.leanApplied == true)
   t.leanParamsReject = true
   v.SetLeanScale(0.5, t.api)
-  check("rejected leanScale is never acknowledged", v.rt.leanScaleApplied == 0.85)
+  check("rejected leanScale is never acknowledged", v.rt.leanScaleApplied == 0.2)
   t.leanParamsReject = false
   v.Sync(t.api)
   check("rejected leanScale retries", v.rt.leanScaleApplied == 0.5)

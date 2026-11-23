@@ -331,8 +331,8 @@ bool g_leanSetting = true;
 bool g_leanHeadSetting = true; // mm.leanHead (default ON like the setting): the motion head layer replaces the head lead while the lean is on
 lrt::Params g_leanParams = [] {
     lrt::Params p;
-    p.scale = 0.85f;     // SetLeanParams: the amounts of the settings mm.leanScale / mm.leanHeadScale
-    p.headScale = 0.9f;
+    p.scale = 0.2f;      // SetLeanParams: the amounts of the settings mm.leanScale / mm.leanHeadScale
+    p.headScale = 0.2f;
     return p;
 }();
 // SetAimWorldSmoothing: on at 12 Hz like the setting mm.aimWorldSmooth

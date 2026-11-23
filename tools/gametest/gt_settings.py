@@ -42,8 +42,8 @@ SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # mm.stickSpeed = 'analog' as an override). Firm feet, body height smoothing, the neutral aim grid and the world aim smoothing change
 # foot placement, the drawn body height and the head / upper body of every walk: pinned for the same reason (--shooter-mode on is
 # the override that lets the neutral aim grid act).
-LOCO_VALUES = (('mm.walkSpeed', 1.9), ('mm.minWalkSpeed', 0.82), ('mm.stickSpeed', 'fixed'), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.85),
-               ('mm.leanHeadScale', 0.9), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.strideWarp', True),
+LOCO_VALUES = (('mm.walkSpeed', 1.9), ('mm.minWalkSpeed', 0.82), ('mm.stickSpeed', 'fixed'), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.2),
+               ('mm.leanHeadScale', 0.2), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.strideWarp', True),
                ('mm.footReplant', 'crouch'), ('mm.firmFeet', True), ('mm.bodyHeightSmooth', True), ('mm.neutralAim', True),
                ('mm.aimWorldSmooth', True), ('bodyturn.aimJog', True),
                ('bodyturn.aimJogSpeed', 3.85), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False),
