@@ -302,6 +302,30 @@ static void CurbSnap()
     Check(pelJump < 0.03f && ballJump < 0.006f && st.Diagnostics().sudden >= 1, name);
 }
 
+static void SteadyDescent()
+{
+    // a steady descent (stairs taken fast, flat planes under both feet that sink with the capsule) at 30 and 60 Hz: 1.3 m/s is above
+    // suddenStep per update at 30 Hz, yet it is expected motion; the pelvis must not climb (it did when every update counted as a snap)
+    const auto pose = MockPose(12.0f, 18.0f);
+    for (int hz : {30, 60})
+    {
+        float tNow = 0.0f;
+        const float v = 1.3f;
+        Ground h = [&tNow, v](float, float) { return -v * tNow; };
+        std::vector<float> pel;
+        Stage st;
+        const Outcome o = Run(h, pose, hz, 2.0f, [&tNow, v](float t) { tNow = t; return -v * t; }, 0.0f, &st, &pel);
+        float maxOff = 0.0f;
+        const float dt = 1.0f / float(hz);
+        for (size_t i = pel.size() / 2; i < pel.size(); ++i)
+            maxOff = std::fmax(maxOff, std::fabs(pel[i] - (o.anim.pel.p.z - v * float(i) * dt)));
+        char name[200];
+        std::snprintf(name, sizeof name, "steady descent 1.3 m/s at %d Hz: pelvis offset max %.1f cm over the last second, snaps %llu", hz,
+                      double(maxOff) * 100, static_cast<unsigned long long>(st.Diagnostics().sudden));
+        Check(maxOff < 0.03f, name);
+    }
+}
+
 static void PlaneJump()
 {
     // the trace under the left foot jumps 17 cm (a swinging foot over a step edge): the ball rises over several frames, no pop; the
@@ -568,6 +592,7 @@ int main(int argc, char** argv)
     Slopes();
     Steps();
     CurbSnap();
+    SteadyDescent();
     PlaneJump();
     BadTraces();
     Limits();

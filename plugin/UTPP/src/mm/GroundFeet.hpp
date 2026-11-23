@@ -61,6 +61,7 @@ struct Config
     float softReach = 0.97f;         // soft reach start
     float suddenStep = 0.02f;        // m, drawn height change per update beyond the slope that counts as a capsule snap
     float frontLegSpeed = 0.5f;      // m/s, above it only the front leg sets the pelvis drop
+    float suddenRateTau = 0.1f;      // s, how fast a snap update moves the expected vertical rate
     float bias = 0.0f;               // m, ground hit minus capsule height on flat ground (calibration)
 };
 
@@ -74,7 +75,8 @@ inline bool ValidConfig(const Config& c)
            pos(c.maxDt) &&
            pos(c.pelvisStiffness) && nonneg(c.maxDrop) && nonneg(c.maxCompensation) && nonneg(c.heelLift) && c.heelLift <= 1.0f &&
            std::isfinite(c.reach) && c.reach > 0.5f && c.reach <= 1.0f && std::isfinite(c.softReach) && c.softReach > 0.5f &&
-           c.softReach <= c.reach && pos(c.suddenStep) && pos(c.frontLegSpeed) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f;
+           c.softReach <= c.reach && pos(c.suddenStep) && pos(c.frontLegSpeed) &&
+           pos(c.suddenRateTau) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f;
 }
 
 // One trace per foot, in the model frame of the capsule the trace was taken with (x, y: the traced point; n: the surface normal)
@@ -563,9 +565,12 @@ public:
             {
                 m_pel = std::clamp(m_pel - sudden, -m_cfg.maxCompensation, m_cfg.maxCompensation);
                 ++m_diag.sudden;
+                // a snap moves the rate only a little (time constant suddenRateTau), so a single snap is not expected again, while a
+                // steady rate above suddenStep per update (a fast descent at a low frame rate) becomes expected within a few updates
+                m_vz += (dz / dt - m_vz) * (1.0f - std::exp(-dt / m_cfg.suddenRateTau));
             }
             else
-                m_vz = dz / dt; // the rate follows only steady motion, so a snap is not expected again on the next update
+                m_vz = dz / dt;
         }
         else if (first || !m_havePrev)
             m_vz = 0.0f;
