@@ -113,6 +113,24 @@ class PlanTests(FilmCase):
             rcf.plan_films(left, right, steps=['melee_weapons/knife.light_combo'], film='f')
         self.assertIn('no time in the right run', str(cm.exception))
 
+    def test_ranged_family_phases_are_named_by_family(self):
+        # the ranged weapon macro records 'family' (not 'weapon'): two families in one session must not share a phase name
+        d = make_run(self.tmp, 'rf', 3.0, {('jump_in_place', 1): JUMP}, video_name='rf.mp4')
+        with open(os.path.join(d, 'cycle.json'), encoding='utf-8') as f:
+            cyc = json.load(f)
+        wins = [{'family': 'handgun', 'phase': 'aim_fire', 'label': 'rf_handgun_aim_fire', 'start': stamp(30.0), 'end': stamp(33.0)},
+                {'family': 'assault_rifle', 'phase': 'aim_fire', 'label': 'rf_assault_rifle_aim_fire',
+                 'start': stamp(40.0), 'end': stamp(43.0)}]
+        cyc['scenarios'].append({'name': 'ranged_families', 'run': 1, 'start': stamp(29.0), 'end': stamp(44.0),
+                                 'phase_windows': wins})
+        with open(os.path.join(d, 'cycle.json'), 'w', encoding='utf-8') as f:
+            json.dump(cyc, f)
+        run = rcf.load_run(d)
+        names = [n for n, _, _ in run['steps'][('ranged_families', 1)]]
+        self.assertEqual(names, ['handgun.aim_fire', 'assault_rifle.aim_fire'])
+        p = rcf.plan_films(run, run, steps=['ranged_families/assault_rifle.aim_fire'], film='f')[0]['pairs'][0]
+        self.assertEqual(p['left']['start'], 3.0 + 40.0)          # the rifle window, not the first (handgun) one
+
     def test_steps_go_into_one_film_in_the_given_order(self):
         films = rcf.plan_films(self.left, self.right, steps=['slide_sprint/slide', 'jump_in_place/jump'], film='states')
         self.assertEqual([f['name'] for f in films], ['states'])

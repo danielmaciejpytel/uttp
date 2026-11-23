@@ -86,7 +86,8 @@ def load_run(run_dir: str) -> dict:
             # of the macro named '<weapon>.<phase>' (or '<phase>'), so a phase is paired by name and not by play order
             for w in c.get('phase_windows') or []:
                 if w.get('start') and w.get('end') and w.get('phase'):
-                    name = f'{w["weapon"]}.{w["phase"]}' if w.get('weapon') else w['phase']
+                    owner = w.get('weapon') or w.get('family')
+                    name = f'{owner}.{w["phase"]}' if owner else w['phase']
                     steps.setdefault(key, []).append((name, _t(w['start']), _t(w['end'])))
     return {'dir': run_dir, 'video': video, 'video_start': _t(ck['video_start']), 'duration': float(ck['duration_s']),
             'steps': steps, 'scenarios': scenarios}
