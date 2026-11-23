@@ -60,7 +60,9 @@
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
 // (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets),
 // 33 no heading catch-up (check K), 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered),
-// 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered).
+// 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered), 44 no blocked
+// capsule idle (flick_180_sprint cruise (Male, wall) 10 > 6), 45 no loop dwell against a shuffle of the same database (sprint_dash
+// dash_right (loop vs shuffle) 7 > 5).
 // Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
@@ -142,6 +144,7 @@ struct Slice
     const char* file;
     std::vector<Window> windows;
     bool man = false; // Male V bundle (body slot 1)
+    bool stickFixed = false; // fixed stick speed model (motiondriver::SetStickSpeedMode 1, the shipped default) for this slice only
 };
 
 // the clip / database changes of the frames the v2 driver stepped (what the MOTION trace lines show), counted like gt_log.py _motion_metrics: the same
@@ -456,6 +459,14 @@ int main(int argc, char** argv)
                                        {"weapon_walk walk_unarmed", 318.44f, 321.442f, 6, false, true, false, -1, 15.0f}}},
         // Male 2026-11-11 17:19: sprint flick; 9 changes in 2.5 s (3.6 per second, game 9) before the turn commit, 6 with it
         {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male)", 181.397f, 183.897f, 6, false, false, true, -1, 15.0f}}, true},
+        // Male 2026-11-18 13:07: the sprint of flick_180_sprint / cruise ends against a wall with the stick held (capsule 8-30 cm/s, the
+        // direction flipping per feed): Run_Pivot_B_F <-> Run_Diamond_BR_F every 0.3 s (game 10 changes in 3 s); 5 with the blocked capsule
+        // idle (MapConfig::blockedIdleS: Stop, then the hold), 10 without (mutation 44)
+        {"churn_wall_flick_man.feed", {{"flick_180_sprint cruise (Male, wall)", 289.721f, 292.721f, 6}}, true},
+        // Female 2026-11-14 21:00 sprint_dash / dash_right (weapon drawn): after the turn, a young Run_Loop_FR lost one feed later to the
+        // shuffle of its own database by 0.023 and came back 0.2 s later; 5 with guard 1c (MatcherConfig::loopDwellShuffle), 7 without
+        // (mutation 45); fixed stick speed as shipped (the shuffle needs it)
+        {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle)", 809.874f, 811.873f, 5}}, false, true},
         {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 3}, {"sprint_dash sprint_again", 264.284f, 267.284f, 7}}},
         // Female 2026-11-14 03:53, keyboard-like input (full-deflection direction keys): the harness step windows keep 3.0 changes per second; check K
         // runs over the key edges of the whole sequence (the key edge of a step reaches the feed ~0.13 s before the harness step window starts)
@@ -514,6 +525,7 @@ int main(int argc, char** argv)
             return 3;
         }
         g_dumpBody = s.man ? 1 : 0;
+        motiondriver::SetStickSpeedMode(s.stickFixed ? 1 : 0); // DriverOptionBaseline: 0
         const mm::motion::MotionDatabase& sdb = s.man ? *dbM : *db;
         const std::vector<FrameOut> run = RunDriver(s.man ? rigM : rig, f);
         if (trace)

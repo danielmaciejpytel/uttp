@@ -191,6 +191,25 @@ enum class Interrupt : uint8_t
 // update already plays the motion stand takeoff F_Start_Stand_L/Rfoot (motion has no in-place jump clip); M_Neutral_Jump_Loop_Fall
 // is a terminal fall (root Vz -9.8 m/s constant): an addend of -0.02 .. -0.2 never selects it, -0.3 .. -1.0 only for
 // the last 1-5 updates before touchdown, alternating with the stand clip on consecutive updates (pops).
+// churn guard 1c (MatcherConfig::loopDwellShuffle): the direction token after aKey in a clip name ("M_Neutral_Run_Loop_RR_offset", "_Loop" ->
+// "RR"; "M_Neutral_Run_Shuffle_RR_to_RL_Lfoot", "_Shuffle" -> "RR"; "M_Neutral_Run_Loop_F_R_20", "_Loop" -> "F"); empty without the key
+inline std::string_view ClipDirectionToken(std::string_view aName, std::string_view aKey)
+{
+    const size_t p = aName.find(aKey);
+    if (p == std::string_view::npos || p + aKey.size() + 1 >= aName.size() || aName[p + aKey.size()] != '_')
+        return {};
+    const size_t s = p + aKey.size() + 1;
+    const size_t e = aName.find('_', s);
+    return aName.substr(s, (e == std::string_view::npos ? aName.size() : e) - s);
+}
+
+// a hip-side shuffle that does not start from the direction of the playing loop (Run_Shuffle_RR_to_RL after Run_Loop_FR)
+inline bool ShuffleOffLoopSide(std::string_view aCandidate, std::string_view aLoop)
+{
+    const std::string_view from = ClipDirectionToken(aCandidate, "_Shuffle");
+    return !from.empty() && from != ClipDirectionToken(aLoop, "_Loop");
+}
+
 inline constexpr float kAirFallMaxSpeedCmS = 50.0f;
 inline constexpr float kAirFallBiasDefault = 0.0f;
 // motion clip names (posesearch.json PSD_Dense_Jumps, 21 entries: 0-15 B / F (Stand, Walk, Run) / LL / RL
@@ -611,6 +630,12 @@ struct MatcherConfig
     //     sessions). 0.15 lets the slalom window churn again.
     float loopDwellS = 0.5f;
     float loopDwellOverride = 0.2f;
+    //  1c. loopDwellShuffle (Female sprint_dash / dash_right, 2026-11-23): guard 1 also holds a young loop of a *_Loops database against a
+    //     hip-side shuffle of the SAME database that does not start from the loop's direction (ShuffleOffLoopSide: Run_Shuffle_RR_to_RL after
+    //     Run_Loop_FR): after a turn hold ended, Run_Loop_FR was picked and lost one feed later to that shuffle by 0.023, then came back 0.2 s
+    //     later (two changes for one direction). A shuffle from the loop's own side (after Run_Loop_RR_offset), transitions and the clips of
+    //     other databases are untouched. Same margin and time as guard 1. false = off.
+    bool loopDwellShuffle = true;
     //  1b. strafeSectorDelayS / strafeSectorDelayOverride (Shooter mode, ChooserState::shooterStrafe): with the facing held on the camera a
     //     turning stick sweeps the travel direction through the direction loops of a *_Loops database (F, F_L_20, FL, LL / LR, BL, B, BR,
     //     RL / RR, FR, F_R_20) and the shuffles between the hip sides; a 360 deg stick turn in 3 s picked every one of them in turn (11 clip
@@ -817,6 +842,7 @@ inline void TestGuardsOff(MatcherConfig& c)
     if (has("fresh")) c.freshEventS = 0.0f;
     if (has("upshift")) c.startUpshiftHoldS = c.startUpshiftRefaceWalkHoldS = c.startUpshiftRefaceRunHoldS = 0.0f;
     if (has("restart")) c.startRestartDwellS = 0.0f;
+    if (has("loopshuffle")) c.loopDwellShuffle = false;
     if (has("downshift")) c.downshiftDeferS = 0.0f;
     if (has("headingdip")) c.headingDipHoldS = 0.0f;
     if (has("catchup")) c.headingCatchUpS = 0.0f;
@@ -2182,7 +2208,10 @@ public:
             }
             // churn guard 1 (MatcherConfig::loopDwellS): a young loop gives way to another loop only by a clear margin
             if (UTPP_AND_NOT(JUMPPICK, 24) jump && m_guardsOn && res.interrupt == Interrupt::DoNotInterrupt && m_cfg.loopDwellS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.loopDwellS &&
-                aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0 && !aForce && (cl.flags & kClipLoop) &&
+                aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0 && !aForce &&
+                ((cl.flags & kClipLoop) ||
+                 (UTPP_AND_NOT(JUMPPICK, 45) m_cfg.loopDwellShuffle && bestDb == contDb && m_dbDirectionLoops[static_cast<uint32_t>(bestDb)] &&
+                  ShuffleOffLoopSide(db.ClipName(en.clip), db.ClipName(static_cast<uint32_t>(m_cur.clip))))) &&
                 (db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) && bestCost > contBestCost - m_cfg.loopDwellOverride)
             {
                 jump = false;

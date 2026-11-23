@@ -791,6 +791,12 @@ enum class FacingSource : uint8_t
 #endif
 inline constexpr bool kCapsuleSpeedQueryDefault = UTPP_CAPSULE_SPEED_QUERY_DEFAULT != 0;
 inline constexpr bool kVelocityPredicatesDefault = UTPP_VELOCITY_PREDICATES_DEFAULT != 0;
+// blocked capsule (MapConfig::blockedIdleS): speed bound of the collision jitter (cm/s, capsule speed), the time in which two heading flips
+// must fall (s), the time without a flip after which the capsule counts as free again (s) and how long the free state must last (s)
+inline constexpr float kCapsuleJitterMaxCmS = 60.0f;
+inline constexpr float kCapsuleJitterWindowS = 0.2f;
+inline constexpr float kBlockedNoFlipS = 0.3f;
+inline constexpr float kBlockedReleaseS = 0.1f;
 
 // Capsule speed play rate (MapConfig::capsuleSpeedRate): the search keeps the mapped query; the play rate of a variable-rate pick is the
 // query speed scaled by capsule / mapped speed at the chooser speed (ChooserState::rateSpeedScale -> rate2::Calculate querySpeedScale).
@@ -1001,6 +1007,15 @@ struct MapConfig
     // (motiontraj::IsMovingFromVelocity), turn angle and IsPivoting from the input acceleration against the velocity.
     // false = IsMoving from the predicted future velocity, turn angle future against velocity.
     bool velocityPredicates = kVelocityPredicatesDefault;
+    // Blocked capsule idle (Male flick_180_sprint / cruise, 2026-11-23: a sprint into a wall with the stick held): the game's collision pushes
+    // the capsule back and forth (8-30 cm/s, the velocity heading flipping from feed to feed), the predicted future still runs, so the pivot
+    // query swapped two pivot clips every 0.3 s (Run_Pivot_B_F <-> Run_Diamond_BR_F, 3.3 changes per second in the game) and every pick
+    // played its root motion against a capsule that does not move. Once the jitter (two heading flips within kCapsuleJitterWindowS at or
+    // below kCapsuleJitterMaxCmS) has lasted blockedIdleS on the stand ground with the input held, IsMoving reads the velocity as the
+    // reference movement does (no velocity, not moving): MovementState 0, the stop / idle picks. It ends when the input is released, the
+    // stance or movement mode changes, or the capsule is free for kBlockedReleaseS (speed above the bound or no flip for kBlockedNoFlipS).
+    // A slow start or a slide along a wall keeps its heading and never latches. 0 = off.
+    float blockedIdleS = 0.15f;
     // Capsule speed play rate (see CapsuleRateMode). Ignored while capsuleSpeedQuery is on (that query already carries the capsule speed)
     // and inside the slide map.
     CapsuleRateMode capsuleSpeedRate = kCapsuleSpeedRateDefault;
@@ -1343,6 +1358,13 @@ struct MapState
     float sweepAgeS[kHeadingSweepFeeds] = {};
     int sweepCount = 0;
     float stopHoldCmS = 0.0f;
+    // blocked capsule (MapConfig::blockedIdleS): the velocity of the last feed, the ages of the last two heading flips (s), the time the
+    // jitter has lasted (s), the latch and the time the capsule has been free while latched (s)
+    motiontraj::V3 jitterVel{};
+    float jitterFlipAgeS[2] = {1.0e9f, 1.0e9f};
+    float jitterHeldS = 0.0f;
+    bool blocked = false;
+    float blockedFreeS = 0.0f;
     float capsuleBrakeModel = 0.0f; // active grounded no-input CP deceleration; trace only
     float capsuleAccelModel = 0.0f; // active grounded full-input applied acceleration; trace only
     motiontraj::Trajectory traj; // Update_Trajectory (history 30 + prediction 15 x 0.1 s)
@@ -2128,6 +2150,36 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     st.isMoving = c.velocityPredicates
         ? motiontraj::IsMovingFromVelocity(motiontraj::V3{velQ.x, velQ.y, 0.0f}, st.trjFuture, acc, st.accelerationLast)
         : motiontraj::IsMoving(st.trjFuture, acc);
+    // blocked capsule (MapConfig::blockedIdleS): a capsule held against a wall moves back and forth in the game's collision response (the
+    // velocity heading turns by more than 90 deg from one feed to the next) at a low speed; a slow start or a slide along a wall keeps its heading
+    {
+        m.jitterFlipAgeS[0] += dt;
+        m.jitterFlipAgeS[1] += dt;
+        const motiontraj::V3 v{vel.x, vel.y, 0.0f};
+        if (mode == 0 && motiontraj::SizeXY(v) > 1.0f && motiontraj::SizeXY(m.jitterVel) > 1.0f && motiontraj::Dot(v, m.jitterVel) < 0.0f)
+        {
+            m.jitterFlipAgeS[1] = m.jitterFlipAgeS[0];
+            m.jitterFlipAgeS[0] = 0.0f;
+        }
+        m.jitterVel = mode == 0 ? v : motiontraj::V3{};
+        const bool held = mode == 0 && stance == 0 && !motiontraj::IsZero(acc);
+        const bool jitter = held && sp <= kCapsuleJitterMaxCmS && m.jitterFlipAgeS[1] <= kCapsuleJitterWindowS;
+        m.jitterHeldS = jitter ? m.jitterHeldS + dt : 0.0f;
+        if (UTPP_AND_NOT(JUMPPICK, 44) !m.blocked && c.blockedIdleS > 0.0f && m.jitterHeldS >= c.blockedIdleS)
+        {
+            m.blocked = true;
+            m.blockedFreeS = 0.0f;
+        }
+        else if (m.blocked)
+        {
+            const bool free = sp > kCapsuleJitterMaxCmS || m.jitterFlipAgeS[0] > kBlockedNoFlipS;
+            m.blockedFreeS = free ? m.blockedFreeS + dt : 0.0f;
+            if (!held || m.blockedFreeS >= kBlockedReleaseS)
+                m.blocked = false;
+        }
+        if (m.blocked)
+            st.isMoving = false;
+    }
     st.movementStateLast = st.movementState;
     st.movementState = st.isMoving ? 1 : 0;
     st.gaitLast = st.gait;
