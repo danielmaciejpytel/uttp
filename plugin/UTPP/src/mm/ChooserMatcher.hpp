@@ -628,6 +628,19 @@ struct MatcherConfig
     float freshEventS = 0.2f;
     float freshEventBias = 0.025f;
     bool dodgeHold = true;
+    //  3b. dodgeFacingHoldS / dodgeFacingStillDeg / dodgeFacingOffDeg: a ground dodge shows its clip for up to ~0.6 s from its first feed
+    //     (mm/Dodge.hpp) and the body turn holds the actor yaw for that time, longer than the PSM detail and its decay. With the facing
+    //     held far from the travel (a dodge during a reversal start: 120 deg) the continuing cost of the playing start rose to 2.4 while
+    //     nothing in the databases matched either, and the selection changed clip three to four times among such rows before the facing
+    //     was released (Male sprint_dash / dash_right: 10 changes in 2 s, 4.5 per second in the game). Up to dodgeFacingHoldS after the
+    //     last dodge feed the playing clip is kept (dodgeHold conditions) while the actor yaw has turned less than dodgeFacingStillDeg
+    //     over the last 0.1 s and the travel is more than dodgeFacingOffDeg away from it. dodgeFacingStillDeg 10: the first searches
+    //     after the release (yaw moving 1-9 deg in 0.1 s) still found only such rows (cost 2.1) and picked one for two feeds. When the
+    //     facing turns, the heading catch-up rule (headingCatchUpS) runs from the release as after a heading step: the body turns 120 deg
+    //     toward the travel, and the strafe loops / shuffles it passes (RR_offset, Shuffle, FR) are no new candidates. 0 = off.
+    float dodgeFacingHoldS = 0.6f;
+    float dodgeFacingStillDeg = 10.0f;
+    float dodgeFacingOffDeg = 60.0f;
     //  4. startUpshiftHoldS: a fast-rising stick passes the gait thresholds within ~0.1-0.4 s (Walk -> Run -> Sprint), and every gait edge
     //     (InterruptOnDatabaseChange) dropped the playing start clip and picked a fresh one of the new gait's start database: Walk start ->
     //     Run start -> Sprint start in a fraction of a second (flick_180_sprint / accel 5 clip changes in 1.5 s, sprint_again 9; a Walk_Start ->
@@ -1301,6 +1314,8 @@ public:
         m_headingRestArmed = false;
         m_slideExitAge = 1.0e9f;
         m_sinceJumpS = 1.0e9f;
+        m_sinceDodgeS = 1.0e9f;
+        m_sinceDodgeFacingS = 1.0e9f;
         m_sinceSlideS = 1.0e9f;
         m_sinceFastS = 1.0e9f;
         m_sinceSlowS = 1.0e9f;
@@ -1409,6 +1424,8 @@ public:
         const bool holdExpiredNow = holdWasActive && m_slideExitHoldLeft <= 0.0f;
         m_slideExitAge += aDt;
         m_sinceJumpS += aDt;
+        m_sinceDodgeS = aState.dodge ? 0.0f : m_sinceDodgeS + aDt;
+        m_sinceDodgeFacingS += aDt;
         m_riseHoldLeft = std::fmax(0.0f, m_riseHoldLeft - aDt);
         m_sinceSlideS = aState.movementMode == kMovementSliding ? 0.0f : m_sinceSlideS + aDt;
         m_sinceFastS = aState.gait >= 1 || aState.speed2dCmS > m_cfg.walkTransitionFastCmS ? 0.0f : m_sinceFastS + aDt;
@@ -2028,7 +2045,10 @@ public:
         }
 
         // churn guard 3 (MatcherConfig::dodgeHold): the playing clip is kept through the game's ground Dodge
-        const bool continueDodge = UTPP_AND_NOT(JUMPPICK, 26) m_guardsOn && m_cfg.dodgeHold && contEvaluated && aState.dodge && aState.movementMode == 0 &&
+        // churn guard 3b (MatcherConfig::dodgeFacingHoldS, mutation 46 off): after the dodge while its held facing points away from the travel
+        const bool dodgeFacingHeld = UTPP_AND_NOT(JUMPPICK, 46) !aState.dodge && m_sinceDodgeS <= m_cfg.dodgeFacingHoldS && DodgeFacingHeld();
+        const bool continueDodge = UTPP_AND_NOT(JUMPPICK, 26) m_guardsOn && m_cfg.dodgeHold && contEvaluated && (aState.dodge || dodgeFacingHeld) &&
+            aState.movementMode == 0 &&
             last.movementMode == 0 && aState.stance == 0 && !aForce;
         const bool continueTurn = turnHold && contEvaluated;
         if (turnHold && !contEvaluated)
@@ -2036,11 +2056,17 @@ public:
         res.turnHold = continueTurn;
         // MatcherConfig::headingCatchUpS: after a digital heading step, until the facing has caught up, no clip that keeps its facing is a new candidate
         // mutation 33: no heading catch-up rule
-        m_headingCatchUp = UTPP_AND_NOT(JUMPPICK, 33) m_guardsOn && m_cfg.headingCatchUpS > 0.0f && aState.headingStepAgeS < m_cfg.headingCatchUpS &&
+        // a facing released by the dodge hold (3b) catches up like after a heading step (mutation 47: it does not)
+        if (dodgeFacingHeld)
+            m_sinceDodgeFacingS = 0.0f;
+        const bool dodgeCatchUp = UTPP_AND_NOT(JUMPPICK, 47) m_sinceDodgeFacingS < aState.headingStepAgeS;
+        const float catchUpAgeS = dodgeCatchUp ? m_sinceDodgeFacingS : aState.headingStepAgeS;
+        m_headingCatchUp = UTPP_AND_NOT(JUMPPICK, 33) m_guardsOn && m_cfg.headingCatchUpS > 0.0f && catchUpAgeS < m_cfg.headingCatchUpS &&
                            aState.headingLagDeg > m_cfg.headingSettledDeg && aState.movementMode == 0 && aState.movementState == 1 &&
                            (aState.stance == 0 || aState.stance == 1) && !aForce && !aState.justLandedLight && !aState.justLandedHeavy && !aState.justTraversed &&
                            !aState.stationaryAimTurn && !aState.stationaryShotTurn && !aState.restTurn &&
-                           (!aState.headingStepFromRest || m_headingRestArmed || (m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 0));
+                           (dodgeCatchUp || !aState.headingStepFromRest || m_headingRestArmed ||
+                            (m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 0));
         // a start from rest arms the rule while its start clip plays; it then stays on until the facing has caught up or the window ends
         m_headingRestArmed = m_headingCatchUp && aState.headingStepFromRest;
         // ---- search every chooser database
@@ -3069,6 +3095,24 @@ private:
         oy = s * x + c * y;
     }
 
+    // MatcherConfig::dodgeFacingHoldS: the actor yaw of the trajectory has turned less than dodgeFacingStillDeg over the last 0.1 s and the
+    // current travel (trajectory velocity in the facing frame) is more than dodgeFacingOffDeg away from the facing.
+    bool DodgeFacingHeld() const
+    {
+        if (!m_traj || m_numTraj < 2 || m_traj[0].t > -0.1f)
+            return false;
+        constexpr float kDeg = 3.14159265358979f / 180.0f;
+        if (std::fabs(math::WrapAngle(SampleTraj(0.0f).yaw - SampleTraj(-0.1f).yaw)) > m_cfg.dodgeFacingStillDeg * kDeg)
+            return false;
+        float a[3], b[3];
+        constexpr float h = 1.0f / 60.0f;
+        RelRoot(0.0f, 0.0f, a);
+        RelRoot(-h, 0.0f, b);
+        const float vx = (a[0] - b[0]) / h, vy = (a[1] - b[1]) / h;
+        const float sp = std::hypot(vx, vy);
+        return sp > 0.5f && vy < sp * std::cos(m_cfg.dodgeFacingOffDeg * kDeg); // forward = +Y
+    }
+
     // rel(root, root, ts, to) of FORMAT.txt v2.
     void RelRoot(float ts, float to, float out[3]) const
     {
@@ -3356,6 +3400,8 @@ private:
     std::vector<uint8_t> m_dbFadeFrom;  // footsink2: database index -> 1 = ground locomotion, landing or slide exit (outgoing side)
     std::vector<uint8_t> m_dbTurnInPlace; // footsink2: database index -> 1 = *TurnInPlace*
     float m_slideExitHoldLeft = 0.0f;   // fix/slide-exit: seconds the selected exit clip is still kept (MatcherConfig::slideExitMinHoldS)
+    float m_sinceDodgeS = 1.0e9f;       // seconds since the last dodge feed (MatcherConfig::dodgeFacingHoldS)
+    float m_sinceDodgeFacingS = 1.0e9f; // seconds since the dodge facing hold last held (heading catch-up after it)
     float m_sinceJumpS = 1.0e9f;        // seconds since the playing clip was selected (MatcherConfig::freshEventS, loopDwellS)
     float m_slideExitAge = 1.0e9f;      // fix/slide-exit: seconds since an exit clip was selected (MatcherConfig::slideExitBiasS)
     int m_holdStance = 0, m_holdGait = 0, m_holdMovementState = 0, m_holdFlags = 0; // fix/slide-exit: chooser state when the exit clip was selected
