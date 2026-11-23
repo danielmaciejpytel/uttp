@@ -12,8 +12,8 @@
 //     maxPitchDeg / maxRollDeg in the foot's heading frame (a planted toe stays where the lock put it).
 //   - dead zone: deadHeight is subtracted from the height and deadAngleDeg from the tilt (continuous at the threshold); on flat
 //     ground both are zero and the stage hands the pose to the body height stage untouched (bit for bit).
-//   - pelvis: the PelvisPlacement range (all legs, no raise) of the ground targets minus the same range for the animated ankles, so
-//     only a ground difference lowers the pelvis; a critically damped spring (pelvisStiffness), added to the body height offset.
+//   - pelvis: the PelvisPlacement range (no raise; while moving only the front leg, standing all legs) of the ground targets minus
+//     the same range for the animated ankles, so only a ground difference lowers the pelvis; a critically damped spring (pelvisStiffness), added to the body height offset.
 //   - sudden capsule motion: a change of the drawn height between two updates beyond what the slope under the feet or the last steady
 //     vertical rate explains (above suddenStep) is taken into the pelvis spring, so the body does not jump with the capsule and
 //     springs back instead.
@@ -60,6 +60,7 @@ struct Config
     float reach = 0.995f;            // leg reach (fraction of thigh + shin)
     float softReach = 0.97f;         // soft reach start
     float suddenStep = 0.02f;        // m, drawn height change per update beyond the slope that counts as a capsule snap
+    float frontLegSpeed = 0.5f;      // m/s, above it only the front leg sets the pelvis drop
     float bias = 0.0f;               // m, ground hit minus capsule height on flat ground (calibration)
 };
 
@@ -73,7 +74,7 @@ inline bool ValidConfig(const Config& c)
            pos(c.maxDt) &&
            pos(c.pelvisStiffness) && nonneg(c.maxDrop) && nonneg(c.maxCompensation) && nonneg(c.heelLift) && c.heelLift <= 1.0f &&
            std::isfinite(c.reach) && c.reach > 0.5f && c.reach <= 1.0f && std::isfinite(c.softReach) && c.softReach > 0.5f &&
-           c.softReach <= c.reach && pos(c.suddenStep) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f;
+           c.softReach <= c.reach && pos(c.suddenStep) && pos(c.frontLegSpeed) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f;
 }
 
 // One trace per foot, in the model frame of the capsule the trace was taken with (x, y: the traced point; n: the surface normal)
@@ -255,7 +256,9 @@ inline FootGoal Goal(const Config& c, const FootPlane& p, const LegFrame& l)
 
 // Ground pelvis target (m, <= 0): the PelvisPlacement range of the goals minus that of the animated ankles, with the hips raised by the
 // body height offset aLift. Zero when no goal is active.
-inline float PelvisTarget(const Config& c, const PoseFrame& f, const FootGoal (&g)[2], float aLift)
+// aFrontLeg: -1 = every leg sets the pelvis; 0 / 1 = only that (front) leg does, the other keeps the animation's own need (while moving,
+// the trailing leg does not pull the pelvis down a step; it reaches as far as the leg allows)
+inline float PelvisTarget(const Config& c, const PoseFrame& f, const FootGoal (&g)[2], float aLift, int aFrontLeg = -1)
 {
     if (!g[0].active && !g[1].active)
         return 0.0f;
@@ -279,7 +282,7 @@ inline float PelvisTarget(const Config& c, const PoseFrame& f, const FootGoal (&
         anim[s] = leg;
         anim[s].target = l.gc.p;
         goal[s] = leg;
-        goal[s].target = g[s].ankle;
+        goal[s].target = (aFrontLeg < 0 || aFrontLeg == s) ? g[s].ankle : l.gc.p;
     }
     const float z = PelvisPlacement::TargetOffset(pc, goal).z - PelvisPlacement::TargetOffset(pc, anim).z;
     if (!std::isfinite(z))
@@ -430,6 +433,8 @@ public:
         for (Foot& f : m_foot)
             f = Foot{};
         m_pel = m_pelV = m_vz = 0.0f;
+        m_move[0] = 0.0f;
+        m_move[1] = 1.0f;
         m_havePrev = false;
         m_plan = Plan{};
     }
@@ -564,6 +569,18 @@ public:
         }
         else if (first || !m_havePrev)
             m_vz = 0.0f;
+        // front leg while moving (model axes): the leg whose ball is further along the drawn motion of this update
+        int front = -1;
+        if (!first && m_havePrev && aHaveXY && aSamples && dt > 0.0f && std::isfinite(aDrawn[0]) && std::isfinite(aDrawn[1]))
+        {
+            float mx = 0.0f, my = 0.0f;
+            math::Rot2(-aSamples->yaw, aDrawn[0] - m_prev[0], aDrawn[1] - m_prev[1], mx, my);
+            const float d = std::sqrt(mx * mx + my * my);
+            if (d > m_cfg.frontLegSpeed * dt)
+                front = 0; // chosen below from the pose
+            m_move[0] = mx / std::fmax(d, 1e-6f);
+            m_move[1] = my / std::fmax(d, 1e-6f);
+        }
         // pelvis spring towards the ground target
         float target = 0.0f;
         if (allowed && anyFoot)
@@ -574,7 +591,13 @@ public:
                 FootGoal g[2];
                 for (int s = 0; s < 2; ++s)
                     g[s] = Goal(m_cfg, m_plan.foot[s], pf.leg[s]);
-                target = PelvisTarget(m_cfg, pf, g, aBodyOffset);
+                if (front >= 0)
+                {
+                    const float d0 = pf.leg[0].ball.x * m_move[0] + pf.leg[0].ball.y * m_move[1];
+                    const float d1 = pf.leg[1].ball.x * m_move[0] + pf.leg[1].ball.y * m_move[1];
+                    front = d1 > d0 ? 1 : 0;
+                }
+                target = PelvisTarget(m_cfg, pf, g, aBodyOffset, front);
             }
         }
         if (dt > 0.0f)
@@ -611,6 +634,7 @@ private:
     Foot m_foot[2];
     float m_pel = 0.0f, m_pelV = 0.0f;
     float m_vz = 0.0f; // steady drawn height rate (m/s)
+    float m_move[2] = {0.0f, 1.0f}; // drawn motion direction of the last update (model axes)
     bool m_havePrev = false;
     float m_prev[3] = {0.0f, 0.0f, 0.0f};
     Plan m_plan;
