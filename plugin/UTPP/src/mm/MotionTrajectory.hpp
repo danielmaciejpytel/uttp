@@ -52,6 +52,8 @@ inline constexpr float kMovingTolerance = 10.0f;  // IsMoving: Trj_FutureVelocit
 inline constexpr float kStartingMargin = 100.0f;  // IsStarting: |Future|xy >= |Velocity|xy + 100
 inline constexpr float kPivotOrient = 45.0f;      // IsPivoting OrientToMovement
 inline constexpr float kPivotStrafe = 30.0f;      // IsPivoting Strafe
+inline constexpr float kPivotAim = 0.0f;          // IsPivoting Aim (the reference value: any turn angle while moving)
+inline constexpr float kPivotAimGateS = 0.5f;     // no new pivot within this time of a pivot / start pick (state elapsed-time gate)
 inline constexpr float kTurnInPlaceDeg = 50.0f;   // turn admission angle (rest turn, shot turn) and the previous ShouldTurnInPlace angle
 #ifndef UTPP_TURN_IN_PLACE_PREDICATE_DEG
 #define UTPP_TURN_IN_PLACE_PREDICATE_DEG 50.0f
@@ -621,6 +623,17 @@ inline bool IsPivoting(bool aMoving, V3 aFuture, V3 aVelocity, RotationMode aMod
     return SizeXY(aVelocity) > kHasVelocity && std::fabs(TurnAngle(aFuture, aVelocity)) >= thr && aMoving;
 #endif
 }
+// Aim rotation sub-mode (MapConfig::aimRotation): IsPivoting with the Aim threshold aPivotDeg (the reference uses 0) and the
+// state elapsed-time gate of the reference transitions: while the playing pick comes from a Pivots or Starts database and is not
+// older than aGateS, no new pivot is reported (the beginning of a pivot or start is not broken by the next one). The velocity floor
+// of IsPivoting applies.
+inline bool IsPivotingAim(bool aMoving, V3 aFuture, V3 aVelocity, float aPivotDeg, bool aCurrentPivotOrStart, float aPickAgeS,
+                          float aGateS)
+{
+    if (aCurrentPivotOrStart && aPickAgeS <= aGateS)
+        return false;
+    return SizeXY(aVelocity) > kHasVelocity && std::fabs(TurnAngle(aFuture, aVelocity)) >= aPivotDeg && aMoving;
+}
 // ---------------------------------------------------------------- directional locomotion inputs (opt-in chooser inputs)
 // Movement direction of the directional locomotion rows: the angle of the movement direction from the orientation intent, split into
 // quadrants by four thresholds (FL <= F <= FR, BL <= left <= FL, FR <= right <= BR, the rest backward). The thresholds depend on the
@@ -832,6 +845,7 @@ struct States
     V3 trjPast, trjCurrent, trjFuture;
     float turnAngle = 0.0f;
     bool isMoving = false, isStarting = false, isPivoting = false;
+    bool aimRotation = false; // MapConfig::aimRotation acted on this frame (aiming in the strafe rotation mode): IsPivotingAim
     bool shouldTurnInPlace = false, shouldSpin = false;
     bool justLandedLight = false, justLandedHeavy = false;
     bool playLand = false, playMovingLand = false;

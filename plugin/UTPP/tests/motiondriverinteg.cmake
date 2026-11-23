@@ -1,12 +1,13 @@
 # ---- port: MotionDriver integration test through the real v1 MMDriver (src/MotionHost.cpp + src/MotionDriver.cpp, no RED4ext).
 # Short grounded start prediction, cancellation, and bounded support preservation.
-foreach(_start_stop_test CapsuleAcceleration CancelledStart StartStopSupport)
+foreach(_start_stop_test CapsuleAcceleration CancelledStart StartStopSupport AimRotation)
     add_executable(utpp_${_start_stop_test}_test tests/${_start_stop_test}Test.cpp)
     target_compile_features(utpp_${_start_stop_test}_test PRIVATE cxx_std_20)
     target_compile_options(utpp_${_start_stop_test}_test PRIVATE ${UTPP_WARNINGS} /EHsc)
     target_link_libraries(utpp_${_start_stop_test}_test PRIVATE bcrypt)
 endforeach()
 add_test(NAME utpp_CapsuleAcceleration_test COMMAND utpp_CapsuleAcceleration_test)
+add_test(NAME utpp_AimRotation_test COMMAND utpp_AimRotation_test)
 add_test(NAME utpp_CancelledStart_test COMMAND utpp_CancelledStart_test
          "${_utpp_mdmotion_data}/utpp_motion_woman.utppmm")
 # The test finds its three clips by name (their indices differ between the 710 / 726 / 800 clip bakes). --baseline runs the stack WITHOUT the

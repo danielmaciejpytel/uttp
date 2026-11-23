@@ -101,6 +101,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
+    ["mm.aimRotation"] = "false",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
@@ -296,6 +297,7 @@ return {
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
     "native UTPPSetMMCapsuleForecast(false)",
+    "native UTPPSetMMAimRotation(false)",
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
@@ -323,6 +325,7 @@ return {
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
+    "apply mm.aimRotation(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -527,6 +530,7 @@ return {
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
+    "apply mm.aimRotation(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -1530,6 +1534,14 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
+    ["mm.aimRotation"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.aimUpperFade"] = {
       ["default"] = "true",
       ["hasApply"] = true,
@@ -2416,6 +2428,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
+    ["mm.aimRotation"] = "false",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
@@ -2637,6 +2650,7 @@ return {
     "mm.farJumpGravity",
     "mm.overlayInertialSwitch",
     "mm.capsuleForecast",
+    "mm.aimRotation",
     "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
@@ -2829,6 +2843,7 @@ return {
     "mm.farJumpGravity",
     "mm.overlayInertialSwitch",
     "mm.capsuleForecast",
+    "mm.aimRotation",
     "mm.leanCoverage",
     "mm.selectionGuards",
     "mm.debug",
@@ -3011,6 +3026,7 @@ return {
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
+    "apply mm.aimRotation(false,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -3203,6 +3219,7 @@ mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
+mm.aimRotation=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -3470,6 +3487,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.farJumpGravity",
       "mm.overlayInertialSwitch",
       "mm.capsuleForecast",
+      "mm.aimRotation",
       "mm.leanCoverage",
       "mm.selectionGuards",
       "mm.debug"
@@ -3637,6 +3655,7 @@ vehicle.jumpOutSidePush=true\r\
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
+    ["mm.aimRotation"] = "false",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"hold\"",
@@ -3827,6 +3846,7 @@ mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
+mm.aimRotation=false\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -4011,6 +4031,7 @@ other.module=42\r\
     "/utpp/motion|switch|mm.farJumpGravity",
     "/utpp/motion|switch|mm.overlayInertialSwitch",
     "/utpp/motion|switch|mm.capsuleForecast",
+    "/utpp/motion|switch|mm.aimRotation",
     "/utpp/motion|selector|mm.leanCoverage",
     "/utpp/motion|switch|mm.selectionGuards",
     "/utpp/motion|switch|mm.debug",

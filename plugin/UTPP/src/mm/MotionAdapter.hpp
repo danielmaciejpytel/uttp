@@ -1008,6 +1008,13 @@ struct MapConfig
     bool directionalStartSlowMargin = true; // the half-future margin of slow targets (motiontraj::IsStartingDirectional)
     // ShouldTurnInPlace angle (degrees). motiontraj::kTurnInPlaceDeg (50) = the previous angle; the rest / shot turn admission keeps it.
     float turnInPlaceDeg = motiontraj::kTurnInPlacePredicateDeg;
+    // Aim rotation sub-mode (mm.aimRotation, default off): while aiming in the strafe rotation mode, IsPivoting uses aimPivotDeg in
+    // place of the strafe 30 deg and is held off while a pivot / start pick is not older than aimPivotGateS
+    // (motiontraj::IsPivotingAim). Everything else of the strafe mode (facing, sprint cone, trajectory) is unchanged.
+    // false = the strafe IsPivoting, bit for bit.
+    bool aimRotation = false;
+    float aimPivotDeg = motiontraj::kPivotAim;
+    float aimPivotGateS = motiontraj::kPivotAimGateS;
 };
 
 // Factor for motiontraj::GameVelocityToCm (horizontal cm/s = m/s x 100 x factor) at the game planar speed aGameSpeed (m/s).
@@ -1201,6 +1208,10 @@ struct MapContext
     // motion CurrentDatabaseTags contains "Pivots": tags of the database of the PREVIOUS search result
     // (ABP l. 1901 sets them after the selection; Update_States of the next frame reads them, l. 1785 / 1875).
     bool currentDbPivots = false;
+    // Read only by MapConfig::aimRotation: the database of the previous search result is tagged Starts, and the time (s) since the
+    // playing clip was picked (a new clip or database restarts it; large = no pick yet).
+    bool currentDbStarts = false;
+    float currentPickAgeS = 1.0e9f;
     // The current clip loops (false: a transition plays). Read only by MapConfig::moveDirection: a lateral direction keeps the wider
     // lateral thresholds while a transition plays or while aiming.
     bool currentClipLoop = true;
@@ -1240,6 +1251,7 @@ struct MapContext
 
 // [P] database tag "Pivots" from the motion database name (PSD_*_Pivots); the tag arrays are not exported to the chooser data.
 inline bool DatabaseHasPivotsTag(std::string_view aDbName) { return aDbName.find("Pivots") != std::string_view::npos; }
+inline bool DatabaseHasStartsTag(std::string_view aDbName) { return aDbName.find("Starts") != std::string_view::npos; }
 
 // motionfix item 7 (pose snaps): v2 blend floor and the stop on a game-side speed collapse.
 // Blend floor [P] 0.1 s (task bound 0.08-0.10 s): QuinticInertializer::SetMinDuration on every v2 inertializer (PoseEvaluator =
@@ -2086,6 +2098,11 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     st.turnAngle = motiontraj::TurnAngle(turnTarget, vel);
     st.isStarting = motiontraj::IsStarting(st.isMoving, st.trjFuture, vel, x.currentDbPivots);
     st.isPivoting = motiontraj::IsPivoting(st.isMoving, turnTarget, vel, rot);
+    // aim rotation sub-mode (MapConfig::aimRotation): the Aim pivot threshold and the pivot / start elapsed-time gate
+    st.aimRotation = c.aimRotation && f.aiming && rot == motiontraj::RotationMode::Strafe;
+    if (st.aimRotation)
+        st.isPivoting = motiontraj::IsPivotingAim(st.isMoving, turnTarget, vel, c.aimPivotDeg, x.currentDbPivots || x.currentDbStarts,
+                                                  x.currentPickAgeS, c.aimPivotGateS);
     // directional locomotion inputs (MapConfig::directionalPredicates / moveDirection)
     if (c.directionalPredicates)
     {

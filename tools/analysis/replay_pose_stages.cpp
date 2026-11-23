@@ -84,6 +84,12 @@
 //                       without the aim offset (the game's upper body is not recorded): barrel measurements of it are not the shown pose.
 //   --capsule-forecast 0|1  capsule forecast for turning and partial-stick starts (motiondriver::SetCapsuleForecast, the
 //                       mm.capsuleForecast setting; the settings log call MMCapsuleForecast is applied as well). Off / not passed: unchanged.
+//   --aim-rotation 0|1  aim rotation sub-mode while aiming (motiondriver::SetAimRotation, the mm.aimRotation setting; the settings
+//                       log call MMAimRotation is applied as well). Off / not passed: unchanged.
+//   --aim-pivot-deg D   with --aim-rotation 1: the Aim pivot threshold (deg, default 0) (test override of MapConfig::aimPivotDeg)
+//   --aim-pivot-gate S  with --aim-rotation 1: the pivot / start elapsed-time gate (s, default 0.5; 0 = no gate)
+//   --force-aim 1       synthetic aim: every feed reads the PSM upper body Aim with a drawn weapon (the recordings have almost no
+//                       aiming while moving); combine with --aim-camera P for the overlay and the aim target. Default off.
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
 //                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
 //                       (inspection only; the other outputs are unchanged)
@@ -138,6 +144,7 @@
 namespace utpp::motiondriver
 {
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg);
+void TestSetMapAimPivot(float aPivotDeg, float aGateS);
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
@@ -286,6 +293,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
         else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
+        else if (name == "MMAimRotation") motiondriver::SetAimRotation(flag(0));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
     }
@@ -459,6 +467,9 @@ int main(int argc, char** argv)
     int leanLoaded = -1;                       // with --lean-pack: lean pack state of the bundles seen (LEANPACK line)
     bool aimJogQuery = false;                  // --aim-jog-query 1
     uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
+    int32_t aimRotation = -1;                  // --aim-rotation: < 0 = not passed (the settings log / build default)
+    float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
+    bool forceAim = false;                     // --force-aim 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
     float tipDeg = std::numeric_limits<float>::quiet_NaN();
@@ -553,6 +564,14 @@ int main(int argc, char** argv)
             swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
             leanPack = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--aim-rotation") == 0)
+            aimRotation = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--aim-pivot-deg") == 0)
+            aimPivotDeg = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-pivot-gate") == 0)
+            aimPivotGateS = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--force-aim") == 0)
+            forceAim = std::atoi(argv[i + 1]) != 0;
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -653,6 +672,11 @@ int main(int argc, char** argv)
     }
     if (inputs.empty())
         return 6;
+    // --force-aim: PSM upper body Aim and a drawn weapon on every feed (the upper body field holds the state + 1)
+    if (forceAim)
+        for (auto& in : inputs)
+            in.psmBlock = (in.psmBlock & ~integ::kPsmUpperFieldMask) | (uint32_t(integ::kPsmUpperBodyAim + 1) << integ::kPsmUpperShift) |
+                          integ::kPsmWeaponKnown | integ::kPsmWeaponDrawn;
     // --ahead recorded: the body turn of the coming tick is the next feed's yaw minus this one (what the game applied after the feed);
     // without it the host derives it from its own body yaw command, which an open-loop replay never issues (0).
     if (aheadRecorded)
@@ -726,6 +750,10 @@ int main(int argc, char** argv)
     motiondriver::TestSetMapOverrides(capsuleQuery, velocityPredicates, tipDeg);
     if (capsuleForecast >= 0)
         motiondriver::SetCapsuleForecast(capsuleForecast != 0);
+    if (aimRotation >= 0)
+        motiondriver::SetAimRotation(aimRotation != 0);
+    if (std::isfinite(aimPivotDeg) || std::isfinite(aimPivotGateS))
+        motiondriver::TestSetMapAimPivot(aimPivotDeg, aimPivotGateS);
     FILE* forecastOut = nullptr;
     if (forecastDump && out != "-")
     {

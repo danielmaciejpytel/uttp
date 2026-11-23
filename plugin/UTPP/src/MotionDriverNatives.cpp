@@ -35,6 +35,7 @@ bool SetNeutralAimOffset(bool aOn);
 void SetHandBackBlend(bool aOn);
 void SetStepDownReach(bool aOn);
 void SetCapsuleForecast(bool aOn);
+void SetAimRotation(bool aOn);
 void SetFarJumpGravityScale(bool aOn);
 bool SetOverlayInertialSwitch(bool aOn);
 }
@@ -532,6 +533,15 @@ void Native_SetMMCapsuleForecast(RED4ext::IScriptable*, RED4ext::CStackFrame* aF
     SetCapsuleForecast(v);
     pluginlog::LogInfo("UTPPSetMMCapsuleForecast(%d) -> 1", v ? 1 : 0);
 }
+// aim rotation sub-mode while aiming (MapConfig::aimRotation; CET utpp_motion mm.aimRotation, default off)
+void Native_SetMMAimRotation(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    SetAimRotation(v);
+    pluginlog::LogInfo("UTPPSetMMAimRotation(%d) -> 1", v ? 1 : 0);
+}
 void Native_SetMMFarJumpGravity(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     bool v = false;
@@ -780,6 +790,8 @@ void RegisterNatives()
     o3->flags = flags; o3->AddParam("Bool", "on"); rtti->RegisterFunction(o3);
     auto* o3b = RED4ext::CGlobalFunction::Create("UTPPSetMMCapsuleForecast", "UTPPSetMMCapsuleForecast", &Native_SetMMCapsuleForecast);
     o3b->flags = flags; o3b->AddParam("Bool", "on"); rtti->RegisterFunction(o3b);
+    auto* o3c = RED4ext::CGlobalFunction::Create("UTPPSetMMAimRotation", "UTPPSetMMAimRotation", &Native_SetMMAimRotation);
+    o3c->flags = flags; o3c->AddParam("Bool", "on"); rtti->RegisterFunction(o3c);
     auto* o4 = RED4ext::CGlobalFunction::Create("UTPPSetMMFarJumpGravity", "UTPPSetMMFarJumpGravity", &Native_SetMMFarJumpGravity);
     o4->flags = flags; o4->AddParam("Bool", "on"); rtti->RegisterFunction(o4);
     auto* o5 = RED4ext::CGlobalFunction::Create("UTPPSetMotionLeanCoverage", "UTPPSetMotionLeanCoverage", &Native_SetMotionLeanCoverage);

@@ -199,6 +199,10 @@ bool SelectionGuards();
 // query trajectory ramps at the applied capsule acceleration also when the body faces away from the input, at a partial stick and
 // with a turning input. Read on every Step.
 void SetCapsuleForecast(bool aOn);
+// Aim rotation sub-mode (CET mm.aimRotation, default off; MapConfig::aimRotation): while aiming in the strafe rotation mode the
+// chooser's IsPivoting uses the Aim pivot threshold and the pivot / start elapsed-time gate (motiontraj::IsPivotingAim). Read on
+// every Step.
+void SetAimRotation(bool aOn);
 // Tier2 Slow flag (GameplayRestriction.Tier2LocomotionSlow; reds UTPPFeedMotionTier2Slow, sent right before every UTPPFeedLocomotion): the next
 // v2 Steps lower the stand run cap by 1.3 m/s (MotionFeed::tier2Slow). Process-lifetime atomic, false at start. Status: tier2Slow=.
 void FeedTier2Slow(bool aSlow);
