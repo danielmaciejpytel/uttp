@@ -307,6 +307,24 @@ int main()
         for (int i = 0; i < 60; ++i)
             h1 = speedconv::Step(q1, back, true, true, dt, lim, false, true);
         Check("converter direction only: a reversal turns through within 1 s", h1.x < -440.0f);
+        // stall: the capsule loses most of its speed within a feed with the input held (a wall) -> the game velocity
+        speedconv::State w0 = s;
+        const V3 wall = speedconv::Step(w0, V3{20.0f, 80.0f, 0.0f}, true, true, dt, lim, false, true);
+        Check("converter: a stall against a wall keeps the game velocity", wall.x == 20.0f && wall.y == 80.0f);
+        // the stall holds while the capsule jitters against the wall (direction flips from feed to feed, speed stays low)
+        bool held = true;
+        for (int i = 0; i < 20; ++i)
+        {
+            const V3 g = (i & 1) ? V3{-25.0f, 20.0f, 0.0f} : V3{10.0f, -30.0f, 0.0f};
+            const V3 o = speedconv::Step(w0, g, true, true, dt, lim, false, true);
+            held = held && o.x == g.x && o.y == g.y;
+        }
+        Check("converter: a stall holds while the capsule jitters against the wall", held);
+        // the conversion returns once the speed recovers
+        V3 rec{};
+        for (int i = 0; i < 3; ++i)
+            rec = speedconv::Step(w0, V3{0.0f, 500.0f, 0.0f}, true, true, dt, lim, false, true);
+        Check("converter: the stall ends once the speed recovers", w0.stallSpeed == 0.0f && rec.y > 0.0f);
         // steady-speed filter: a held speed is steady, a start ramp is not
         speedconv::State f0;
         bool steady = false, ramp = false;

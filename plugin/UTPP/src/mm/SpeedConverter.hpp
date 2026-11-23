@@ -35,12 +35,16 @@ struct Limits
     // cos of the largest angle between the converted and the game velocity that is converted; a larger one (a reversal, which the
     // reference passes through a near stop and the pivot picks already cover) resets to the game velocity. -1 = every angle.
     float maxTurnCos = -1.0f;
+    // the game speed falling below this share of the previous feed's game speed with the input held is a stall (a wall): reset
+    float stallRatio = 0.5f;
 };
 
 struct State
 {
     bool valid = false;
     motiontraj::V3 vel{};
+    float gamePrevSpeed = 0.0f; // the game speed of the previous feed (stall detection)
+    float stallSpeed = 0.0f;    // > 0: stalled (the game speed before the stall); the game velocity passes until the speed recovers
     // kSteadyLoopRate: the previous speed (< 0 = none) and the filtered rate of change of the speed
     float steadyPrevSpeed = -1.0f;
     float steadyAccel = 0.0f;
@@ -68,6 +72,8 @@ inline void Reset(State& s, motiontraj::V3 aGame)
 {
     s.valid = true;
     s.vel = aGame;
+    s.gamePrevSpeed = motiontraj::SizeXY(aGame);
+    s.stallSpeed = 0.0f;
 }
 
 // Below this angle between the converted and the game velocity the two count as aligned: without aShapeSpeed the converted speed is
@@ -87,13 +93,30 @@ inline motiontraj::V3 Step(State& s, motiontraj::V3 aGame, bool aInput, bool aAc
 #endif
     if (!aActive || !s.valid || !(aDt > 0.0f) || !std::isfinite(aDt))
     {
+        const float keepStall = aInput ? s.stallSpeed : 0.0f; // a stall outlasts the slow feeds that switch the conversion off
         Reset(s, aGame);
+        s.stallSpeed = keepStall;
         return aGame;
     }
     const V3 game{aGame.x, aGame.y, 0.0f};
     V3 v{s.vel.x, s.vel.y, 0.0f};
     const float target = motiontraj::SizeXY(game);
     const float prev = motiontraj::SizeXY(v);
+    // a stall (the capsule lost most of its speed within a feed with the input held: a wall) keeps the game velocity; it holds until the input is released or the game speed is back above stallRatio of the speed before it (a capsule pressed
+    // against a wall jitters in direction from feed to feed)
+    if (aInput && target < l.stallRatio * s.gamePrevSpeed && s.stallSpeed <= 0.0f)
+        s.stallSpeed = s.gamePrevSpeed;
+    const float stallSpeed = s.stallSpeed;
+    const bool stall = stallSpeed > 0.0f && aInput && target < l.stallRatio * stallSpeed;
+    if (stall)
+    {
+        Reset(s, aGame);
+        s.stallSpeed = stallSpeed;
+        return aGame;
+    }
+    s.stallSpeed = 0.0f;
+    s.gamePrevSpeed = target;
+    // a reversal beyond maxTurnCos keeps the game velocity
     if (l.maxTurnCos > -1.0f && target > motiontraj::kHasVelocity && prev > motiontraj::kHasVelocity &&
         motiontraj::Dot(v, game) < l.maxTurnCos * prev * target)
     {
