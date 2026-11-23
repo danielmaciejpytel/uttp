@@ -187,6 +187,11 @@ struct FootPlantReferenceConfig
 // first contact crossing holds the toe where the clip's foot is still landing, and since a standing stop does not settle, that offset
 // would stay as the stance correction. A partial crossfade contact that never gets firm does not plant at all. Every other path (moving
 // capsule, no stop episode, already firm contact) is unchanged.
+#if defined(UTPP_FLRELOCK_MUTATION) && UTPP_FLRELOCK_MUTATION == 1 // mutation 1: no relock guard
+#define UTPP_FOOT_RELOCK_GUARD 0
+#else
+#define UTPP_FOOT_RELOCK_GUARD 1
+#endif
 #ifndef UTPP_FOOT_STOP_FIRM_PLANT
 #define UTPP_FOOT_STOP_FIRM_PLANT 1
 #endif
@@ -294,6 +299,7 @@ struct FootLockDiagnostics
     uint64_t updates = 0;
     uint64_t locks = 0;
     uint64_t relocks = 0;      // lock started while still blending out
+    uint64_t relockSkips = 0;  // relock guard: relocks skipped because the fading toe was beyond maxDrift
     uint64_t driftUnlocks = 0; // maxDrift exceeded
     uint64_t clamps = 0;       // updates with an unreachable target (per foot)
     uint64_t nonFiniteResets = 0;
@@ -335,6 +341,8 @@ class FootLocker
 public:
     static constexpr int kLeft = 0;
     static constexpr int kRight = 1;
+    // Relock guard (FootLocker::UpdateFoot): false = a relock beyond maxDrift drift-unlocks at once and restarts the fade (mutation 1)
+    static constexpr bool kRelockGuard = UTPP_FOOT_RELOCK_GUARD != 0;
     static constexpr float kBlendOutSinkMax = 0.03f; // m, the rotation-space blend-out may lower an ankle this far below the animated one
     // m, standing stop: a lock still blending in whose animated toe moves this far relative to the planted other foot's animated toe is a
     // swing contact and is released (loco-stop-knees 2026-11-09, see UpdateFoot)
@@ -1166,13 +1174,26 @@ private:
             ++m_diag.stopFirmWaits;
         }
 #endif
+        math::Vec3 shown = gl.p;
+        if (f.contact && !f.locked && !f.suppressed && !firmWait && !(PlantRefActive() && !(aContact > m_pcfg.contact)) && wPrev > 0.0f)
+        {
+            // still blending out (rotation space): the relock takes the point where the toe is displayed. Relock guard: a fade of a large
+            // hold (a firm foot released at its contact end whose contact comes back mid-fade) shows the toe beyond maxDrift; that lock
+            // would drift-unlock in the same update and restart the fade from full weight with the stale deltas on a leg the clip has
+            // moved on (reface starts / run stops: 38-43 cm). The fade goes on instead, and as after that drift unlock the foot does not
+            // relock until this contact ends.
+            shown = BlendedLockPoint(aSide, gp, ReleaseWeight(f, wPrev));
+            if (kRelockGuard && !(Len(math::Vec3{shown.x - gl.p.x, shown.y - gl.p.y, 0.0f}) <= m_cfg.maxDrift))
+            {
+                f.suppressed = true;
+                ++m_diag.relockSkips;
+            }
+        }
         if (f.contact && !f.locked && !f.suppressed && !firmWait && !(PlantRefActive() && !(aContact > m_pcfg.contact)))
         {
-            math::Vec3 shown = gl.p;
             if (wPrev > 0.0f)
             {
                 // still blending out (rotation space): lock where the toe is displayed, full weight, no re-blend
-                shown = BlendedLockPoint(aSide, gp, ReleaseWeight(f, wPrev));
                 f.s = 1.0f;
                 ++m_diag.relocks;
             }

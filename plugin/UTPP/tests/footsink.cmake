@@ -66,3 +66,13 @@ if(UTPP_MMDB_TEST_FILE)
     add_test(NAME utpp_standing_stop_support_flfirm_mut1 COMMAND utpp_standing_stop_support_flfirm_mut1 "${UTPP_MMDB_TEST_FILE}")
     set_tests_properties(utpp_standing_stop_support_flfirm_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL firm plant: a short partial contact in a standing stop never locks")
 endif()
+# FootLocker relock guard (FootLocker::kRelockGuard): UTPP_FLRELOCK_MUTATION=1 removes it, the firm foot of tests/MMFootLockTest.cpp (check ff7)
+# whose contact comes back mid-fade must then relock beyond maxDrift, drift-unlock and grow its shown offset again.
+if(UTPP_MMDB_TEST_FILE)
+    add_executable(utpp_mm_footlock_flrelock_mut1 tests/MMFootLockTest.cpp src/BaseDatabase.hpp src/mm/MMMath.hpp src/mm/BaseTrajectory.hpp
+                   src/mm/Inertializer.hpp src/mm/BaseMatcher.hpp src/mm/FootLocker.hpp)
+    target_compile_options(utpp_mm_footlock_flrelock_mut1 PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_mm_footlock_flrelock_mut1 PRIVATE UTPP_FLRELOCK_MUTATION=1)
+    add_test(NAME utpp_mm_footlock_flrelock_mut1 COMMAND utpp_mm_footlock_flrelock_mut1 "${UTPP_MMDB_TEST_FILE}")
+    set_tests_properties(utpp_mm_footlock_flrelock_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "\\[FAIL\\] [(]ff7[)] a contact back mid-fade keeps the fade going")
+endif()

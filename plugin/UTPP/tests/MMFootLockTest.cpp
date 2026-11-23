@@ -1999,6 +1999,66 @@ static void SectionFirmFeet(const Database& db)
             }
         }
     }
+    // (ff7) relock guard: a latched foot released at a large hold whose contact comes back mid-fade (reface starts, run stops) keeps
+    // fading: the shown ankle offset never grows back, no drift unlock fires, and the fade ends in its release time.
+    for (const float dt : {1.0f / 30.0f, 1.0f / 60.0f, 1.0f / 144.0f})
+    {
+        const std::string tag = " (dt 1/" + std::to_string(static_cast<int>(std::lround(1.0 / double(dt)))) + ")";
+        // a small drift bound (the standing test pose limits the hold to ~9 cm): the released hold is beyond it, as a 30 cm hold is beyond
+        // the default 25 cm; the latched foot unlocks at max(maxDrift, hold + driftMargin) and is not affected
+        FootLockConfig lc{};
+        lc.maxDrift = 0.06f;
+        lc.maxSlipOffset = 0.055f;
+        FootLocker fl;
+        fl.Init(db, lc);
+        fl.SetReplantConfig(g_rcTest);
+        fl.SetSlip(0.05f, 0.02f);
+        fl.SetFirmFeet(true);
+        fl.SetFirmHold(true);
+        const math::Vec3 animAnkle0 = fl.ModelSpace(bent, fl.ChainBone(0, 2)).p;
+        const int nSettle = int(0.3f / dt), nMove = int(1.4f / dt), nGap = std::max(1, int(std::lround(0.04 / double(dt)))),
+                  nEnd = int(0.8f / dt);
+        double atRelease = 0.0, prev = 0.0, grow = 0.0, maxAfter = 0.0, releaseTime = 0.0;
+        int released = -1;
+        bool finite = true;
+        for (int i = 0; i < nSettle + nMove + nEnd; ++i)
+        {
+            const bool move = i >= nSettle && i < nSettle + nMove;
+            const int k = i - (nSettle + nMove); // updates since the contact end
+            const float vx = move ? -0.25f : 0.0f;
+            const float cl = k >= 0 && k < nGap ? 0.0f : 1.0f;
+            fl.Update(dt, vx, 0.0f, 0.0f, cl, 1.0f, bent);
+            const auto out = fl.Output();
+            const double shown = double(legik::Len(fl.ModelSpace(out, fl.ChainBone(0, 2)).p - animAnkle0));
+            finite = finite && std::isfinite(shown);
+            const FootLockFootDiag& f0 = fl.Diagnostics().foot[0];
+            if (k >= 0 && released < 0 && !f0.locked)
+            {
+                released = i;
+                atRelease = prev;
+            }
+            if (released >= 0 && i > released)
+            {
+                grow = std::max(grow, shown - prev);
+                maxAfter = std::max(maxAfter, shown);
+                if (releaseTime == 0.0 && f0.weight <= 0.0f)
+                    releaseTime = double(i - released + 1) * double(dt);
+            }
+            prev = shown;
+        }
+        const FootLockDiagnostics& d = fl.Diagnostics();
+        const double expected = std::max(0.15, atRelease / double(FirmFeetConfig{}.releaseSpeed));
+        Expect(("(ff7) the released hold is beyond maxDrift when the contact comes back" + tag).c_str(),
+               released >= 0 && atRelease > double(lc.maxDrift) + 0.005,
+               Fmt("shown ankle offset at the release %.1f cm, contact gap %.0f updates", atRelease * 100.0, double(nGap)));
+        Expect(("(ff7) a contact back mid-fade keeps the fade going: no growth, no drift unlock, ends in its release time" + tag).c_str(),
+               finite && grow <= 0.0005 && maxAfter <= atRelease + 0.0005 && d.driftUnlocks == 0 && releaseTime > 0.0 &&
+                   releaseTime <= expected + 2.0 * double(dt) + 1e-6,
+               Fmt("largest growth per update %.2f mm, max after the release %.1f cm (at it %.1f), drift unlocks %.0f, skips %.0f, fade %.3f s "
+                   "(expected %.3f s)",
+                   grow * 1000.0, maxAfter * 100.0, atRelease * 100.0, double(d.driftUnlocks), double(d.relockSkips), releaseTime, expected));
+        Expect(("(ff7) the relock guard fired" + tag).c_str(), d.relockSkips >= 1, Fmt("skips %.0f", double(d.relockSkips)));
+    }
 }
 
 int main(int argc, char** argv)
