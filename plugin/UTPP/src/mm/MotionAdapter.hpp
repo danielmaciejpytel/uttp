@@ -802,6 +802,13 @@ enum class CapsuleRateMode : uint8_t
     LowerOnly = 3
 };
 inline constexpr CapsuleRateMode kCapsuleSpeedRateDefault = static_cast<CapsuleRateMode>(UTPP_CAPSULE_SPEED_RATE_DEFAULT & 3);
+// MapConfig::capsuleRateScope -> ChooserState::rateScaleScope (written only when the chooser state declares it)
+template <class S>
+inline void WriteRateScaleScope(S& s, int aScope)
+{
+    if constexpr (requires { s.rateScaleScope = aScope; })
+        s.rateScaleScope = aScope;
+}
 inline float CapsuleRateScaleForMode(CapsuleRateMode aMode, float aScale)
 {
     if (aMode == CapsuleRateMode::Off || !std::isfinite(aScale) || aScale <= 0.0f)
@@ -996,6 +1003,9 @@ struct MapConfig
     // Capsule speed play rate (see CapsuleRateMode). Ignored while capsuleSpeedQuery is on (that query already carries the capsule speed)
     // and inside the slide map.
     CapsuleRateMode capsuleSpeedRate = kCapsuleSpeedRateDefault;
+    // capsuleRateScope: the picks that play at the capsule speed (ChooserState::rateScaleScope): 0 every pick, 1 loop clips only, 2 every
+    // pick but a start clip (a start keeps the rate of the mapped query, so its authored acceleration stays in step with the query).
+    int capsuleRateScope = 0;
     // Directional locomotion inputs for the directional database rows (MapState::st.moveDirection, isStartingDirectional,
     // isPivotingDirectional). Computed only when on; the existing inputs (slide direction, IsStarting, IsPivoting) are unchanged.
     // moveDirection: the six-way movement direction with hysteresis (motiontraj::UpdateMoveDirection), from the input direction on the
@@ -2213,6 +2223,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.restTurn = stationaryRestTurn; // finishes an admitted same-side clip like the aim turn, but is no aim start
 #endif
     s.explicitWalk = f.wantsToWalk;
+    WriteRateScaleScope(s, c.capsuleRateScope);
     if (facing.shotTurn)
     {
         shotturn::Hold side; // R3 review L1: the error is read on the admitted side near 180 deg (same rule as the hold)

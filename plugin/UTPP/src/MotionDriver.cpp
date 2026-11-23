@@ -2666,13 +2666,15 @@ struct TestMapOverrides
     float turnInPlaceDeg = std::numeric_limits<float>::quiet_NaN();
     int32_t stepDownReach = -1;
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
+    int32_t capsuleSpeedRate = -1, capsuleRateScope = -1; // MapConfig::capsuleSpeedRate (CapsuleRateMode 0-3), capsuleRateScope (0-2)
 };
 TestMapOverrides g_testMapOverrides;
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg)
 {
     std::lock_guard lock(g_m);
     g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach,
-                                          g_testMapOverrides.aimPivotDeg, g_testMapOverrides.aimPivotGateS};
+                                          g_testMapOverrides.aimPivotDeg, g_testMapOverrides.aimPivotGateS,
+                                          g_testMapOverrides.capsuleSpeedRate, g_testMapOverrides.capsuleRateScope};
 }
 void TestSetMapAimPivot(float aPivotDeg, float aGateS)
 {
@@ -2706,8 +2708,18 @@ void TestSetMapStepDownReach(int32_t aOn)
     std::lock_guard lock(g_m);
     g_testMapOverrides.stepDownReach = aOn;
 }
+void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope)
+{
+    std::lock_guard lock(g_m);
+    g_testMapOverrides.capsuleSpeedRate = aMode;
+    g_testMapOverrides.capsuleRateScope = aScope;
+}
 void TestApplyMapOverrides(adapter::MapConfig& aMc)
 {
+    if (g_testMapOverrides.capsuleSpeedRate >= 0)
+        aMc.capsuleSpeedRate = static_cast<adapter::CapsuleRateMode>(g_testMapOverrides.capsuleSpeedRate & 3);
+    if (g_testMapOverrides.capsuleRateScope >= 0)
+        aMc.capsuleRateScope = g_testMapOverrides.capsuleRateScope;
     if (g_testMapOverrides.capsuleSpeedQuery >= 0)
         aMc.capsuleSpeedQuery = g_testMapOverrides.capsuleSpeedQuery != 0;
     if (g_testMapOverrides.velocityPredicates >= 0)

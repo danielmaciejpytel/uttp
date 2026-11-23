@@ -21,6 +21,9 @@
 //   --signals N         per-bone root-motion signals: bit 0 root on the Root weight, bit 1 contacts on the leg weights
 //   --pelvis 1          pelvis stage of the foot locker
 //   --capsule-query 1   chooser query trajectory in capsule units
+//   --capsule-rate M    play rate from the capsule speed, the search on the mapped query (MapConfig::capsuleSpeedRate: 0 off, 1 both
+//                       ways, 2 raise only, 3 lower only); --capsule-rate-scope S: the picks that take it (MapConfig::capsuleRateScope:
+//                       0 every pick, 1 loop clips only, 2 every pick but a start clip)
 //   --velocity-predicates 1  moving / pivot predicates from the current velocity and the input acceleration
 //   --tip-deg D         turn-in-place angle of the chooser (deg)
 //   --pick-dump 1       one PICKDUMP line per stop / start pick (inspection)
@@ -161,6 +164,7 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
 void TestSetMapStepDownReach(int32_t aOn);
 void SetStepDownReach(bool aOn);
 void TestSetMapAimPivot(float aPivotDeg, float aGateS);
+void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope);
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
@@ -461,7 +465,7 @@ int main(int argc, char** argv)
     std::string settingsLog;
     bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int turnFootPhase = -1; // -1 = build default
-    int32_t capsuleQuery = -1, velocityPredicates = -1;
+    int32_t capsuleQuery = -1, velocityPredicates = -1, capsuleRate = -1, capsuleRateScope = -1;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
     int32_t firmFeet = -1;                     // -1 = not passed
@@ -525,6 +529,10 @@ int main(int argc, char** argv)
             pelvis = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--capsule-query") == 0)
             capsuleQuery = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--capsule-rate") == 0)
+            capsuleRate = std::atoi(argv[i + 1]) & 3;
+        else if (std::strcmp(argv[i], "--capsule-rate-scope") == 0)
+            capsuleRateScope = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--velocity-predicates") == 0)
             velocityPredicates = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--tip-deg") == 0)
@@ -820,6 +828,7 @@ int main(int argc, char** argv)
         motiondriver::TestSetMapStepDownReach(stepDownReach);
         motionhost::SetAirStepDownReach(stepDownReach != 0);
     }
+    motiondriver::TestSetMapCapsuleRate(capsuleRate, capsuleRateScope);
     if (capsuleForecast >= 0)
         motiondriver::SetCapsuleForecast(capsuleForecast != 0);
     if (aimRotation >= 0)
