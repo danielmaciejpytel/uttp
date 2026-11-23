@@ -24,6 +24,10 @@ inline constexpr int kSteadyLoopRate = 16; // kLoopRate only while the capsule s
 // kSteadyLoopRate: the capsule speed counts as steady while its filtered rate of change stays below this (cm/s^2 on the query scale)
 inline constexpr float kSteadyAccelCmS2 = 150.0f;
 inline constexpr float kSteadyFilterS = 0.1f; // time constant of that filter (s)
+// kDirectionOnly: a turn starts when the heading error to the game velocity exceeds kTurnStartDeg (a sharp input change; a smooth curve
+// stays below it and passes the game heading unchanged) and ends below kTurnEndDeg
+inline constexpr float kTurnStartDeg = 30.0f;
+inline constexpr float kTurnEndDeg = 5.0f;
 
 struct Limits
 {
@@ -45,6 +49,7 @@ struct State
     motiontraj::V3 vel{};
     float gamePrevSpeed = 0.0f; // the game speed of the previous feed (stall detection)
     float stallSpeed = 0.0f;    // > 0: stalled (the game speed before the stall); the game velocity passes until the speed recovers
+    bool turning = false;       // kDirectionOnly: a turn is being converted
     // kSteadyLoopRate: the previous speed (< 0 = none) and the filtered rate of change of the speed
     float steadyPrevSpeed = -1.0f;
     float steadyAccel = 0.0f;
@@ -74,6 +79,7 @@ inline void Reset(State& s, motiontraj::V3 aGame)
     s.vel = aGame;
     s.gamePrevSpeed = motiontraj::SizeXY(aGame);
     s.stallSpeed = 0.0f;
+    s.turning = false;
 }
 
 // Below this angle between the converted and the game velocity the two count as aligned: without aShapeSpeed the converted speed is
@@ -128,6 +134,14 @@ inline motiontraj::V3 Step(State& s, motiontraj::V3 aGame, bool aInput, bool aAc
         // direction only: the heading error to the game velocity decays at the friction rate (the small-angle behaviour of the CMC
         // friction term), the speed is the game speed; a reversal turns along an arc to the side of the error instead of stalling
         const float err = motiontraj::NormalizeAxis(motiontraj::YawOf(game) - motiontraj::YawOf(v));
+        if (std::fabs(err) > kTurnStartDeg)
+            s.turning = true;
+        if (!s.turning || std::fabs(err) < kTurnEndDeg)
+        {
+            s.turning = false;
+            s.vel = aGame;
+            return aGame;
+        }
         const float yaw = motiontraj::YawOf(v) + err * std::min(aDt * l.friction, 1.0f);
         const float r = yaw / motiontraj::kRad2Deg;
         v = V3{std::cos(r) * target, std::sin(r) * target, 0.0f};

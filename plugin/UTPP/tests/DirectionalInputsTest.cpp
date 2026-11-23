@@ -307,6 +307,17 @@ int main()
         for (int i = 0; i < 60; ++i)
             h1 = speedconv::Step(q1, back, true, true, dt, lim, false, true);
         Check("converter direction only: a reversal turns through within 1 s", h1.x < -440.0f);
+        // direction only: a smooth curve (1.5 deg per feed) is not a turn, the game velocity passes unchanged
+        speedconv::State q2 = s;
+        bool smooth = true;
+        for (int i = 1; i <= 60; ++i)
+        {
+            const float r = 1.5f * static_cast<float>(i) / motiontraj::kRad2Deg;
+            const V3 g{500.0f * std::cos(r), 500.0f * std::sin(r), 0.0f};
+            const V3 o = speedconv::Step(q2, g, true, true, dt, lim, false, true);
+            smooth = smooth && o.x == g.x && o.y == g.y;
+        }
+        Check("converter direction only: a smooth curve passes the game velocity", smooth);
         // stall: the capsule loses most of its speed within a feed with the input held (a wall) -> the game velocity
         speedconv::State w0 = s;
         const V3 wall = speedconv::Step(w0, V3{20.0f, 80.0f, 0.0f}, true, true, dt, lim, false, true);
