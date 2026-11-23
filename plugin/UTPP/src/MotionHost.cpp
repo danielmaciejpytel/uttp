@@ -57,6 +57,7 @@
 #include "mm/Strafe.hpp"
 #include "ragdoll/RagdollEpisode.hpp" // ragdoll episode: game-owned feed
 #include "mm/BodyHeightRuntime.hpp" // body height smoothing (option, default on): gate + leg rig for the animation-thread stage
+#include "mm/GroundFeetRuntime.hpp" // feet on uneven ground (option, default off): gate + probe points for the animation-thread stage
 #include "mm/VehicleTransition.hpp" // vehicle batch W1 P2: mount pop / exit hand-in (CAR-5 / MOTO-3, MOTO-6 / CAR-1 step 5)
 
 namespace utpp::motionhost
@@ -1537,6 +1538,12 @@ bool g_bodyHeightAllowed = false; // set by the leg pipeline of this feed
 bool g_bodyHeightPlatform = false; // a moving platform carries V (FeedInput.onMovingPlatform of the last real feed): no smoothing
 bool g_bodyHeightReset = true;    // consumed by the next publish (first publish starts a fresh tracker)
 uint64_t g_bodyHeightTeleports = 0;
+// Feet on uneven ground (mm/GroundFeetRuntime.hpp; option, default off): the stage runs on the animation thread next to the body height
+// stage; the feed publishes its gate, a reset request and the probe points (balls of the published feet) the script traces under.
+bool g_groundFeetOn = false;     // the menu default (mm.groundFeet)
+bool g_groundFeetAllowed = false; // set by the leg pipeline of this feed
+bool g_groundFeetReset = true;   // consumed by the next publish
+uint64_t g_groundFeetTeleports = 0;
 
 LegContext ComputeLegContextLocked(const FeedInput& aIn, float aCapsuleSpeed)
 {
@@ -1686,6 +1693,7 @@ void MotionHandbackLocked() // UTPP-MOTION SEAM
         return; // UTPP-MOTION SEAM
     g_motionHeldMatcher = false; // UTPP-MOTION SEAM
     g_bodyHeightReset = g_bodyHeightOn; // body height smoothing restarts at the hand-back
+    g_groundFeetReset = g_groundFeetOn; // so does the ground feet stage
     g_airHoldGroundReplantLeft = 0.0f; // never carry a v1 landing-step policy across v2 ownership
     g_airLandGroundBlendLeft = 0.0f; // never blend a cached v1 Land pose across an independently owned v2 span
     g_airLandGroundBlendPending = false;
@@ -1953,6 +1961,17 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
             g_bodyHeightReset = true;
         }
     }
+    if (g_groundFeetOn)
+    {
+        // ground feet gate: the body height gate (ground locomotion, no traversal frame, third person)
+        g_groundFeetAllowed = aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && g_motionFrame.travFrame) && aIn.tppActive;
+        const uint64_t tp = g_offsetRoot.Diagnostics().teleports;
+        if (tp != g_groundFeetTeleports)
+        {
+            g_groundFeetTeleports = tp;
+            g_groundFeetReset = true;
+        }
+    }
 }
 
 // Crossfade the pose before StanceGuard / FootLocker so both feet are solved against the final Hips pose.
@@ -2083,6 +2102,13 @@ void PublishLocked(float aWeight)
             ++g_jumpOutSlewFrames;
         g_jumpOutLimiter.Apply(g_snap.pose, g_snap.firstBone, g_snap.numBones, dtS, mm::kJumpOutSlewDegPerS, slew);
     }
+    if (g_groundFeetOn)
+    {
+        groundfeet::rt::PublishGate(g_groundFeetAllowed && g_snap.weight > 0.0f, g_groundFeetReset, g_bodyHeightPlatform);
+        g_groundFeetReset = false;
+    }
+    if (groundfeet::rt::WantsProbe()) // stage or recorder: the balls the script traces under before the next feed
+        groundfeet::rt::ProbeFromPose(g_snap.pose, g_snap.numBones);
     g_mmPose.Publish(g_snap);
     g_hot.mmActive.store(g_snap.weight > 0.0f, std::memory_order_release);
     if (handInNow && g_snap.weight > 0.0f)
@@ -3852,6 +3878,7 @@ void Feed(const FeedInput& aRawIn)
     const FeedInput& aRaw = conditionedFeed ? *conditionedFeed : aRawIn;
     std::lock_guard lock(g_mutex);
     g_bodyHeightAllowed = false; // set again by the leg pipeline of this feed
+    g_groundFeetAllowed = false;
     if (!aRawIn.synthetic)
         g_bodyHeightPlatform = aRawIn.onMovingPlatform; // body height smoothing passes the height through on a moving platform
     if (!aRawIn.synthetic)
@@ -7490,6 +7517,23 @@ void SetBodyHeightSmooth(bool aOn)
     bodyheight::rt::SetEnabled(aOn); // the animation-thread stage restarts its tracker on every toggle
     if (aOn)
         bodyheight::rt::PublishGate(false, true);
+}
+
+// Feet on uneven ground (mm/GroundFeetRuntime.hpp; CET mm.groundFeet, default off).
+void SetGroundFeet(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    if (g_groundFeetOn != aOn)
+        g_groundFeetReset = aOn;
+    g_groundFeetOn = aOn;
+    groundfeet::rt::SetEnabled(aOn); // the animation-thread stage restarts on every toggle
+    groundfeet::rt::PublishGate(false, true);
+}
+
+bool GroundFeetOn()
+{
+    std::lock_guard lock(g_mutex);
+    return g_groundFeetOn;
 }
 
 void SetAirStepDownReach(bool aOn)

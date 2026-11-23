@@ -11,6 +11,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <span>
+#include <string_view>
 
 #include "BodyHeightRuntime.hpp"
 #include "GameIntegration.hpp"
@@ -48,6 +50,12 @@ inline std::atomic<float> g_pelvis{0.0f};            // m, ground pelvis offset 
 inline std::atomic<float> g_lastUs{0.0f}, g_maxUs{0.0f};
 
 inline bool Enabled() { return g_on.load(std::memory_order_relaxed); }
+
+// Ground recorder (mm.trace): the script traces under the published feet and logs them, the pose is not changed. The probe
+// points are kept while either the stage or the recorder is on.
+inline std::atomic<bool> g_record{false};
+inline bool Recording() { return g_record.load(std::memory_order_relaxed); }
+inline bool WantsProbe() { return Enabled() || Recording(); }
 
 inline void BumpSerial() { g_gate.fetch_add(1u << 8, std::memory_order_acq_rel); }
 
@@ -87,7 +95,7 @@ inline void ProbeFromPose(const float* aPose, uint32_t aNumBones)
 {
     bodyheight::LegRig rig;
     PoseFrame f;
-    if (!Enabled() || !bodyheight::rt::g_rig.Read(rig) || !Gather(rig, aPose, aNumBones, f))
+    if (!WantsProbe() || !bodyheight::rt::g_rig.Read(rig) || !Gather(rig, aPose, aNumBones, f))
     {
         g_probe.valid = false;
         return;
@@ -124,6 +132,59 @@ inline bool ProbePoint(int aSide, float aCapX, float aCapY, float aYaw, float& a
     aOutX = wx + lx;
     aOutY = wy + ly;
     return true;
+}
+
+// Recorder: the published ball of foot aSide in world space with the given capsule (no lead). False = no published pose.
+inline bool BallWorld(int aSide, float aCapX, float aCapY, float aCapZ, float aYaw, float (&aOut)[3])
+{
+    if (aSide < 0 || aSide > 1 || !g_probe.valid || !std::isfinite(aCapX) || !std::isfinite(aCapY) || !std::isfinite(aCapZ) ||
+        !std::isfinite(aYaw))
+        return false;
+    math::Rot2(aYaw, g_probe.ball[aSide].x, g_probe.ball[aSide].y, aOut[0], aOut[1]);
+    aOut[0] += aCapX;
+    aOut[1] += aCapY;
+    aOut[2] = aCapZ + g_probe.ball[aSide].z;
+    return true;
+}
+
+// Recorder: cost of the script's trace block (QPC, game thread).
+inline int64_t g_traceBegin = 0;
+inline std::atomic<float> g_traceUs{0.0f}, g_traceMaxUs{0.0f};
+
+// Recorder: the game's own world foot IK joints (Torso_World_LeftLeg_Foot_IK_JNT / Right) as the pose arrives at the FK pass,
+// before UTPP writes it. Indices are found at arm time; the animation thread copies the local translation (read only).
+struct IkJoints
+{
+    uint64_t rig = 0;
+    uint32_t count = 0;
+    int32_t idx[2] = {-1, -1};
+    int32_t parent[2] = {-1, -1};
+};
+inline integ::SeqlockBuffer<IkJoints> g_ikJoints;
+inline std::atomic<float> g_ikPre[2][3] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+inline std::atomic<int64_t> g_ikTicks{0};
+
+inline void ArmIkJoints(uint64_t aRig, std::span<const uint64_t> aNames, std::span<const int16_t> aParents)
+{
+    IkJoints j;
+    if (aRig && !aNames.empty() && aNames.size() == aParents.size())
+    {
+        constexpr std::string_view kNames[2] = {"Torso_World_LeftLeg_Foot_IK_JNT", "Torso_World_RightLeg_Foot_IK_JNT"};
+        j.rig = aRig;
+        j.count = static_cast<uint32_t>(aNames.size());
+        for (int s = 0; s < 2; ++s)
+        {
+            const uint64_t h = integ::CNameHash(kNames[s]);
+            for (size_t i = 0; i < aNames.size(); ++i)
+                if (aNames[i] == h)
+                {
+                    j.idx[s] = static_cast<int32_t>(i);
+                    j.parent[s] = aParents[i];
+                    break;
+                }
+        }
+    }
+    g_ikJoints.Publish(j);
 }
 
 // Game thread: the traces of this frame in world space (hit points and normals) with the capsule they were taken with, stored in its

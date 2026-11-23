@@ -31,6 +31,7 @@
 #include "EarlyPoseRuntime.hpp"
 #include "mm/AimOffsetRuntime.hpp"
 #include "mm/BodyHeightRuntime.hpp"
+#include "mm/GroundFeetRuntime.hpp"
 #include "mm/MeleeAimRuntime.hpp"
 #include "mm/MeleeBaseRuntime.hpp"
 #include "mm/MeleePoseRuntime.hpp"
@@ -82,6 +83,7 @@ namespace
 {
 constexpr uint32_t kEntityTransformOff = 0xB0;   // entEntity transformComponent (SDK entEntity.hpp; input/GameLook.cpp)
 constexpr uint32_t kPlacedWorldPosZOff = 0xE8;   // IPlacedComponent worldTransform (0xE0) position z, FixedPoint (bits / 131072)
+constexpr uint32_t kPlacedWorldPosXOff = 0xE0;   // position x, y (same format)
 
 // No C++ objects with destructors in the SEH helpers.
 bool SehReadWorldZ(uintptr_t aComponent, float* aOut)
@@ -96,6 +98,53 @@ bool SehReadWorldZ(uintptr_t aComponent, float* aOut)
     {
         return false;
     }
+}
+bool SehReadWorldPos(uintptr_t aComponent, float* aOut)
+{
+    __try
+    {
+        const auto* v = reinterpret_cast<const volatile int32_t*>(aComponent + kPlacedWorldPosXOff);
+        aOut[0] = static_cast<float>(v[0]) / 131072.0f;
+        aOut[1] = static_cast<float>(v[1]) / 131072.0f;
+        aOut[2] = static_cast<float>(v[2]) / 131072.0f;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+bool SehReadBonePos(const uint8_t* aBones, int32_t aIndex, float* aOut)
+{
+    __try
+    {
+        const auto* v = reinterpret_cast<const volatile float*>(aBones + static_cast<size_t>(aIndex) * kBoneStride);
+        aOut[0] = v[0];
+        aOut[1] = v[1];
+        aOut[2] = v[2];
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+// Ground recorder (mm.trace): the game's world foot IK joints of the pose as it arrives here, before any UTPP write (read only).
+void RecordIkJoints(const uint8_t* aBones, uint32_t aCount, uint64_t aRig, int64_t aNow)
+{
+    namespace gf = mm::groundfeet::rt;
+    gf::IkJoints j;
+    if (!aBones || !gf::g_ikJoints.Read(j) || j.rig != aRig || j.count != aCount)
+        return;
+    for (int s = 0; s < 2; ++s)
+    {
+        float p[3];
+        if (j.idx[s] < 0 || static_cast<uint32_t>(j.idx[s]) >= aCount || !SehReadBonePos(aBones, j.idx[s], p))
+            continue;
+        for (int k = 0; k < 3; ++k)
+            gf::g_ikPre[s][k].store(p[k], std::memory_order_relaxed);
+    }
+    gf::g_ikTicks.store(aNow, std::memory_order_relaxed);
 }
 uintptr_t SehTransformComponent(void* aPlayer)
 {
@@ -112,19 +161,40 @@ uintptr_t SehTransformComponent(void* aPlayer)
 
 void ApplyBodyHeight(mm::integ::PoseSnapshot& aSnapshot, int64_t aNow)
 {
-    if (!mm::bodyheight::rt::Enabled())
+    const bool bodyHeight = mm::bodyheight::rt::Enabled();
+    const bool groundFeet = mm::groundfeet::rt::Enabled();
+    if (!bodyHeight && !groundFeet)
         return;
     const uintptr_t comp = mm::bodyheight::rt::TransformSource();
-    float z = 0.0f;
-    const bool haveZ = comp != 0 && SehReadWorldZ(comp, &z);
-    const float off = mm::bodyheight::rt::Step(aNow, util::QpcFrequency(), haveZ, z);
-    mm::bodyheight::rt::ApplyToSnapshot(aSnapshot, off);
+    float pos[3] = {0.0f, 0.0f, 0.0f};
+    bool haveZ = false, haveXY = false;
+    if (groundFeet)
+        haveZ = haveXY = comp != 0 && SehReadWorldPos(comp, pos);
+    else
+        haveZ = comp != 0 && SehReadWorldZ(comp, &pos[2]);
+    const float off = bodyHeight ? mm::bodyheight::rt::Step(aNow, util::QpcFrequency(), haveZ, pos[2]) : 0.0f;
+    // Feet on uneven ground: one leg solve for the body height offset and the ground plan; an inactive plan (flat ground, gate closed)
+    // leaves the pose to the body height stage alone, bit for bit.
+    if (groundFeet)
+    {
+        LARGE_INTEGER t0{}, t1{};
+        QueryPerformanceCounter(&t0);
+        const bool applied = mm::groundfeet::rt::StepAndApply(aSnapshot, aNow, util::QpcFrequency(), haveZ, haveXY, pos, off);
+        QueryPerformanceCounter(&t1);
+        const float us = static_cast<float>(double(t1.QuadPart - t0.QuadPart) * 1.0e6 / double(util::QpcFrequency()));
+        mm::groundfeet::rt::g_lastUs.store(us, std::memory_order_relaxed);
+        mm::groundfeet::rt::StoreMax(mm::groundfeet::rt::g_maxUs, us);
+        if (applied)
+            return;
+    }
+    if (bodyHeight)
+        mm::bodyheight::rt::ApplyToSnapshot(aSnapshot, off);
 }
 
 void BodyHeightOnFeed(void* aPlayer, float aFeedZ, bool aTrace, void (*aLog)(const char*))
 {
     namespace bh = mm::bodyheight::rt;
-    bh::SetTransformSource(aPlayer ? SehTransformComponent(aPlayer) : 0);
+    bh::SetTransformSource(aPlayer ? SehTransformComponent(aPlayer) : 0); // also the ground feet stage's drawn position
     const uint32_t frames = bh::g_stepsSinceFeed.exchange(0, std::memory_order_relaxed);
     if (!aTrace || !aLog)
         return;
@@ -473,6 +543,8 @@ void ApplyMotionMatching(uint8_t* aDesc, void* aRig, uint32_t aCount, int64_t aN
         return;
     }
     auto* bones = *reinterpret_cast<uint8_t**>(aDesc + kDescBonesOff);
+    if (mm::groundfeet::rt::Recording())
+        RecordIkJoints(bones, aCount, reinterpret_cast<uint64_t>(aRig), aNow);
     ApplyBodyHeight(snap, aNow);
     ApplyPoseSnapshot(nullptr, aDesc, bones, aCount, reinterpret_cast<uint64_t>(aRig), snap, aNow);
     // The game filled the shadow skeleton from the main bones before this write; set it again from the written pose. The published

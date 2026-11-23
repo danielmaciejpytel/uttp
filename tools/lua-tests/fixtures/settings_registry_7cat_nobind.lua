@@ -121,6 +121,7 @@ return {
     ["mm.firmFeet"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
+    ["mm.groundFeet"] = "false",
     ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
@@ -292,6 +293,7 @@ return {
     "native UTPPSetMMNeutralAimOffset(true)",
     "native UTPPSetMMPelvisPlacement(false)",
     "native UTPPSetMMBodyHeightSmooth(true)",
+    "native UTPPSetMMGroundFeet(false)",
     "native UTPPSetMMHandBackBlend(false)",
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
@@ -318,6 +320,7 @@ return {
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
+    "apply mm.groundFeet(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -522,6 +525,7 @@ return {
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
+    "apply mm.groundFeet(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -1699,6 +1703,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.groundFeet"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.handBackBlend"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -2436,6 +2448,7 @@ return {
     ["mm.firmFeet"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
+    ["mm.groundFeet"] = "false",
     ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
@@ -2632,6 +2645,7 @@ return {
     "mm.neutralAim",
     "mm.pelvisPlacement",
     "mm.bodyHeightSmooth",
+    "mm.groundFeet",
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
@@ -2824,6 +2838,7 @@ return {
     "mm.neutralAim",
     "mm.pelvisPlacement",
     "mm.bodyHeightSmooth",
+    "mm.groundFeet",
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
@@ -3006,6 +3021,7 @@ return {
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
+    "apply mm.groundFeet(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -3198,6 +3214,7 @@ mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
+mm.groundFeet=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
@@ -3465,6 +3482,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.neutralAim",
       "mm.pelvisPlacement",
       "mm.bodyHeightSmooth",
+      "mm.groundFeet",
       "mm.handBackBlend",
       "mm.stepDownReach",
       "mm.farJumpGravity",
@@ -3657,6 +3675,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.firmFeet"] = "true",
     ["mm.footReplant"] = "\"off\"",
     ["mm.grip"] = "true",
+    ["mm.groundFeet"] = "false",
     ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
@@ -3822,6 +3841,7 @@ mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
+mm.groundFeet=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
@@ -4006,6 +4026,7 @@ other.module=42\r\
     "/utpp/motion|switch|mm.neutralAim",
     "/utpp/motion|switch|mm.pelvisPlacement",
     "/utpp/motion|switch|mm.bodyHeightSmooth",
+    "/utpp/motion|switch|mm.groundFeet",
     "/utpp/motion|switch|mm.handBackBlend",
     "/utpp/motion|switch|mm.stepDownReach",
     "/utpp/motion|switch|mm.farJumpGravity",

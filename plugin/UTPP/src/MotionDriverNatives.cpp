@@ -17,6 +17,7 @@
 #include "CommonUtil.hpp"
 #include "MotionHost.hpp"
 #include "MotionDriver.hpp"
+#include "mm/GroundFeetRuntime.hpp" // feet on uneven ground: natives of the stage and the ground recorder
 #include "PluginLog.hpp"
 #include "ragdoll/RagdollSlotProbe.hpp" // ragdoll get-up: standing belly reference sign (PelvisTracker)
 
@@ -24,6 +25,7 @@ namespace utpp::motionhost
 {
 void SetPelvisPlacement(bool aOn); // MotionHost.cpp
 void SetBodyHeightSmooth(bool aOn); // MotionHost.cpp
+void SetGroundFeet(bool aOn); // MotionHost.cpp
 void SetAirStepDownReach(bool aOn); // MotionHost.cpp
 }
 namespace utpp::motiondriver
@@ -603,6 +605,156 @@ void Native_SetMMFirmFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, b
     if (aOut)
         *aOut = ok;
 }
+// ---- feet on uneven ground (mm/GroundFeetRuntime.hpp; CET utpp_motion mm.groundFeet, default off) and the ground recorder
+// (mm.trace: traces under the published feet, logged as UTPP GRT lines, no pose change). Script side: scripts/utpp.reds
+// UTPPFeedGroundFromLocomotion, right before the locomotion feed. Yaw: the feed's player yaw (deg, forward = (-sin, cos)).
+void Native_SetMMGroundFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    motionhost::SetGroundFeet(v);
+    pluginlog::LogInfo("UTPPSetMMGroundFeet(%d) -> 1", v ? 1 : 0);
+}
+void Native_SetMMGroundFeetBias(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    float v = 0.0f;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    mm::groundfeet::rt::SetBias(v);
+    pluginlog::LogInfo("UTPPSetMMGroundFeetBias(%.4f)", double(v));
+}
+// True when the script should trace this frame: the stage is on with its gate open, or the recorder is on; and a published pose
+// gives the points.
+void Native_GroundWantsTrace(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    aFrame->code++;
+    namespace gf = mm::groundfeet::rt;
+    const bool want = gf::g_probe.valid && ((gf::Enabled() && gf::GateOpen()) || gf::Recording());
+    if (aOut)
+        *aOut = want;
+}
+// The world point to trace under for one foot (0 left, 1 right): x, y = the trace point (the stage leads a swinging foot by one
+// step; the recorder alone traces under the published ball), z = the published ball height; w = 1 valid, 0 none.
+void Native_GroundProbePoint(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::Vector4* aOut, int64_t)
+{
+    int32_t side = 0;
+    RED4ext::Vector4 cap{};
+    float yawDeg = 0.0f;
+    RED4ext::GetParameter(aFrame, &side);
+    RED4ext::GetParameter(aFrame, &cap);
+    RED4ext::GetParameter(aFrame, &yawDeg);
+    aFrame->code++;
+    namespace gf = mm::groundfeet::rt;
+    const float yaw = yawDeg * 0.0174532925f;
+    float ball[3] = {0.0f, 0.0f, 0.0f};
+    float x = 0.0f, y = 0.0f;
+    bool ok = gf::BallWorld(side, cap.X, cap.Y, cap.Z, yaw, ball);
+    if (ok && gf::Enabled())
+        ok = gf::ProbePoint(side, cap.X, cap.Y, yaw, x, y);
+    else
+        x = ball[0], y = ball[1];
+    if (aOut)
+    {
+        aOut->X = ok ? x : 0.0f;
+        aOut->Y = ok ? y : 0.0f;
+        aOut->Z = ok ? ball[2] : 0.0f;
+        aOut->W = ok ? 1.0f : 0.0f;
+    }
+}
+void Native_GroundTraceBegin(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    aFrame->code++;
+    LARGE_INTEGER t{};
+    QueryPerformanceCounter(&t);
+    mm::groundfeet::rt::g_traceBegin = t.QuadPart;
+}
+// Microseconds since UTPPGroundTraceBegin (the cost of the script's trace block); kept as the last and the largest value.
+void Native_GroundTraceEnd(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, float* aOut, int64_t)
+{
+    aFrame->code++;
+    namespace gf = mm::groundfeet::rt;
+    LARGE_INTEGER t{};
+    QueryPerformanceCounter(&t);
+    const float us = gf::g_traceBegin != 0
+                         ? static_cast<float>(double(t.QuadPart - gf::g_traceBegin) * 1.0e6 / double(util::QpcFrequency()))
+                         : 0.0f;
+    gf::g_traceBegin = 0;
+    gf::g_traceUs.store(us, std::memory_order_relaxed);
+    gf::StoreMax(gf::g_traceMaxUs, us);
+    if (aOut)
+        *aOut = us;
+}
+// The traces of this frame (hit flags, world hit points and normals) with the capsule and yaw of the probe points. Hands them to the
+// stage and, with the recorder on, logs one UTPP GRT line: per foot the published ball, the hit, hit - capsule z, ball - hit, the
+// normal and the game's world foot IK joint (local translation before the UTPP write), then the trace cost and the stage state.
+void Native_FeedGround(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool hit[2] = {false, false};
+    RED4ext::Vector4 pos[2]{}, nrm[2]{}, cap{};
+    float yawDeg = 0.0f;
+    RED4ext::GetParameter(aFrame, &hit[0]);
+    RED4ext::GetParameter(aFrame, &pos[0]);
+    RED4ext::GetParameter(aFrame, &nrm[0]);
+    RED4ext::GetParameter(aFrame, &hit[1]);
+    RED4ext::GetParameter(aFrame, &pos[1]);
+    RED4ext::GetParameter(aFrame, &nrm[1]);
+    RED4ext::GetParameter(aFrame, &cap);
+    RED4ext::GetParameter(aFrame, &yawDeg);
+    aFrame->code++;
+    namespace gf = mm::groundfeet::rt;
+    const float yaw = yawDeg * 0.0174532925f;
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    float p[2][3], n[2][3];
+    for (int s = 0; s < 2; ++s)
+    {
+        p[s][0] = pos[s].X, p[s][1] = pos[s].Y, p[s][2] = pos[s].Z;
+        n[s][0] = nrm[s].X, n[s][1] = nrm[s].Y, n[s][2] = nrm[s].Z;
+    }
+    if (gf::Enabled())
+        gf::PublishSamples(hit, p, n, cap.X, cap.Y, cap.Z, yaw, now.QuadPart);
+    if (!gf::Recording())
+        return;
+    char line[768];
+    int len = std::snprintf(line, sizeof(line), "UTPP GRT t=%.4f cap=%.3f,%.3f,%.3f yaw=%.2f",
+                            double(now.QuadPart) / double(util::QpcFrequency()), double(cap.X), double(cap.Y), double(cap.Z),
+                            double(yawDeg));
+    for (int s = 0; s < 2 && len > 0 && len < int(sizeof(line)); ++s)
+    {
+        float ball[3] = {0.0f, 0.0f, 0.0f};
+        const bool haveBall = gf::BallWorld(s, cap.X, cap.Y, cap.Z, yaw, ball);
+        len += std::snprintf(line + len, sizeof(line) - size_t(len),
+                             " %s: hit=%d ball=%.3f,%.3f,%.3f g=%.3f,%.3f,%.3f gCap=%.3f ballG=%.3f n=%.2f,%.2f,%.2f ik=%.3f,%.3f,%.3f",
+                             s == 0 ? "L" : "R", hit[s] ? 1 : 0, double(ball[0]), double(ball[1]), double(ball[2]), double(p[s][0]),
+                             double(p[s][1]), double(p[s][2]), hit[s] ? double(p[s][2] - cap.Z) : -9.0,
+                             hit[s] && haveBall ? double(ball[2] - p[s][2]) : -9.0, double(n[s][0]), double(n[s][1]), double(n[s][2]),
+                             double(gf::g_ikPre[s][0].load(std::memory_order_relaxed)),
+                             double(gf::g_ikPre[s][1].load(std::memory_order_relaxed)),
+                             double(gf::g_ikPre[s][2].load(std::memory_order_relaxed)));
+    }
+    if (len > 0 && len < int(sizeof(line)))
+        std::snprintf(line + len, sizeof(line) - size_t(len),
+                      " traceUs=%.1f traceMaxUs=%.1f stage=%d gate=%d w=%.2f,%.2f planeH=%.3f,%.3f lift=%.3f,%.3f pelvis=%.3f stageUs=%.1f "
+                      "stageMaxUs=%.1f applied=%llu identity=%llu noSamples=%llu knee=%llu",
+                      double(gf::g_traceUs.load(std::memory_order_relaxed)), double(gf::g_traceMaxUs.load(std::memory_order_relaxed)),
+                      gf::Enabled() ? 1 : 0, gf::GateOpen() ? 1 : 0, double(gf::g_weight[0].load(std::memory_order_relaxed)),
+                      double(gf::g_weight[1].load(std::memory_order_relaxed)), double(gf::g_planeH[0].load(std::memory_order_relaxed)),
+                      double(gf::g_planeH[1].load(std::memory_order_relaxed)), double(gf::g_lift[0].load(std::memory_order_relaxed)),
+                      double(gf::g_lift[1].load(std::memory_order_relaxed)), double(gf::g_pelvis.load(std::memory_order_relaxed)),
+                      double(gf::g_lastUs.load(std::memory_order_relaxed)), double(gf::g_maxUs.load(std::memory_order_relaxed)),
+                      static_cast<unsigned long long>(gf::g_applied.load(std::memory_order_relaxed)),
+                      static_cast<unsigned long long>(gf::g_identity.load(std::memory_order_relaxed)),
+                      static_cast<unsigned long long>(gf::g_noSamples.load(std::memory_order_relaxed)),
+                      static_cast<unsigned long long>(gf::g_kneeLimits.load(std::memory_order_relaxed)));
+    pluginlog::LogInfo("%s", line);
+}
+void Native_GroundRecorderOn(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    aFrame->code++;
+    if (aOut)
+        *aOut = mm::groundfeet::rt::Recording();
+}
 // body yaw offset per body (CET utpp_motion mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale): deg, + = left, -20..20 each
 void Native_SetMotionBodyYawOffsets(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -798,6 +950,26 @@ void RegisterNatives()
     o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);
     auto* o11 = RED4ext::CGlobalFunction::Create("UTPPSetMMFirmFeet", "UTPPSetMMFirmFeet", &Native_SetMMFirmFeet);
     o11->flags = flags; o11->AddParam("Bool", "on"); o11->SetReturnType("Bool"); rtti->RegisterFunction(o11);
+    // feet on uneven ground + ground recorder
+    auto* gf1 = RED4ext::CGlobalFunction::Create("UTPPSetMMGroundFeet", "UTPPSetMMGroundFeet", &Native_SetMMGroundFeet);
+    gf1->flags = flags; gf1->AddParam("Bool", "on"); rtti->RegisterFunction(gf1);
+    auto* gf2 = RED4ext::CGlobalFunction::Create("UTPPSetMMGroundFeetBias", "UTPPSetMMGroundFeetBias", &Native_SetMMGroundFeetBias);
+    gf2->flags = flags; gf2->AddParam("Float", "bias"); rtti->RegisterFunction(gf2);
+    auto* gf3 = RED4ext::CGlobalFunction::Create("UTPPGroundWantsTrace", "UTPPGroundWantsTrace", &Native_GroundWantsTrace);
+    gf3->flags = flags; gf3->SetReturnType("Bool"); rtti->RegisterFunction(gf3);
+    auto* gf4 = RED4ext::CGlobalFunction::Create("UTPPGroundProbePoint", "UTPPGroundProbePoint", &Native_GroundProbePoint);
+    gf4->flags = flags; gf4->AddParam("Int32", "side"); gf4->AddParam("Vector4", "capsule"); gf4->AddParam("Float", "yawDeg");
+    gf4->SetReturnType("Vector4"); rtti->RegisterFunction(gf4);
+    auto* gf5 = RED4ext::CGlobalFunction::Create("UTPPGroundTraceBegin", "UTPPGroundTraceBegin", &Native_GroundTraceBegin);
+    gf5->flags = flags; rtti->RegisterFunction(gf5);
+    auto* gf6 = RED4ext::CGlobalFunction::Create("UTPPGroundTraceEnd", "UTPPGroundTraceEnd", &Native_GroundTraceEnd);
+    gf6->flags = flags; gf6->SetReturnType("Float"); rtti->RegisterFunction(gf6);
+    auto* gf7 = RED4ext::CGlobalFunction::Create("UTPPFeedGround", "UTPPFeedGround", &Native_FeedGround);
+    gf7->flags = flags; gf7->AddParam("Bool", "hitL"); gf7->AddParam("Vector4", "posL"); gf7->AddParam("Vector4", "normalL");
+    gf7->AddParam("Bool", "hitR"); gf7->AddParam("Vector4", "posR"); gf7->AddParam("Vector4", "normalR");
+    gf7->AddParam("Vector4", "capsule"); gf7->AddParam("Float", "yawDeg"); rtti->RegisterFunction(gf7);
+    auto* gf8 = RED4ext::CGlobalFunction::Create("UTPPGroundRecorderOn", "UTPPGroundRecorderOn", &Native_GroundRecorderOn);
+    gf8->flags = flags; gf8->SetReturnType("Bool"); rtti->RegisterFunction(gf8);
 }
 
 void Install(const std::wstring& aDllDir)
