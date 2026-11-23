@@ -54,8 +54,10 @@
 //      Rifle / Pistol1H / Pistol2H x stand / crouch, 0.5 s per cell. Signed pitch error = elevation(WeaponRight +Y) -
 //      elevation(P - muzzle 0.25 m). Loop-off digest = the build before the loop (INFO line, compare by hand); loop enabled
 //      without an aim point == open loop bit for bit; with P: <= 1 deg (|pitch| <= 45, d >= 5), <= 2 (d < 5), <= 3 (|pitch| > 45)
-//      where muzzle -> P >= 1.1 m (closer: reported), yaw not worse, 2H contact, step <= 1 deg/frame, residual <= 6 deg.
-//      10b exclusions / fade-out, 10c loop unit. Mutation 18 (the loop never applies) fails 10 / 10b.
+//      where muzzle -> P >= 1.1 m (closer: reported), yaw not worse, 2H contact, step <= 1 deg/frame, residual <= 6 deg; heading
+//      channel: |yaw error| <= 1 deg at |pitch| <= 45, d >= 5 (muzzle -> P >= 1.1 m).
+//      10b exclusions / fade-out, 10c loop unit. Mutation 18 (the loop never applies) fails 10 / 10b; mutation 26 (no heading
+//      channel) fails the yaw check of 10.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -2248,6 +2250,7 @@ struct Stats
     float errCore = 0, errNear = 0, errSteep = 0;  // |signed pitch error|: |pitch| <= 45 & d >= 5, |pitch| <= 45 & d = 2, 45 < |pitch| <= 60
     float signedCoreMin = 1e9f, signedCoreMax = -1e9f;
     float yawCore = 0, yawAll = 0;                 // |yaw error| at d >= 5 / everywhere
+    float yawLevel = 0;                            // |yaw error| at |pitch| <= 45 & d >= 5 (the heading channel's acceptance cells)
     float contact = 0;                             // 2H left hand -> authored grip (m)
     float stepBias = 0, stepRes = 0, residual = 0; // loop: per-frame change of the applied bias / residual, |residual|
     float stepSum = 0;                             // per-frame |change of bias| + |change of residual|
@@ -2374,6 +2377,8 @@ static void RunBarrelGrid(const char* aTag, motionpose::PoseEvaluator& ev, const
                 aStats.errSteep = std::max(aStats.errSteep, std::fabs(err));
             if (dEff >= 5.0f - 1e-3f)
                 aStats.yawCore = std::max(aStats.yawCore, yaw);
+            if (dEff >= 5.0f - 1e-3f && ap <= 45.0f && muzzleDist >= barrel::kNearMuzzleDist)
+                aStats.yawLevel = std::max(aStats.yawLevel, yaw);
             aStats.yawAll = std::max(aStats.yawAll, yaw);
             aStats.yawCell[di][pi] = dEff >= 5.0f - 1e-3f ? yaw : -1.0f;
             aStats.contactCell[di][pi] = contact;
@@ -2491,8 +2496,11 @@ static void TestBarrelPitch(const char* aTag, motionpose::PoseEvaluator& ev, con
                                    "(%d worse, max %+.3f)", aTag, ovn[oi], st, yawWorse, yawWorst));
             std::printf("[INFO] %s 10 %s %s: yaw plan tolerance +0.5 deg: %s (%d cells worse, max %+.3f)\n", aTag, ovn[oi], st,
                         yawWorsePlan == 0 ? "met" : "PLAN CRITERION NOT MET", yawWorsePlan, yawWorst);
-            std::printf("[INFO] %s 10 %s %s: yaw error d >= 5 m %.2f deg (target <= 2, the loop corrects pitch only)\n", aTag,
-                        ovn[oi], st, loop.yawCore);
+            std::printf("[INFO] %s 10 %s %s: yaw error d >= 5 m %.2f deg (|pitch| <= 45: %.2f; open loop %.2f / %.2f)\n", aTag,
+                        ovn[oi], st, loop.yawCore, loop.yawLevel, open.yawCore, open.yawLevel);
+            // heading channel of the loop: the barrel heading follows P where the pitch channel's core criterion applies
+            Check(loop.yawLevel <= 1.0f, F("%s 10 %s %s: |yaw err| %.3f deg <= 1.0 (|pitch| <= 45, d >= 5 m; open loop %.2f)", aTag,
+                                           ovn[oi], st, loop.yawLevel, open.yawLevel));
             if (ovs[oi] != ov::PoseOverlay::Pistol1H)
             {
                 // 2H contact: <= 1 cm where the open loop holds it; where the open-loop grip IK already misses (steep sweep

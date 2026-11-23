@@ -31,7 +31,17 @@
 // target weight fades the applied bias and the residual toward the open loop (0 at kBarrelFadeTargetDist) and nothing is learned.
 // A frame with dt <= 0 (probe frames of the offline tests) moves no state.
 //
-// Mutation (UTPP_POSEV2_AO_MUTATION, shared with MotionPose.hpp): 18 = the loop never applies a correction (open loop).
+//
+// Heading (yaw) channel: the authored aim poses do not point the barrel along the aim direction in yaw either (Rifle ~4 deg to
+// the left of P at every distance and pitch, the pistols ~1 deg to the right; offline MotionPoseTest 10 and the recorded ADS
+// sessions). A second bias per slot is added to the spine yaw of the aim offset (the arms and the weapon turn with the chest,
+// so the barrel heading follows it 1:1); it learns, steps and fades exactly like the pitch bias (rate kBarrelBiasHz, at most
+// kBarrelStepDeg per frame, clamp kBarrelYawBiasClampDeg, same exclusions). It learns the heading error minus the part the aim
+// offset itself has not caught up with (its rate limit, the spine yaw clamp, the world aim smoothing): only the pose's own
+// offset is corrected, the intended lag of a camera turn stays. No residual in yaw (the bias alone closes it at the pose).
+//
+// Mutation (UTPP_POSEV2_AO_MUTATION, shared with MotionPose.hpp): 18 = the loop never applies a correction (open loop);
+// 26 = the heading channel never applies (the pitch-only loop).
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -56,6 +66,10 @@ inline constexpr float kBarrelLearnMinAlpha = 0.99f;  // a fading aim offset mea
 inline constexpr float kBarrelMinTargetDist = 1.0f;   // m, muzzle -> P: full loop from here
 inline constexpr float kBarrelFadeTargetDist = 0.6f;  // m, muzzle -> P: open loop below
 inline constexpr float kBarrelMaxErrDeg = 35.0f;
+// Heading channel: bias clamp, and the largest lag of the aim offset behind the target (deg) at which the heading still learns
+// (a target past the spine yaw clamp or a fast turn: the heading error there is not the pose's own offset).
+inline constexpr float kBarrelYawBiasClampDeg = 15.0f;
+inline constexpr float kBarrelYawLearnMaxLagDeg = 10.0f;
 inline constexpr int kBarrelSlots = 64; // overlay (ov::PoseOverlay::Count 6) x stance 2 x style 3 = 36
 
 // FrameInfo::barrelExcluded bits
@@ -79,6 +93,7 @@ struct BarrelMeasure
     float barrelPitchDeg = 0.0f; // elevation of the barrel axis (+ = up)
     float wantPitchDeg = 0.0f;   // elevation of muzzle -> P
     float errDeg = 0.0f;         // barrel - want (+ = the barrel points above P)
+    float yawErrDeg = 0.0f;      // heading of the barrel - heading of muzzle -> P, wrapped (+ = the barrel points left of P)
     float dist = 0.0f;           // |P - muzzle| (m)
     math::Vec3 barrel{};         // unit barrel direction (model / pose frame)
 };
@@ -101,8 +116,9 @@ inline bool MeasureBarrel(const math::Quat& aWeaponRot, const math::Vec3& aWeapo
     aOut.barrelPitchDeg = p0 / aim::kDegF;
     aOut.wantPitchDeg = p1 / aim::kDegF;
     aOut.errDeg = aOut.barrelPitchDeg - aOut.wantPitchDeg;
+    aOut.yawErrDeg = std::remainder((y0 - y1) / aim::kDegF, 360.0f);
     aOut.dist = aim::Length(want);
-    return std::isfinite(aOut.errDeg) && std::isfinite(aOut.dist);
+    return std::isfinite(aOut.errDeg) && std::isfinite(aOut.yawErrDeg) && std::isfinite(aOut.dist);
 }
 
 // 1 at muzzle -> P >= kBarrelMinTargetDist, 0 at <= kBarrelFadeTargetDist, smoothstep between.
@@ -128,13 +144,16 @@ public:
     // offset, the learned slot biases stay (the next aim entry does not start from the open-loop error again).
     void ResetApplied()
     {
-        m_applied = m_residual = m_residualTarget = m_lastStep = m_shotHold = 0.0f;
+        m_applied = m_yawApplied = m_residual = m_residualTarget = m_lastStep = m_shotHold = 0.0f;
         m_targetW = 1.0f;
     }
     // Nothing is applied: the evaluator may bypass the loop (bit for bit the open-loop aim offset).
-    bool Idle() const { return m_applied == 0.0f && m_residual == 0.0f; }
+    bool Idle() const { return m_applied == 0.0f && m_yawApplied == 0.0f && m_residual == 0.0f; }
     float Residual() const { return m_residual; }
     float Bias(int aSlot) const { return aSlot >= 0 && aSlot < kBarrelSlots ? m_bias[aSlot] : 0.0f; }
+    float YawBias(int aSlot) const { return aSlot >= 0 && aSlot < kBarrelSlots ? m_yawBias[aSlot] : 0.0f; }
+    // Applied heading bias of this frame (deg, + = turn left), stepped by Command; added to the spine yaw of the aim offset.
+    float YawApplied() const { return m_yawApplied; }
     // Target weight (BarrelTargetWeight) of the last measurement; the next Command scales the bias with it.
     void SetTargetWeight(float aW) { m_targetW = aim::Clampf(aW, 0.0f, 1.0f); }
 
@@ -142,14 +161,19 @@ public:
     // fades the applied bias to 0. The applied bias moves at most kBarrelStepDeg per frame toward the blended slot bias x
     // target weight, the residual toward the target the last frame left (SetResidualTarget) within the rest of that step.
     // dt <= 0 keeps both.
+    // The heading bias steps the same way on its own budget of kBarrelStepDeg (YawApplied).
     float Command(const int* aSlots, const float* aW, int aCount, bool aRun, float aDt)
     {
-        float raw = 0.0f;
+        float raw = 0.0f, rawYaw = 0.0f;
         if (aRun)
             for (int k = 0; k < aCount; ++k)
                 if (aSlots[k] >= 0 && aSlots[k] < kBarrelSlots)
+                {
                     raw += aW[k] * m_bias[aSlots[k]];
+                    rawYaw += aW[k] * m_yawBias[aSlots[k]];
+                }
         raw *= m_targetW;
+        rawYaw *= m_targetW;
         m_lastStep = 0.0f;
         if (aDt > 0.0f && std::isfinite(aDt) && std::isfinite(raw))
         {
@@ -157,6 +181,8 @@ public:
             m_applied = BarrelStepToward(m_applied, raw, kBarrelStepDeg);
             m_lastStep = std::fabs(m_applied - before);
         }
+        if (aDt > 0.0f && std::isfinite(aDt) && std::isfinite(rawYaw))
+            m_yawApplied = BarrelStepToward(m_yawApplied, rawYaw, kBarrelStepDeg);
         StepResidual(aRun ? m_residualTarget : 0.0f, aDt);
         return m_applied;
     }
@@ -166,14 +192,12 @@ public:
     // Integrator: each slot moves by its weight share of alpha * (want - barrel), at most kBarrelStepDeg per frame, clamped.
     void Learn(const int* aSlots, const float* aW, int aCount, float aErrDeg, float aDt)
     {
-        if (!(aDt > 0.0f) || !std::isfinite(aDt) || !std::isfinite(aErrDeg))
-            return;
-        const float alpha = 1.0f - std::exp(-2.0f * math::kPi * kBarrelBiasHz * std::min(aDt, 0.1f));
-        const float step = aim::Clampf(-aErrDeg * alpha, -kBarrelStepDeg, kBarrelStepDeg);
-        for (int k = 0; k < aCount; ++k)
-            if (aSlots[k] >= 0 && aSlots[k] < kBarrelSlots)
-                m_bias[aSlots[k]] = aim::Clampf(m_bias[aSlots[k]] + step * aim::Clampf(aW[k], 0.0f, 1.0f),
-                                                -kBarrelBiasClampDeg, kBarrelBiasClampDeg);
+        LearnInto(m_bias, kBarrelBiasClampDeg, aSlots, aW, aCount, aErrDeg, aDt);
+    }
+    // Heading channel: aErrDeg = the pose's own heading error (barrel - muzzle -> P, minus the lag of the aim offset), + = left.
+    void LearnYaw(const int* aSlots, const float* aW, int aCount, float aErrDeg, float aDt)
+    {
+        LearnInto(m_yawBias, kBarrelYawBiasClampDeg, aSlots, aW, aCount, aErrDeg, aDt);
     }
 
     // Residual toward aTargetDeg (0 = fade out): smoothing, clamp, and a step within what the bias step of this frame left of
@@ -206,7 +230,20 @@ public:
     }
 
 private:
+    static void LearnInto(float* aBias, float aClamp, const int* aSlots, const float* aW, int aCount, float aErrDeg, float aDt)
+    {
+        if (!(aDt > 0.0f) || !std::isfinite(aDt) || !std::isfinite(aErrDeg))
+            return;
+        const float alpha = 1.0f - std::exp(-2.0f * math::kPi * kBarrelBiasHz * std::min(aDt, 0.1f));
+        const float step = aim::Clampf(-aErrDeg * alpha, -kBarrelStepDeg, kBarrelStepDeg);
+        for (int k = 0; k < aCount; ++k)
+            if (aSlots[k] >= 0 && aSlots[k] < kBarrelSlots)
+                aBias[aSlots[k]] = aim::Clampf(aBias[aSlots[k]] + step * aim::Clampf(aW[k], 0.0f, 1.0f), -aClamp, aClamp);
+    }
+
     float m_bias[kBarrelSlots] = {};
+    float m_yawBias[kBarrelSlots] = {}; // heading channel, per slot
+    float m_yawApplied = 0.0f;
     float m_applied = 0.0f;
     float m_targetW = 1.0f;  // BarrelTargetWeight of the last measurement
     float m_lastStep = 0.0f; // |change of the applied bias| in the last Command
