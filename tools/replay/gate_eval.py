@@ -23,10 +23,13 @@ Gate, per body (each body is judged on the aggregate of its sessions):
     A class value (P50, P95) or clip change rate (CC) within its tolerance counts as unchanged. The total improves when the mean is
     below zero.
   hard limits (after side):
-    clip changes / s <= 3.0, absolute, on the session mean and on the busiest window (rt_clip_win_max: the most driver clip
-      changes inside any 3 s of feed time / 3 s, compare_runs --world-slide, --clip-window; the in-game limit judges steps of
-      about 3 s, a session mean of ~1 / s hides a burst such as 3.7 / s in a fast running arc). A result without the window
-      measure is marked 'incomplete' (never counted as a complete pass);
+    clip changes / s <= 3.0, absolute, on the session mean and per scored harness step (rt_clip_step_max: the replay's clip
+      changes inside each step the in-game gate judged / the step duration, the same windows and ratio as the in-game limit,
+      placed on the feed clock through the MOTION trace; compare_runs --world-slide with --motion-log 1). A session mean of
+      ~1 / s hides a burst such as 3.7 / s in a fast running arc. A result without the per-step measure, or with sessions
+      that have no harness steps, is marked 'incomplete' (never counted as a complete pass). The busiest 3 s anywhere in the
+      session (rt_clip_win_max, --clip-window) is reported only: it also counts the time between steps and unscored steps
+      and runs well above the in-game step values;
     foot correction max, split: horizontal (planar lock, rt_corr_max) <= 15 cm (--corr-limit; up to 35 cm only with separate
       evidence of better world slide and deformation) and vertical (ground / terrain stage, rt_corr_v_max) <= 20 cm
       (--corr-v-limit; stairs). Both are judged against the baseline: a maximum already above the limit in the baseline is listed
@@ -42,9 +45,13 @@ Gate, per body (each body is judged on the aggregate of its sessions):
     FAIL     = a hard limit exceeded, or worse / minor rows without a body total that improves;
     RERUN    = the measurement is not trustworthy (the verdict it would have is shown): the baseline side measured twice
                (measure --repeat-check) differs on a correctness metric beyond its resolution (the replay is deterministic, so
-               the rows depend on the machine state), or the --motion-log trace has cost budget trips (the pose was paused).
+               the rows depend on the machine state), the --motion-log trace has cost budget trips (the pose was paused), or the
+               Feed cost is over its limit while the machine was busy (the cost needs an idle machine).
+  eval --baseline also compares each input's own before side with the stored baseline and warns when they differ (another
+  machine state or other data; a data variant measured with --root differs by design).
   machine load: measure records the CPU load and compiler processes during the run (gametest/gt_load.py) and flags a busy
-  machine as a warning (the verdict is unchanged; repeatability decides); --wait-idle S waits up to S s for a quiet machine.
+  machine as a warning (correctness verdicts are unchanged, repeatability decides); --wait-idle S waits up to S s for a quiet
+  machine.
 Rows known to be invalid offline (world slide stop p95 on both bodies, Female loop p95) are reported but left out of the decision
 and of the body total; every result is also evaluated with them included and verdicts that depend on them are marked.
 Replay lab rows (FLTAB, FLTOT) and Feed cost are reported, not gated (cost is gated by the hard limit only).
@@ -97,6 +104,8 @@ LABELS = {
     'replay: clip changes / s': 'clip_changes_s',
     'runtime: clip changes / s': 'rt_clip_changes_s',
     'runtime: clip changes / s, busiest window': 'rt_clip_win_max',
+    'runtime: clip changes / s, busiest scored step': 'rt_clip_step_max',
+    'runtime: sessions without scored steps': 'rt_clip_step_missing',
     'runtime: foot correction max, cm': 'rt_corr_max',
     'runtime: foot correction vertical max, cm': 'rt_corr_v_max',
     'runtime: vertical foot correction measured': 'rt_corr_v_measured',
@@ -409,15 +418,22 @@ def gate_body(body, before, after, margin=None, include_invalid=False, corr_limi
     total = sum(rels.values()) / len(rels) if rels else None
     improves = total is not None and total < 0
     hard, hard_before, preexisting, notes, incomplete = [], [], [], [], []
-    # absolute limits: clip changes (session mean and busiest window) and Feed cost
-    for key, lim in (('rt_clip_changes_s', HARD_CLIP_CHANGES), ('rt_clip_win_max', HARD_CLIP_CHANGES), ('rt_feed_p95', HARD_FEED_P95)):
+    # absolute limits: clip changes (session mean and busiest scored step) and Feed cost
+    for key, lim in (('rt_clip_changes_s', HARD_CLIP_CHANGES), ('rt_clip_step_max', HARD_CLIP_CHANGES), ('rt_feed_p95', HARD_FEED_P95)):
         v, vb = after.get(key), before.get(key)
         if v is not None and v > lim:
             hard.append('%s %.3f > %.1f%s' % (key, v, lim, where(after, key)))
         if vb is not None and vb > lim:
             hard_before.append('%s %.3f > %.1f%s' % (key, vb, lim, where(before, key)))
-    if after.get('rt_clip_win_max') is None:
-        incomplete.append('clip changes per window not measured (measure with --world-slide)')
+    if after.get('rt_clip_step_max') is None:
+        incomplete.append('clip changes per step not measured (needs --world-slide, --motion-log 1 and recorded harness steps)')
+    elif after.get('rt_clip_step_missing'):
+        incomplete.append('%d session(s) without scored harness steps (clip changes per step not measured there)'
+                          % after['rt_clip_step_missing'])
+    if after.get('rt_clip_win_max') is not None:
+        wlen = next((w.get('window') for w in (after.get('_windows') or {}).values() if w.get('window')), '3.0')
+        notes.append('clip changes in the busiest %s s anywhere (report only): %.3f -> %.3f / s%s' % (
+            wlen, before.get('rt_clip_win_max', float('nan')), after['rt_clip_win_max'], where(after, 'rt_clip_win_max')))
     # foot correction maxima: judged against the baseline (a limit already exceeded in the baseline does not fail the change, a
     # change that makes it worse does); horizontal = the planar lock, vertical = the ground stage
     v_measured = after.get('rt_corr_v_measured', 0.0) >= 0.5
@@ -464,7 +480,7 @@ def where(side, key, prefix=' at'):
     wins = side.get('_windows') or {}
     if not wins:
         return ''
-    fld = {'rt_clip_win_max': 'clipWinMax', 'rt_corr_max': 'corrMax', 'rt_corr_v_max': 'corrVMax'}.get(key)
+    fld = {'rt_clip_win_max': 'clipWinMax', 'rt_clip_step_max': 'stepMax', 'rt_corr_max': 'corrMax', 'rt_corr_v_max': 'corrVMax'}.get(key)
     if not fld:
         return ''
 
@@ -474,6 +490,9 @@ def where(side, key, prefix=' at'):
         except ValueError:
             return float('-inf')
     rid, w = max(wins.items(), key=lambda x: val(x[1]))
+    if key == 'rt_clip_step_max':
+        return '%s %s %s (%s changes in %s s; in game %s)' % (prefix, rid, w.get('stepLabel', '-'), w.get('stepN', '-'),
+                                                             w.get('stepDur', '-'), w.get('stepGame', '-'))
     if key == 'rt_clip_win_max':
         return '%s %s %s %s (%s)' % (prefix, rid, w.get('clipWinAt', '-'), w.get('clipWinCls', '-'), w.get('clipWinClips', '-'))
     return '%s %s %s %s %s' % (prefix, rid, w.get('corrAt', '-'), w.get('corrCls', '-'), w.get('corrClip', '-'))
@@ -487,7 +506,7 @@ def reliability(result, body):
     rep = (result.get('repeat') or {}).get(body)
     if result.get('repeat') is not None and rep is not None:
         res = {k: r for k, _, r in gated_metrics()}
-        res.update(rt_clip_win_max=0.0011, rt_corr_v_max=0.051)
+        res.update(rt_clip_step_max=0.0011, rt_corr_v_max=0.051)
         for key, spread in sorted(rep.items()):
             if key in COST_KEYS or key not in res:
                 continue
@@ -498,6 +517,10 @@ def reliability(result, body):
         n = (sides.get(side) or {}).get('rt_budget_trips')
         if n:
             reasons.append('%s side: %d cost budget trip(s) (motion pose paused; rows depend on the machine load)' % (side, n))
+    mis = (result.get('baseline_mismatch') or {}).get(body)
+    if mis:
+        warns.append('own before side differs from the stored baseline (%d rows, e.g. %s): another machine state or other data; '
+                     'without --root expect a rerun' % (len(mis), '; '.join(mis[:3])))
     load = result.get('load') or {}
     if load.get('high'):
         warns.append('busy machine: CPU mean %s %%, max %s %%, compiler processes %s' % (
@@ -517,6 +540,8 @@ def evaluate(result, margin=None, corr_limit=HARD_CORR_MAX, corr_v_limit=HARD_CO
         g['verdict_with_invalid'] = gi['verdict']
         g['depends_on_invalid'] = gi['verdict'] != g['verdict']
         g['unreliable'], g['warnings'] = reliability(result, body)
+        if (result.get('load') or {}).get('high') and any(h.startswith('rt_feed_p95') for h in g['hard']):
+            g['unreliable'].append('Feed cost over its limit on a busy machine: measure the cost again on an idle machine')
         g['verdict_measured'] = g['verdict']
         if g['unreliable']:
             g['verdict'] = 'RERUN'
@@ -613,10 +638,18 @@ def main(argv=None):
         # on both sides; its after side is judged against the baseline build on the live data)
         with open(a.baseline, encoding='utf-8') as f:
             base = json.load(f)
+        res_of = {k: r for k, _, r in gated_metrics()}
         for it in items:
             for body, sides in it['bodies'].items():
                 if body in base['bodies']:
-                    sides['before'] = base['bodies'][body][a.baseline_side]
+                    # repeatability across runs: the candidate's own before side against the stored baseline (a warning only: a
+                    # data variant measured with --root has another before side by design)
+                    own, ref = sides.get('before') or {}, base['bodies'][body][a.baseline_side]
+                    diff = ['%s %.3f vs %.3f' % (k, own[k], ref[k]) for k in sorted(res_of)
+                            if k in own and k in ref and abs(own[k] - ref[k]) > res_of[k] + 1e-9]
+                    if diff:
+                        it.setdefault('baseline_mismatch', {})[body] = diff
+                    sides['before'] = ref
             if it.get('repeat') is None and base.get('repeat') is not None:
                 it['repeat'] = base['repeat']     # the repeatability of the baseline that now forms the before side
     summary = []
