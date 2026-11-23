@@ -14,11 +14,13 @@
 //     ground both are zero and the stage hands the pose to the body height stage untouched (bit for bit).
 //   - pelvis: the PelvisPlacement range (all legs, no raise) of the ground targets minus the same range for the animated ankles, so
 //     only a ground difference lowers the pelvis; a critically damped spring (pelvisStiffness), added to the body height offset.
-//   - sudden capsule motion: a change of the drawn height between two updates beyond what the slope under the feet explains
-//     (above suddenStep) is taken into the pelvis spring, so the body does not jump with the capsule and springs back instead.
+//   - sudden capsule motion: a change of the drawn height between two updates beyond what the slope under the feet or the last steady
+//     vertical rate explains (above suddenStep) is taken into the pelvis spring, so the body does not jump with the capsule and
+//     springs back instead.
 //   - one leg solve (shared two-bone solver) per frame for the body height offset, the pelvis offset and the foot goals. A leg
 //     whose knee would fold more than kneeFreeDeg over the animation gets a shorter ground correction instead of a broken knee.
-// The stage fades in / out with fadeTau per foot (a missing or inconsistent trace: hit more than maxGroundDelta from the capsule).
+// The stage fades in / out with fadeTau per foot (a missing or inconsistent trace: hit more than maxGroundDelta above or maxGroundDrop
+// below the capsule).
 // Model space: character frame, z up (the frame is turned about z only, so model z is world z).
 #pragma once
 
@@ -45,7 +47,9 @@ struct Config
     float maxRollDeg = 15.0f;        // deg, foot roll to the surface
     float kneeFreeDeg = 60.0f;       // deg, extra knee flexion over the animation
     float minKneeDeg = 25.0f;        // deg, smallest interior knee angle
-    float maxGroundDelta = 0.35f;    // m, a hit further from the capsule height is not used (car roof, crate, body)
+    float maxGroundDelta = 0.35f;    // m, a hit higher above the capsule height is not used (car roof, crate, body)
+    float maxGroundDrop = 0.55f;     // m, a hit deeper below the capsule height is not used (a step down a stair seen ahead of a lagging
+                                     // drawn capsule still counts, a ledge does not)
     float fadeTau = 0.08f;           // s, per-foot fade in / out
     float maxDt = 0.25f;             // s, a longer gap restarts the stage
     float pelvisStiffness = 100.0f;  // pelvis offset spring
@@ -65,7 +69,8 @@ inline bool ValidConfig(const Config& c)
     auto nonneg = [](float v) { return std::isfinite(v) && v >= 0.0f; };
     return pos(c.heightStiffness) && pos(c.normalStiffness) && nonneg(c.maxPenetration) && nonneg(c.deadHeight) &&
            nonneg(c.deadAngleDeg) && pos(c.maxPitchDeg) && c.maxPitchDeg < 80.0f && pos(c.maxRollDeg) && c.maxRollDeg < 80.0f &&
-           nonneg(c.kneeFreeDeg) && nonneg(c.minKneeDeg) && pos(c.maxGroundDelta) && pos(c.fadeTau) && pos(c.maxDt) &&
+           nonneg(c.kneeFreeDeg) && nonneg(c.minKneeDeg) && pos(c.maxGroundDelta) && pos(c.maxGroundDrop) && pos(c.fadeTau) &&
+           pos(c.maxDt) &&
            pos(c.pelvisStiffness) && nonneg(c.maxDrop) && nonneg(c.maxCompensation) && nonneg(c.heelLift) && c.heelLift <= 1.0f &&
            std::isfinite(c.reach) && c.reach > 0.5f && c.reach <= 1.0f && std::isfinite(c.softReach) && c.softReach > 0.5f &&
            c.softReach <= c.reach && pos(c.suddenStep) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f;
@@ -424,7 +429,7 @@ public:
     {
         for (Foot& f : m_foot)
             f = Foot{};
-        m_pel = m_pelV = 0.0f;
+        m_pel = m_pelV = m_vz = 0.0f;
         m_havePrev = false;
         m_plan = Plan{};
     }
@@ -468,7 +473,8 @@ public:
                 const float nl = detail::Len(n);
                 g = fs.z - m_cfg.bias;
                 valid = fs.hit != 0 && std::isfinite(g) && std::isfinite(fs.x) && std::isfinite(fs.y) && std::isfinite(nl) && nl > 1e-3f &&
-                        std::isfinite(aSamples->capZ) && std::fabs(g - aSamples->capZ) <= m_cfg.maxGroundDelta;
+                        std::isfinite(aSamples->capZ) && g - aSamples->capZ <= m_cfg.maxGroundDelta &&
+                        aSamples->capZ - g <= m_cfg.maxGroundDrop;
                 if (valid)
                 {
                     n = n * (1.0f / nl);
@@ -543,13 +549,21 @@ public:
                     expected = -(n.x * mx + n.y * my) / n.z;
                 }
             }
-            const float sudden = (drawnZ - m_prev[2]) - expected;
+            // a steady vertical rate (stairs, a ramp the trace normal does not show) is expected motion too: only the part of the
+            // change that neither the slope nor the last steady rate explains is a snap
+            const float dz = drawnZ - m_prev[2];
+            const float bySlope = dz - expected, byRate = dz - m_vz * dt;
+            const float sudden = std::fabs(bySlope) <= std::fabs(byRate) ? bySlope : byRate;
             if (std::fabs(sudden) > m_cfg.suddenStep)
             {
                 m_pel = std::clamp(m_pel - sudden, -m_cfg.maxCompensation, m_cfg.maxCompensation);
                 ++m_diag.sudden;
             }
+            else
+                m_vz = dz / dt; // the rate follows only steady motion, so a snap is not expected again on the next update
         }
+        else if (first || !m_havePrev)
+            m_vz = 0.0f;
         // pelvis spring towards the ground target
         float target = 0.0f;
         if (allowed && anyFoot)
@@ -596,6 +610,7 @@ private:
     Config m_cfg;
     Foot m_foot[2];
     float m_pel = 0.0f, m_pelV = 0.0f;
+    float m_vz = 0.0f; // steady drawn height rate (m/s)
     bool m_havePrev = false;
     float m_prev[3] = {0.0f, 0.0f, 0.0f};
     Plan m_plan;

@@ -74,6 +74,20 @@
 //                       with the drawn world height; here it runs after each feed on the published pose, with the drawn height of
 //                       --draw-z next (default: the next feed's capsule z, the capsule after the tick's movement) or same (this feed's
 //                       capsule z) and the gate the host published. One BODYHEIGHT line. Off / not passed: output unchanged.
+//   --ground-feet 0|1   feet on uneven ground (motionhost::SetGroundFeet, the mm.groundFeet setting; the settings log call MMGroundFeet
+//                       is applied as well). The game's per-foot traces are emulated before each feed at the points the DLL hands out
+//                       (the balls of the previous published pose, with this feed's capsule: one frame late, as in the game), against
+//                       the --terrain ground; the stage then runs on the published pose with the drawn capsule of --draw-z, through the
+//                       same rt::StepAndApply the game calls (the body height offset first, as FkHook ApplyBodyHeight). The driver feed
+//                       is not changed (the clip choice is the recorded one). One GROUNDFEET line.
+//   --terrain flat|slope|stairs|stairs-down|curb|rubble  ground under the recorded path, h(x, y) above the capsule height at the first
+//                       written feed: along the direction of the written path (--terrain-dir side: across the facing at that feed, for
+//                       standing across a step edge); slope --slope-deg (15), stairs / curb rise --step-rise (0.17) and run --step-run
+//                       (0.28), the pattern shifted by --terrain-offset (m, curb: the edge). The drawn capsule height follows the base of
+//                       a 0.3 m bottom sphere resting on the ground (on stairs it rides the step noses); what is left of a jump is taken
+//                       over about 0.4 s (the game's step-up smoothing), a slope at once. With
+//                       --terrain the body height stage reads that height too, and <out prefix>.ground.txt gets per written feed the
+//                       drawn capsule height and the stage values (for the film tools). Not passed: no terrain, no traces.
 //   --turn-rate 0|1     turn clip rate of the legacy matcher off / on after --settings-log (motionhost::SetTurnRate, the bodyturn.turnRate
 //                       setting); not passed: the build default (on)
 //   --turn-rate-max M   turn clip rate cap after --settings-log (motionhost::SetTurnRateParams(0.9, M), bodyturn.turnRateMax; the
@@ -134,6 +148,7 @@
 #include "../../plugin/UTPP/src/mm/ExitPoseHistory.hpp"
 #include "../../plugin/UTPP/src/mm/MotionBlendStack.hpp"
 #include "../../plugin/UTPP/src/mm/BodyHeightRuntime.hpp"
+#include "../../plugin/UTPP/src/mm/GroundFeetRuntime.hpp"
 
 namespace utpp::motiondriver
 {
@@ -148,6 +163,7 @@ namespace utpp::motionhost
 {
 void TestSetPelvisPlacement(bool aOn);
 void SetBodyHeightSmooth(bool aOn);
+void SetGroundFeet(bool aOn);
 }
 
 namespace
@@ -285,6 +301,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
+        else if (name == "MMGroundFeet") motionhost::SetGroundFeet(flag(0));
         else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
@@ -423,6 +440,70 @@ struct CapsuleStatReplay
     }
 };
 
+// --terrain: the emulated ground under the recorded path (world z = anchor z + H).
+struct Terrain
+{
+    enum Kind { None, Flat, Slope, Stairs, StairsDown, Curb, Rubble } kind = None;
+    double ax = 0, ay = 0, az = 0; // anchor (capsule at the first written feed)
+    double ux = 0, uy = 1;         // pattern direction
+    double rise = 0.17, run = 0.28, slopeDeg = 15.0, offset = 0.0;
+    static Kind Parse(const char* aName)
+    {
+        const std::string n(aName);
+        return n == "flat" ? Flat : n == "slope" ? Slope : n == "stairs" ? Stairs : n == "stairs-down" ? StairsDown : n == "curb" ? Curb
+               : n == "rubble" ? Rubble : None;
+    }
+    double S(double aX, double aY) const { return (aX - ax) * ux + (aY - ay) * uy + offset; }
+    double H(double aX, double aY) const
+    {
+        const double s = S(aX, aY);
+        switch (kind)
+        {
+        case Slope: return std::tan(slopeDeg * 3.14159265358979 / 180.0) * s;
+        case Stairs: return rise * std::floor(s / run);
+        case StairsDown: return -rise * std::floor(s / run);
+        case Curb: return s >= 0.0 ? rise : 0.0;
+        case Rubble:
+        {
+            // smooth bumps up to about +-8 cm, a few dm wide
+            const double x = aX - ax, y = aY - ay;
+            return 0.045 * std::sin(x * 6.9813) * std::sin(y * 8.9760) + 0.03 * std::sin((x + y) * 13.9626 + 0.7) +
+                   0.015 * std::sin((x - 2.0 * y) * 21.0);
+        }
+        default: return 0.0;
+        }
+    }
+    double Ground(double aX, double aY) const { return az + H(aX, aY); }
+    // Base height of the capsule standing at (x, y): the bottom sphere (radius aR) rests on the highest ground under it, so on stairs it
+    // rides the step noses and a curb lifts it before the centre is over the edge (sampled every 2 cm inside the sphere's footprint).
+    double CapsuleBase(double aX, double aY, double aR) const
+    {
+        double best = -1e30;
+        const int n = int(std::ceil(aR / 0.02));
+        for (int i = -n; i <= n; ++i)
+            for (int j = -n; j <= n; ++j)
+            {
+                const double dx = i * 0.02, dy = j * 0.02, d2 = dx * dx + dy * dy;
+                if (d2 > aR * aR)
+                    continue;
+                best = std::max(best, H(aX + dx, aY + dy) + std::sqrt(aR * aR - d2) - aR);
+            }
+        return az + best;
+    }
+    void Normal(double aX, double aY, float (&aN)[3]) const
+    {
+        double gx = 0, gy = 0;
+        if (kind == Slope || kind == Rubble)
+        {
+            const double e = 0.005;
+            gx = (H(aX + e, aY) - H(aX - e, aY)) / (2 * e);
+            gy = (H(aX, aY + e) - H(aX, aY - e)) / (2 * e);
+        }
+        const double l = std::sqrt(gx * gx + gy * gy + 1.0);
+        aN[0] = float(-gx / l), aN[1] = float(-gy / l), aN[2] = float(1.0 / l);
+    }
+};
+
 int main(int argc, char** argv)
 {
     if (argc < 5)
@@ -450,6 +531,9 @@ int main(int argc, char** argv)
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
     int32_t bodyHeight = -1;                   // --body-height-smooth: < 0 = not passed (the settings log / build default)
     bool drawZNext = true;                     // --draw-z next (default) | same
+    int32_t groundFeet = -1;                   // --ground-feet: < 0 = not passed
+    Terrain terrain;                           // --terrain (None = not passed) and its parameters
+    bool terrainSide = false;                  // --terrain-dir side
     int32_t aimCameraAlt = -1;                 // --aim-camera-alt: second overlay pose of a drawn weapon, < 0 = not passed
     uint64_t aimCameraDrawnFeeds = 0;
     int32_t aimGameUpper = -1;                 // --aim-game-upper: < 0 = not passed
@@ -553,6 +637,27 @@ int main(int argc, char** argv)
             swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
             leanPack = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--ground-feet") == 0)
+            groundFeet = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--terrain") == 0)
+        {
+            terrain.kind = Terrain::Parse(argv[i + 1]);
+            if (terrain.kind == Terrain::None)
+            {
+                std::fprintf(stderr, "--terrain %s unknown\n", argv[i + 1]);
+                return 2;
+            }
+        }
+        else if (std::strcmp(argv[i], "--terrain-dir") == 0)
+            terrainSide = std::strcmp(argv[i + 1], "side") == 0;
+        else if (std::strcmp(argv[i], "--terrain-offset") == 0)
+            terrain.offset = std::atof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--step-rise") == 0)
+            terrain.rise = std::atof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--step-run") == 0)
+            terrain.run = std::max(0.05, std::atof(argv[i + 1]));
+        else if (std::strcmp(argv[i], "--slope-deg") == 0)
+            terrain.slopeDeg = std::atof(argv[i + 1]);
     }
     const bool aimOptions = neutralAim >= 0 || aimWorldSmoothHz >= 0.0f || shooterMode >= 0;
     Rig rig;
@@ -743,6 +848,76 @@ int main(int argc, char** argv)
     uint64_t bodyHeightRows = 0, bodyHeightApplied = 0, bodyHeightAllowed = 0;
     double bodyHeightAbsMax = 0.0;
     std::vector<double> bodyHeightAbs;
+    if (groundFeet >= 0)
+        motionhost::SetGroundFeet(groundFeet != 0);
+    // --terrain: anchor at the first written feed, the drawn capsule height per feed (the ground under the capsule; a jump of the
+    // ground is taken over about 0.4 s: the gap decays with tau 0.1 s, a slope is followed at once)
+    std::vector<float> drawnZ;
+    if (terrain.kind != Terrain::None)
+    {
+        size_t a = 0;
+        while (a + 1 < rows.size() && rows[a].t < from)
+            ++a;
+        size_t b = a;
+        for (size_t k = a; k < rows.size() && rows[k].t <= to; ++k)
+            b = k;
+        if (!inputs[a].haveExtra)
+        {
+            std::fprintf(stderr, "--terrain needs a feed dump with capsule positions\n");
+            return 2;
+        }
+        terrain.ax = inputs[a].capsulePos[0], terrain.ay = inputs[a].capsulePos[1], terrain.az = inputs[a].capsulePos[2];
+        const double yaw = double(rows[a].yawDeg) * 3.14159265358979 / 180.0;
+        double dx = inputs[b].capsulePos[0] - terrain.ax, dy = inputs[b].capsulePos[1] - terrain.ay;
+        const double d = std::hypot(dx, dy);
+        if (terrainSide)
+            dx = std::cos(yaw), dy = std::sin(yaw); // right of the facing (-sin, cos)
+        else if (d < 0.5)
+            dx = -std::sin(yaw), dy = std::cos(yaw); // standing: along the facing
+        else
+            dx /= d, dy /= d;
+        terrain.ux = dx, terrain.uy = dy;
+        drawnZ.resize(inputs.size());
+        // the capsule base follows the ground continuously (the sphere rolls over step noses); only a snap (more than 3 cm in one feed)
+        // is smoothed out on the drawn height (0.1 s)
+        double gPrev = 0.0, gap = 0.0;
+        for (size_t k = 0; k < inputs.size(); ++k)
+        {
+            const double g = terrain.CapsuleBase(inputs[k].capsulePos[0], inputs[k].capsulePos[1], 0.3);
+            if (k)
+            {
+                gap *= std::exp(-double(rows[k].dt) / 0.1);
+                if (std::fabs(g - gPrev) > 0.03)
+                    gap = std::clamp(gap - (g - gPrev), -0.3, 0.3);
+            }
+            gPrev = g;
+            drawnZ[k] = float(g + gap);
+        }
+        std::printf("TERRAIN kind=%d anchor=%.3f,%.3f,%.3f dir=%.3f,%.3f rise=%.3f run=%.3f slopeDeg=%.1f offset=%.3f\n", int(terrain.kind),
+                    terrain.ax, terrain.ay, terrain.az, terrain.ux, terrain.uy, terrain.rise, terrain.run, terrain.slopeDeg, terrain.offset);
+    }
+    const auto capZAt = [&](size_t aRow) {
+        return drawnZ.empty() ? (inputs[aRow].haveExtra ? inputs[aRow].capsulePos[2] : std::nanf("")) : drawnZ[aRow];
+    };
+    // ground feet summary: planted ball error against the ground (cm: shown ball height above the ground minus the animation's own
+    // ball height above its floor; < 0 = into the ground), applied lift and pelvis (cm)
+    std::vector<double> gfSoleErr, gfLift, gfPelvis;
+    double gfSoleMin = 0.0;
+    uint64_t gfRows = 0, gfApplied = 0, gfTraced = 0, gfHits = 0;
+    // stage counters are global: the GROUNDFEET line reports them from the first row of the scene window on
+    bool gfWin = false;
+    uint64_t gfKnee0 = 0, gfClamp0 = 0, gfIdentity0 = 0, gfNoSamples0 = 0, gfSudden0 = 0, gfRejected0 = 0;
+    FILE* groundOut = nullptr;
+    if (terrain.kind != Terrain::None && out != "-")
+    {
+        groundOut = std::fopen((out + ".ground.txt").c_str(), "w");
+        if (!groundOut)
+            return 7;
+        std::fprintf(groundOut, "# terrain kind=%d anchor=%.4f %.4f %.4f dir=%.5f %.5f rise=%.4f run=%.4f slopeDeg=%.3f offset=%.4f\n",
+                     int(terrain.kind), terrain.ax, terrain.ay, terrain.az, terrain.ux, terrain.uy, terrain.rise, terrain.run,
+                     terrain.slopeDeg, terrain.offset);
+        std::fprintf(groundOut, "# t drawnCapZ applied liftL liftR pelvis soleErrL soleErrR plantedL plantedR\n");
+    }
     // --qpc-feed: feed time t -> QueryPerformanceCounter ticks (offset by 1 s so the first stamp is not 0, which the host reads as unset)
     LARGE_INTEGER qpcHz{};
     QueryPerformanceFrequency(&qpcHz);
@@ -841,6 +1016,32 @@ int main(int argc, char** argv)
             ++aimCameraFeeds;
             aimCameraAimFeeds += aim ? 1 : 0;
         }
+        if (terrain.kind != Terrain::None && mm::groundfeet::rt::Enabled() && mm::groundfeet::rt::g_probe.valid &&
+            mm::groundfeet::rt::GateOpen())
+        {
+            // the script's traces of this frame (scripts/utpp.reds UTPPFeedGroundFromLocomotion, right before the feed): one per foot
+            // under the point the DLL hands out (the previous published pose), 0.6 m above to 0.6 m below the capsule height
+            namespace gf = mm::groundfeet::rt;
+            const float yaw = rows[i].yawDeg * 0.0174532925f;
+            const float cx = inputs[i].capsulePos[0], cy = inputs[i].capsulePos[1], cz = capZAt(i);
+            bool hit[2] = {false, false};
+            float pos[2][3] = {}, nrm[2][3] = {{0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}};
+            for (int s = 0; s < 2; ++s)
+            {
+                float px = 0.0f, py = 0.0f;
+                if (!gf::ProbePoint(s, cx, cy, yaw, px, py))
+                    continue;
+                const double g = terrain.Ground(px, py);
+                if (std::fabs(g - double(cz)) > 0.6)
+                    continue;
+                hit[s] = true;
+                pos[s][0] = px, pos[s][1] = py, pos[s][2] = float(g);
+                terrain.Normal(px, py, nrm[s]);
+            }
+            gf::PublishSamples(hit, pos, nrm, cx, cy, cz, yaw, feedTicks(i));
+            ++gfTraced;
+            gfHits += uint64_t(hit[0]) + uint64_t(hit[1]);
+        }
         g_motionLogT = rows[i].t;
         const auto feed0 = std::chrono::steady_clock::now();
         motionhost::Feed(inputs[i]);
@@ -856,7 +1057,21 @@ int main(int argc, char** argv)
             aimJogOnFeeds += jog > 0.0f ? 1 : 0;
         }
         const bool published = ReadPublished();
-        if (mm::bodyheight::rt::Enabled())
+        const size_t zi = drawZNext ? std::min(i + 1, inputs.size() - 1) : i; // the feed whose capsule draws this pose
+        // ground feet sole error: the animation's own ball heights above its floor (published pose, before the stages)
+        math::Vec3 toePre[2];
+        const bool haveToePre = terrain.kind != Terrain::None && published && g_read.numBones == nb &&
+                                FeetAt(*db, toeBones, 0, [&](uint32_t b, math::Vec3& p, math::Quat& q) {
+                                    const float* v = g_read.pose + size_t(b) * 7;
+                                    p = math::Vec3{v[0], v[1], v[2]};
+                                    q = math::Quat{v[3], v[4], v[5], v[6]};
+                                    return true;
+                                }, toePre);
+        // the animation-thread stages in the game's order (FkHook ApplyBodyHeight): the body height offset, then the ground feet solve
+        // with it; an unapplied ground plan leaves the body height offset alone
+        float bodyOff = 0.0f;
+        const bool bodyOn = mm::bodyheight::rt::Enabled();
+        if (bodyOn)
         {
             const uint32_t gate = mm::bodyheight::rt::g_gate.load(std::memory_order_acquire);
             if ((gate >> 8) != bodyHeightSerial)
@@ -864,22 +1079,81 @@ int main(int argc, char** argv)
                 bodyHeightSerial = gate >> 8;
                 bodyHeightFilter.Reset();
             }
-            const size_t zi = drawZNext ? std::min(i + 1, inputs.size() - 1) : i;
-            const bool haveZ = inputs[zi].haveExtra && std::isfinite(inputs[zi].capsulePos[2]);
-            float off = 0.0f;
+            const float z = capZAt(zi);
+            const bool haveZ = inputs[zi].haveExtra && std::isfinite(z);
             if (haveZ)
-                off = bodyHeightFilter.Step(bodyHeightRows ? rows[i].dt : 0.0f, inputs[zi].capsulePos[2], (gate & 1u) != 0,
-                                              (gate & 2u) != 0);
+                bodyOff = bodyHeightFilter.Step(bodyHeightRows ? rows[i].dt : 0.0f, z, (gate & 1u) != 0, (gate & 2u) != 0);
             else
                 bodyHeightFilter.Reset();
             ++bodyHeightRows;
             bodyHeightAllowed += (gate & 1u) != 0 ? 1 : 0;
-            if (published && mm::bodyheight::rt::ApplyToSnapshot(g_read, off))
+        }
+        bool groundApplied = false;
+        if (published && mm::groundfeet::rt::Enabled())
+        {
+            const float drawn[3] = {inputs[zi].capsulePos[0], inputs[zi].capsulePos[1], capZAt(zi)};
+            const bool haveZ = inputs[zi].haveExtra && std::isfinite(drawn[2]);
+            groundApplied = mm::groundfeet::rt::StepAndApply(g_read, feedTicks(i), qpcHz.QuadPart, haveZ, haveZ, drawn, bodyOff);
+        }
+        if (bodyOn && published && (groundApplied || mm::bodyheight::rt::ApplyToSnapshot(g_read, bodyOff)))
+        {
+            ++bodyHeightApplied;
+            bodyHeightAbs.push_back(std::fabs(double(bodyOff)) * 100.0);
+            bodyHeightAbsMax = std::max(bodyHeightAbsMax, std::fabs(double(bodyOff)) * 100.0);
+        }
+        if (terrain.kind != Terrain::None && rows[i].t >= from && rows[i].t <= to)
+        {
+            namespace gf = mm::groundfeet::rt;
+            if (!gfWin)
             {
-                ++bodyHeightApplied;
-                bodyHeightAbs.push_back(std::fabs(double(off)) * 100.0);
-                bodyHeightAbsMax = std::max(bodyHeightAbsMax, std::fabs(double(off)) * 100.0);
+                gfWin = true;
+                gfKnee0 = gf::g_kneeLimits.load();
+                gfClamp0 = gf::g_clamps.load();
+                gfIdentity0 = gf::g_identity.load();
+                gfNoSamples0 = gf::g_noSamples.load();
+                gfSudden0 = gf::g_sudden.load();
+                gfRejected0 = gf::g_rejected.load();
             }
+            math::Vec3 toePost[2];
+            const bool okPost = haveToePre && FeetAt(*db, toeBones, 0, [&](uint32_t b, math::Vec3& p, math::Quat& q) {
+                const float* v = g_read.pose + size_t(b) * 7;
+                p = math::Vec3{v[0], v[1], v[2]};
+                q = math::Quat{v[3], v[4], v[5], v[6]};
+                return true;
+            }, toePost);
+            const double yw = double(rows[zi].yawDeg) * 3.14159265358979 / 180.0;
+            double err[2] = {std::nan(""), std::nan("")};
+            bool planted[2] = {false, false};
+            for (int s = 0; s < 2 && okPost; ++s)
+            {
+                planted[s] = g_tailValid && g_tail.contact[s] >= 0.5f;
+                const double wx = std::cos(yw) * toePost[s].x - std::sin(yw) * toePost[s].y + inputs[zi].capsulePos[0];
+                const double wy = std::sin(yw) * toePost[s].x + std::cos(yw) * toePost[s].y + inputs[zi].capsulePos[1];
+                const double wz = double(capZAt(zi)) + toePost[s].z;
+                err[s] = (wz - terrain.Ground(wx, wy) - toePre[s].z) * 100.0;
+                if (planted[s])
+                {
+                    gfSoleErr.push_back(std::fabs(err[s]));
+                    gfSoleMin = std::min(gfSoleMin, err[s]);
+                }
+            }
+            gfRows += okPost ? 1 : 0;
+            float lift[2] = {0.0f, 0.0f}, pelvisOff = 0.0f;
+            if (groundApplied)
+            {
+                ++gfApplied;
+                for (int s = 0; s < 2; ++s)
+                {
+                    lift[s] = gf::g_lift[s].load();
+                    gfLift.push_back(std::fabs(double(lift[s])) * 100.0);
+                }
+                pelvisOff = gf::g_pelvis.load();
+                gfPelvis.push_back(std::fabs(double(pelvisOff)) * 100.0);
+            }
+            if (groundOut)
+                std::fprintf(groundOut, "%.6f %.5f %d %.5f %.5f %.5f %.3f %.3f %d %d\n", double(rows[i].t), double(capZAt(zi)),
+                             groundApplied ? 1 : 0, double(lift[0]), double(lift[1]), double(pelvisOff), err[0], err[1], planted[0] ? 1 : 0,
+                             planted[1] ? 1 : 0);
         }
         if (forecastOut)
         {
@@ -1161,6 +1435,33 @@ int main(int argc, char** argv)
     }
     if (forecastOut)
         std::fclose(forecastOut);
+    if (groundOut)
+        std::fclose(groundOut);
+    if (terrain.kind != Terrain::None || groundFeet >= 0)
+    {
+        // GROUNDFEET: rows = written feeds with both balls measured; soleErr = |planted ball height above the ground - the animation's
+        // own ball height above its floor| (cm, p50 / p95 / max) and the deepest planted ball into the ground (cm, <= 0); lift = applied
+        // ground height at the balls (vertical correction, cm, p95 / max of |lift|), pelvis = ground pelvis offset (cm)
+        const auto q = [](std::vector<double> v, double p) {
+            if (v.empty())
+                return 0.0;
+            std::sort(v.begin(), v.end());
+            return v[std::min(v.size() - 1, size_t(p * double(v.size())))];
+        };
+        namespace gf = mm::groundfeet::rt;
+        std::printf("GROUNDFEET on=%d terrain=%d rows=%llu applied=%llu traced=%llu hits=%llu plantedN=%zu soleErrP50Cm=%.2f "
+                    "soleErrP95Cm=%.2f soleErrMaxCm=%.2f soleMinCm=%.2f liftP95Cm=%.2f liftMaxCm=%.2f pelvisP95Cm=%.2f pelvisMaxCm=%.2f "
+                    "kneeLimits=%llu clamps=%llu identity=%llu noSamples=%llu sudden=%llu rejected=%llu\n",
+                    gf::Enabled() ? 1 : 0, int(terrain.kind), static_cast<unsigned long long>(gfRows),
+                    static_cast<unsigned long long>(gfApplied), static_cast<unsigned long long>(gfTraced),
+                    static_cast<unsigned long long>(gfHits), gfSoleErr.size(), q(gfSoleErr, 0.5), q(gfSoleErr, 0.95), q(gfSoleErr, 1.0),
+                    gfSoleMin, q(gfLift, 0.95), q(gfLift, 1.0), q(gfPelvis, 0.95), q(gfPelvis, 1.0),
+                    static_cast<unsigned long long>(gf::g_kneeLimits.load() - gfKnee0),
+                    static_cast<unsigned long long>(gf::g_clamps.load() - gfClamp0), static_cast<unsigned long long>(gf::g_identity.load() - gfIdentity0),
+                    static_cast<unsigned long long>(gf::g_noSamples.load() - gfNoSamples0),
+                    static_cast<unsigned long long>(gf::g_sudden.load() - gfSudden0),
+                    static_cast<unsigned long long>(gf::g_rejected.load() - gfRejected0));
+    }
     motionhost::SetMotionHooks(nullptr);
     motionhost::TestSetQpcTicks(-1);
     if (g_motionLog)
