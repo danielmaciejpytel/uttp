@@ -933,6 +933,23 @@ int main(int argc, char** argv)
         crouchRate.cfg.crouchCapsuleRate = true;
         const std::vector<Frame> frCrouchRate = Replay(*model, rows, crouchRate);
         CrouchCapsuleRateChecks(frCrouchRate, frPlainCrouchRate);
+        {
+            // the capsule speed play rate (MapConfig::capsuleSpeedRate) replaces the CR-5 crouch loop scale: with both on a crouch loop is
+            // scaled once, so the frames equal the capsule speed play rate alone, and the pair differs from the CR-5 rate alone
+            Variant capRate = prod;
+            capRate.mc.capsuleSpeedRate = adapter::CapsuleRateMode::Both;
+            Variant capRateOnly = capRate;
+            capRateOnly.cfg.crouchCapsuleRate = false;
+            const std::vector<Frame> frBoth = Replay(*model, rows, capRate);
+            const auto dOnce = Diff(frBoth, Replay(*model, rows, capRateOnly));
+            Check(dOnce.empty(), "CR-5 with the capsule speed play rate: crouch loops scaled once (= capsule speed play rate alone; differing frames)",
+                  double(dOnce.size()));
+            float hi = 0.f;
+            for (size_t i = At(frBoth, kCwalkSlow0); i < At(frBoth, kCwalkFull1); ++i)
+                if (Has(frBoth[i].clip, "Crouch_Loop_"))
+                    hi = std::fmax(hi, frBoth[i].rate);
+            Check(hi > 0.f && hi <= prod.cfg.maxPlayRate + 1e-4f, "CR-5 with the capsule speed play rate: crouch loop rate within the bound (max rate)", hi);
+        }
         // CR-5 is on by default together with the stop brake gate (its late crouch stop entry stays out, see CR-6 in tests/LocoStanceTest.cpp)
         Check(prod.cfg.crouchCapsuleRate && prod.cfg.stopBrakeGate > 0.0f, "CR-5 default on: production has the crouch capsule rate and the stop brake gate");
         Variant rateGate = crouchRate;

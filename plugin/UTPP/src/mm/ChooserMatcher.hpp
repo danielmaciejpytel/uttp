@@ -2365,13 +2365,15 @@ public:
             m_cur.playRate = rate.wanted;
             m_lastRateRatio = rate.ratio;
             // ChooserState::rateSpeedScale: the rate of the selected pose follows the capsule speed (only the picks of
-            // ChooserState::rateScaleScope); the search above stays on the mapped query
+            // ChooserState::rateScaleScope); the search above stays on the mapped query. It replaces the CR-5 crouch loop scale
+            // (rateQueryScale, already in rate.querySpeed): both are capsule per mapped speed, so a crouch loop is scaled once.
             if (aState.rateSpeedScale != 1.0f && std::isfinite(aState.rateSpeedScale) && aState.rateSpeedScale > 0.0f && rate.valid &&
                 rate.channels > 0 && rate.poseSpeed > 1e-6f && m_cfg.maxPlayRate - rateMin > 1e-4f && m_cur.clip >= 0 &&
                 (aState.rateScaleScope == 1 ? (db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) != 0
                  : aState.rateScaleScope == 2 ? m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 0 : true))
             {
-                m_lastRateRatio = rate.querySpeed * aState.rateSpeedScale / rate.poseSpeed; // rate2::Calculate querySpeedScale
+                const float querySpeed = rateQueryScale != 1.0f ? rate.querySpeed / rateQueryScale : rate.querySpeed;
+                m_lastRateRatio = querySpeed * aState.rateSpeedScale / rate.poseSpeed; // rate2::Calculate querySpeedScale
                 m_cur.playRate = std::clamp(m_lastRateRatio, rateMin, m_cfg.maxPlayRate);
             }
         }
