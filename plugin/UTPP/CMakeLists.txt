@@ -1135,6 +1135,15 @@ target_compile_features(utpp_mm_loco_body_height_test PRIVATE cxx_std_20)
 target_compile_options(utpp_mm_loco_body_height_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_mm_loco_body_height_test COMMAND utpp_mm_loco_body_height_test "${UTPP_MMDB_TEST_FILE}")
 
+# ---- feet on uneven ground (mm/GroundFeet.hpp, mm/GroundFeetRuntime.hpp; option mm.groundFeet, default off): flat identity, slopes,
+# steps, stairs, curb snap, limits, stepper; database poses on a step and a slope ----
+add_executable(utpp_mm_loco_ground_feet_test tests/GroundFeetTest.cpp src/BaseDatabase.hpp
+  src/mm/GroundFeet.hpp src/mm/GroundFeetRuntime.hpp src/mm/BodyHeightFilter.hpp src/mm/BodyHeightRuntime.hpp src/mm/LegIk.hpp
+  src/mm/PelvisPlacement.hpp)
+target_compile_features(utpp_mm_loco_ground_feet_test PRIVATE cxx_std_20)
+target_compile_options(utpp_mm_loco_ground_feet_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_mm_loco_ground_feet_test COMMAND utpp_mm_loco_ground_feet_test "${UTPP_MMDB_TEST_FILE}")
+
 # ---- live pose history (mm/LivePoseHistory.hpp; MotionDriver SetLivePoseHistory, off by default) ----
 if(DEFINED _utpp_nlr_base AND EXISTS "${_utpp_nlr_base}.utppmm" AND EXISTS "${_utpp_nlr_base}.chooser.json")
   add_executable(utpp_mm_live_pose_history_test tests/LivePoseHistoryTest.cpp src/mm/LivePoseHistory.hpp src/mm/ExitPoseHistory.hpp)
