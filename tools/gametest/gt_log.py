@@ -161,6 +161,16 @@ class LogLine:
         return f'{t} {"TRANS" if self.kind == "TRANS" else "tick "} ' + ' '.join(parts)
 
 
+VCORR_RE = re.compile(r'^(-?[\d.]+)(cm)?$')
+
+
+def vertical_corr(line: LogLine, side: str):
+    """Vertical (ground / terrain) foot correction of one foot in cm from a trace line field vcorrL= / vcorrR= ('4.2cm' or '4.2'),
+    or None when the line does not carry it (builds without a ground stage)."""
+    m = VCORR_RE.match(line.fields.get('vcorr' + side, ''))
+    return float(m.group(1)) if m else None
+
+
 def parse_line(line: str) -> LogLine | None:
     m = TS_RE.match(line)
     if not m or 'UTPP' not in line:
@@ -932,16 +942,24 @@ def compute_metrics(lines: list[LogLine], t0: datetime, t1: datetime, saturation
         _base_metrics(m, trace, segs, dur, saturation_cm)
     _gait_common(m, trace)
 
-    corr = []
+    corr, vcorr = [], []
     for l in trace:
         for k in ('L', 'R'):
             f = l.foot(k)
             if f is not None:
                 corr.append(abs(f[2]))
+            v = vertical_corr(l, k)
+            if v is not None:
+                vcorr.append(abs(v))
     m['footlock_corr_max_cm'] = _r(max(corr) if corr else None, 2)
     # report name of the same value: how far the foot locker's IK moved the foot (not the slide that remains visible, which is
     # the world-space planted-toe speed of Source/tools/footslide/world_slide.py); the key above stays for thresholds and history
     m['ik_correction_max_cm'] = m['footlock_corr_max_cm']
+    # the foot correction split: horizontal = the planar lock above (limit 15 cm, footlock_corr_max_cm), vertical = the ground /
+    # terrain stage (limit 20 cm, stairs). The vertical part reads 0 (footlock_corr_v_measured False) until the trace lines carry it
+    # (fields vcorrL= / vcorrR=, cm, see vertical_corr); None without trace lines.
+    m['footlock_corr_v_measured'] = bool(vcorr)
+    m['footlock_corr_v_max_cm'] = _r(max(vcorr), 2) if vcorr else (0.0 if trace else None)
 
     _, vmean, vmax = _stats([l.num('|v|') for l in trace])
     m['speed_mean'], m['speed_max'] = _r(vmean, 2), _r(vmax, 2)
@@ -1023,8 +1041,9 @@ DEFAULT_THRESHOLDS = {
     'cost_mean': {'max': 30.0},   # 0.3.8-0.4.1 TRANS cost: median 5.3, p90 33, p97 53, max 774
     'cost_max': {'max': 100.0},
     'offset_saturated_s': {'max': 0.5},
-    'footlock_corr_max_cm': {'max': 15.0},
-    'rate_min': None,                # report only since 2026-10-23 (contradicts the intended slow-walk rate 0.25)
+    'footlock_corr_max_cm': {'max': 15.0},      # horizontal (planar lock) foot correction
+    'footlock_corr_v_max_cm': {'max': 20.0},    # vertical (ground / terrain) foot correction, stairs; reads 0 until measured
+    'rate_min': None,               # report only since 2026-10-23 (contradicts the intended slow-walk rate 0.25)
     'rate_min@slow': {'min': 0.2},   # partial stick / ramps / stops: slow-walk rate floor (~0.25) is intended
     'rate_max': {'max': 1.8},
     # MM v2 selection: provisional loose limit (the v1 value) until a reviewed v2 baseline exists; costs report only

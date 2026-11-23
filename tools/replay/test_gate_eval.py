@@ -13,10 +13,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gate_eval as ge  # noqa: E402
+import compare_runs as cr  # noqa: E402
 
 
 def side(**over):
-    m = {'rt_clip_changes_s': 0.8, 'rt_corr_p95': 9.0, 'rt_corr_max': 14.0, 'rt_feed_p95': 100.0,
+    m = {'rt_clip_changes_s': 0.8, 'rt_clip_win_max': 2.0, 'rt_corr_p95': 9.0, 'rt_corr_max': 14.0, 'rt_feed_p95': 100.0,
          'startPlantedHipKeptShare': 0.7, 'startPlantedHipOffP50Cm': 3.0, 'stopPlantedHipKeptShare': 0.1,
          'stopPlantedHipOffP50Cm': 20.0}
     for i, c in enumerate(ge.CLASSES):
@@ -55,11 +56,21 @@ class GateTest(unittest.TestCase):
         self.assertEqual([r['key'] for r in g['exceptions']], ['ws_pivot_p50'])
         self.assertAlmostEqual(g['exceptions'][0]['rel'], 0.015, places=6)
 
-    def test_more_than_two_percent_fails_even_with_gain(self):
+    def test_more_than_two_percent_with_gain_is_conflicting(self):
+        # a row worse beyond 2 % while the body total improves: not a plain FAIL any more but CONFLICT (1x film, the user decides)
         g = self.gate(side(ws_pivot_p50=12.0 * 1.03, ws_loop_p50=5.0, rt_clip_changes_s=0.5))
         self.assertTrue(g['improves'])
-        self.assertEqual(g['verdict'], 'FAIL')
+        self.assertEqual(g['verdict'], 'CONFLICT')
         self.assertEqual([r['key'] for r in g['worse']], ['ws_pivot_p50'])
+        self.assertEqual([r['key'] for r in g['film_rows']], ['ws_pivot_p50'])
+        self.assertIn(ge.CONFLICT_TEXT, ge.report('t', {'woman': g}))
+
+    def test_more_than_two_percent_without_gain_fails(self):
+        g = self.gate(side(ws_pivot_p50=12.0 * 1.03))
+        self.assertFalse(g['improves'])
+        self.assertEqual(g['verdict'], 'FAIL')
+        g = self.gate(side(ws_pivot_p50=12.0 * 1.03, ws_loop_p50=5.0, rt_feed_p95=300.0))   # gain, but a hard limit: FAIL
+        self.assertEqual(g['verdict'], 'FAIL')
 
     def test_higher_is_better_keys(self):
         g = self.gate(side(stopPlantedHipKeptShare=0.2))
@@ -69,7 +80,8 @@ class GateTest(unittest.TestCase):
         self.assertEqual(g['verdict'], 'FAIL')
 
     def test_hard_limits(self):
-        for over, key in (({'rt_clip_changes_s': 3.2}, 'rt_clip_changes_s'), ({'rt_corr_max': 15.5}, 'rt_corr_max'),
+        # clip changes (mean and busiest window) and Feed cost stay absolute: the same value on both sides still fails
+        for over, key in (({'rt_clip_changes_s': 3.2}, 'rt_clip_changes_s'), ({'rt_clip_win_max': 3.67}, 'rt_clip_win_max'),
                           ({'rt_feed_p95': 260.0}, 'rt_feed_p95')):
             before = side(**over)        # same before: no relative change, only the absolute limit can fail
             g = self.gate(side(**over), before=before)
@@ -77,6 +89,107 @@ class GateTest(unittest.TestCase):
             self.assertTrue(g['hard'][0].startswith(key))
         g = ge.evaluate(result(side(rt_corr_max=15.5), side(rt_corr_max=15.5)), None, corr_limit=35.0)['woman']
         self.assertEqual(g['verdict'], 'PASS')
+
+    def test_corr_max_judged_against_the_baseline(self):
+        # above the limit in the baseline and not worse: pre-existing, not a FAIL (it used to fail every change)
+        g = self.gate(side(rt_corr_max=30.0), before=side(rt_corr_max=30.0))
+        self.assertEqual(g['verdict'], 'PASS')
+        self.assertEqual(g['hard'], [])
+        self.assertEqual(len(g['preexisting']), 1)
+        self.assertIn('already in the baseline', g['preexisting'][0])
+        g = self.gate(side(rt_corr_max=30.03), before=side(rt_corr_max=30.0))      # within the 0.051 resolution
+        self.assertEqual(g['hard'], [])
+        g = self.gate(side(rt_corr_max=28.0), before=side(rt_corr_max=30.0))       # better, still above: pre-existing
+        self.assertEqual(g['hard'], [])
+        self.assertEqual(len(g['preexisting']), 1)
+        # worse than a baseline already above: FAIL (no 2 % allowance on a hard limit)
+        g = self.gate(side(rt_corr_max=30.3), before=side(rt_corr_max=30.0))
+        self.assertEqual(g['verdict'], 'FAIL')
+        self.assertIn('worse than the baseline', g['hard'][0])
+        # a baseline below the limit: crossing it fails
+        g = self.gate(side(rt_corr_max=15.5), before=side(rt_corr_max=14.0))
+        self.assertEqual(g['verdict'], 'FAIL')
+        self.assertTrue(g['hard'][0].startswith('rt_corr_max 15.50 > 15.0'))
+        # the A/A margin widens the tolerance of the comparison with the baseline
+        g = self.gate(side(rt_corr_max=30.3), before=side(rt_corr_max=30.0), margin={'woman': {'rt_corr_max': 0.5}})
+        self.assertEqual(g['hard'], [])
+
+    def test_vertical_correction(self):
+        # not measured (no ground stage): reads 0, a note, no limit applied
+        g = self.gate(side(rt_corr_v_max=0.0, rt_corr_v_measured=0.0))
+        self.assertEqual(g['verdict'], 'PASS')
+        self.assertTrue(any('vertical foot correction not measured' in n for n in g['notes']))
+        g = self.gate(side())                                                      # older results: no key at all
+        self.assertTrue(any('not measured' in n for n in g['notes']))
+        # measured: limit 20 cm, judged against the baseline like the horizontal one
+        g = self.gate(side(rt_corr_v_max=18.0, rt_corr_v_measured=1.0), before=side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0))
+        self.assertEqual(g['hard'], [])
+        self.assertEqual(g['notes'], [])
+        g = self.gate(side(rt_corr_v_max=21.0, rt_corr_v_measured=1.0), before=side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0))
+        self.assertEqual(g['verdict'], 'FAIL')
+        self.assertTrue(g['hard'][0].startswith('rt_corr_v_max 21.00 > 20.0'))
+        g = ge.evaluate(result(side(rt_corr_v_max=5.0, rt_corr_v_measured=1.0), side(rt_corr_v_max=21.0, rt_corr_v_measured=1.0)),
+                        None, corr_v_limit=25.0)['woman']
+        self.assertEqual(g['hard'], [])
+        # the horizontal limit is not affected by the vertical one
+        g = self.gate(side(rt_corr_max=16.0, rt_corr_v_max=16.0, rt_corr_v_measured=1.0))
+        self.assertEqual(len(g['hard']), 1)
+        self.assertTrue(g['hard'][0].startswith('rt_corr_max'))
+
+    def test_clip_window(self):
+        # the arc case: a burst of 3.67 / s in a 3 s window on the before side, a session mean near 1 / s
+        b = side(rt_clip_changes_s=0.90, rt_clip_win_max=3.67)
+        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_win_max=2.67), before=b)
+        self.assertEqual(g['hard'], [])
+        self.assertEqual(len(g['hard_before']), 1)
+        self.assertTrue(g['hard_before'][0].startswith('rt_clip_win_max 3.670 > 3.0'))
+        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_win_max=3.33), before=b)
+        self.assertEqual(g['verdict'], 'FAIL')
+        # an older result without the window measure: verdict kept, marked incomplete (never a complete pass)
+        a = side()
+        del a['rt_clip_win_max']
+        g = self.gate(a)
+        self.assertEqual(g['verdict'], 'PASS')
+        self.assertTrue(g['incomplete'])
+        self.assertIn('incomplete', ge.verdict_text(g))
+
+    def test_where_names_the_session(self):
+        b = side(rt_corr_max=30.0)
+        b['_windows'] = {'s1': {'corrMax': '12.00', 'corrAt': '5.00s', 'corrCls': 'loop', 'corrClip': 'A'},
+                         's2': {'corrMax': '30.00', 'corrAt': '81.20s', 'corrCls': 'stop', 'corrClip': 'Run_Stop',
+                                'clipWinMax': '3.667', 'clipWinAt': '10.00-12.90s', 'clipWinCls': 'loop', 'clipWinClips': 'A>B'}}
+        g = self.gate(side(rt_corr_max=30.0), before=b)
+        self.assertIn('s2 81.20s stop Run_Stop', g['preexisting'][0])
+        self.assertEqual(ge.where(b, 'rt_clip_win_max'), ' at s2 10.00-12.90s loop (A>B)')
+        self.assertEqual(ge.where(side(), 'rt_corr_max'), '')
+
+    def test_reliability(self):
+        r = result(side(), side(ws_loop_p50=10.0, rt_clip_changes_s=0.7))
+        self.assertEqual(ge.evaluate(r)['woman']['verdict'], 'PASS')
+        # the baseline measured twice differs on a correctness row: RERUN, the measured verdict kept
+        r['repeat'] = {'woman': {'ws_loop_p50': 0.5, 'rt_feed_p95': 300.0}}
+        g = ge.evaluate(r)['woman']
+        self.assertEqual(g['verdict'], 'RERUN')
+        self.assertEqual(g['verdict_measured'], 'PASS')
+        self.assertEqual(len(g['unreliable']), 1)
+        self.assertIn('ws_loop_p50', g['unreliable'][0])
+        # only the cost spread (wall time): reproducible
+        r['repeat'] = {'woman': {'ws_loop_p50': 0.0, 'rt_feed_p95': 300.0}}
+        self.assertEqual(ge.evaluate(r)['woman']['verdict'], 'PASS')
+        # cost budget trips on either side: RERUN
+        r2 = result(side(rt_budget_trips=2.0), side())
+        self.assertEqual(ge.evaluate(r2)['woman']['verdict'], 'RERUN')
+        # a busy machine alone is a warning, the verdict stays
+        r3 = result(side(), side())
+        r3['load'] = {'high': True, 'cpu_mean_pct': 85.0, 'cpu_max_pct': 100.0, 'compiler_processes_max': 12}
+        g = ge.evaluate(r3)['woman']
+        self.assertEqual(g['verdict'], 'PASS')
+        self.assertTrue(g['warnings'][0].startswith('busy machine'))
+
+    def test_wait_for_idle(self):
+        loads = iter([90.0, 80.0, 30.0])
+        self.assertEqual(ge.wait_for_idle(60, probe=lambda: next(loads), period=5.0), (10.0, 30.0))
+        self.assertEqual(ge.wait_for_idle(5, probe=lambda: 95.0, period=5.0), (5.0, 95.0))
 
     def test_invalid_rows_reported_not_decided(self):
         g = self.gate(side(ws_stop_p95=200.0))      # stop p95 100+10 -> 200: invalid on both bodies
@@ -146,6 +259,29 @@ class GateTest(unittest.TestCase):
         self.assertEqual(r['woman']['after']['rt_feed_p95'], 99.0)
         self.assertEqual(r['man']['after']['rt_corr_max'], 14.1)
 
+    def test_table_text_window_rows(self):
+        w = dict(window_s=3.0, changes=40, secs=120.0, clip_rate=11 / 3.0, clip_n=11, clip_t0=50.0, clip_t1=52.9, clip_cls='loop',
+                 clip_names=['A', 'B', 'C'], corr_max=30.0, corr_t=81.2, corr_cls='stop', corr_clip='Run_Stop', corr_v_max=None,
+                 budget_trips=0)
+        text = '\n'.join([
+            cr.window_line('before', 'woman', '20261122-132705', w),
+            cr.window_line('aa1', 'woman', '20261122-132705', w),          # A/A side: not a before / after value
+            '== woman (20261122-132705)',
+            '%-48s %10.3f %10.3f %10.3f ' % ('runtime: clip changes / s, busiest window', 3.667, 2.667, -1.0),
+            '%-48s %10.3f %10.3f %10.3f ' % ('runtime: foot correction vertical max, cm', 0.0, 0.0, 0.0),
+            '%-48s %10.3f %10.3f %10.3f ' % ('runtime: vertical foot correction measured', 0.0, 0.0, 0.0),
+            '%-48s %10.3f %10.3f %10.3f ' % ('runtime: cost budget trips', 0.0, 1.0, 1.0),
+        ])
+        r = ge.parse_table_text(text)['woman']
+        self.assertEqual(r['before']['rt_clip_win_max'], 3.667)
+        self.assertEqual(r['after']['rt_budget_trips'], 1.0)
+        self.assertEqual(r['after']['rt_corr_v_measured'], 0.0)
+        wb = r['before']['_windows']['20261122-132705']
+        self.assertEqual((wb['clipWinMax'], wb['clipWinAt'], wb['clipWinCls'], wb['clipWinClips']), ('3.667', '50.00-52.90s', 'loop',
+                                                                                                      'A>B>C'))
+        self.assertEqual((wb['corrMax'], wb['corrAt'], wb['corrClip'], wb['corrVMax']), ('30.00', '81.20s', 'Run_Stop', '-'))
+        self.assertNotIn('_windows', r['after'])
+
     def test_planted_hip_aggregate(self):
         line = ('PICKS run=x startPicks=5 startPlantedHipN=10 startPlantedHipKept=8 startPlantedHipOffP50Cm=2.00 '
                 'stopPlantedHipN=20 stopPlantedHipKept=2 stopPlantedHipOffP50Cm=20.00')
@@ -186,6 +322,69 @@ class GateTest(unittest.TestCase):
         snap = copy.deepcopy(r)
         ge.evaluate(r)
         self.assertEqual(r, snap)
+
+
+class WindowTest(unittest.TestCase):
+    """compare_runs per-row window measures (session_windows) on synthetic stage meta arrays."""
+
+    def test_clip_change_rows_follow_the_runtime_count(self):
+        # a row without a pick neither counts nor resets the last pick: A, -, A is no change
+        self.assertEqual(cr.clip_change_rows([-1, 1, 1, -1, 1, 2, 2, -1, 3]), [5, 8])
+        self.assertEqual(cr.clip_change_rows([-1, -1]), [])
+
+    def test_busiest_window(self):
+        t = [0.1 * i for i in range(100)]                 # 10 s at 10 Hz
+        rows = [5, 30, 31, 33, 35, 38, 41, 90]            # 6 changes in 3.10 .. 4.10 s
+        self.assertEqual(cr.busiest_window(t, rows, 3.0), (6, 30, 41))
+        self.assertEqual(cr.busiest_window(t, rows, 0.5), (3, 30, 33))   # first of the equal windows
+        self.assertEqual(cr.busiest_window(t, [], 3.0), (0, None, None))
+
+    def test_session_windows(self):
+        import numpy as np
+        n = 300                                           # 10 s at 30 Hz
+        t = np.arange(n) / 30.0
+        clip = np.zeros(n)
+        # session: one burst of 11 changes in 3 s (the running arc), else steady
+        for k, i in enumerate(range(150, 240, 9)):
+            clip[i:] = k + 1
+        clip[20:25] = np.nan                              # no pick for a moment: no change
+        corrL = np.zeros(n)
+        corrR = np.zeros(n)
+        corrR[200] = 31.0
+        cls = np.array(['loop'] * n, dtype=object)
+        cls[200] = 'stop'
+        names = ['c%d' % i for i in range(20)]
+        m = dict(t=t, clip=clip, corrL_cm=corrL, corrR_cm=corrR)
+        w = cr.session_windows(m, cls, names, 3.0)
+        self.assertEqual(w['changes'], 10)
+        self.assertEqual(w['clip_n'], 10)
+        self.assertAlmostEqual(w['clip_rate'], 10 / 3.0)
+        self.assertEqual(w['clip_names'][:3], ['c0', 'c1', 'c2'])
+        self.assertEqual((w['corr_max'], w['corr_cls'], w['corr_clip']), (31.0, 'stop', 'c6'))
+        self.assertAlmostEqual(w['corr_t'], 200 / 30.0)
+        self.assertIsNone(w['corr_v_max'])                # no ground stage in the output
+        self.assertIsNone(w['budget_trips'])              # no trace file
+        m['corrVL_cm'] = np.zeros(n)
+        m['corrVL_cm'][50] = -12.0
+        w = cr.session_windows(m, cls, names, 3.0)
+        self.assertEqual(w['corr_v_max'], 12.0)
+        line = cr.window_line('before', 'woman', 'x', w)
+        self.assertIn('clipWinMax=3.333', line)
+        self.assertIn('corrVMax=12.00', line)
+
+    def test_budget_trips_counted_from_the_trace(self):
+        import numpy as np
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, 'x.motion.log')
+        try:
+            with open(p, 'w', encoding='utf-8') as f:
+                f.write('[2000-01-01 00:00:01.000000] UTPP MOTION db=0:x clip=1:a\n'
+                        '[2000-01-01 00:00:02.000000] UTPP mm.motionDriver budget trip #1 p95us=600.0 wallP95us=610.0 limit=250\n')
+            m = dict(t=np.arange(10) / 30.0, clip=np.zeros(10))
+            self.assertEqual(cr.session_windows(m, np.array(['idle'] * 10), ['a'], 3.0, p)['budget_trips'], 1)
+        finally:
+            os.remove(p)
+            os.rmdir(d)
 
 
 if __name__ == '__main__':
