@@ -2714,8 +2714,25 @@ void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope)
     g_testMapOverrides.capsuleSpeedRate = aMode;
     g_testMapOverrides.capsuleRateScope = aScope;
 }
+// MapConfig::speedConverter bits (-1 = keep the default), the turn friction of the converter (<= 0 = the gait ground friction) and its
+// largest converted turn (<= 0 = every turn)
+int32_t g_testSpeedConverter = -1;
+float g_testSpeedConverterFriction = 0.0f, g_testSpeedConverterMaxTurnDeg = 0.0f;
+void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg)
+{
+    std::lock_guard lock(g_m);
+    g_testSpeedConverter = aBits;
+    g_testSpeedConverterFriction = aFriction;
+    g_testSpeedConverterMaxTurnDeg = aMaxTurnDeg;
+}
 void TestApplyMapOverrides(adapter::MapConfig& aMc)
 {
+    if (g_testSpeedConverter >= 0)
+        aMc.speedConverter = g_testSpeedConverter;
+    if (g_testSpeedConverterFriction > 0.0f)
+        aMc.speedConverterFriction = g_testSpeedConverterFriction;
+    if (g_testSpeedConverterMaxTurnDeg > 0.0f)
+        aMc.speedConverterMaxTurnDeg = g_testSpeedConverterMaxTurnDeg;
     if (g_testMapOverrides.capsuleSpeedRate >= 0)
         aMc.capsuleSpeedRate = static_cast<adapter::CapsuleRateMode>(g_testMapOverrides.capsuleSpeedRate & 3);
     if (g_testMapOverrides.capsuleRateScope >= 0)

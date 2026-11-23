@@ -36,6 +36,7 @@
 #include "StanceCalibration.hpp"
 #include "StationaryShotTurn.hpp"
 #include "MotionTrajectory.hpp"
+#include "SpeedConverter.hpp"
 
 namespace utpp::mm::adapter
 {
@@ -1006,6 +1007,17 @@ struct MapConfig
     // capsuleRateScope: the picks that play at the capsule speed (ChooserState::rateScaleScope): 0 every pick, 1 loop clips only, 2 every
     // pick but a start clip (a start keeps the rate of the mapped query, so its authored acceleration stays in step with the query).
     int capsuleRateScope = 0;
+    // Speed converter (speedconv bits, 0 = off): kQuery = the query trajectory and the movement predicates use the velocity the
+    // reference character movement would have while chasing the game velocity (speedconv::Step: curved turns, limited acceleration and
+    // braking) on the ground while the input is held and the capsule moves, outside the landing window; without kStartsStops only a
+    // turn is reshaped (the speed is the game speed while the two velocities are aligned); kStartsStops = the speed too, also from rest
+    // and after the input is released; kLoopRate = loop clips play at the capsule speed (capsuleSpeedRate Both with scope 1, when
+    // capsuleSpeedRate is off).
+    // 0 = the game velocity everywhere, bit for bit.
+    int speedConverter = 0;
+    speedconv::Limits speedConverterLimits;
+    float speedConverterFriction = 0.0f; // turn friction of the converter (per second); 0 = the gait ground friction of the character movement
+    float speedConverterMaxTurnDeg = 0.0f; // larger turns (reversals) keep the game velocity (speedconv::Limits::maxTurnCos); 0 = every turn
     // Directional locomotion inputs for the directional database rows (MapState::st.moveDirection, isStartingDirectional,
     // isPivotingDirectional). Computed only when on; the existing inputs (slide direction, IsStarting, IsPivoting) are unchanged.
     // moveDirection: the six-way movement direction with hysteresis (motiontraj::UpdateMoveDirection), from the input direction on the
@@ -1026,6 +1038,17 @@ struct MapConfig
     float aimPivotDeg = motiontraj::kPivotAim;
     float aimPivotGateS = motiontraj::kPivotAimGateS;
 };
+
+// The capsule speed play rate in effect: MapConfig::capsuleSpeedRate, or with it off the loop rate of the speed converter
+// (speedconv::kLoopRate: Both, loop clips only).
+inline CapsuleRateMode EffectiveCapsuleRate(const MapConfig& c)
+{
+    return c.capsuleSpeedRate == CapsuleRateMode::Off && (c.speedConverter & speedconv::kLoopRate) ? CapsuleRateMode::Both : c.capsuleSpeedRate;
+}
+inline int EffectiveCapsuleRateScope(const MapConfig& c)
+{
+    return c.capsuleSpeedRate == CapsuleRateMode::Off && (c.speedConverter & speedconv::kLoopRate) ? 1 : c.capsuleRateScope;
+}
 
 // Factor for motiontraj::GameVelocityToCm (horizontal cm/s = m/s x 100 x factor) at the game planar speed aGameSpeed (m/s).
 inline float SpeedScaleFor(const MapConfig& c, int aStance, float aGameSpeed)
@@ -1331,6 +1354,7 @@ struct MapState
         SpeedPoints stand{0, {}, {}}, crouch{0, {}, {}};
     } querySpeed;
     float rateSpeedScale = 1.0f; // MapConfig::capsuleSpeedRate: this feed's play-rate scale (1 = off)
+    speedconv::State speedConverter; // MapConfig::speedConverter: the converted velocity of the last feed
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -1724,7 +1748,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         const bool slideScale = c.slide && c.slideSpec.declared && gameSp > 0.01f &&
             (slideActive || (mode == 0 && m.slideExitAge < c.slideExitMapS));
         m.querySpeed.active = c.capsuleSpeedQuery && !slideScale;
-        m.querySpeed.rate = c.capsuleSpeedRate != CapsuleRateMode::Off && !c.capsuleSpeedQuery && !slideScale;
+        m.querySpeed.rate = EffectiveCapsuleRate(c) != CapsuleRateMode::Off && !c.capsuleSpeedQuery && !slideScale;
         if (m.querySpeed.active || m.querySpeed.rate)
         {
             const brake::Prediction map = CapsuleStopPrediction(c, calibrationWeight, gameSp);
@@ -2063,7 +2087,25 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             motiontraj::MotionMaxSpeed(c.cmc, gait, stance, false, 0.0f) * std::clamp(stick, 0.0f, 1.0f));
     m.capsuleBrakeModel = d.capsuleStop.Active() ? d.capsuleStop.deceleration : 0.0f;
     const bool hasFloor = f.air.valid && f.air.distanceToGround >= 0.0f;
-    m.traj.Update(dt, vel, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);
+    // Speed converter (MapConfig::speedConverter): the query velocity the reference character movement would have while chasing the
+    // game velocity; vel itself (play rate, speed, landing, feet) stays the game's
+    motiontraj::V3 velQ = vel;
+    if (c.speedConverter & speedconv::kQuery)
+    {
+        const bool input = !motiontraj::IsZero(acc);
+        // ground only, and not within the landing window (the landing picks keep the game velocity they were tuned on)
+        const bool ground = mode == 0 && PsmGround(locoDetail) && !slideActive && !x.vehicleExit && !jumpOutFlight &&
+                            st.movementMode == 0 && m.sinceLand >= motiontraj::kJustLandedSeconds;
+        const bool shapeSpeed = (c.speedConverter & speedconv::kStartsStops) != 0;
+        const bool active = ground && ((input && sp > motiontraj::kHasVelocity) || shapeSpeed);
+        speedconv::Limits lim = c.speedConverterLimits;
+        lim.friction = c.speedConverterFriction > 0.0f ? c.speedConverterFriction : motiontraj::MotionGroundFriction(c.cmc, gait, sp);
+        lim.acceleration = motiontraj::MotionMaxAcceleration(c.cmc, gait, sp);
+        if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
+            lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
+        velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed);
+    }
+    m.traj.Update(dt, velQ, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);
     m.capsuleAccelModel = m.traj.CapsuleAcceleration();
     st.trjPast = m.traj.PastVelocity();
     st.trjCurrent = m.traj.CurrentVelocity();
@@ -2083,7 +2125,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     st.rotationModeLast = st.rotationMode;
     st.rotationMode = rot;
     st.isMoving = c.velocityPredicates
-        ? motiontraj::IsMovingFromVelocity(motiontraj::V3{vel.x, vel.y, 0.0f}, st.trjFuture, acc, st.accelerationLast)
+        ? motiontraj::IsMovingFromVelocity(motiontraj::V3{velQ.x, velQ.y, 0.0f}, st.trjFuture, acc, st.accelerationLast)
         : motiontraj::IsMoving(st.trjFuture, acc);
     st.movementStateLast = st.movementState;
     st.movementState = st.isMoving ? 1 : 0;
@@ -2117,13 +2159,13 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // predicates (ABP functions l. 1777-1937)
     // velocity predicates: the turn is the input acceleration against the velocity (IsPivoting reads it in place of the future)
     const motiontraj::V3 turnTarget = c.velocityPredicates ? acc : st.trjFuture;
-    st.turnAngle = motiontraj::TurnAngle(turnTarget, vel);
-    st.isStarting = motiontraj::IsStarting(st.isMoving, st.trjFuture, vel, x.currentDbPivots);
-    st.isPivoting = motiontraj::IsPivoting(st.isMoving, turnTarget, vel, rot);
+    st.turnAngle = motiontraj::TurnAngle(turnTarget, velQ);
+    st.isStarting = motiontraj::IsStarting(st.isMoving, st.trjFuture, velQ, x.currentDbPivots);
+    st.isPivoting = motiontraj::IsPivoting(st.isMoving, turnTarget, velQ, rot);
     // aim rotation sub-mode (MapConfig::aimRotation): the Aim pivot threshold and the pivot / start elapsed-time gate
     st.aimRotation = c.aimRotation && f.aiming && rot == motiontraj::RotationMode::Strafe;
     if (st.aimRotation)
-        st.isPivoting = motiontraj::IsPivotingAim(st.isMoving, turnTarget, vel, c.aimPivotDeg, x.currentDbPivots || x.currentDbStarts,
+        st.isPivoting = motiontraj::IsPivotingAim(st.isMoving, turnTarget, velQ, c.aimPivotDeg, x.currentDbPivots || x.currentDbStarts,
                                                   x.currentPickAgeS, c.aimPivotGateS);
     // directional locomotion inputs (MapConfig::directionalPredicates / moveDirection)
     if (c.directionalPredicates)
@@ -2131,9 +2173,9 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         const float pastRate = motiontraj::FacingYawRate(m.traj, -0.4f, -0.3f);
         const float currentRate = motiontraj::FacingYawRate(m.traj, 0.0f, 0.1f);
         st.isCircling = motiontraj::IsCircling(pastRate, currentRate, st.turnAngle);
-        st.isStartingDirectional = motiontraj::IsStartingDirectional(st.isMoving, st.trjFuture, vel, x.currentDbPivots, st.speed2D,
+        st.isStartingDirectional = motiontraj::IsStartingDirectional(st.isMoving, st.trjFuture, velQ, x.currentDbPivots, st.speed2D,
                                                                      c.directionalStartSlowMargin);
-        st.isPivotingDirectional = motiontraj::IsPivotingDirectional(st.isMoving, turnTarget, vel, st.isCircling, c.directionalPivotDeg);
+        st.isPivotingDirectional = motiontraj::IsPivotingDirectional(st.isMoving, turnTarget, velQ, st.isCircling, c.directionalPivotDeg);
     }
     else
         st.isCircling = st.isStartingDirectional = st.isPivotingDirectional = false;
@@ -2223,7 +2265,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.restTurn = stationaryRestTurn; // finishes an admitted same-side clip like the aim turn, but is no aim start
 #endif
     s.explicitWalk = f.wantsToWalk;
-    WriteRateScaleScope(s, c.capsuleRateScope);
+    WriteRateScaleScope(s, EffectiveCapsuleRateScope(c));
     if (facing.shotTurn)
     {
         shotturn::Hold side; // R3 review L1: the error is read on the admitted side near 180 deg (same rule as the hold)
@@ -2237,7 +2279,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.stationaryAimTargetYawDeg = (s.stationaryAimTurn || s.restTurn) ? aimGoalYaw : 0;
     s.speed2dCmS = chooserSpeed;
     m.rateSpeedScale = m.querySpeed.rate && chooserSpeed > 1.0f
-                           ? CapsuleRateScaleForMode(c.capsuleSpeedRate, CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
+                           ? CapsuleRateScaleForMode(EffectiveCapsuleRate(c), CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
                            : 1.0f;
     WriteRateSpeedScale(s, m.rateSpeedScale);
     WriteCrouchRateScale(s, c, st.stance);
