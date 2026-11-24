@@ -210,12 +210,12 @@ do
   check("registered mm.pelvisYawTrim: float -10..10 step 0.5, default 2, animation section, label <= 38 chars",
     pt ~= nil and pt.type == "float" and pt.default == 2 and pt.min == -10 and pt.max == 10 and pt.step == 0.5
     and pt.section == "animation" and #pt.label <= 38, pt and pt.label)
-  local ws = defs["mm.walkSpeed"]
-  check("registered mm.walkSpeed: float 0..3.5 step 0.1, default 1.9, animation section, label <= 38 chars, desc names the walk toggle",
+  local ws = defs["mm.walkToggleSpeed"]
+  check("registered mm.walkToggleSpeed: float 0..3.5 step 0.1, default 1.9, animation section, label <= 38 chars, desc names the walk toggle",
     ws ~= nil and ws.type == "float" and ws.default == 1.9 and ws.min == 0 and ws.max == 3.5 and ws.step == 0.1
     and ws.section == "animation" and #ws.label <= 38 and type(ws.desc) == "string" and ws.desc:find("(G)", 1, true) ~= nil, ws and ws.label)
-  local mw = defs["mm.minWalkSpeed"]
-  check("registered mm.minWalkSpeed: float 0..1.6 step 0.01, default 0.82, animation section, label <= 38 chars",
+  local mw = defs["mm.minAnalogWalkSpeed"]
+  check("registered mm.minAnalogWalkSpeed: float 0..1.6 step 0.01, default 0.82, animation section, label <= 38 chars",
     mw ~= nil and mw.type == "float" and mw.default == 0.82 and mw.min == 0 and mw.max == 1.6 and mw.step == 0.01
     and mw.section == "animation" and #mw.label <= 38 and type(mw.desc) == "string", mw and mw.label)
   local ss = defs["mm.stickSpeed"]
@@ -234,6 +234,8 @@ do
     and bm.section == "animation" and bm.label == "Body yaw offset (male V, deg)" and type(bm.desc) == "string"
     and bm.desc:find("movement direction is unchanged", 1, true) ~= nil and bm.desc:find("Not while aiming", 1, true) ~= nil)
   check("the single-value key mm.bodyYawOffset is no longer registered", defs["mm.bodyYawOffset"] == nil)
+  check("the renamed keys mm.walkSpeed / mm.minWalkSpeed are no longer registered",
+    defs["mm.walkSpeed"] == nil and defs["mm.minWalkSpeed"] == nil)
   local sw = defs["mm.strideWarp"]
   check("registered mm.strideWarp: bool, on by default, animation section, label 'Stride matching'",
     sw ~= nil and sw.type == "bool" and sw.default == true and sw.section == "animation" and sw.label == "Stride matching"
@@ -456,7 +458,49 @@ do
   check("no stored value: width 0, no call", w == 0 and #t.shoulder == 0)
 end
 
--- mm.walkSpeed (2026-10-31): DLL default 1.9 since 2026-11-22 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
+-- migration (utpp_core MIGRATED_KEYS): mm.walkSpeed -> mm.walkToggleSpeed and mm.minWalkSpeed -> mm.minAnalogWalkSpeed keep
+-- the stored value, the old keys are dropped from the file; a stored new key wins
+do
+  local tmp = UTPP_MOTION_PATH .. ".walk-rename-migration-test.tmp"
+  local function run(lines)
+    local v, t, core = fresh(), mock(), dofile(UTPP_CORE_PATH)
+    core.sink = function() end
+    core.SETTINGS_FILE = tmp
+    local fh = assert(io.open(tmp, "w"))
+    fh:write("# test\n" .. core.SETTINGS_RESET_KEY .. "=" .. core.SETTINGS_RESET .. "\n"
+      .. core.DEFAULTS_REVISION_KEY .. "=" .. core.DEFAULTS_REVISION .. "\n")
+    for _, l in ipairs(lines) do fh:write(l .. "\n") end
+    fh:close()
+    core.Load(tmp)
+    v.api = t.api
+    v.RegisterSettings(core)
+    v.SetEnabled(true); v.Sync(t.api)
+    core.Save(tmp)
+    local fh2 = assert(io.open(tmp, "r"))
+    local text = fh2:read("*a")
+    fh2:close()
+    os.remove(tmp)
+    return core, t, text
+  end
+  local core, t, text = run({ "mm.walkSpeed=2.3", "mm.minWalkSpeed=0.5" })
+  check("rename migration: old keys -> walkToggleSpeed 2.3 / minAnalogWalkSpeed 0.5, both sent, old keys gone from the file",
+    core.Get("mm.walkToggleSpeed") == 2.3 and core.Get("mm.minAnalogWalkSpeed") == 0.5
+    and t.walk[#t.walk] == 2.3 and t.minWalk[#t.minWalk] == 0.5
+    and text:find("\nmm.walkToggleSpeed=2.3\n", 1, true) ~= nil and text:find("\nmm.minAnalogWalkSpeed=0.5\n", 1, true) ~= nil
+    and text:find("mm.walkSpeed", 1, true) == nil and text:find("mm.minWalkSpeed", 1, true) == nil, text)
+  core, t, text = run({ "mm.walkSpeed=2.3", "mm.walkToggleSpeed=1.5", "mm.minAnalogWalkSpeed=0.6", "mm.minWalkSpeed=0.4" })
+  check("rename migration: a stored new key wins whatever the line order, old keys dropped",
+    core.Get("mm.walkToggleSpeed") == 1.5 and core.Get("mm.minAnalogWalkSpeed") == 0.6
+    and text:find("mm.walkSpeed", 1, true) == nil and text:find("mm.minWalkSpeed", 1, true) == nil, text)
+  core, t, text = run({ "mm.walkSpeed=abc" })
+  check("rename migration: an invalid old value is dropped, the new key keeps its default 1.9",
+    core.Get("mm.walkToggleSpeed") == 1.9 and text:find("mm.walkSpeed", 1, true) == nil, text)
+  core, t = run({})
+  check("rename migration: no stored value -> defaults 1.9 / 0.82",
+    core.Get("mm.walkToggleSpeed") == 1.9 and core.Get("mm.minAnalogWalkSpeed") == 0.82)
+end
+
+-- mm.walkToggleSpeed (2026-10-31): DLL default 1.9 since 2026-11-22 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
 -- wanted value once, then only a change; clamped to 0..3.5, NaN -> 0
 do
   local v, t = fresh(), mock()
@@ -494,7 +538,7 @@ do
   check("walkSpeed is not resent for a fresh glue session", v.Sync(t.api) == "enabled" and #t.walk == 1)
 end
 
--- mm.minWalkSpeed (2026-10-31): DLL default 0.82 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
+-- mm.minAnalogWalkSpeed (2026-10-31): DLL default 0.82 (= the setting; 0 = off); the cache starts unknown, so the first enable sends the
 -- wanted value once, then only a change; clamped to 0..1.6, NaN -> 0
 do
   local v, t = fresh(), mock()

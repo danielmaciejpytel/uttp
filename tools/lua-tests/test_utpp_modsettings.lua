@@ -436,6 +436,31 @@ local ok, err = pcall(function()
   check("T16 baseline: new key synced, old key dropped", b16:find("mm.shoulderWidth=1", 1, true) ~= nil
     and b16:find("shoulderNarrow", 1, true) == nil, b16)
 
+  -- T16b renamed key (MIGRATED_KEYS: mm.walkSpeed -> mm.walkToggleSpeed, the same value): the baseline holds the old key and
+  -- Mod Settings shows the new field at its class default 1.9 (no user.ini entry): the migrated CET value 2.3 is kept and pushed
+  os.remove(settingsFile)
+  local fs2 = SAVED.open(settingsFile, "w")
+  fs2:write("# UTPP settings\n" .. LEVEL_LINE .. "mm.walkSpeed=2.3\nt.steps=3\n")
+  fs2:close()
+  local fb3 = SAVED.open(baseFile, "w")
+  fb3:write("# UTPP: values last synced with Mod Settings\nmm.walkSpeed=1.9\nt.steps=3\n")
+  fb3:close()
+  local c16b = newCore()
+  c16b.Register({ key = "mm.walkToggleSpeed", section = "animation", type = "float", default = 1.9, min = 0, max = 3.5, step = 0.1,
+                  label = "Walk speed (m/s)" })
+  check("T16b renamed on load: mm.walkToggleSpeed = 2.3, old key not stored", c16b.settings.values["mm.walkToggleSpeed"] == 2.3
+    and c16b.settings.stored["mm.walkSpeed"] == nil, c16b.settings.values["mm.walkToggleSpeed"])
+  local m16b = mockMS(defaultsPage())
+  m16b.fields.mm_walkToggleSpeed = "1.900000"
+  c16b.msync.api = m16b.api
+  tick(c16b, 1)
+  check("T16b Mod Settings class default 1.9 does not undo the renamed value; CET value pushed",
+    c16b.settings.values["mm.walkToggleSpeed"] == 2.3 and math.abs((tonumber(m16b.fields.mm_walkToggleSpeed) or 0) - 2.3) < 1e-6
+    and next(c16b.msync.dirty) == nil, m16b.fields.mm_walkToggleSpeed)
+  local b16b = readFile(baseFile) or ""
+  check("T16b baseline: new key synced, old key dropped", b16b:find("mm.walkToggleSpeed=2.3", 1, true) ~= nil
+    and b16b:find("mm.walkSpeed", 1, true) == nil, b16b)
+
   -- ---------------------------------------------------------------- T17 hidden options (registry flag hidden = true, 2026-11-12)
   -- the six head look options are hidden in 0.1.0: no class field, never in the snapshot. Their CET value, default and settings
   -- file stay as they are; nothing is pushed, imported or kept in the baseline for them. A shown switch syncs both ways; a baseline of false must not read as "no baseline" (ModSettingsSync).
@@ -453,7 +478,7 @@ local ok, err = pcall(function()
     and string.find(redsText, "public let camera_aim_distance", 1, true) ~= nil)
   -- the options flagged through utpp_core's HIDDEN_KEYS (registered by other modules) have no field either
   local leaked = {}
-  for _, f in ipairs({ "camera_aim_occlusion", "mm_pelvisYawTrim", "mm_bodyYawOffsetFemale", "mm_bodyYawOffsetMale", "mm_minWalkSpeed", "camera_body", "camera_collision",
+  for _, f in ipairs({ "camera_aim_occlusion", "mm_pelvisYawTrim", "mm_bodyYawOffsetFemale", "mm_bodyYawOffsetMale", "mm_minAnalogWalkSpeed", "camera_body", "camera_collision",
                        "mm_aimAtCrosshair", "perspective_sceneTier", "interactRange_scale", "lootRange_scale", "lootView_zoom",
                        "lootView_radius", "vehicle_keepTpp", "vehicle_pullOut", "vehicle_rideWatchdog", "vehicle_safeTeleportExit",
                        "camera_mouseScale", "perspective_minGap", "camera_aim_range", "camera_zoomUnarmed_fov",

@@ -101,7 +101,7 @@ M.PACK_FORCED = {
 -- options that only work with the mod's animations: their menu text ends with PACK_NOTE (added when the option is registered)
 M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
-for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkSpeed", "mm.minWalkSpeed",
+for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
   "mm.strideWarp", "mm.firmFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
@@ -156,7 +156,7 @@ local orderIndex = {}
 -- bodyturn.turnRate / bodyturn.turnRateMax: no effect on frames the motion driver owns; they apply on the legacy matcher and
 -- on frames handed back to it.
 M.HIDDEN_KEYS = {}
-for _, k in ipairs({ "camera.aim.occlusion", "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.minWalkSpeed", "camera.body",
+for _, k in ipairs({ "camera.aim.occlusion", "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.minAnalogWalkSpeed", "camera.body",
   "camera.collision", "mm.aimAtCrosshair", "perspective.sceneTier", "interactRange.scale", "lootRange.scale", "lootView.zoom",
   "lootView.radius", "vehicle.keepTpp", "vehicle.pullOut", "vehicle.rideWatchdog", "vehicle.safeTeleportExit", "camera.mouseScale",
   "perspective.minGap", "camera.aim.range", "camera.zoomUnarmed.fov", "camera.zoomUnarmed.lastFov",
@@ -315,17 +315,23 @@ local RETIRED_KEYS = { ["perspective.enforceWithRef"] = true,
 -- default look, both shoulders together, -5 .. 5, default 0): width = 5 - 2 * narrow (2.5 -> 0, 2 -> 1, 0 -> 5, 4 -> -3).
 -- mm.bodyYawOffset (body yaw offset of both bodies, deg) -> mm.bodyYawOffsetFemale (the same value); mm.bodyYawOffsetMale keeps its
 -- default (0). The changed default of the old key (M.DEFAULT_CHANGES, revision 3) applies to the converted value.
+-- mm.walkSpeed -> mm.walkToggleSpeed and mm.minWalkSpeed -> mm.minAnalogWalkSpeed: renamed (the walk toggle speed and the
+-- minimum walk speed of a small stick tilt), the same value. The changed default of mm.walkSpeed (M.DEFAULT_CHANGES, revision 5)
+-- applies to the converted value.
+local function sameNumber(v)
+  local n = tonumber(v)
+  if n == nil or n ~= n or n == math.huge or n == -math.huge then return nil end
+  return n
+end
 local MIGRATED_KEYS = {
   ["mm.shoulderNarrow"] = { key = "mm.shoulderWidth", convert = function(v)
     local n = tonumber(v)
     if n == nil or n ~= n or n == math.huge or n == -math.huge then return nil end
     return 5 - 2 * n
   end },
-  ["mm.bodyYawOffset"] = { key = "mm.bodyYawOffsetFemale", convert = function(v)
-    local n = tonumber(v)
-    if n == nil or n ~= n or n == math.huge or n == -math.huge then return nil end
-    return n
-  end },
+  ["mm.bodyYawOffset"] = { key = "mm.bodyYawOffsetFemale", convert = sameNumber },
+  ["mm.walkSpeed"] = { key = "mm.walkToggleSpeed", convert = sameNumber },
+  ["mm.minWalkSpeed"] = { key = "mm.minAnalogWalkSpeed", convert = sameNumber },
 }
 M.MIGRATED_KEYS = MIGRATED_KEYS
 
@@ -346,7 +352,7 @@ M.DEFAULT_CHANGES = {
   { rev = 3, key = "perspective.scene", from = true, to = false },
   { rev = 3, key = "camera.side", from = 0.5, to = 1 },
   { rev = 4, key = "mm.neutralAim", from = false, to = true },
-  { rev = 5, key = "mm.walkSpeed", from = 1.6, to = 1.9 },
+  { rev = 5, key = "mm.walkToggleSpeed", from = 1.6, to = 1.9 }, -- introduced as mm.walkSpeed (MIGRATED_KEYS)
   { rev = 5, key = "bodyturn.aimJogSpeed", from = 3.3, to = 3.85 },
   { rev = 5, key = "mm.overlayInertialSwitch", from = false, to = true },
   { rev = 6, key = "mm.leanScale", from = 0.85, to = 0.2 },
@@ -576,15 +582,15 @@ local LAYOUT = {
   -- "Body yaw offset" of female V and of male V (mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale, utpp_motion: the whole character
   -- turned against the over-the-shoulder parallax);
   --   "Head follows turns" (mm.headLead, registered below: hidden, the lean head layer takes the head) right after it;
-  --   "Walk speed (m/s)" (mm.walkSpeed, utpp_motion: capsule speed under the walk toggle) after it, then "Minimum walk
-  -- speed (m/s)" (mm.minWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
+  --   "Walk speed (m/s)" (mm.walkToggleSpeed, utpp_motion: capsule speed under the walk toggle) after it, then "Minimum walk
+  -- speed (m/s)" (mm.minAnalogWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
   -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less), then "Firm feet in turns and
   -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default on), then "Body lean" and "Head lean"
   -- (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
-                         "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.headLead", "mm.walkSpeed", "mm.minWalkSpeed",
+                         "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.headLead", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
                          "mm.strideWarp", "mm.firmFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth",
                          "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",

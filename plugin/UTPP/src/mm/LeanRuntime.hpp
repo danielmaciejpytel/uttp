@@ -24,7 +24,7 @@
 //     correction). motion pins the feet with its foot IK after the lean layer; Apply does the same with a two-bone leg IK
 //     (legik::SolveTwoBone, thigh / shin / foot rotations only) back onto the model-space ankles and foot rotations of the unleaned
 //     pose (Params::anchorFeet), so the gait, the contacts and the foot locker see the same feet as without the lean.
-//   * The head layer (setting leanHead, default off) is applied only when asked; it replaces the HeadLead layer of the driver
+//   * The head layer (setting leanHead, default on) is applied only when asked; it replaces the HeadLead layer of the driver
 //     (never summed with it: the head lead is a closed loop on the path angle and would fight the lean head).
 // OFF (no call) and ON with weight 0 (straight running, idle, aim, reload, ...): Idle() is true, Apply is never called, the pose is
 // bit-identical.

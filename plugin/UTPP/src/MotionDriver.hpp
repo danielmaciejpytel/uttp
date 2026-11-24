@@ -164,7 +164,7 @@ bool SetShooterMode(bool aOn);
 // LIVE (setting on, v2 enabled, no fallback, bundle loaded); exactly 1.0f otherwise. ShooterModeLive mirrors that flag.
 float ShooterModeSpeedMul(float aMoveX, float aMoveY, int32_t aDetailed);
 bool ShooterModeLive();
-// Walk toggle speed (CET mm.walkSpeed, DLL default 1.9 like the setting, 0 = off; mm/MotionAdapter.hpp MapConfig::gameWalkTogglePoint): the capsule speed (game
+// Walk toggle speed (CET mm.walkToggleSpeed, DLL default 1.9 like the setting, 0 = off; mm/MotionAdapter.hpp MapConfig::gameWalkTogglePoint): the capsule speed (game
 // m/s, 0 .. kWalkSpeedMaxMs) the game walk toggle (G) should hold at the full stick. SetWalkSpeed stores it (false on NaN / out of range,
 // nothing changed); the driver maps that speed onto the motion Walk cap while the toggle is on (stand ground, no aim / air / sprint), and
 // the script (utpp.reds UTPPUpdateWalkSpeed) holds the capsule there with one MaxSpeed multiplier = WalkSpeedTarget() / 2.72 (the speed
@@ -174,7 +174,7 @@ bool ShooterModeLive();
 bool SetWalkSpeed(float aMs);
 float WalkSpeedSetting();
 float WalkSpeedTarget();
-// Minimum analog walk speed (CET mm.minWalkSpeed, DLL default 0.82 like the setting, 0 = off; mm/MotionAdapter.hpp AnalogWalkFloorMul / MapConfig::analogFloorStick):
+// Minimum analog walk speed (CET mm.minAnalogWalkSpeed, DLL default 0.82 like the setting, 0 = off; mm/MotionAdapter.hpp AnalogWalkFloorMul / MapConfig::analogFloorStick):
 // the capsule speed (game m/s at the stand run curve, 0 .. kMinAnalogWalkMaxMs) a small stick tilt is lifted to. SetMinAnalogWalk stores it
 // (false on NaN / out of range, nothing changed); the driver gives the prediction the cap of the lifted speed, and the script (utpp.reds
 // UTPPUpdateAnalogFloor) applies one MaxSpeed multiplier = AnalogFloorMul. AnalogFloorMul is lock-free (reds calls it once per locomotion

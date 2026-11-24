@@ -1,4 +1,4 @@
-# ---- Minimum analog walk speed (CET mm.minWalkSpeed): adapter::AnalogWalkFloorMul / AnalogFloorStickFor and MapToChooser with the floor
+# ---- Minimum analog walk speed (CET mm.minAnalogWalkSpeed): adapter::AnalogWalkFloorMul / AnalogFloorStickFor and MapToChooser with the floor
 # on / off (identity at and above the floor stick, predicted cap = the reachable lifted speed).
 # Included from plugin/UTPP/CMakeLists.txt (include(tests/analogfloor.cmake OPTIONAL)); expects UTPP_WARNINGS. No data files.
 add_executable(utpp_mm_analogfloor_test tests/AnalogWalkFloorTest.cpp src/mm/MotionAdapter.hpp)

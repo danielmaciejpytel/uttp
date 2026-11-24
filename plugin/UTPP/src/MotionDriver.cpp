@@ -382,12 +382,12 @@ bool g_hipLease = false;                 // UTPPSetMotionHipLease: the CET hip-f
 // (0 walk / 1 run / 2 sprint; the walk toggle makes it walk), so the speed ratio matches the strafe clips that really play.
 std::atomic<int64_t> g_fnDrivingNs{0};
 std::atomic<int> g_fnLastGait{-1};
-// Walk toggle speed (SetWalkSpeed, CET mm.walkSpeed; MotionAdapter.hpp MapConfig::gameWalkTogglePoint) and the Tier2 Slow feed flag
+// Walk toggle speed (SetWalkSpeed, CET mm.walkToggleSpeed; MotionAdapter.hpp MapConfig::gameWalkTogglePoint) and the Tier2 Slow feed flag
 // (FeedTier2Slow). g_walkSpeedLive = target > 0 AND v2 can run (enabled, no fallback, bundle): the lock-free gate WalkSpeedTarget reads,
 // refreshed with the Shooter live flag. Starts at 1.9 m/s like the setting (0 = off).
 std::atomic<float> g_walkSpeed{1.9f};
 std::atomic<bool> g_walkSpeedLive{false};
-// Minimum analog walk speed (SetMinAnalogWalk, CET mm.minWalkSpeed; MotionAdapter.hpp AnalogWalkFloorMul): g_minAnalogWalkLive = setting > 0
+// Minimum analog walk speed (SetMinAnalogWalk, CET mm.minAnalogWalkSpeed; MotionAdapter.hpp AnalogWalkFloorMul): g_minAnalogWalkLive = setting > 0
 // AND v2 can run, refreshed with the walk speed flag (AnalogFloorMul gate). Starts at 0.82 m/s like the setting (0 = off).
 std::atomic<float> g_minAnalogWalk{0.82f};
 std::atomic<bool> g_minAnalogWalkLive{false};

@@ -495,16 +495,16 @@ int main(int argc, char** argv)
     {
         // G2 / G5 native settings (data-free): walk toggle speed validation + the lock-free target gate, Tier2 Slow flag
         Check(motiondriver::WalkSpeedSetting() == 1.9f && motiondriver::WalkSpeedTarget() == 0.0f,
-              "G2: walk speed default 1.9 (= mm.walkSpeed), target 0 while motion does not drive");
+              "G2: walk speed default 1.9 (= mm.walkToggleSpeed), target 0 while motion does not drive");
         Check(!motiondriver::SetWalkSpeed(std::numeric_limits<float>::quiet_NaN()) && !motiondriver::SetWalkSpeed(-0.1f) && !motiondriver::SetWalkSpeed(3.6f) &&
                   !motiondriver::SetWalkSpeed(std::numeric_limits<float>::infinity()) && motiondriver::WalkSpeedSetting() == 1.9f,
               "G2: SetWalkSpeed rejects NaN / negative / over 3.5 / inf and keeps the previous value");
         Check(motiondriver::SetWalkSpeed(2.0f) && motiondriver::WalkSpeedSetting() == 2.0f, "G2: SetWalkSpeed(2.0) stored");
         Check(motiondriver::WalkSpeedTarget() == 0.0f, "G2: target answers 0 while motion is not driving third-person locomotion");
         Check(motiondriver::SetWalkSpeed(3.5f) && motiondriver::SetWalkSpeed(0.0f) && motiondriver::WalkSpeedSetting() == 0.0f, "G2: 3.5 accepted, 0 switches it off");
-        // minimum analog walk speed (CET mm.minWalkSpeed): DLL default 0.82 (0 = off), 0 .. 1.6, the multiplier 1 while v2 does not drive
+        // minimum analog walk speed (CET mm.minAnalogWalkSpeed): DLL default 0.82 (0 = off), 0 .. 1.6, the multiplier 1 while v2 does not drive
         Check(motiondriver::MinAnalogWalkSetting() == 0.82f && motiondriver::AnalogFloorMul(0.0f, 0.09f, 1, false) == 1.0f,
-              "minimum analog walk default 0.82 (= mm.minWalkSpeed)");
+              "minimum analog walk default 0.82 (= mm.minAnalogWalkSpeed)");
         Check(!motiondriver::SetMinAnalogWalk(std::numeric_limits<float>::quiet_NaN()) && !motiondriver::SetMinAnalogWalk(-0.1f) &&
                   !motiondriver::SetMinAnalogWalk(1.7f) && !motiondriver::SetMinAnalogWalk(std::numeric_limits<float>::infinity()) &&
                   motiondriver::MinAnalogWalkSetting() == 0.82f,

@@ -2380,7 +2380,7 @@ void Native_MotionShooterModeSpeedMul(RED4ext::IScriptable*, RED4ext::CStackFram
     if (aOut)
         *aOut = r;
 }
-// ---- walk toggle speed (motiondriver::SetWalkSpeed; CET mm.walkSpeed, DLL default 0 = off): game m/s at the full stick, 0 .. 3.5
+// ---- walk toggle speed (motiondriver::SetWalkSpeed; CET mm.walkToggleSpeed, DLL default 1.9, 0 = off): game m/s at the full stick, 0 .. 3.5
 void Native_SetMotionWalkSpeed(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     float ms = 0.0f;
@@ -2399,7 +2399,7 @@ void Native_MotionWalkSpeedTarget(RED4ext::IScriptable*, RED4ext::CStackFrame* a
     if (aOut)
         *aOut = r;
 }
-// ---- minimum analog walk speed (motiondriver::SetMinAnalogWalk; CET mm.minWalkSpeed, DLL default 0 = off): game m/s, 0 .. 1.6
+// ---- minimum analog walk speed (motiondriver::SetMinAnalogWalk; CET mm.minAnalogWalkSpeed, DLL default 0.82, 0 = off): game m/s, 0 .. 1.6
 void Native_SetMotionMinAnalogWalk(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
     float ms = 0.0f;

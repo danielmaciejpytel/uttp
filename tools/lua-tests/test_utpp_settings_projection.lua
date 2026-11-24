@@ -671,13 +671,13 @@ if not WRITE then
     check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Firm feet in turns and stops, Body lean, Head lean, Shoulder width, Feminine figure, then the advanced camera options",
       placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffsetFemale") == "hidden/frame/60"
       and placeOf("mm.bodyYawOffsetMale") == "hidden/frame/70" and placeOf("mm.headLead") == "hidden/frame/80"
-      and placeOf("mm.walkSpeed") == "player/frame/90" and placeOf("mm.minWalkSpeed") == "hidden/frame/100"
+      and placeOf("mm.walkToggleSpeed") == "player/frame/90" and placeOf("mm.minAnalogWalkSpeed") == "hidden/frame/100"
       and placeOf("mm.strideWarp") == "player/frame/110" and placeOf("mm.firmFeet") == "player/frame/120"
       and placeOf("mm.leanScale") == "player/frame/130" and placeOf("mm.leanHeadScale") == "player/frame/140"
       and placeOf("mm.shoulderWidth") == "player/frame/150" and placeOf("mm.feminineFigure") == "player/frame/160"
       and placeOf("camera.idleOrbit") == "advanced/frame/170",
       placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.bodyYawOffsetFemale") .. " " .. placeOf("mm.bodyYawOffsetMale") .. " "
-        .. placeOf("mm.walkSpeed") .. " " .. placeOf("mm.minWalkSpeed") .. " " .. placeOf("mm.strideWarp") .. " " .. placeOf("mm.firmFeet") .. " "
+        .. placeOf("mm.walkToggleSpeed") .. " " .. placeOf("mm.minAnalogWalkSpeed") .. " " .. placeOf("mm.strideWarp") .. " " .. placeOf("mm.firmFeet") .. " "
         .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
     -- 2026-10-30 aim pitch plan: "Weapon aims at crosshair point" (mm.aimAtCrosshair, utpp_motion) after the crosshair colour, player level
     -- 2026-11-09: Melee full body / Melee aim tilt (player level) after Weapon aims at crosshair point
@@ -772,7 +772,7 @@ if not WRITE then
       local DEFAULTS = { ["headLook.impl"] = true, ["headLook.whileWalking"] = true, ["headLook.faceCamera"] = true,
                          ["headLook.lookAtLoot"] = true, ["headLook.maxYaw"] = 100, ["headLook.chest"] = 0.5,
                          ["camera.aim.occlusion"] = true, ["mm.pelvisYawTrim"] = 2, ["mm.bodyYawOffsetFemale"] = 4, ["mm.bodyYawOffsetMale"] = 0,
-                         ["mm.minWalkSpeed"] = 0.82,
+                         ["mm.minAnalogWalkSpeed"] = 0.82,
                          ["camera.body"] = true, ["camera.collision"] = true, ["mm.aimAtCrosshair"] = true, ["perspective.sceneTier"] = 3,
                          ["interactRange.scale"] = 1.0, ["lootRange.scale"] = 1.0, ["lootView.zoom"] = 0.9, ["lootView.radius"] = 1.8,
                          ["vehicle.keepTpp"] = true, ["vehicle.pullOut"] = true, ["vehicle.rideWatchdog"] = true,
@@ -1752,22 +1752,23 @@ do
     local r4Later = bootWithFile(REV .. "\nmm.neutralAim=false\n")
     check("T03 defaults revision 4: a file of revision 4 keeps the head with the body as a choice",
       r4Later.Get("mm.neutralAim") == false and defaultsLines() == 0)
-    -- revision 5: walk toggle 1.9, aim jog 3.85 and the smooth weapon pose switch on
+    -- revision 5: walk toggle 1.9, aim jog 3.85 and the smooth weapon pose switch on (these files hold the walk toggle speed
+    -- under its earlier key mm.walkSpeed: the value is moved to mm.walkToggleSpeed first, then the changed default applies)
     local r5 = bootWithFile("core.defaultsRevision=4\nmm.walkSpeed=1.6\nbodyturn.aimJogSpeed=3.3\nmm.overlayInertialSwitch=false\n")
     local r5Log = loggedLine()
     check("T03 defaults revision 5: a fresh install starts on walk 1.9, aim jog 3.85 and the weapon pose switch on",
-      r3Fresh.Get("mm.walkSpeed") == 1.9 and r3Fresh.Get("bodyturn.aimJogSpeed") == 3.85
+      r3Fresh.Get("mm.walkToggleSpeed") == 1.9 and r3Fresh.Get("bodyturn.aimJogSpeed") == 3.85
       and r3Fresh.Get("mm.overlayInertialSwitch") == true)
     check("T03 defaults revision 5: a file of revision 4 with the old defaults stored moves them once",
-      r5.Get("mm.walkSpeed") == 1.9 and r5.Get("bodyturn.aimJogSpeed") == 3.85 and r5.Get("mm.overlayInertialSwitch") == true
+      r5.Get("mm.walkToggleSpeed") == 1.9 and r5.Get("bodyturn.aimJogSpeed") == 3.85 and r5.Get("mm.overlayInertialSwitch") == true
       and defaultsLines() == 1 and string.find(r5Log, "4 -> 7", 1, true) ~= nil
-      and string.find(r5Log, "mm.walkSpeed 1.6 -> 1.9", 1, true) ~= nil, r5Log)
+      and string.find(r5Log, "mm.walkToggleSpeed 1.6 -> 1.9", 1, true) ~= nil, r5Log)
     local r5Chosen = bootWithFile("core.defaultsRevision=4\nmm.walkSpeed=1.7\nbodyturn.aimJogSpeed=3.5\n")
     check("T03 defaults revision 5: other stored walk and aim jog speeds are choices and stay",
-      r5Chosen.Get("mm.walkSpeed") == 1.7 and r5Chosen.Get("bodyturn.aimJogSpeed") == 3.5 and defaultsLines() == 0)
+      r5Chosen.Get("mm.walkToggleSpeed") == 1.7 and r5Chosen.Get("bodyturn.aimJogSpeed") == 3.5 and defaultsLines() == 0)
     local r5Later = bootWithFile("core.defaultsRevision=5\nmm.walkSpeed=1.6\nmm.overlayInertialSwitch=false\n")
     check("T03 defaults revision 5: a file of revision 5 keeps walk 1.6 and the switch off as choices",
-      r5Later.Get("mm.walkSpeed") == 1.6 and r5Later.Get("mm.overlayInertialSwitch") == false and defaultsLines() == 0)
+      r5Later.Get("mm.walkToggleSpeed") == 1.6 and r5Later.Get("mm.overlayInertialSwitch") == false and defaultsLines() == 0)
     -- revision 6: body and head lean 0.2 (were 0.85 / 0.9)
     local r6 = bootWithFile("core.defaultsRevision=5\nmm.leanScale=0.85\nmm.leanHeadScale=0.9\n")
     local r6Log = loggedLine()
