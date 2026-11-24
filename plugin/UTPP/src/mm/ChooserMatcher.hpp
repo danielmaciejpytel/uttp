@@ -121,7 +121,7 @@ struct ChooserState
     int32_t committedStartTurnClip = -1;
     // Capsule speed play rate (adapter MapConfig::capsuleSpeedRate): capsule speed per mapped speed at the chooser speed. It scales the
     // query speed of the play rate only (the search keeps the mapped query); 1 = off. rateScaleScope: which picks take it (0 every pick,
-    // 1 loop clips only, 2 every pick but a start clip).
+    // 1 loop clips only, 2 every pick but a start clip, 3 every pick but a reface start clip).
     float rateSpeedScale = 1.0f;
     int rateScaleScope = 0;
     // Slide (motion, sprint -> crouch). FEED fields written by adapter::MapToChooser (the matcher / chooser side that reads them
@@ -498,8 +498,10 @@ struct MatcherConfig
     bool crouchStopLegFade = false;
     float crouchStopBlendS = 0.0f;
     // crouchStopLowerFeet: the same crouch stop entries take the foot height permission of a stance fade (BlendRequest::stanceChange): a
-    // floating foot is lowered through its leg instead of by a pelvis drop of the smaller float alone.
-    bool crouchStopLowerFeet = false;
+    // floating foot is lowered through its leg instead of by a pelvis drop of the smaller float alone. On by default: with the capsule speed
+    // play rate (adapter MapConfig::capsuleSpeedRate) the crouch loop phase at the stick release changes and the 76.462 crouch stop of the
+    // stance test enters Crouch_Stop_F_Lfoot, whose stepping foot floats 3 cm under the pelvis drop alone. The selection is unchanged.
+    bool crouchStopLowerFeet = true;
     // CR-7 (crouch stop query weights). false = the database's own schema weights. The crouch stop database uses the PSS_Default schema (current
     // root velocity weight 1, like one pose channel) where the stand stop databases use PSS_Stop (current velocity, direction and heading weight
     // 10, the coming trajectory 5, the pose channels 1 / 0.3). crouchStopStopWeights: the cost of a row of PSD_*_Crouch_Walk_Stops is taken
@@ -2434,7 +2436,8 @@ public:
             if (aState.rateSpeedScale != 1.0f && std::isfinite(aState.rateSpeedScale) && aState.rateSpeedScale > 0.0f && rate.valid &&
                 rate.channels > 0 && rate.poseSpeed > 1e-6f && m_cfg.maxPlayRate - rateMin > 1e-4f && m_cur.clip >= 0 &&
                 (aState.rateScaleScope == 1 ? (db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) != 0
-                 : aState.rateScaleScope == 2 ? m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 0 : true))
+                 : aState.rateScaleScope == 2 ? m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 0
+                 : aState.rateScaleScope == 3 ? m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 2 : true))
             {
                 const float querySpeed = rateQueryScale != 1.0f ? rate.querySpeed / rateQueryScale : rate.querySpeed;
                 m_lastRateRatio = querySpeed * aState.rateSpeedScale / rate.poseSpeed; // rate2::Calculate querySpeedScale

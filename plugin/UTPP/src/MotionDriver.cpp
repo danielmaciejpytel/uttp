@@ -2667,6 +2667,8 @@ struct TestMapOverrides
     int32_t stepDownReach = -1;
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
     int32_t capsuleSpeedRate = -1, capsuleRateScope = -1; // MapConfig::capsuleSpeedRate (CapsuleRateMode 0-3), capsuleRateScope (0-2)
+    int32_t capsuleRateGuards = -1; // MapConfig::capsuleRateGuards (caprate bits)
+    float capsuleRateBlendS = std::numeric_limits<float>::quiet_NaN(); // MapConfig::capsuleRateBlendS
 };
 TestMapOverrides g_testMapOverrides;
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg)
@@ -2674,7 +2676,8 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
     std::lock_guard lock(g_m);
     g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach,
                                           g_testMapOverrides.aimPivotDeg, g_testMapOverrides.aimPivotGateS,
-                                          g_testMapOverrides.capsuleSpeedRate, g_testMapOverrides.capsuleRateScope};
+                                          g_testMapOverrides.capsuleSpeedRate, g_testMapOverrides.capsuleRateScope,
+                                          g_testMapOverrides.capsuleRateGuards, g_testMapOverrides.capsuleRateBlendS};
 }
 void TestSetMapAimPivot(float aPivotDeg, float aGateS)
 {
@@ -2714,6 +2717,12 @@ void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope)
     g_testMapOverrides.capsuleSpeedRate = aMode;
     g_testMapOverrides.capsuleRateScope = aScope;
 }
+void TestSetMapCapsuleRateGuards(int32_t aGuards, float aBlendS)
+{
+    std::lock_guard lock(g_m);
+    g_testMapOverrides.capsuleRateGuards = aGuards;
+    g_testMapOverrides.capsuleRateBlendS = aBlendS;
+}
 // MapConfig::speedConverter bits (-1 = keep the default), the turn friction of the converter (<= 0 = the gait ground friction) and its
 // largest converted turn (<= 0 = every turn)
 int32_t g_testSpeedConverter = -1;
@@ -2737,6 +2746,10 @@ void TestApplyMapOverrides(adapter::MapConfig& aMc)
         aMc.capsuleSpeedRate = static_cast<adapter::CapsuleRateMode>(g_testMapOverrides.capsuleSpeedRate & 3);
     if (g_testMapOverrides.capsuleRateScope >= 0)
         aMc.capsuleRateScope = g_testMapOverrides.capsuleRateScope;
+    if (g_testMapOverrides.capsuleRateGuards >= 0)
+        aMc.capsuleRateGuards = g_testMapOverrides.capsuleRateGuards & adapter::caprate::kAll;
+    if (std::isfinite(g_testMapOverrides.capsuleRateBlendS))
+        aMc.capsuleRateBlendS = g_testMapOverrides.capsuleRateBlendS;
     if (g_testMapOverrides.capsuleSpeedQuery >= 0)
         aMc.capsuleSpeedQuery = g_testMapOverrides.capsuleSpeedQuery != 0;
     if (g_testMapOverrides.velocityPredicates >= 0)
