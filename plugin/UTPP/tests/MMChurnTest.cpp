@@ -154,6 +154,7 @@ struct Slice
     bool stickFixed = false; // fixed stick speed model (motiondriver::SetStickSpeedMode 1, the shipped default) for this slice only
     bool converterOff = false; // speed converter off (MapConfig::speedConverter 0) for this slice only
     bool dodgeFacingOff = false; // dodge facing hold off (MatcherConfig::dodgeFacingHoldS 0) for this slice only
+    int converterBits = -1; // speed converter bits (MapConfig::speedConverter) for this slice only; -1 = the default
 };
 
 // the clip / database changes of the frames the v2 driver stepped (what the MOTION trace lines show), counted like gt_log.py _motion_metrics: the same
@@ -466,9 +467,12 @@ int main(int argc, char** argv)
         {"churn_flick_sprint.feed", {{"flick_180_sprint accel", 162.384f, 163.884f, 4, true}}},
         {"churn_reface_sprint.feed", {{"flick_180_sprint accel (second run)", 169.529f, 171.029f, 4, true}}},
         {"churn_reface_whip.feed", {{"camera_whip_180 accel", 185.111f, 187.111f, 3, true}}},
-        // Female 2026-11-11 17:37: the stick held against a blocked capsule (weapon armed / unarmed walk): the start clips restarted every 0.2 s (13 changes in 3 s)
+        // Female 2026-11-11 17:37: the stick held against a blocked capsule (weapon armed / unarmed walk): the start clips restarted every 0.2 s (13 changes in 3 s).
+        // The start restart guard is checked with the stronger converter preset (bits 33): the trajectory stage (bit 256, default since 0.2.0)
+        // swaps the Walk_to_Run transition foot twice during the start acceleration before the wall (7 changes in walk_armed, 5 without it).
         {"churn_stalled_start.feed", {{"weapon_aim walk_armed", 307.026f, 310.026f, 6, false, true}, {"weapon_aim aim_walk", 310.026f, 313.026f, 3, false, true},
-                                       {"weapon_walk walk_unarmed", 318.44f, 321.442f, 6, false, true, false, -1, 15.0f}}},
+                                       {"weapon_walk walk_unarmed", 318.44f, 321.442f, 6, false, true, false, -1, 15.0f}},
+         false, false, false, false, mm::speedconv::PresetFor(mm::speedconv::kPresetStronger).bits},
         // Male 2026-11-11 17:19: sprint flick; 9 changes in 2.5 s (3.6 per second, game 9) before the turn commit, 6 with it
         {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male)", 181.397f, 183.897f, 6, false, false, true, -1, 15.0f}}, true},
         // Male 2026-11-18 13:07: the sprint of flick_180_sprint / cruise ends against a wall with the stick held (capsule 8-30 cm/s, the
@@ -546,7 +550,7 @@ int main(int argc, char** argv)
         }
         g_dumpBody = s.man ? 1 : 0;
         motiondriver::SetStickSpeedMode(s.stickFixed ? 1 : 0); // DriverOptionBaseline: 0
-        motiondriver::TestSetMapSpeedConverter(s.converterOff ? 0 : -1, 0.0f, 0.0f);
+        motiondriver::TestSetMapSpeedConverter(s.converterOff ? 0 : s.converterBits, 0.0f, 0.0f);
         if (s.dodgeFacingOff || dodgeFacingPinned)
             motiondriver::TestSetDodgeFacingHold(s.dodgeFacingOff ? 0.0f : -1.0f);
         dodgeFacingPinned = dodgeFacingPinned || s.dodgeFacingOff;
