@@ -23,7 +23,9 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'gametest'))
 import fist_base_offline as fbo  # noqa: E402
+import gt_log  # noqa: E402
 
 SHIFT = 0.016
 REF_FROM = 0.12
@@ -45,7 +47,9 @@ def nlerp(a, b, w):
 def melee_windows(log):
     """(mask on, mask off) of the melee mask reason (melee=1) and the melee full body (on, off) windows, seconds of the day"""
     mask, full, cur, curf = [], [], None, None
-    for ln in open(log, encoding='utf-8', errors='replace'):
+    with gt_log.open_session_lines(log) as lines:     # the rotated parts of the session included
+        rows = [ln for ln in lines if 'UTPP MMMASK' in ln or 'UTPP MMMELEEFULL' in ln]
+    for ln in rows:
         m = re.match(r'\[2026-\d\d-\d\d (\d\d:\d\d:\d\d\.\d+)\].*UTPP (MMMASK|MMMELEEFULL) (on|off)\b(.*)', ln)
         if not m:
             continue
@@ -143,9 +147,8 @@ def main():
     ap.add_argument('--exe', default=os.path.join(fbo.ROOT, 'Build', 'UTPP', 'utpp_melee_base_offline.exe'),
                     help='the replay exe built from the CURRENT sources (ninja -C Build/UTPP utpp_melee_base_offline); it must read MBO3')
     a = ap.parse_args()
-    import glob
     rec = fbo.Recording(a.pose, a.night)
-    log = glob.glob(os.path.join(a.night, 'logs', 'utpp-*.log'))[0]
+    log = gt_log.session_log_in(os.path.join(a.night, 'logs'))
     wins = [int(x) for x in a.windows.split(',')]
     frames, lower = build_frames(rec, log, wins, a.frames)
     tmpd = os.path.join(os.path.dirname(os.path.abspath(a.fixture)), '_tmp')

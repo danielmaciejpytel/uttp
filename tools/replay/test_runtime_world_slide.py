@@ -74,10 +74,10 @@ class LeanPackReplayTests(unittest.TestCase):
                 not os.path.isfile(os.path.join(root, 'Data', 'utpp_lean_man.bin')):
             self.skipTest('needs UTPP_REPLAY_EXE_DIR, the recorded session and Data/utpp_lean_man.bin')
         feed = sorted(f for f in os.listdir(logs) if f.startswith('utpp-feed-') and f.endswith('.txt'))[-1]
-        log = sorted(f for f in os.listdir(logs) if f.startswith('utpp-2') and f.endswith('.log'))[-1]
         with tempfile.TemporaryDirectory() as d:
-            return rws.run_stages(exe_dir, root, os.path.join(logs, feed), os.path.join(logs, log), self.RUN[0],
-                                  os.path.join(d, 'run'), '--to 3 ' + extra)
+            log = rws.gt_log.merged_session_copy(rws.session_log(logs), os.path.join(d, 'log'))
+            return rws.run_stages(exe_dir, root, os.path.join(logs, feed), log, self.RUN[0], os.path.join(d, 'run'),
+                                  '--to 3 ' + extra)
 
     def test_the_lean_pack_is_loaded_only_when_asked(self):
         self.assertRegex(self.replay('--lean-pack 1'), r'(?m)^LEANPACK .*requested=1 loaded=1$')

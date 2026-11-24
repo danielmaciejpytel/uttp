@@ -51,6 +51,7 @@ class FakeNight:
         self.script, self.car, self.approach_dist = script, car, approach_dist
         self.stand_errors, self.aim_errors = list(stand_errors), list(aim_errors)
         self.door_spot_override = self.door_radius_override = None
+        self.veh_xy, self.veh_r = V_XY, V_R
         self.at = self.look = None
         self.n_approach = self.n_align = 0
         self.calls, self.logs, self.plays = [], [], {}
@@ -75,22 +76,20 @@ class FakeNight:
         self.newer = getattr(self, 'newer', 0) + (newer_than is not None)
         if not self.car:
             return None
+        veh = (self.veh_xy[0], self.veh_xy[1], 0.0)
         if self.at is None:
-            return {'p': (0.0, 0.0, 0.0), 'cf': (1.0, 0.0), 'v': (5.0, 0.0, 0.0), 'vr': V_R, 'src': 'summon'}
-        p = gn.from_car_frame(self.at[0], self.at[1], V_XY, V_R)
+            return {'p': (self.veh_xy[0] - 5.0, self.veh_xy[1], 0.0), 'cf': (1.0, 0.0), 'v': veh, 'vr': self.veh_r, 'src': 'summon'}
+        p = gn.from_car_frame(self.at[0], self.at[1], self.veh_xy, self.veh_r)
         cf = (1.0, 0.0)
         if self.look is not None:
             dx, dy = self.look[0] - p[0], self.look[1] - p[1]
             d = (dx * dx + dy * dy) ** 0.5
             cf = gn.rotate_stick(dx / d, dy / d, self.aim_error)
-        return {'p': (p[0], p[1], 0.0), 'cf': cf, 'v': (5.0, 0.0, 0.0), 'vr': V_R, 'src': 'summon'}
+        return {'p': (p[0], p[1], 0.0), 'cf': cf, 'v': veh, 'vr': self.veh_r, 'src': 'summon'}
 
     def locate_vehicle(self, pad, guard, plan, ep):
         self.calls.append(('locate',))
         return None
-
-    def wait_car_stopped(self, pad, guard, ep, pos):
-        return pos, True
 
     def approach(self, pad, guard, plan, pos, ep):
         self.calls.append(('approach', self.door_spot_override))
@@ -100,6 +99,10 @@ class FakeNight:
         spot = self.door_spot_override
         self.at, self.look = (spot[0] + err[0], spot[1] + err[1]), None
         return self.approach_dist
+
+    def wait_car_stopped(self, pad, guard, ep, pos):
+        self.calls.append(('stopped',))
+        return pos, True
 
     def camera_align(self, pad, guard, plan, known, target, ep, tol=None, why='align', fine=False, pulses=None):
         self.calls.append(('aim', why))
@@ -422,6 +425,177 @@ class MacroTests(unittest.TestCase):
         fails = gn.macro_failures([rec])
         self.assertEqual([f['scenario'] for f in fails], ['traversal#1'])
         self.assertTrue(gn.macro_result_text(fails, []).startswith('macro FAIL: traversal#1'))
+
+
+# bike positions read from the POS lines after the bike stopped (V at the start point 1588.78, 2164.07)
+GOOD_BIKE = {'p': (1588.78, 2164.07, 177.10), 'v': (1586.90, 2161.24, 177.54), 'vr': (-0.875, -0.411)}   # 2026-11-18, vault + climb 1st try
+OFF_BIKE = {'p': (1588.78, 2164.07, 177.10), 'v': (1586.01, 2162.02, 177.47), 'vr': (-0.983, -0.092)}    # 2026-11-24, h 0.89
+TRAV_H = lambda h, result='Rejected(too slow)': (f'UTPP trav: action=9 h={h:.2f} ext=0.35 depth=0.34 back=0.89 v=1.7 kind=1 '  # noqa: E731
+                                                 f'decision=- result={result} montage=-')
+
+
+class SiteNight(FakeNight):
+    """FakeNight with the bike at the save's start point; the placed spawn moves it to the placement (or leaves it when
+    place_ok is False)."""
+    def __init__(self, tmp, script, bike, place_ok=True, summon_polls=0, spawn_ok=True, **kw):
+        super().__init__(tmp, script, **kw)
+        self.veh_xy, self.veh_r = bike['v'][:2], bike['vr']
+        self.place_ok, self.placed, self.summon_polls, self.spawn_ok = place_ok, 0, summon_polls, spawn_ok
+
+    def console_verified(self, pad, guard, cmd, echo, label, timeout=3.0):
+        if label != 'traversal/place':
+            return super().console_verified(pad, guard, cmd, echo, label, timeout)
+        self.calls.append(('console', label))
+        self.placed += 1
+        if self.place_ok:
+            self.veh_xy, self.veh_r = gt.BIKE_PLACE['v'], gt.BIKE_PLACE['vr']
+        return '[night] SPAWN placed ok=%s userdata' % ('true' if self.spawn_ok else 'false')
+
+    def poll_pos(self, guard, pad=None, timeout=None, newer_than=None):
+        pos = super().poll_pos(guard, pad, timeout, newer_than)
+        if pos and self.placed and self.summon_polls > 0:
+            # the new entity is not there yet: the position line reports the save's own bike, elsewhere
+            self.summon_polls -= 1
+            return dict(pos, v=(1584.6, 2167.9, 177.0), vr=(0.0, 1.0), src='summon')
+        return dict(pos, src='tag') if pos else pos
+
+
+class PlacementTests(unittest.TestCase):
+    def test_the_recorded_placements_are_judged(self):
+        good, off = gt.placement_check(GOOD_BIKE), gt.placement_check(OFF_BIKE)
+        self.assertTrue(good['applies'] and good['ok'])
+        self.assertTrue(off['applies'])
+        self.assertFalse(off['ok'])
+        self.assertAlmostEqual(off['off_m'], 1.18, delta=0.01)
+        self.assertAlmostEqual(off['off_deg'], 19.9, delta=0.5)
+        self.assertIn('1.18 m and 20 deg off', off['why'])
+        far = dict(OFF_BIKE, v=(1619.5, 2132.1, 178.6))                     # another place: not judged
+        self.assertEqual(gt.placement_check(far)['applies'], False)
+        self.assertFalse(gt.placement_check({'p': (0, 0, 0)})['applies'])
+        self.assertFalse(gt.placement_check(OFF_BIKE, place={})['applies'])  # check off
+
+    def test_the_spawn_convention_reproduces_both_recorded_bikes(self):
+        # the relative spawn puts the bike 3 m right / 2 m ahead of V with V's facing; the forward vector car_axes derives from the
+        # recorded right vector must give back the place each bike settled at (so the placed spawn's heading uses the same axes)
+        for bike in (GOOD_BIKE, OFF_BIKE):
+            (fx, fy), (lx, ly) = gn.car_axes(bike['vr'])
+            rx, ry = -lx, -ly
+            x = bike['p'][0] + rx * 3 + fx * 2
+            y = bike['p'][1] + ry * 3 + fy * 2
+            self.assertLess(((x - bike['v'][0]) ** 2 + (y - bike['v'][1]) ** 2) ** 0.5, 0.3)   # settle drift; a wrong axis is metres off
+
+    def test_the_placed_spawn_command(self):
+        cmd = gt.placed_spawn_cmd(gt.BIKE_PLACE_DEFAULT)
+        self.assertIn('Vector4.new(1586.90,2161.24,177.40,1)', cmd)
+        self.assertIn('Vector4.new(0.4251,-0.9051,0,0):ToRotation().yaw', cmd)    # forward from the right vector (unit)
+        self.assertIn("DeleteTagged('" + gn.NIGHT_TAG + "')", cmd)
+        self.assertIn("[night] SPAWN placed ok=", cmd)
+
+    def test_place_from_the_environment(self):
+        name = 'UTPP_NIGHT_TEST_PLACE'
+        old = os.environ.pop(name, None)
+        try:
+            self.assertEqual(gt.env_place(name, {'x': 1}), {'x': 1})
+            os.environ[name] = 'off'
+            self.assertIsNone(gt.env_place(name, {'x': 1}))
+            os.environ[name] = '1,2,3,0,1'
+            self.assertEqual(gt.env_place(name, None), {'v': (1.0, 2.0), 'z': 3.0, 'vr': (0.0, 1.0)})
+            os.environ[name] = '1,2'
+            self.assertEqual(gt.env_place(name, {'x': 1}), {'x': 1})
+        finally:
+            os.environ.pop(name, None)
+            if old is not None:
+                os.environ[name] = old
+
+    def test_vault_height(self):
+        self.assertEqual(gt.vault_height(gt.evidence(TRAV_OK(8) + '\n' + TRAV_H(0.89) + '\n' + TRAV_H(1.10))), 0.89)
+        self.assertIsNone(gt.vault_height(gt.evidence(TRAV_OK(8))))
+        self.assertEqual([gt.height_off(h) for h in (None, 0.89, 1.0, 1.08, 1.15, 1.27)], [False, True, False, False, False, True])
+
+    def run_site(self, script, bike, **kw):
+        with tempfile.TemporaryDirectory() as d:
+            night = SiteNight(d, script, bike, **kw)
+            out = gt.run_traversal_macro(night, None, FakeGuard(), {}, {})
+        return night, out
+
+    def test_a_bike_off_the_placement_is_spawned_there_once_before_the_jumps(self):
+        night, out = self.run_site(success, OFF_BIKE)
+        self.assertEqual(night.placed, 1)
+        self.assertEqual(out['verdict'], 'PASS')
+        labels = [c for c in night.calls if c[0] in ('console', 'play', 'stopped')]
+        self.assertLess(labels.index(('console', 'traversal/place')), labels.index(('play', 'trav_vault_jump')))
+        self.assertIn(('stopped',), labels)                                    # waits for the new bike to stand
+        self.assertTrue(out['placement']['replaced'])
+        self.assertFalse(out['placement']['before']['ok'])
+        self.assertTrue(out['placement']['after']['ok'])
+        self.assertTrue(any('spawning the bike at the level placement once' in m for m in night.logs), night.logs)
+
+    def test_a_bike_at_the_placement_is_left_alone(self):
+        night, out = self.run_site(success, GOOD_BIKE)
+        self.assertEqual(night.placed, 0)
+        self.assertEqual(out['verdict'], 'PASS')
+        self.assertTrue(out['placement']['before']['ok'])
+        self.assertNotIn('replaced', out['placement'])
+
+    def test_a_bike_that_stays_off_means_no_jump_and_an_invalid_setup(self):
+        night, out = self.run_site(success, OFF_BIKE, place_ok=False)
+        self.assertEqual(night.placed, 1)                                      # one try only
+        self.assertFalse(out['placement']['after']['ok'])
+        self.assertEqual(night.plays, {})                                      # V never jumps from other ground
+        self.assertEqual(out['verdict'], 'INVALID')
+        self.assertEqual(out['fails'], [])
+        self.assertIn('still not at the level placement', out['invalid_cause'])
+        self.assertEqual(night.calls[-1], ('console', 'traversal/log_off'))    # the vault log is still switched off
+        rec = dict(out, name='traversal', run=1)
+        self.assertEqual(gn.macro_failures([rec]), [])                         # not counted against the mod
+
+    def test_an_unconfirmed_placed_spawn_means_no_jump(self):
+        night, out = self.run_site(success, OFF_BIKE, spawn_ok=False)
+        self.assertEqual((out['verdict'], night.plays), ('INVALID', {}))
+        self.assertIn('not confirmed', out['invalid_cause'])
+
+    def test_the_save_bike_reported_before_the_new_one_is_not_taken(self):
+        night, out = self.run_site(success, OFF_BIKE, summon_polls=2)
+        self.assertEqual(out['verdict'], 'PASS')
+        self.assertTrue(out['placement']['after']['ok'])                       # judged on the new tagged bike
+        night, out = self.run_site(success, OFF_BIKE, summon_polls=gt.PLACE_POLLS)
+        self.assertEqual((out['verdict'], night.plays), ('INVALID', {}))      # never reported: no jump
+        self.assertIn('no position of the placed bike', out['invalid_cause'])
+
+    def test_a_failed_vault_at_an_odd_height_places_the_bike_once(self):
+        def script(part, n):
+            if part == 'trav_vault_jump':
+                return [TRAV_H(0.89)] if n < 3 else [TRAV_H(1.08, 'Ok(-)')]
+            return success(part, n)
+        night, out = self.run_site(script, GOOD_BIKE)
+        self.assertEqual(night.placed, 1)                                      # after the first failure, not after the second
+        self.assertIn('vault obstacle height 0.89 m', out['placement']['replace_why'])
+        vault = [a for a in out['attempts'] if a['kind'] == 'vault']
+        self.assertEqual([a['obstacle_h_m'] for a in vault], [0.89, 0.89])
+        self.assertEqual(out['verdict'], 'FAIL')
+        self.assertEqual(sum('obstacle height 0.89 m' in w for w in out['warnings']), 2)
+
+    def test_a_vault_that_worked_at_an_odd_height_is_kept_with_a_warning(self):
+        def script(part, n):
+            return [TRAV_H(0.89, 'Unsupported(vehicle)'), RELEASED(9)] if part == 'trav_vault_jump' else success(part, n)
+        night, out = self.run_site(script, GOOD_BIKE)
+        self.assertEqual(out['verdict'], 'PASS')
+        self.assertEqual(night.placed, 0)
+        self.assertTrue(any('not comparable' in w for w in out['warnings']))
+
+    def test_the_check_does_not_touch_a_vehicle_elsewhere(self):
+        night, out = self.run_macro_elsewhere()
+        self.assertEqual(out['placement']['before']['applies'], False)
+        self.assertNotIn(('console', 'traversal/place'), night.calls)
+
+    def run_macro_elsewhere(self):
+        with tempfile.TemporaryDirectory() as d:
+            night = FakeNight(d, success)
+            out = gt.run_traversal_macro(night, None, FakeGuard(), {}, {})
+        return night, out
+
+    def test_the_dry_run_names_the_placement(self):
+        self.assertTrue(any(l.strip().startswith('place') and '1586.90, 2161.24' in l for l in gt.dry_run_lines()))
 
 
 if __name__ == '__main__':

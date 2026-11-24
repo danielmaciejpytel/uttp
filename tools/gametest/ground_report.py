@@ -22,6 +22,8 @@ import re
 import sys
 from datetime import datetime, timedelta
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # gt_log (python -I leaves the script folder out)
+
 WINDOW_PAD_S = 1.0
 STEP_MIN_M = 0.04
 AIR_DETAILS = set(range(14, 23))
@@ -35,17 +37,15 @@ FEED_NAME_RE = re.compile(r'utpp-feed-(\d{4})-(\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d)
 
 
 def find_files(folder: str) -> tuple[list[str], list[str]]:
-    """(mod logs, feed dumps) in folder or folder/logs, sorted by name (= time)."""
+    """(mod logs, feed dumps) in folder or folder/logs in time order: feeds by name, logs by session with the rotated parts
+    of a session oldest first (gt_log.plugin_log_files)."""
+    import gt_log
     logs, feeds = [], []
     for d in (folder, os.path.join(folder, 'logs')):
         if not os.path.isdir(d):
             continue
-        for f in sorted(os.listdir(d)):
-            p = os.path.join(d, f)
-            if re.match(r'utpp-\d{4}-.*\.log$', f):
-                logs.append(p)
-            elif FEED_NAME_RE.search(f):
-                feeds.append(p)
+        logs += gt_log.plugin_log_files(d)
+        feeds += [os.path.join(d, f) for f in sorted(os.listdir(d)) if FEED_NAME_RE.search(f)]
     return logs, feeds
 
 

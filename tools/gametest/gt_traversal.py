@@ -4,7 +4,8 @@ The summoned car of the vehicle set is the obstacle, so no special place is need
 approach of the vehicle macro, with another car-frame spot), pushes the stick into the car and taps jump. Vault: at the hood height
 spot; climb: at the cabin. The result is judged from the log lines of the attempt ("UTPP trav:", "UTPP MMTRAV", the vehicle vault
 diagnostic line) and from the motion feed column `detailed` (8 = climb, 9 = vault) when a feed file is being written. Each attempt
-is recorded as a labelled phase window for the pose meter.
+is recorded as a labelled phase window for the pose meter. At the save's start point the spawned bike is first checked against the
+level placement where the vault works (placement_check) and spawned there once when it is off.
 
   python Source\\tools\\gametest\\night.py --dry-run --set traversal
 """
@@ -100,6 +101,125 @@ def path_note(before: tuple | None, after: tuple | None) -> str:
     if x is not None:
         return f'V crossed the vehicle axis at lon {x:+.2f} (stood at lon {before[0]:+.2f} lat {before[1]:.2f})'
     return f'V did not cross the vehicle (lon {before[0]:+.2f} lat {before[1]:.2f} -> lon {after[0]:+.2f} lat {after[1]:.2f})'
+# Placement of the test bike. The vault test stands at the save's start point, on level ground; the bike is spawned 3 m right and
+# 2 m ahead of V along V's body facing (gt_night.SPAWN_CODEWARE_CMD), so the facing V has after leaving the save's bike decides
+# where the spawned bike stands. The place below is where it stood in the run that vaulted and climbed at the first try
+# (2026-11-18, obstacle heights 1.08 / 1.13 m); on 2026-11-24 it stood 1.2 m and 20 deg off (vr -0.983,-0.092), the vault
+# met no obstacle once and the one it played measured 0.89 m. `vr` is the bike's world right vector, as the POS lines carry it.
+# The check applies only when the bike is within PLACE_SITE_M of that place (the same start point); then a bike more than
+# PLACE_TOL_M / PLACE_TOL_DEG off is spawned once more AT that place (absolute position and heading; spawning relative to V again
+# would repeat the error). Still off after that: no jump (V would jump from other ground), the run is INVALID as a setup problem.
+# From the environment: UTPP_NIGHT_BIKE_PLACE "x,y,z,rx,ry" (z = spawn height) or "off".
+BIKE_PLACE_DEFAULT = {'v': (1586.90, 2161.24), 'z': 177.40, 'vr': (-0.875, -0.411)}
+PLACE_SITE_M = 10.0
+PLACE_TOL_M = 0.5
+PLACE_TOL_DEG = 8.0
+PLACE_SETTLE_S = 1.0      # between the position reads after the placed spawn (the entity is created asynchronously)
+PLACE_POLLS = 5           # reads until the new tagged bike must be reported
+# the obstacle height of the vault (h= of the first "UTPP trav: action=9" line) at the good placement; outside this range the
+# measurement is not comparable with the reference runs, and a failed vault there is the trigger for the one re-placement
+H_RANGE = (1.0, 1.15)
+
+
+def env_place(name: str = 'UTPP_NIGHT_BIKE_PLACE', default: dict | None = None) -> dict | None:
+    """The bike placement from the environment ("x,y,z,rx,ry" or "off"); unset or malformed = `default`."""
+    raw = os.environ.get(name, '').strip()
+    if raw.lower() == 'off':
+        return None
+    try:
+        x, y, z, rx, ry = (float(v) for v in raw.split(','))
+    except ValueError:
+        return default
+    return {'v': (x, y), 'z': z, 'vr': (rx, ry)}
+
+
+BIKE_PLACE = env_place(default=BIKE_PLACE_DEFAULT)
+
+
+def placement_check(pos: dict | None, place: dict | None = None) -> dict:
+    """How far the vehicle of `pos` stands from the known placement: {'applies': the vehicle is within PLACE_SITE_M of it (else
+    nothing is judged), 'ok', 'off_m', 'off_deg' (heading difference, from the right vectors), 'why'}. Pure."""
+    place = BIKE_PLACE if place is None else place
+    out = {'applies': False, 'ok': True, 'off_m': None, 'off_deg': None, 'why': ''}
+    if not place or not pos or not pos.get('v') or not pos.get('vr'):
+        return out
+    off_m = math.hypot(pos['v'][0] - place['v'][0], pos['v'][1] - place['v'][1])
+    if off_m > PLACE_SITE_M:
+        return out
+    a = math.degrees(math.atan2(pos['vr'][1], pos['vr'][0]) - math.atan2(place['vr'][1], place['vr'][0]))
+    off_deg = abs((a + 180.0) % 360.0 - 180.0)
+    ok = off_m <= PLACE_TOL_M and off_deg <= PLACE_TOL_DEG
+    out.update(applies=True, ok=ok, off_m=off_m, off_deg=off_deg,
+               why='' if ok else f'bike {off_m:.2f} m and {off_deg:.0f} deg off the level placement '
+                                 f'(tol {PLACE_TOL_M:.1f} m / {PLACE_TOL_DEG:.0f} deg)')
+    return out
+
+
+def placed_spawn_cmd(place: dict) -> str:
+    """Codeware spawn of the test vehicle AT `place` (absolute position, heading from the right vector), the same tag and record
+    as gt_night.SPAWN_CODEWARE_CMD; echo '[night] SPAWN placed ok='."""
+    import gt_night as gn  # late: gt_night imports this module
+    (fx, fy), _ = gn.car_axes(place['vr'])
+    return ("local ok,e=pcall(function() local des=Game.GetDynamicEntitySystem() des:DeleteTagged('" + gn.NIGHT_TAG + "') "
+            + gn._VEH_ID_LUA +
+            "local s=DynamicEntitySpec.new() s.recordID=id "
+            f"s.position=Vector4.new({place['v'][0]:.2f},{place['v'][1]:.2f},{place['z']:.2f},1) "
+            f"s.orientation=EulerAngles.new(0,0,Vector4.new({fx:.4f},{fy:.4f},0,0):ToRotation().yaw):ToQuat() "
+            "s.alwaysSpawned=true s.persistState=false s.persistSpawn=false s.tags={'" + gn.NIGHT_TAG + "'} "
+            "return des:CreateEntity(s) end) Game.UTPPLogLine('[night] SPAWN placed ok='..tostring(ok)..' '..tostring(e))")
+
+
+def vault_height(ev: dict) -> float | None:
+    """h of the first vault line (action 9) of an attempt's evidence, None without one. Pure."""
+    return next((e['h'] for e in ev.get('mm', []) if e['action'] == ACTION_VAULT and e.get('h') is not None), None)
+
+
+def height_off(h: float | None) -> bool:
+    """True when a measured vault obstacle height lies outside H_RANGE (None = not measured = not off). Pure."""
+    return h is not None and not (H_RANGE[0] <= h <= H_RANGE[1])
+
+
+def place_vehicle(night, pad, guard, ep: dict, pos: dict, rec: dict, why: str) -> tuple[dict, str]:
+    """The one re-placement: spawn the bike at BIKE_PLACE, wait for the new tagged bike (until the entity exists the position
+    line may report the save's own bike, src=summon) and until it stands, check it again. Fills rec ('replaced', 'replace_why',
+    'after' = the check afterwards). -> (position, '' when the bike now stands at the placement, else why not: then no jump
+    may follow, V would jump from other ground)."""
+    rec.update(replaced=True, replace_why=why)
+    night.log(f'[traversal] {why}: spawning the bike at the level placement once')
+    t0 = datetime.now()
+    txt = night.console_verified(pad, guard, placed_spawn_cmd(BIKE_PLACE), lambda t: '[night] SPAWN placed ok=' in t,
+                                 'traversal/place')
+    rec['after'] = None
+    if not (txt and '[night] SPAWN placed ok=true' in txt):
+        return pos, 'the placed spawn of the bike was not confirmed'
+    new = None
+    for _ in range(PLACE_POLLS):
+        guard.wait(PLACE_SETTLE_S)
+        p = night.poll_pos(guard, pad, newer_than=t0)
+        if p and p.get('src') == 'tag' and p.get('v') and p.get('vr'):
+            new = p
+            break
+    if new is None:
+        return pos, f'no position of the placed bike within {PLACE_POLLS * PLACE_SETTLE_S:.0f} s'
+    new, _ = night.wait_car_stopped(pad, guard, ep, new)
+    chk = placement_check(new)
+    rec['after'] = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in chk.items()}
+    if chk['applies'] and chk['ok']:
+        night.log(f'[traversal] bike placed: {chk["off_m"]:.2f} m / {chk["off_deg"]:.0f} deg from the level placement')
+        return new, ''
+    return new, 'bike still not at the level placement after the placed spawn: ' + (chk['why'] or 'not near it')
+
+
+def setup_invalid(night, out: dict, text: str) -> dict:
+    """Ends the macro without (further) jumps: a harness setup problem, verdict INVALID (FAIL when a failure was already
+    recorded), not a failure of the mod."""
+    out['invalid_fails'].append('setup: ' + text)
+    out['invalid_cause'] = 'setup: ' + text
+    out['verdict'] = 'FAIL' if out['fails'] else 'INVALID'
+    night.log(f'[traversal] {text}: no jump, INVALID (setup)')
+    return out
+
+
 ATTEMPTS = 2              # per kind
 APPROACH_OK_M = 2.0       # the approach must end within this distance of the spot, else the attempt is not played (the vault
                           # then also needs STAND_TOL_M from a fresh position: prepare_vault)
@@ -109,7 +229,7 @@ VAULT_LOG_ON = ("local ok,e=pcall(function() return Game.UTPPSetVehicleVaultLog(
                 "Game.UTPPLogLine('[night] TRAVLOG ok='..tostring(ok))")
 VAULT_LOG_OFF = VAULT_LOG_ON.replace('(true)', '(false)')
 
-TRAV_RE = re.compile(r'UTPP trav: action=(\d+) h=[-\d.]+ .*?result=(\w+)\(([^)]*)\)')
+TRAV_RE = re.compile(r'UTPP trav: action=(\d+) h=([-\d.]+) .*?result=(\w+)\(([^)]*)\)')
 RELEASE_RE = re.compile(r'UTPP trav: released to game animation \(detail=(-?\d+)\)')
 MMTRAV_RE = re.compile(r'UTPP MMTRAV ')
 # the game's own obstacle probe found no vault here: the vault line carries this text, the attempt says nothing about the mod
@@ -119,14 +239,14 @@ VEHICLE_VAULT_RE = re.compile(r'\[utpp_vehicle_vault\] (vanilla vault over a car
 
 
 def evidence(text: str) -> dict:
-    """The traversal lines of a plugin log text: {'mm': [{'action', 'result', 'reason'}], 'released': [detail], 'vehicle_vault':
-    [{'kind': 'vanilla' | 'assisted' | 'none', 'why'}], 'mmtrav': n, 'vault_not_valid': number of vault lines that report the
-    game's vault data as not valid}. Pure."""
+    """The traversal lines of a plugin log text: {'mm': [{'action', 'h' (obstacle height above the feet, m), 'result', 'reason'}],
+    'released': [detail], 'vehicle_vault': [{'kind': 'vanilla' | 'assisted' | 'none', 'why'}], 'mmtrav': n, 'vault_not_valid':
+    number of vault lines that report the game's vault data as not valid}. Pure."""
     out: dict = {'mm': [], 'released': [], 'vehicle_vault': [], 'mmtrav': 0, 'vault_not_valid': 0}
     for line in text.splitlines():
         m = TRAV_RE.search(line)
         if m:
-            out['mm'].append({'action': int(m.group(1)), 'result': m.group(2), 'reason': m.group(3)})
+            out['mm'].append({'action': int(m.group(1)), 'h': float(m.group(2)), 'result': m.group(3), 'reason': m.group(4)})
             continue
         m = RELEASE_RE.search(line)
         if m:
@@ -327,6 +447,14 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
             out.update(verdict='SKIP', skip_reason='no car located (nothing to vault or climb)')
             night.log('[traversal] no car located: skipped')
             return out
+        # the bike at the start point must stand where the vault works (level ground, the known heading): one placed spawn else
+        place_rec = out.setdefault('placement', {})
+        chk = placement_check(pos)
+        place_rec['before'] = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in chk.items()}
+        if chk['applies'] and not chk['ok']:
+            pos, bad = place_vehicle(night, pad, guard, ep, pos, place_rec, chk['why'])
+            if bad:
+                return setup_invalid(night, out, bad)
         for kind, spec in KINDS.items():
             done = False
             for attempt in range(1, ATTEMPTS + 1):
@@ -373,6 +501,10 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
                 after = car_frame_point(new, known if known and known.get('v') else new)
                 note = path_note(before, after)
                 why = res['why'] + (f'; {note}' if note and not res['ok'] else '')
+                h = vault_height(ev) if kind == 'vault' else None
+                if height_off(h):
+                    out['warnings'].append(f'vault #{attempt}: obstacle height {h:.2f} m outside {H_RANGE[0]:.2f}-{H_RANGE[1]:.2f} m '
+                                           '(not comparable with the reference runs)')
                 out['phase_windows'].append({'label': f'{spec["label"]}_{attempt}', 'start': _stamp(t0), 'end': _stamp(t1)})
                 out['attempts'].append({'kind': kind, 'attempt': attempt, 'played': True, 'approach_dist_m': round(dist, 2),
                                         'ok': res['ok'], 'by': res['by'], 'why': why, 'invalid': res['invalid'], 'evidence': ev,
@@ -381,10 +513,19 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
                                         'end': [round(c, 2) for c in after] if after else None,
                                         'crossing_lon': (round(crossing_lon(before, after), 2)
                                                          if crossing_lon(before, after) is not None else None),
+                                        'obstacle_h_m': h,
                                         **(_prep_fields(prep) if prep else {})})
                 night.log(f'[traversal] {kind} #{attempt}: ' + ('OK by ' + ', '.join(res['by']) if res['ok'] else 'NOT done: ' + why)
-                          + (f' [{note}]' if note and res['ok'] else ''))
+                          + (f' [{note}]' if note and res['ok'] else '') + (f' [h {h:.2f} m]' if h is not None else ''))
                 pos = new or pos
+                if (not res['ok'] and height_off(h) and not place_rec.get('replaced')
+                        and placement_check(known if known and known.get('v') else pos)['applies']):
+                    # the bike looked placed but the game measured another height: the one placed spawn, then the next attempt
+                    pos, bad = place_vehicle(night, pad, guard, ep, pos, place_rec,
+                                             f'vault obstacle height {h:.2f} m outside {H_RANGE[0]:.2f}-{H_RANGE[1]:.2f} m')
+                    if bad:
+                        out['results'][kind] = 'invalid'
+                        return setup_invalid(night, out, bad)
                 if res['ok']:
                     done = True
                     break
@@ -418,7 +559,11 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
 def dry_run_lines(scenarios: dict | None = None) -> list[str]:
     lines = [f'== {SET_NAME}: vault and climb at the summoned car (not in "all"; the car of the vehicle set is the obstacle)',
              '   console: Game.UTPPSetVehicleVaultLog(true) before, (false) after (ledger entry vehicle.vaultLog)',
-             '   car     : the position of the car in the POS lines, else summoned the way the vehicle macro does it']
+             '   car     : the position of the car in the POS lines, else summoned the way the vehicle macro does it',
+             '   place   : ' + (f'a bike within {PLACE_SITE_M:.0f} m of {BIKE_PLACE["v"][0]:.2f}, {BIKE_PLACE["v"][1]:.2f} must stand within '
+                            f'{PLACE_TOL_M:.1f} m / {PLACE_TOL_DEG:.0f} deg of it (right vector {BIKE_PLACE["vr"][0]:.3f}, '
+                            f'{BIKE_PLACE["vr"][1]:.3f}), else it is spawned there once; a failed vault with h outside '
+                            f'{H_RANGE[0]:.2f}-{H_RANGE[1]:.2f} m does the same once; still off = no jump, INVALID (setup)' if BIKE_PLACE else 'check off (UTPP_NIGHT_BIKE_PLACE=off)')]
     for kind, spec in KINDS.items():
         sc = scenarios.get(spec['part']) if scenarios else None
         dur = f', {sc.duration:.1f} s of pad input' if sc is not None else ''

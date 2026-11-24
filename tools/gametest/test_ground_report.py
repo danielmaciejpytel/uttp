@@ -63,6 +63,19 @@ class Rides(unittest.TestCase):
         self.assertIn('1 feed row(s) with an air detail', text)
         self.assertEqual(gr.main([d]), 1)
 
+    def test_a_ride_across_a_log_rotation_is_read_in_time_order(self):
+        # the session log rotated during the ride: "on" is in the older part .2, "off" in the newer part .1 (name order is .1, .2)
+        on, off = self.ride_log()
+        d = write_run([log('14:00:16.000', 'UTPP after the ride')], walk(8.0, 600, lambda i: 10.0, clip='M_Neutral_Idle'))
+        for idx, line in ((2, on), (1, off)):
+            with open(os.path.join(d, 'logs', f'utpp-2026-11-22-14-00-00.{idx}.log'), 'w', encoding='utf-8') as f:
+                f.write(line + '\n')
+        logs, feeds = gr.find_files(d)
+        self.assertEqual([os.path.basename(p) for p in logs], ['utpp-2026-11-22-14-00-00.2.log', 'utpp-2026-11-22-14-00-00.1.log',
+                                                               'utpp-2026-11-22-14-00-00.log'])
+        r = gr.ride_verdicts(gr.read_log(logs)['rides'], [(gr.feed_start(p), gr.read_feed(p)) for p in feeds])
+        self.assertEqual([x['verdict'] for x in r], ['PASS'])
+
     def test_rows_outside_the_ride_window_do_not_count(self):
         rows = walk(0.0, 300, lambda i: 10.0, clip='M_Jump_Start') + walk(8.0, 600, lambda i: 10.0, clip='M_Neutral_Idle')
         d = write_run(self.ride_log(), rows)

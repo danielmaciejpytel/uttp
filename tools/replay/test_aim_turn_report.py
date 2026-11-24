@@ -94,6 +94,25 @@ class AimTurns(unittest.TestCase):
         self.assertAlmostEqual(s['at_least_45']['tip_share'], 0.5)
         self.assertEqual(s['unaligned_runs'], ['20260102-100000'])         # no POS lines: reported, not hidden
 
+    def test_a_turn_in_a_rotated_log_part_is_found(self):
+        # the plugin log rotated at 10 MB: the turn clip is only in the older part .1.log (.2 is older still, name order .1, .2, current)
+        logs = os.path.join(self.run, 'logs')
+        cur = os.path.join(logs, 'utpp-2026-01-02-10-00-00.log')
+        with open(cur, encoding='utf-8') as f:
+            lines = f.read().splitlines()
+        t0 = START.timestamp()
+        with open(os.path.join(logs, 'utpp-2026-01-02-10-00-00.2.log'), 'w') as f:
+            f.write(motion_line(t0 - 5.0, 'M_Pistol_Stand_Idle_Loop') + '\n')
+        with open(os.path.join(logs, 'utpp-2026-01-02-10-00-00.1.log'), 'w') as f:
+            f.write(lines[0] + '\n')
+        with open(cur, 'w') as f:
+            f.write('\n'.join(lines[1:]) + '\n')
+        turns = {t['step']: t for t in atr.report([self.run])['turns']}
+        self.assertTrue(turns['turn_060_r']['tip'])
+        self.assertEqual(turns['turn_060_r']['tip_clip'], 'M_Pistol_Stand_Turn_060_R')
+        run = scal.Run(self.run)
+        self.assertEqual([round(m['wall'] - t0, 1) for m in run.log['motion']], [-5.0, 0.7, 2.5, 4.0])   # time order
+
     def test_angle_classes(self):
         self.assertEqual([atr.angle_class(a) for a in (20, -44, 50, 70, -100, 181)], ['30', '45', '45', '60', '90', '180+'])
 

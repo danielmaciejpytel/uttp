@@ -55,6 +55,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from utpp_paths import project_root  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runtime_world_slide as rws  # noqa: E402
+import gt_log  # noqa: E402  (tools/gametest, on the path through runtime_world_slide)
 
 # Reference sessions: Female (all moves, keyboard, crouch) and Male (the same three).
 # Window of the busiest-window clip change measure (s of feed time; the in-game steps that the 3.75 / s limit judges last about 3 s)
@@ -69,6 +70,14 @@ def one(pattern):
     if not hits:
         raise SystemExit('missing: ' + pattern)
     return hits[0]
+
+
+def plugin_log(logs):
+    """The current plugin log of the run (its rotated parts are read with it); plain sorting would pick the .1.log part."""
+    path = gt_log.session_log_in(logs)
+    if not path:
+        raise SystemExit('missing: plugin log utpp-<stamp>.log in ' + logs)
+    return path
 
 
 def run(cmd):
@@ -142,10 +151,14 @@ def main():
     night = os.path.join(a.root, 'Research', 'logs', 'night')
     data = os.path.join(a.root, 'Data')
     sessions = {}
+    settings_logs = {}     # rid -> the whole session as one file (the setting calls are in the oldest rotated part)
     for spec in a.runs:
         body, rid = spec.split(':', 1)
         logs = os.path.join(night, rid, 'logs')
-        sessions.setdefault(body, []).append((rid, one(os.path.join(logs, 'utpp-feed-*.txt')), one(os.path.join(logs, 'utpp-2*.log'))))
+        log = plugin_log(logs)
+        sessions.setdefault(body, []).append((rid, one(os.path.join(logs, 'utpp-feed-*.txt')), log))
+        if not a.no_stages:
+            settings_logs[rid] = gt_log.merged_session_copy(log, os.path.join(work, 'session_logs', rid))
 
     builds = {'before': (a.before_dir, a.before_replay_args, a.before_stages_args),
               'after': (a.after_dir, a.after_replay_args, a.after_stages_args)}
@@ -165,7 +178,7 @@ def main():
                     for k in range(a.repeat):
                         out = os.path.join(work, '%s_%s_%s' % (side, body, rid)) if a.world_slide and k == 0 else '-'
                         cmd = [os.path.join(d, 'utpp_replay_pose_stages.exe'), data, os.path.join(data, 'utpp_base.utppmm'), feed, out,
-                               '--settings-log', log, '--ahead', 'recorded', '--body', body] + shlex.split(sargs, posix=False)
+                               '--settings-log', settings_logs[rid], '--ahead', 'recorded', '--body', body] + shlex.split(sargs, posix=False)
                         jobs[(side, body, 'stages', rid, k)] = pool.submit(run, cmd)
                         if out != '-':
                             ws_jobs[(side, body, rid)] = (jobs[(side, body, 'stages', rid, k)], out, feed, body)
@@ -192,6 +205,10 @@ def main():
                     os.remove(out + ext)
                 except OSError:
                     pass
+    for lst in sessions.values():          # the joined session copies of the replay's --settings-log
+        for rid, _, log in lst:
+            if settings_logs.get(rid, log) != log:
+                rws.remove_merged(settings_logs[rid])
 
     bad = False
     for k, (rc, text) in res.items():

@@ -25,7 +25,9 @@ an in-window offset of 0.5 cm).
 """
 from __future__ import annotations
 
+import contextlib
 import glob
+import itertools
 import math
 import os
 import re
@@ -512,6 +514,78 @@ def newest_log(log_dir: str = DEFAULT_LOG_DIR, pattern: str = 'utpp-*.log') -> s
         return None
     t, current, anyfile = max(sessions.values(), key=lambda v: v[0])
     return current or anyfile
+
+
+# plugin log of a session, current or rotated part (not the feed / pose / bodytrace / report files, which have other names)
+PLUGIN_LOG_RE = re.compile(r'^utpp-\d{4}(?:-\d\d){5}(?:\.\d+)?\.log$')
+
+
+def session_log_in(folder: str) -> str | None:
+    """The CURRENT plugin log (utpp-<stamp>.log) of the latest session in `folder`, by the stamp in the name. Pass it to
+    session_files / open_session_lines / merged_session_copy to read the whole session. A session that has only rotated parts
+    left is answered by its newest part (that part alone is read). None when the folder has no plugin log."""
+    try:
+        names = [n for n in os.listdir(folder) if PLUGIN_LOG_RE.match(n)]
+    except OSError:
+        return None
+    if not names:
+        return None
+    by_base: dict = {}
+    for n in names:
+        m = _LOG_NAME_RE.match(n)
+        by_base.setdefault(m.group('base'), []).append((int(m.group('idx') or 0), n))
+    parts = by_base[max(by_base)]
+    return os.path.join(folder, min(parts)[1])        # index 0 (the current file) first, else the lowest = newest rotated part
+
+
+def plugin_log_files(folder: str) -> list[str]:
+    """Every plugin log file of `folder` in reading order: the sessions by the stamp in the name, each session's parts oldest
+    content first (plain name sorting puts utpp-<stamp>.1.log, .2.log before the current file and .1 before the older .2)."""
+    try:
+        bases = sorted({_LOG_NAME_RE.match(n).group('base') for n in os.listdir(folder) if PLUGIN_LOG_RE.match(n)})
+    except OSError:
+        return []
+    out: list[str] = []
+    for b in bases:
+        out += _list_session(os.path.join(folder, b + '.log'))
+    return out
+
+
+@contextlib.contextmanager
+def open_session_lines(path: str):
+    """All parts of the session of `path` as one line iterator, oldest content first."""
+    files = [open(p, 'r', encoding='utf-8', errors='replace') for p in (session_files(path) or [path])]
+    try:
+        yield itertools.chain.from_iterable(files)
+    finally:
+        for f in files:
+            f.close()
+
+
+def merged_session_copy(path: str, out_dir: str) -> str:
+    """`path` itself when its session is one file; else the parts joined oldest first into out_dir/<name of path> (rewritten
+    when the size differs) and that path. For readers that take a single file (the replay tools' --settings-log: the setting
+    calls are at the session start, in the oldest part)."""
+    parts = session_files(path)
+    if len(parts) <= 1:
+        return path
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, os.path.basename(path))
+    if os.path.normcase(os.path.abspath(out)) == os.path.normcase(os.path.abspath(path)):
+        raise ValueError('merged_session_copy: out_dir is the folder of the log itself')
+    total = sum(os.path.getsize(p) for p in parts)
+    if not (os.path.isfile(out) and os.path.getsize(out) == total):
+        tmp = out + '.part'
+        with open(tmp, 'wb') as w:
+            for p in parts:
+                with open(p, 'rb') as r:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        w.write(chunk)
+        os.replace(tmp, out)
+    return out
 
 
 # ---------------------------------------------------------------------------------------------- metrics
