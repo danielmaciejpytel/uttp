@@ -232,6 +232,8 @@ struct StrafeProbe
     int32_t gait = 0;
     float actorYawDeg = 0.0f, rootYawDeg = 0.0f; // feed player yaw / committed visual root yaw (world, deg) of that Step
     bool shouldSpin = false;                       // chooser input ShouldSpinTransition of that Step
+    bool shooterStrafe = false;                    // chooser input ChooserState::shooterStrafe of that Step
+    uint64_t strafeSectorHolds = 0;                // the matcher's count of jumps the Shooter sector delay held (after that Step's update)
 };
 StrafeProbe TestStrafeProbe();
 // test targets only: the aim point / barrel loop seam of the last v2 evaluation (aim pitch plan 2026-10-30 seam C).

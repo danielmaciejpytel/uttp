@@ -29,7 +29,7 @@ endforeach()
 # (--slide): 2 no spin suppression, 9 spin suppression follows the windowed shooterModeActive; 12 the CET hip-fire lease is no H2 exclusion, 13 the speed
 # ratio is answered in first person / on skipped feeds, 15 a root reseed drops the held heading, 16 the root does not follow the actor in the air,
 # 17 the speed ratio takes the gait from the stick size instead of the gait the chooser plays, 18 the chooser is never told that Shooter mode strafes
-# (no direction sector delay: the arc feed changes the clip more than 3.0 times per second).
+# (the strafe probe shows the flag missing and no direction sector delay hold on the turning stick windows of the arc feed).
 # A setup problem (missing data, a feed that does not load) prints SETUP-ERROR and exits with code 3, never "FAIL ": a mutation build is only
 # killed by a real assertion.
 if(DEFINED _utpp_mdmotion_data_native AND UTPP_MMDB_TEST_FILE)

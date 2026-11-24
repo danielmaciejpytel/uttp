@@ -5847,6 +5847,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     g_strafeProbe.gait = cs.gait;
     g_strafeProbe.actorYawDeg = aRaw.playerYawDeg;
     g_strafeProbe.shouldSpin = cs.shouldSpinTransition;
+    g_strafeProbe.shooterStrafe = cs.shooterStrafe;
 #endif
     if (b.map.airGraceActive)
         f.air.onGround = true; // fix/slide-exit: head lead / lean / orient warp below follow the ground the chooser kept (the v1 leg tail still sees the drop)
@@ -5944,6 +5945,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
     b.matcher.SetShownPoseHistory(nullptr);
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    g_strafeProbe.strafeSectorHolds = b.matcher.StrafeSectorHolds();
+#endif
     ++g_turnFootOutcome[r.turnFootPhase & 3];
     BudgetStageRecordLocked(r);
     b.startTurn.Selected(r.clip, b.matcher.StartTurnDirection(r.clip));

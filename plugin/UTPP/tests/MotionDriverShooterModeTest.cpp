@@ -728,7 +728,8 @@ void OpenFeedCase(Rt& rt, const std::vector<FeedFile>& aFeeds, bool aShooterMode
             {
                 // sector delay (MatcherConfig::strafeSectorDelayS): the facing stays on the camera while the stick turns 360 deg in 3 s
                 // (scenario step arc_120, feed time 11.5-14.5 s; arc_90 7.5-11.5 s): the clip changes stay within the 3.0 per second bound of
-                // the game harness (mutation 18, no delay: arc_90 3.25 per second on this database, 3.7 per second in the game at 120 deg/s)
+                // the game harness (mutation 18, no delay: 3.7 per second in the game at 120 deg/s; on this database 3.25 per second before the
+                // 0.2.0 defaults, exactly 3.0 with them, so the bound alone no longer tells the delay apart - the two checks below do)
                 const auto changesPerS = [&](float aT0, float aT1) {
                     // changes per step length, as the harness counts them
                     int32_t last = -2;
@@ -746,7 +747,40 @@ void OpenFeedCase(Rt& rt, const std::vector<FeedFile>& aFeeds, bool aShooterMode
                 Check(c120 >= 0.0 && c120 <= 3.0 && c90 >= 0.0 && c90 <= 3.0,
                       tag + f.name + ": turning stick at 90 / 120 deg/s: clip changes <= 3.0 per second (direction sector delay)",
                       "arc_90 " + Fmt(c90, 2) + " /s, arc_120 " + Fmt(c120, 2) + " /s");
+                // the chooser is told that Shooter mode strafes (ChooserState::shooterStrafe) on every stepped Strafe frame of this ground feed,
+                // and the sector delay holds a direction clip inside the turning stick windows (mutation 18: never told, no hold)
+                size_t told = 0, strafeN = 0;
+                uint64_t holds0 = 0, holds1 = 0;
+                bool inArc = false;
+                for (size_t i = 0; i < f.fr.size(); ++i)
+                {
+                    const motiondriver::StrafeProbe& p = tail.probe[i];
+                    if (tail.out[i].stepped && p.shooterModeActive && p.rotationMode == 1)
+                    {
+                        ++strafeN;
+                        told += p.shooterStrafe;
+                    }
+                    if (f.fr[i].t >= 7.5f && f.fr[i].t <= 14.5f)
+                    {
+                        if (!inArc)
+                            holds0 = i > 0 ? tail.probe[i - 1].strafeSectorHolds : 0;
+                        inArc = true;
+                        holds1 = p.strafeSectorHolds;
+                    }
+                }
+                Check(strafeN > 0 && told == strafeN, tag + f.name + ": the chooser is told that Shooter mode strafes on 100 % of the stepped Strafe frames",
+                      std::to_string(told) + "/" + std::to_string(strafeN));
+                Check(inArc && holds1 > holds0, tag + f.name + ": turning stick at 90 / 120 deg/s: the direction sector delay holds a clip",
+                      std::to_string(holds1 - holds0) + " holds");
             }
+        }
+        if (!aShooterMode)
+        {
+            // Shooter mode off: the H2 latch strafes, but the chooser is never told that Shooter mode strafes (no sector delay outside it)
+            size_t told = 0;
+            for (size_t i = 0; i < f.fr.size(); ++i)
+                told += tail.out[i].stepped && tail.probe[i].shooterStrafe;
+            Check(told == 0, tag + f.name + ": Shooter mode off: the chooser is never told that Shooter mode strafes", std::to_string(told) + " frames");
         }
         if (!aShooterMode)
         {
