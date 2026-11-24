@@ -1506,6 +1506,15 @@ int main(int argc, char** argv)
         FootChecks(frU, "unarmed", 0.015f);
         GroundChecks(*model, fr, "armed");
         GroundChecks(*model, frU, "unarmed");
+        // the stance edges C with the capsule speed play rate off (the mapped query rate): these checks are about the stance floats and the pelvis
+        // drop of the foot height keeping, which the play rate does not concern; with the play rate on, the run -> crouch edge reaches the fade
+        // at another clip phase where the legs alone keep the float under the bound. The shipped defaults are covered by the two replays above.
+        {
+            const std::vector<Frame> frM = Replay(*model, rows, -1.0, -1.0, -1.0, 1e9, nullptr, true);
+            Check(NearEdge(frM, 59.749) && NearEdge(frM, 73.779), "FS-13 the two C edges are in the mapped play rate replay (-, -)");
+            Edge(frM, 59.749, 0.015f, 0.015f, "armed, mapped play rate", "C stand -> crouch still", true);
+            Edge(frM, 73.779, 0.015f, 0.015f, "armed, mapped play rate", "C run -> crouch moving", true);
+        }
         GateChecks(fr, "recorded feed", 6);
         // the stance gate also lowers: a swinging foot that floats 5 cm when the forced stance pick lands comes down over the alpha ramp (2 cm / frame)
         GateChecks(Replay(*model, rows, -1.0, -1.0, 80.172, 1e9, nullptr, true), "stance pick inside the 79.989 gait fade", 6, 0.02f);
