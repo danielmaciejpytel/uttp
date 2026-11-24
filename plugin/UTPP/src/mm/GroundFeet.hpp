@@ -7,9 +7,12 @@
 //     the normal through another one (normalStiffness), both in closed form of dt; the smoothed plane may stay at most
 //     maxPenetration below the traced ground. The plane is held in world height, so a snap of the drawn capsule never moves a foot
 //     in the world.
-//   - every foot (planted or swinging) keeps the clip's height above the model ground plane, carried onto its planting plane: the
-//     ball (toe base) is lifted by the plane height under it and the foot turns about the ball by the tilt of the plane, limited to
-//     maxPitchDeg / maxRollDeg in the foot's heading frame (a planted toe stays where the lock put it).
+//   - a foot near the clip's floor (ball at most swingLow above the floor estimate: the lowest ball of either foot, rising at most
+//     floorRise per second) keeps the clip's height above the model ground plane, carried onto its planting plane: the ball (toe
+//     base) is lifted by the plane height under it and the foot turns about the ball by the tilt of the plane, limited to
+//     maxPitchDeg / maxRollDeg in the foot's heading frame (a planted toe stays where the lock put it). Higher in the swing (up to
+//     swingHigh) that carry fades out: an airborne foot is neither tilted nor lowered towards the ground under it and is raised only
+//     as far as it needs to stay swingClearance above that ground (a step ahead), so the knee keeps the animation's fold.
 //   - dead zone: deadHeight is subtracted from the height and deadAngleDeg from the tilt (continuous at the threshold); on flat
 //     ground both are zero and the stage hands the pose to the body height stage untouched (bit for bit).
 //   - pelvis: the PelvisPlacement range (no raise; while moving only the front leg, standing all legs) of the ground targets minus
@@ -18,10 +21,11 @@
 //     vertical rate explains (above suddenStep) is taken into the pelvis spring, so the body does not jump with the capsule and
 //     springs back instead.
 //   - one leg solve (shared two-bone solver) per frame for the body height offset, the pelvis offset and the foot goals. A leg
-//     whose knee would fold more than kneeFreeDeg over the animation gets a shorter ground correction instead of a broken knee.
+//     whose knee would fold more than kneeFreeDeg (kneeFreeClimbDeg while the capsule climbs) over the animation gets a shorter ground
+//     correction instead of a broken knee.
 // The stage fades in / out with fadeTau per foot (a missing or inconsistent trace: hit more than maxGroundDelta above or maxGroundDrop
 // below the capsule; down to maxGroundDropFollow while the drawn capsule descends steadily: a stair down, not a ledge ahead on level
-// ground).
+// ground; up to maxGroundRiseFollow while it climbs steadily: the next steps of a stair a running foot lands on ahead of the capsule).
 // Model space: character frame, z up (the frame is turned about z only, so model z is world z).
 #pragma once
 
@@ -47,11 +51,18 @@ struct Config
     float maxPitchDeg = 25.0f;       // deg, foot pitch to the surface (heading frame)
     float maxRollDeg = 15.0f;        // deg, foot roll to the surface
     float kneeFreeDeg = 60.0f;       // deg, extra knee flexion over the animation
+    float kneeFreeClimbDeg = 90.0f;  // deg, ... while the drawn capsule climbs steadily (a foot landing on a step ahead of the capsule)
     float minKneeDeg = 25.0f;        // deg, smallest interior knee angle
     float maxGroundDelta = 0.35f;    // m, a hit higher above the capsule height is not used (car roof, crate, body)
     float maxGroundDrop = 0.35f;     // m, a hit deeper below the capsule height is used only while the drawn capsule descends steadily
     float maxGroundDropFollow = 0.55f; // m, ... down to this depth (a step down a stair seen ahead of the descending capsule; on level
     float minDescentRate = 0.2f;     // m/s, ... ground a ledge ahead is not followed), descending = steady rate below -minDescentRate
+    float maxGroundRiseFollow = 0.55f; // m, a hit up to this high above the capsule is used while the drawn capsule climbs steadily
+    float minClimbRate = 0.2f;       // m/s, ... (a steady rate above minClimbRate; the script traces up to 0.6 m above the capsule)
+    float swingLow = 0.02f;          // m, ball height above the floor estimate up to which the ground carry is full
+    float swingHigh = 0.08f;         // m, ... from which only the clearance is kept
+    float swingClearance = 0.03f;    // m, smallest height of a swinging ball above the ground under it
+    float floorRise = 0.05f;         // m/s, largest rise of the floor estimate
     float fadeTau = 0.08f;           // s, per-foot fade in / out
     float maxDt = 0.25f;             // s, a longer gap restarts the stage
     float pelvisStiffness = 100.0f;  // pelvis offset spring
@@ -73,9 +84,11 @@ inline bool ValidConfig(const Config& c)
     auto nonneg = [](float v) { return std::isfinite(v) && v >= 0.0f; };
     return pos(c.heightStiffness) && pos(c.normalStiffness) && nonneg(c.maxPenetration) && nonneg(c.deadHeight) &&
            nonneg(c.deadAngleDeg) && pos(c.maxPitchDeg) && c.maxPitchDeg < 80.0f && pos(c.maxRollDeg) && c.maxRollDeg < 80.0f &&
-           nonneg(c.kneeFreeDeg) && nonneg(c.minKneeDeg) && pos(c.maxGroundDelta) && pos(c.maxGroundDrop) && pos(c.fadeTau) &&
+           nonneg(c.kneeFreeDeg) && nonneg(c.kneeFreeClimbDeg) && c.kneeFreeClimbDeg < 150.0f && nonneg(c.minKneeDeg) && pos(c.maxGroundDelta) && pos(c.maxGroundDrop) && pos(c.fadeTau) &&
            std::isfinite(c.maxGroundDropFollow) && c.maxGroundDropFollow >= c.maxGroundDrop && pos(c.minDescentRate) &&
-           pos(c.maxDt) &&
+           std::isfinite(c.maxGroundRiseFollow) && c.maxGroundRiseFollow >= c.maxGroundDelta && pos(c.minClimbRate) &&
+           nonneg(c.swingLow) && std::isfinite(c.swingHigh) && c.swingHigh > c.swingLow && nonneg(c.swingClearance) &&
+           pos(c.floorRise) && pos(c.maxDt) &&
            pos(c.pelvisStiffness) && nonneg(c.maxDrop) && nonneg(c.maxCompensation) && nonneg(c.heelLift) && c.heelLift <= 1.0f &&
            std::isfinite(c.reach) && c.reach > 0.5f && c.reach <= 1.0f && std::isfinite(c.softReach) && c.softReach > 0.5f &&
            c.softReach <= c.reach && pos(c.suddenStep) && pos(c.frontLegSpeed) &&
@@ -102,18 +115,22 @@ struct Samples
 };
 static_assert(std::is_trivially_copyable_v<Samples> && sizeof(Samples) % 4 == 0);
 
-// Planting plane of a foot in the model frame of the drawn capsule (height h at (x, y), unit normal n) and its fade weight.
+// Planting plane of a foot in the model frame of the drawn capsule (height h at (x, y), unit normal n), its fade weight, the share of
+// the ground carry (1 = near the floor; 0 = high in the swing: clearance only) and the ball height above the floor estimate (m).
 struct FootPlane
 {
     float w = 0.0f;
     float x = 0.0f, y = 0.0f, h = 0.0f;
     float nx = 0.0f, ny = 0.0f, nz = 1.0f;
+    float carry = 1.0f;
+    float above = 0.0f;
 };
 struct Plan
 {
     FootPlane foot[2];
     float pelvis = 0.0f;  // m, ground pelvis offset (added to the body height offset)
     uint32_t active = 0;  // 1 = the plan changes the pose (some foot weight > 0 or a pelvis offset)
+    float kneeFreeDeg = 0.0f; // deg, extra knee flexion allowed for this plan (0 = Config::kneeFreeDeg)
 };
 static_assert(std::is_trivially_copyable_v<Plan> && sizeof(Plan) % 4 == 0);
 
@@ -204,8 +221,9 @@ inline bool Gather(const bodyheight::LegRig& aRig, const float* aPose, uint32_t 
     return true;
 }
 
-// Foot goal of one leg on its planting plane (see the header). An inactive goal is the animated foot.
-inline FootGoal Goal(const Config& c, const FootPlane& p, const LegFrame& l)
+// Foot goal of one leg on its planting plane (see the header). An inactive goal is the animated foot. aFollow: the vertical offset of
+// the pelvis this frame (m); the airborne share of a swinging foot moves with it, so the knee keeps the animation's fold.
+inline FootGoal Goal(const Config& c, const FootPlane& p, const LegFrame& l, float aFollow = 0.0f)
 {
     FootGoal g;
     g.ankle = l.gc.p;
@@ -234,12 +252,20 @@ inline FootGoal Goal(const Config& c, const FootPlane& p, const LegFrame& l)
     float lift = p.h + ext;
     lift = (lift < 0.0f ? -1.0f : 1.0f) * std::fmax(std::fabs(lift) - c.deadHeight, 0.0f);
     lift *= w;
+    // swing: the carry share of the lift, but never less than keeps the ball swingClearance above the ground under it
+    const float carry = std::isfinite(p.carry) ? std::clamp(p.carry, 0.0f, 1.0f) : 1.0f;
+    if (carry < 1.0f)
+    {
+        const float above = std::isfinite(p.above) ? std::fmax(p.above, 0.0f) : 0.0f;
+        const float follow = std::isfinite(aFollow) ? aFollow : 0.0f;
+        lift = std::fmax(carry * lift + (1.0f - carry) * follow, lift - std::fmax(above - c.swingClearance, 0.0f));
+    }
     // tilt: slopes along the heading and to the side, limited, then the dead angle
     const float sf = std::clamp(-math::Dot(n, fwd) / n.z, -std::tan(detail::Deg(c.maxPitchDeg)), std::tan(detail::Deg(c.maxPitchDeg)));
     const float sr = std::clamp(-math::Dot(n, right) / n.z, -std::tan(detail::Deg(c.maxRollDeg)), std::tan(detail::Deg(c.maxRollDeg)));
     const math::Vec3 nt = legik::Norm(fwd * (-sf) + right * (-sr) + math::Vec3{0.0f, 0.0f, 1.0f});
     const float a = std::acos(std::clamp(nt.z, -1.0f, 1.0f));
-    const float tilt = std::fmax(a - detail::Deg(c.deadAngleDeg), 0.0f) * w;
+    const float tilt = std::fmax(a - detail::Deg(c.deadAngleDeg), 0.0f) * w * carry;
     math::Quat r{0.0f, 0.0f, 0.0f, 1.0f};
     if (tilt > 0.0f)
     {
@@ -311,11 +337,14 @@ inline float MinReach(const Config& c, const LegFrame& l)
 
 // Applies the plan and the body height offset to aPose with one leg solve. Untouched when the rig / pose does not match. The caller
 // runs this only for an active plan (an inactive one is the body height stage alone, bit for bit).
-inline ApplyResult Apply(const Config& c, const bodyheight::LegRig& aRig, float* aPose, uint32_t aNumBones, const Plan& aPlan,
+inline ApplyResult Apply(const Config& aCfg, const bodyheight::LegRig& aRig, float* aPose, uint32_t aNumBones, const Plan& aPlan,
                          float aBodyOffset)
 {
     using detail::Load;
     using detail::Mul;
+    Config c = aCfg;
+    if (std::isfinite(aPlan.kneeFreeDeg) && aPlan.kneeFreeDeg > 0.0f && aPlan.kneeFreeDeg < 150.0f)
+        c.kneeFreeDeg = aPlan.kneeFreeDeg;
     ApplyResult r;
     PoseFrame f;
     if (!std::isfinite(aBodyOffset) || !std::isfinite(aPlan.pelvis) || !Gather(aRig, aPose, aNumBones, f))
@@ -358,6 +387,14 @@ inline ApplyResult Apply(const Config& c, const bodyheight::LegRig& aRig, float*
         }
     }
     r.pelvis = off;
+    // a swinging foot moves with the pelvis by its airborne share (never closer to the ground than its clearance)
+    for (int s = 0; s < 2; ++s)
+        if (off != 0.0f && aPlan.foot[s].carry < 1.0f)
+        {
+            g[s] = Goal(c, aPlan.foot[s], f.leg[s], off);
+            r.lift[s] = g[s].lift;
+            r.tilt[s] = g[s].tilt;
+        }
     if (off != 0.0f)
     {
         float* pp = aPose + size_t(aRig.pelvis) * 7;
@@ -441,6 +478,8 @@ public:
         m_move[0] = 0.0f;
         m_move[1] = 1.0f;
         m_havePrev = false;
+        m_haveFloor = false;
+        m_floor = 0.0f;
         m_plan = Plan{};
     }
 
@@ -484,7 +523,9 @@ public:
                 g = fs.z - m_cfg.bias;
                 const float drop = aSamples->capZ - g;
                 valid = fs.hit != 0 && std::isfinite(g) && std::isfinite(fs.x) && std::isfinite(fs.y) && std::isfinite(nl) && nl > 1e-3f &&
-                        std::isfinite(aSamples->capZ) && g - aSamples->capZ <= m_cfg.maxGroundDelta &&
+                        std::isfinite(aSamples->capZ) &&
+                        (g - aSamples->capZ <= m_cfg.maxGroundDelta ||
+                         (g - aSamples->capZ <= m_cfg.maxGroundRiseFollow && m_vz > m_cfg.minClimbRate)) &&
                         (drop <= m_cfg.maxGroundDrop ||
                          (drop <= m_cfg.maxGroundDropFollow && m_vz < -m_cfg.minDescentRate));
                 if (valid)
@@ -598,6 +639,17 @@ public:
             PoseFrame pf;
             if (Gather(aRig, aPose, aNumBones, pf))
             {
+                // floor estimate of the clip (its ground plane: the lowest ball of either foot, rising slowly) and the swing carry
+                const float low = std::fmin(pf.leg[0].ball.z, pf.leg[1].ball.z);
+                m_floor = (!m_haveFloor || !std::isfinite(m_floor)) ? low : std::fmin(low, m_floor + m_cfg.floorRise * dt);
+                m_haveFloor = std::isfinite(m_floor);
+                for (int s = 0; s < 2; ++s)
+                {
+                    const float above = m_haveFloor ? std::fmax(pf.leg[s].ball.z - m_floor, 0.0f) : 0.0f;
+                    const float u = std::clamp((above - m_cfg.swingLow) / (m_cfg.swingHigh - m_cfg.swingLow), 0.0f, 1.0f);
+                    m_plan.foot[s].carry = 1.0f - u * u * (3.0f - 2.0f * u);
+                    m_plan.foot[s].above = above;
+                }
                 FootGoal g[2];
                 for (int s = 0; s < 2; ++s)
                     g[s] = Goal(m_cfg, m_plan.foot[s], pf.leg[s]);
@@ -619,6 +671,7 @@ public:
             m_pel = m_pelV = 0.0f;
         m_plan.pelvis = m_pel;
         m_plan.active = (anyFoot || m_pel != 0.0f) ? 1u : 0u;
+        m_plan.kneeFreeDeg = m_vz > m_cfg.minClimbRate ? m_cfg.kneeFreeClimbDeg : m_cfg.kneeFreeDeg;
         m_prev[0] = aDrawn[0];
         m_prev[1] = aDrawn[1];
         m_prev[2] = drawnZ;
@@ -647,6 +700,8 @@ private:
     float m_move[2] = {0.0f, 1.0f}; // drawn motion direction of the last update (model axes)
     bool m_havePrev = false;
     float m_prev[3] = {0.0f, 0.0f, 0.0f};
+    float m_floor = 0.0f;  // m, floor estimate of the clip (model z of the lowest ball, rising at most floorRise per second)
+    bool m_haveFloor = false;
     Plan m_plan;
     StageDiag m_diag;
 };

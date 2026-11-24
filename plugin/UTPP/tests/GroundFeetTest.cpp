@@ -1,7 +1,8 @@
 // Feet on uneven ground (mm/GroundFeet.hpp, mm/GroundFeetRuntime.hpp): flat ground is the body height stage bit for bit (named
 // GroundFeetFlatIdentity), slopes 10 / 20 / 30 deg, a 17 cm step up and down, stairs 15 / 20 cm with one foot per step, a 12 cm curb
 // snap of the capsule (sudden motion taken by the pelvis), a plane jump under a swinging foot, 30 / 60 / 144 Hz, missing / NaN traces,
-// the reach and knee limits, the planted ball kept, the moving platform and the gate fade, and the animation-thread stepper; then the
+// the reach and knee limits, the planted ball kept, a swinging foot over a slope (no tilt, the knee's fold kept), ground two steps
+// ahead of a climbing capsule, the moving platform and the gate fade, and the animation-thread stepper; then the
 // same terrain checks on the poses of the motion database when its path is given.
 #include <cmath>
 #include <cstdio>
@@ -584,8 +585,8 @@ static void DatabasePoses(const char* aPath)
     bodyheight::LegRig rig;
     Check(rig.Init(db), "database rig: leg rig found");
     const uint32_t step = std::max<uint32_t>(1, db.NumFrames() / 300);
-    int poses = 0, limited = 0, nonFinite = 0;
-    float worstFold = 0.0f, worstSole = 0.0f;
+    int poses = 0, limited = 0, nonFinite = 0, swinging = 0;
+    float worstFold = 0.0f, worstSole = 0.0f, worstSwingDepth = 0.0f;
     const Ground grounds[2] = {[](float, float y) { return y > 0.0f ? 0.17f : 0.0f; },
                                [](float, float y) { return std::tan(20.0f * math::kPi / 180.0f) * y; }};
     for (uint32_t fr = 0; fr < db.NumFrames(); fr += step)
@@ -614,7 +615,14 @@ static void DatabasePoses(const char* aPath)
             for (int s = 0; s < 2; ++s)
             {
                 worstFold = std::fmax(worstFold, KneeInterior(f0.leg[s]) - KneeInterior(f1.leg[s]));
-                if (r.kneeLimited == 0 && r.clamped == 0)
+                if (plan.foot[s].carry < 1.0f)
+                {
+                    // a foot in the swing keeps clearance instead of standing on the ground: its ball must not end in the ground
+                    ++swinging;
+                    const math::Vec3 b1 = f1.leg[s].ball;
+                    worstSwingDepth = std::fmax(worstSwingDepth, h(b1.x, b1.y) - b1.z);
+                }
+                else if (r.kneeLimited == 0 && r.clamped == 0)
                 {
                     const math::Vec3 b0 = f0.leg[s].ball;
                     const float g = h(b0.x, b0.y);
@@ -623,15 +631,68 @@ static void DatabasePoses(const char* aPath)
             }
         }
     }
+    char name[300];
+    std::snprintf(name, sizeof name, "database poses (%d, step 17 cm / slope 20 deg): finite, extra knee fold max %.1f deg <= 60, planted ball err %.1f mm, "
+                  "swinging legs %d with the ball at most %.1f mm in the ground, limited legs %d",
+                  poses, double(worstFold), double(worstSole) * 1000, swinging, double(worstSwingDepth) * 1000, limited);
+    Check(nonFinite == 0 && worstFold <= 60.5f && worstSole < 0.012f && worstSwingDepth < 0.005f, name);
+}
+
+static void SwingFoot()
+{
+    // the left foot high in the swing (ball well above the clip's floor) over a 20 deg slope with the pelvis lowered by the body
+    // offset: it is not tilted to the slope and keeps the animation's knee fold (it moves with the pelvis); the planted right foot is
+    // tilted to the slope
+    auto pose = MockPose(12.0f, 18.0f);
+    {
+        float* knee = &pose[size_t(3) * 7 + 3]; // LeftLeg: fold the knee so the foot swings up behind
+        const math::Quat q = X(-24.0f - 100.0f);
+        knee[0] = q.x, knee[1] = q.y, knee[2] = q.z, knee[3] = q.w;
+    }
+    const float t20 = std::tan(20.0f * math::kPi / 180.0f);
+    const Outcome o = Run([t20](float, float y) { return t20 * y; }, pose, 60, 1.0f, [](float) { return 0.0f; }, -0.05f);
+    const float above = o.anim.leg[0].ball.z - o.anim.leg[1].ball.z;
+    const float knee = KneeInterior(o.after.leg[0]) - KneeInterior(o.anim.leg[0]);
+    const float pitchL = FootPitchDeg(o.anim, o.after, 0), pitchR = FootPitchDeg(o.anim, o.after, 1);
     char name[240];
-    std::snprintf(name, sizeof name, "database poses (%d, step 17 cm / slope 20 deg): finite, extra knee fold max %.1f deg <= 60, ball err %.1f mm, limited legs %d",
-                  poses, double(worstFold), double(worstSole) * 1000, limited);
-    Check(nonFinite == 0 && worstFold <= 60.5f && worstSole < 0.012f, name);
+    std::snprintf(name, sizeof name, "swing foot %.0f cm up over a 20 deg slope, pelvis -5 cm: left carry %.2f, knee %+.2f deg, pitch %.1f deg; "
+                  "right (planted) pitch %.1f deg", double(above) * 100, double(o.plan.foot[0].carry), double(knee), double(pitchL),
+                  double(pitchR));
+    Check(above > 0.1f && o.plan.foot[0].carry == 0.0f && std::fabs(knee) < 1.0f && pitchL < 0.5f && pitchR > 10.0f, name);
+}
+
+static void StairUpAhead()
+{
+    // ground 45 cm above the capsule under the right ball: on level ground (a crate, a car roof) it is not used; while the capsule
+    // climbs steadily (running up stairs: the foot lands two steps ahead of the capsule) it is
+    const auto pose = MockPose(12.0f, 18.0f);
+    {
+        Stage st;
+        const Outcome o = Run([](float, float y) { return y < -0.06f ? 0.45f : 0.0f; }, pose, 60, 1.0f, [](float) { return 0.0f; }, 0.0f,
+                              &st);
+        char name[200];
+        std::snprintf(name, sizeof name, "ground 45 cm above on level ground: right foot weight %.2f, left weight %.2f",
+                      double(o.plan.foot[1].w), double(o.plan.foot[0].w));
+        Check(o.plan.foot[1].w == 0.0f && o.plan.foot[0].w > 0.99f, name);
+    }
+    {
+        float tNow = 0.0f;
+        const float v = 1.0f;
+        Ground h = [&tNow, v](float, float y) { return (y < -0.06f ? 0.45f : 0.0f) + v * tNow; };
+        Stage st;
+        const Outcome o = Run(h, pose, 60, 1.0f, [&tNow, v](float t) { tNow = t; return v * t; }, 0.0f, &st);
+        char name[200];
+        std::snprintf(name, sizeof name, "ground 45 cm above while climbing 1 m/s: right foot weight %.2f, plane %.1f cm, knee free %.0f deg",
+                      double(o.plan.foot[1].w), double(o.plan.foot[1].h) * 100, double(o.plan.kneeFreeDeg));
+        Check(o.plan.foot[1].w > 0.99f && o.plan.foot[1].h > 0.37f && o.plan.foot[1].h < 0.47f && o.plan.kneeFreeDeg == Config{}.kneeFreeClimbDeg,
+              name);
+    }
 }
 
 int main(int argc, char** argv)
 {
-    Check(!rt::Enabled(), "default: the stage is off at startup (the menu default mm.groundFeet)");
+    Check(rt::Enabled(), "default: the stage is on at startup (the menu default mm.groundFeet)");
+    rt::SetEnabled(false); // the checks below switch it on where they need it
     FlatIdentity();
     Slopes();
     Steps();
@@ -640,6 +701,8 @@ int main(int argc, char** argv)
     PlaneJump();
     RisingPlaneLimit();
     LedgeAndStairDown();
+    SwingFoot();
+    StairUpAhead();
     BadTraces();
     Limits();
     PlatformAndGate();

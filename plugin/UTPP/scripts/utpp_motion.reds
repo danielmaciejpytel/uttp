@@ -101,7 +101,7 @@ public native func UTPPSetMotionLeanParams(scale: Float, headScale: Float) -> Bo
 public native func UTPPSetMMPelvisPlacement(on: Bool) -> Void
 // Smooths the drawn pelvis height on uneven ground; the feet stay where they are (on by default).
 public native func UTPPSetMMBodyHeightSmooth(on: Bool) -> Void
-// Places the feet on the traced ground (slopes, steps, stairs) with one leg solve; the pelvis follows (off by default).
+// Places the feet on the traced ground (slopes, steps, stairs) with one leg solve; the pelvis follows (on by default).
 public native func UTPPSetMMGroundFeet(on: Bool) -> Void
 // Calibration of the ground under the soles (m, |bias| < 0.2).
 public native func UTPPSetMMGroundFeetBias(bias: Float) -> Void

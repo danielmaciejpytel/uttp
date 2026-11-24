@@ -102,7 +102,7 @@ M.PACK_FORCED = {
 M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
-  "mm.strideWarp", "mm.firmFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
+  "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
@@ -341,7 +341,7 @@ M.MIGRATED_KEYS = MIGRATED_KEYS
 -- default (it cannot be told from a value nobody chose); any other stored value is a choice and stays. Save writes the
 -- current revision, so the replacement happens once.
 M.DEFAULTS_REVISION_KEY = "core.defaultsRevision"
-M.DEFAULTS_REVISION = 7
+M.DEFAULTS_REVISION = 8
 M.DEFAULT_CHANGES = {
   { rev = 1, key = "melee.guard", from = false, to = true },
   { rev = 2, key = "body.shadowProxy", from = true, to = false },
@@ -358,6 +358,7 @@ M.DEFAULT_CHANGES = {
   { rev = 6, key = "mm.leanScale", from = 0.85, to = 0.2 },
   { rev = 6, key = "mm.leanHeadScale", from = 0.9, to = 0.2 },
   { rev = 7, key = "mm.aimRotation", from = false, to = true },
+  { rev = 8, key = "mm.groundFeet", from = false, to = true },
 }
 S.fileRevision = nil
 
@@ -585,13 +586,14 @@ local LAYOUT = {
   --   "Walk speed (m/s)" (mm.walkToggleSpeed, utpp_motion: capsule speed under the walk toggle) after it, then "Minimum walk
   -- speed (m/s)" (mm.minAnalogWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
   -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less), then "Firm feet in turns and
-  -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default on), then "Body lean" and "Head lean"
+  -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default on), then "Feet on uneven ground"
+  -- (mm.groundFeet, utpp_motion: the feet stand on the traced ground, default on), then "Body lean" and "Head lean"
   -- (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
                          "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.headLead", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
-                         "mm.strideWarp", "mm.firmFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth",
+                         "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth",
                          "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
@@ -638,7 +640,7 @@ local LAYOUT = {
                                "body.garmentOffsets", "mm.motionDriver", "mm.pistolAuto", "mm.pistol1h", "bodyturn.aimJogSpeed",
                                "bodyturn.aimStrafeUnarmed", "bodyturn.turnRateMax", "mm.orientWarp",
                                "mm.slide", "mm.lean", "mm.leanHead", "mm.leanCoverage",
-                               "mm.selectionGuards", "mm.aimWorldSmooth", "mm.pelvisPlacement", "mm.bodyHeightSmooth", "mm.groundFeet", "mm.handBackBlend", "mm.stepDownReach",
+                               "mm.selectionGuards", "mm.aimWorldSmooth", "mm.pelvisPlacement", "mm.bodyHeightSmooth", "mm.handBackBlend", "mm.stepDownReach",
                                "mm.farJumpGravity", "mm.overlayInertialSwitch", "mm.capsuleForecast", "mm.aimRotation" } },
   --   Debug: the diagnostic logs have one visible list in General (the single switches stay diagnostic level,
   -- console only); camera.aim.occlusion stays visible (detection only, the switch saves its rays)

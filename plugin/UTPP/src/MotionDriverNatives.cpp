@@ -615,7 +615,7 @@ void Native_SetMMFirmFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, b
     if (aOut)
         *aOut = ok;
 }
-// ---- feet on uneven ground (mm/GroundFeetRuntime.hpp; CET utpp_motion mm.groundFeet, default off) and the ground recorder
+// ---- feet on uneven ground (mm/GroundFeetRuntime.hpp; CET utpp_motion mm.groundFeet, default on) and the ground recorder
 // (mm.trace: traces under the published feet, logged as UTPP GRT lines, no pose change). Script side: scripts/utpp.reds
 // UTPPFeedGroundFromLocomotion, right before the locomotion feed. Yaw: the feed's player yaw (deg, forward = (-sin, cos)).
 void Native_SetMMGroundFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
