@@ -53,7 +53,25 @@ for _p in (TOOLS, os.path.join(TOOLS, 'footslide'), os.path.join(TOOLS, 'gametes
         sys.path.insert(0, _p)
 
 import world_slide as ws  # noqa: E402
+import gt_log  # noqa: E402
 from utpp_paths import project_root  # noqa: E402
+
+
+def session_log(logs):
+    """The current plugin log of a run's logs folder (its rotated parts belong to it); ValueError when there is none."""
+    path = gt_log.session_log_in(logs)
+    if not path:
+        raise ValueError('no plugin log utpp-<stamp>.log in ' + logs)
+    return path
+
+
+def remove_merged(path):
+    """Deletes a joined session copy (gt_log.merged_session_copy) and its folder when that is empty."""
+    try:
+        os.remove(path)
+        os.rmdir(os.path.dirname(path))
+    except OSError:
+        pass
 
 DEFAULT_RUNS = ['woman:20261118-121140', 'woman:20261118-122228', 'woman:20261118-122643',
                 'man:20261118-130756', 'man:20261118-131922', 'man:20261118-132319']
@@ -328,11 +346,16 @@ def measure(spec, a):
     run_dir = os.path.join(night, rid)
     logs = os.path.join(run_dir, 'logs')
     feed = sorted(f for f in os.listdir(logs) if f.startswith('utpp-feed-') and f.endswith('.txt'))[-1]
-    log = sorted(f for f in os.listdir(logs) if f.startswith('utpp-2') and f.endswith('.log'))[-1]
-    feed, log = os.path.join(logs, feed), os.path.join(logs, log)
+    feed, log = os.path.join(logs, feed), session_log(logs)
     prefix = os.path.join(a.work, '%s_%s' % (body, rid))
     os.makedirs(a.work, exist_ok=True)
-    stdout = run_stages(a.exe_dir, a.root, feed, log, body, prefix, a.stages_args)
+    # the replay reads one file: the whole session joined (the setting calls are in the oldest rotated part)
+    settings_log = gt_log.merged_session_copy(log, prefix + '_log')
+    try:
+        stdout = run_stages(a.exe_dir, a.root, feed, settings_log, body, prefix, a.stages_args)
+    finally:
+        if settings_log != log and not a.keep_bin:
+            remove_merged(settings_log)
     try:
         oses, _ = offline_session(prefix, feed, body, db_path=db_path_of(a.root, body),
                                   contact='trace' if motion_log_requested(a.stages_args) else 'tail')

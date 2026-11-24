@@ -37,7 +37,6 @@ Read-only on every input; nothing is written next to the recordings (--json goes
 """
 import argparse
 import bisect
-import contextlib
 import datetime
 import itertools
 import json
@@ -304,26 +303,12 @@ def _ts(m):
     return datetime.datetime(int(y), int(mo), int(d), int(hh), int(mi), int(ss), int((frac + '000000')[:6]))
 
 
-def log_parts(path):
-    """The session log and its rotated parts (utpp-<stamp>.N.log, renamed when the log passes 10 MB), oldest content first.
-    Without this only the newest part was read and every window before the last rotation had no clip changes."""
-    try:
-        import gt_log
-        parts = gt_log.session_files(path)
-    except Exception:
-        parts = []
-    return parts or [path]
-
-
-@contextlib.contextmanager
 def open_log_parts(path):
-    """All parts of the session log as one line iterator (oldest first)."""
-    files = [open(p, 'r', encoding='utf-8', errors='replace') for p in log_parts(path)]
-    try:
-        yield itertools.chain.from_iterable(files)
-    finally:
-        for f in files:
-            f.close()
+    """The session log and its rotated parts (utpp-<stamp>.N.log, renamed when the log passes 10 MB) as one line iterator,
+    oldest content first (gt_log.open_session_lines). Without this only the newest part was read and every window before the
+    last rotation had no clip changes."""
+    import gt_log
+    return gt_log.open_session_lines(path)
 
 
 def parse_log(path):

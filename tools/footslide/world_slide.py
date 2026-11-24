@@ -884,8 +884,9 @@ def run_inputs(run_dir):
             plan_runs = json.load(f).get('runs', [])
     windows = gp.build_windows(cycle.get('scenarios'), plan_runs)
     feeds = sorted(fn for fn in os.listdir(logs) if re.fullmatch(r'utpp-feed-\d{4}(-\d\d){5}\.txt', fn))
-    lgs = sorted(fn for fn in os.listdir(logs) if re.fullmatch(r'utpp-\d{4}(-\d\d){5}\.log', fn))
-    if not feeds or not lgs:
+    import gt_log
+    log = gt_log.session_log_in(logs)          # the current file; read_motion_log adds the rotated parts
+    if not feeds or not log:
         raise ValueError('no feed dump or no mod log')
     steps = {}
     sj = os.path.join(run_dir, 'gametest', 'summary.json')
@@ -896,7 +897,7 @@ def run_inputs(run_dir):
             m = st.get('metrics') or {}
             steps[f'{st.get("scenario")}#{st.get("run", 1)}/{st.get("step")}'] = dict(
                 ik_correction_max_cm=m.get('footlock_corr_max_cm'), verdict=st.get('verdict'))
-    return poses, os.path.join(logs, lgs[-1]), os.path.join(logs, feeds[-1]), windows, steps
+    return poses, log, os.path.join(logs, feeds[-1]), windows, steps
 
 
 def _pool_arrays(variants, keep_frame):

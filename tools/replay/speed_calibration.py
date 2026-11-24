@@ -2,7 +2,8 @@
 """Steady capsule speeds, leg / capsule speed ratios and a few locomotion event measurements from recorded game sessions.
 
 Read only. Inputs are the game-test session folders (Research/logs/night/<run>/): the feed dump (logs/utpp-feed-*.txt, one row
-per motion feed), the plugin log (logs/utpp-<stamp>.log: MOTION trace lines and the harness POS lines) and, when present,
+per motion feed), the plugin log (logs/utpp-<stamp>.log with its rotated parts .N.log: MOTION trace lines and the harness POS
+lines) and, when present,
 summary.json (body) and gametest/*.txt (step windows). The motion databases (Data/utpp_motion_<body>.utppmm) give the clip root
 paths.
 
@@ -42,7 +43,9 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'gametest'))
 from utpp_paths import project_root  # noqa: E402
+import gt_log  # noqa: E402
 
 # ---------------------------------------------------------------------------------------------------------- constants
 SETTLE_S = 0.6           # key and stick unchanged for this long before a row counts as steady
@@ -69,7 +72,6 @@ LAND_MOVING = 0.3        # m/s at touchdown: slower landings are on the spot
 MIN_AIR_S = 0.15
 
 FEED_NAME = re.compile(r'utpp-feed-(\d{4})-(\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d)(?:-\d+)?\.txt$')
-LOG_NAME = re.compile(r'utpp-(\d{4})-(\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d)\.log$')
 WALL = re.compile(r'^\[(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\.(\d{3})\]')
 MOTION = re.compile(r'UTPP MOTION t=([-\d.]+) db=(-?\d+):(\S*) clip=(-?\d+):(\S*) ct=([-\d.]+) .*? rot=(\w+) start=(\d) '
                     r'.*? ov=(\d+)/(\d+)/(\d)(\d)\S*(?: w=\S+)? lay=spine([-\d.]+),armL([-\d.]+),armR([-\d.]+),legs([-\d.]+)')
@@ -244,9 +246,10 @@ def segments(keys, steady, t):
 
 # ---------------------------------------------------------------------------------------------------------- log
 def read_log(path):
+    """MOTION, harness POS, vehicle exit and MMWEAPON / MMMASK lines of the session of `path` (the rotated parts included)."""
     motion, pos, exits, other = [], [], [], []
     body = None
-    with open(path, encoding='utf-8', errors='replace') as f:
+    with gt_log.open_session_lines(path) as f:
         for ln in f:
             w = WALL.match(ln)
             if not w:
@@ -376,7 +379,7 @@ class Run:
         self.name = os.path.basename(folder.rstrip('\\/'))
         logs = os.path.join(folder, 'logs')
         feeds = sorted(glob.glob(os.path.join(logs, 'utpp-feed-*.txt')))
-        plogs = sorted(p for p in glob.glob(os.path.join(logs, 'utpp-*.log')) if LOG_NAME.search(os.path.basename(p)))
+        plog = gt_log.session_log_in(logs)
         self.body = None
         sj = os.path.join(folder, 'summary.json')
         if os.path.isfile(sj):
@@ -384,7 +387,7 @@ class Run:
                 self.body = json.load(f).get('body')
         self.feed = derive(read_feed(feeds[0])) if feeds else None
         self.start = feed_start(feeds[0]) if feeds else None
-        self.log = read_log(plogs[-1]) if plogs else {'motion': [], 'pos': [], 'exits': [], 'other': [], 'body': None}
+        self.log = read_log(plog) if plog else {'motion': [], 'pos': [], 'exits': [], 'other': [], 'body': None}
         if self.body is None and self.log['body']:
             self.body = {'woman': 'female', 'man': 'male'}.get(self.log['body'], self.log['body'])
         self.offset, self.align_mad, self.align_n = (align(self.feed, self.start, self.log['pos']) if self.feed is not None

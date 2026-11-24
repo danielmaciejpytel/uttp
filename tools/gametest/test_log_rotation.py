@@ -106,6 +106,49 @@ class SessionFiles(RotationBase):
         self.assertEqual(gt_log.newest_log(self.dir), self.cur)   # the session is ranked by its newest member
 
 
+class AnalysisReaders(RotationBase):
+    """Helpers for the offline analysis tools that read a finished run folder: pick the session, read all of its parts in time
+    order, or join them into one file for a tool that takes a single path."""
+
+    def rotated_session(self):
+        write(self.p('.2'), line(1, 'settings mm.walkSpeed=1.9', 23) + line(2, 'MOTION a', 23))     # oldest part
+        write(self.p('.1'), line(1, 'MOTION b', 41))
+        write(self.cur, line(1, 'MOTION c', 58))
+        write(os.path.join(self.dir, 'utpp-feed-2026-11-01-22-23-30.txt'), '# cols t\n')            # other utpp files
+        write(os.path.join(self.dir, 'utpp-report-2026-11-01-23-00-00.txt'), 'report\n')
+        write(os.path.join(self.dir, 'utpp-2026-11-01-10-00-00.log'), line(1, 'earlier session', 10))
+
+    def test_the_latest_session_is_picked_by_its_current_file(self):
+        self.rotated_session()
+        self.assertEqual(gt_log.session_log_in(self.dir), self.cur)
+        self.assertIsNone(gt_log.session_log_in(os.path.join(self.dir, 'none')))
+        os.remove(self.cur)                                         # only rotated parts left: the newest part
+        self.assertEqual(gt_log.session_log_in(self.dir), self.p('.1'))
+
+    def test_all_parts_are_read_oldest_first(self):
+        self.rotated_session()
+        with gt_log.open_session_lines(gt_log.session_log_in(self.dir)) as f:
+            texts = [ln.split('UTPP ', 2)[-1].strip() for ln in f]
+        self.assertEqual(texts, ['settings mm.walkSpeed=1.9', 'MOTION a', 'MOTION b', 'MOTION c'])
+        names = [os.path.basename(p) for p in gt_log.plugin_log_files(self.dir)]
+        self.assertEqual(names, ['utpp-2026-11-01-10-00-00.log', BASE + '.2.log', BASE + '.1.log', BASE + '.log'])
+
+    def test_a_joined_copy_holds_the_whole_session(self):
+        self.rotated_session()
+        out = os.path.join(self.dir, 'work')
+        joined = gt_log.merged_session_copy(self.cur, out)
+        self.assertEqual(os.path.dirname(joined), out)
+        with open(joined, encoding='utf-8') as f:
+            text = f.read()
+        self.assertTrue(text.startswith(line(1, 'settings mm.walkSpeed=1.9', 23)))   # the setting call of the oldest part
+        self.assertTrue(text.endswith(line(1, 'MOTION c', 58)))
+        self.assertEqual(gt_log.merged_session_copy(self.cur, out), joined)        # reused when complete
+        single = os.path.join(self.dir, 'utpp-2026-11-01-10-00-00.log')
+        self.assertEqual(gt_log.merged_session_copy(single, out), single)         # one file: no copy
+        with self.assertRaises(ValueError):
+            gt_log.merged_session_copy(self.cur, self.dir)                          # never over the log itself
+
+
 class MarkAcrossRotation(RotationBase):
     def test_marker_and_offset_survive_a_rotation_new_file_grows_past_the_old_cursor(self):
         write(self.cur, line(1, 'before-1') + line(2, 'before-2'))

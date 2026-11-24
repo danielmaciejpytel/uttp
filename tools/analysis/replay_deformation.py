@@ -350,19 +350,26 @@ def dump_row(body, prefix, row, stage, mesh_root, path):
 
 # ------------------------------------------------------------------------------------------------------------------------ driver
 def session_inputs(root, rid):
+    """(feed dump, current plugin log) of a night run; the log's rotated parts belong to it."""
+    import runtime_world_slide as rws
     logs = os.path.join(root, 'Research', 'logs', 'night', rid, 'logs')
     feed = sorted(f for f in os.listdir(logs) if f.startswith('utpp-feed-') and f.endswith('.txt'))[-1]
-    log = sorted(f for f in os.listdir(logs) if f.startswith('utpp-2') and f.endswith('.log'))[-1]
-    return os.path.join(logs, feed), os.path.join(logs, log)
+    return os.path.join(logs, feed), rws.session_log(logs)
 
 
 def replay(side, exe_dir, extra, spec, a):
+    import gt_log
     import runtime_world_slide as rws
     body, rid = spec.split(':', 1)
     feed, log = session_inputs(a.root, rid)
     prefix = os.path.join(a.work, side, '%s_%s' % (body, rid))
     os.makedirs(os.path.dirname(prefix), exist_ok=True)
-    rws.run_stages(exe_dir, a.root, feed, log, body, prefix, extra)
+    settings_log = gt_log.merged_session_copy(log, prefix + '_log')   # the replay reads one file: the whole session
+    try:
+        rws.run_stages(exe_dir, a.root, feed, settings_log, body, prefix, extra)
+    finally:
+        if settings_log != log:
+            rws.remove_merged(settings_log)
     try:
         os.remove(prefix + '.motion.log')
     except OSError:

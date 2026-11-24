@@ -62,7 +62,9 @@ import pose_helper_report as ph  # noqa: E402
 
 ROOT = pathlib.Path(HERE).resolve().parents[2]
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'gametest'))
 from utpp_paths import game_dir as _utpp_game_dir  # noqa: E402
+import gt_log  # noqa: E402
 DEFAULT_GAME_DIR = _utpp_game_dir(required=False) or ''
 DEFAULT_CLIPS_ROOT = ROOT / 'Build' / 'work' / 'melee-npc-20261109'
 EPOCH = datetime.datetime(1970, 1, 1)
@@ -205,7 +207,7 @@ def _windows(events, last_t):
 def parse_log(path):
     info = LogInfo()
     mask_ev, full_ev = [], []
-    with open(path, encoding='utf-8', errors='replace') as f:
+    with gt_log.open_session_lines(path) as f:     # the rotated parts of the session included
         for ln in f:
             m = LINE_RE.match(ln)
             if not m:
@@ -880,9 +882,17 @@ def load_steps(run_dir):
 
 
 def find_log(run_dir):
-    logs = sorted(glob.glob(os.path.join(run_dir, 'logs', 'utpp-2026-*.log')) + glob.glob(os.path.join(run_dir, 'logs', 'utpp-20*.log')))
-    logs = sorted(set(logs), key=lambda p: -os.path.getsize(p))
-    return logs[0] if logs else None
+    """The current plugin log of the run's largest session, the rotated parts counted (the largest single file could be a 10 MB
+    rotated part, whose session would then be read from the middle)."""
+    logs = os.path.join(run_dir, 'logs')
+    sessions = {}
+    for p in gt_log.plugin_log_files(logs):
+        sessions.setdefault(re.sub(r'(\.\d+)?\.log$', '', os.path.basename(p)), []).append(p)
+    if not sessions:
+        return None
+    base = max(sessions, key=lambda b: sum(os.path.getsize(p) for p in sessions[b]))
+    current = os.path.join(logs, base + '.log')
+    return current if os.path.isfile(current) else sessions[base][-1]
 
 
 def main(argv=None):
