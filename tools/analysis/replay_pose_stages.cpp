@@ -24,6 +24,8 @@
 //   --capsule-rate M    play rate from the capsule speed, the search on the mapped query (MapConfig::capsuleSpeedRate: 0 off, 1 both
 //                       ways, 2 raise only, 3 lower only); --capsule-rate-scope S: the picks that take it (MapConfig::capsuleRateScope:
 //                       0 every pick, 1 loop clips only, 2 every pick but a start clip)
+//   --capsule-rate-guards G  guards of that rate (MapConfig::capsuleRateGuards bits: 1 direction ratio, 2 dodge, 4 start, 8 crouch
+//                       loops only); --capsule-rate-blend S: time constant of its blend between feeds (MapConfig::capsuleRateBlendS)
 //   --speed-converter B query velocity of the reference character movement chasing the game velocity (MapConfig::speedConverter bits:
 //                       1 query and predicates, 2 also starts and stops, 4 loop clips at the capsule speed, 8 heading only, 16 loop
 //                       rate only at a steady speed, 32 converted feeds play at the game speed, 64 starts and stops in a short window
@@ -189,6 +191,7 @@ void TestSetMapStepDownReach(int32_t aOn);
 void SetStepDownReach(bool aOn);
 void TestSetMapAimPivot(float aPivotDeg, float aGateS);
 void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope);
+void TestSetMapCapsuleRateGuards(int32_t aGuards, float aBlendS);
 void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg);
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth);
 bool SetNeutralAimOffset(bool aOn);
@@ -557,6 +560,8 @@ int main(int argc, char** argv)
     bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int turnFootPhase = -1; // -1 = build default
     int32_t capsuleQuery = -1, velocityPredicates = -1, capsuleRate = -1, capsuleRateScope = -1;
+    int32_t capsuleRateGuards = -1; // -1 = not passed
+    float capsuleRateBlendS = std::numeric_limits<float>::quiet_NaN();
     int32_t speedConverter = -1; // -1 = not passed
     float speedConverterFriction = 0.0f, speedConverterMaxTurnDeg = 0.0f;
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
@@ -642,6 +647,10 @@ int main(int argc, char** argv)
             speedConverterFriction = static_cast<float>(std::atof(argv[i + 1]));
         else if (std::strcmp(argv[i], "--capsule-rate-scope") == 0)
             capsuleRateScope = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--capsule-rate-guards") == 0)
+            capsuleRateGuards = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--capsule-rate-blend") == 0)
+            capsuleRateBlendS = static_cast<float>(std::atof(argv[i + 1]));
         else if (std::strcmp(argv[i], "--velocity-predicates") == 0)
             velocityPredicates = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--tip-deg") == 0)
@@ -959,6 +968,7 @@ int main(int argc, char** argv)
         motionhost::SetAirStepDownReach(stepDownReach != 0);
     }
     motiondriver::TestSetMapCapsuleRate(capsuleRate, capsuleRateScope);
+    motiondriver::TestSetMapCapsuleRateGuards(capsuleRateGuards, capsuleRateBlendS);
     motiondriver::TestSetMapSpeedConverter(speedConverter, speedConverterFriction, speedConverterMaxTurnDeg);
     if (capsuleForecast >= 0)
         motiondriver::SetCapsuleForecast(capsuleForecast != 0);
