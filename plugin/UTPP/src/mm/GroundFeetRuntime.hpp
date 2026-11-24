@@ -1,7 +1,8 @@
 // UTPP motion matching runtime - feet on uneven ground (mm/GroundFeet.hpp), shared state between the game thread and the animation
 // threads. Header-only, lock-free, allocation-free.
-//   - game thread (feed / script / setting): SetEnabled, PublishGate, ProbeFromPose (at every publish: the balls of the published
-//     feet, the points the script traces under next), ProbePoint (model -> world for the script), PublishSamples (the traces);
+//   - game thread (feed / script / setting): SetEnabled, PublishGate, ProbeFromPose (at every publish: the balls and heels of the
+//     published feet, the points the script traces under next), ProbePoint / HeelPoint (model -> world for the script), SetHeelSamples
+//     and PublishSamples (the traces);
 //   - animation thread: StepAndApply (one stage update per frame, reused by every other call of the same frame; one leg solve for the
 //     body height offset and the ground plan). An inactive plan returns false and the caller runs the body height stage alone, so the
 //     pose is bit for bit what it was without this stage.
@@ -86,10 +87,13 @@ struct Probe
 {
     bool valid = false;
     math::Vec3 ball[2];         // model space, the published pose
+    math::Vec3 heel[2];         // model space, the published pose (the ankle without a heel bone)
     float floor = 0.0f;         // model z of the clip's floor (lowest ball of either foot, rising kProbeFloorRise per publish)
     bool haveFloor = false;
     float world[2][2] = {};     // the last world point handed out per foot
     bool haveWorld[2] = {false, false};
+    float heelPoint[2][2] = {}; // the heel trace point of the last ProbePoint per foot (world x, y)
+    bool haveHeel[2] = {false, false};
 };
 inline Probe g_probe;
 
@@ -105,7 +109,10 @@ inline void ProbeFromPose(const float* aPose, uint32_t aNumBones)
     }
     g_probe.valid = true;
     for (int s = 0; s < 2; ++s)
+    {
         g_probe.ball[s] = f.leg[s].ball;
+        g_probe.heel[s] = f.leg[s].heel;
+    }
     const float low = std::fmin(f.leg[0].ball.z, f.leg[1].ball.z);
     g_probe.floor = g_probe.haveFloor && std::isfinite(g_probe.floor) ? std::fmin(low, g_probe.floor + kProbeFloorRise) : low;
     g_probe.haveFloor = std::isfinite(g_probe.floor);
@@ -115,18 +122,22 @@ inline void ProbeFromPose(const float* aPose, uint32_t aNumBones)
 // model). A foot that moved since the last point is led by one more step of that motion (a swinging foot; at most 0.3 m) and by up to
 // kProbeToe further along it (full from kProbeToeMove of motion per point) while it is high in the swing (the ball between
 // Config::swingLow and swingHigh above the clip's floor: the share the stage keeps only clearance for), so a swinging foot sees a step
-// riser under its toe before the ball reaches it. A foot at rest or about to land is traced under its ball.
+// riser under its toe before the ball reaches it. A foot at rest or about to land is traced under its ball. The heel trace point of the
+// same foot (HeelPoint) is its published heel led by the same step (without the toe lead).
 inline constexpr float kProbeToe = 0.08f;     // m
 inline constexpr float kProbeToeMove = 0.05f; // m
 inline bool ProbePoint(int aSide, float aCapX, float aCapY, float aYaw, float& aOutX, float& aOutY)
 {
-    if (aSide < 0 || aSide > 1 || !g_probe.valid || !std::isfinite(aCapX) || !std::isfinite(aCapY) || !std::isfinite(aYaw))
+    if (aSide < 0 || aSide > 1)
+        return false;
+    g_probe.haveHeel[aSide] = false;
+    if (!g_probe.valid || !std::isfinite(aCapX) || !std::isfinite(aCapY) || !std::isfinite(aYaw))
         return false;
     float wx = 0.0f, wy = 0.0f;
     math::Rot2(aYaw, g_probe.ball[aSide].x, g_probe.ball[aSide].y, wx, wy);
     wx += aCapX;
     wy += aCapY;
-    float lx = 0.0f, ly = 0.0f;
+    float lx = 0.0f, ly = 0.0f, hx = 0.0f, hy = 0.0f;
     if (g_probe.haveWorld[aSide])
     {
         lx = wx - g_probe.world[aSide][0];
@@ -141,6 +152,7 @@ inline bool ProbePoint(int aSide, float aCapX, float aCapY, float aYaw, float& a
             const float u = std::clamp((above - c.swingLow) / (c.swingHigh - c.swingLow), 0.0f, 1.0f);
             const float toe = kProbeToe * std::fmin(l / kProbeToeMove, 1.0f) * (u * u * (3.0f - 2.0f * u));
             const float lead = std::fmin(l, 0.3f);
+            hx = lx * (lead / l), hy = ly * (lead / l);
             lx *= (lead + toe) / l, ly *= (lead + toe) / l;
         }
     }
@@ -149,6 +161,21 @@ inline bool ProbePoint(int aSide, float aCapX, float aCapY, float aYaw, float& a
     g_probe.haveWorld[aSide] = true;
     aOutX = wx + lx;
     aOutY = wy + ly;
+    float ex = 0.0f, ey = 0.0f;
+    math::Rot2(aYaw, g_probe.heel[aSide].x, g_probe.heel[aSide].y, ex, ey);
+    g_probe.heelPoint[aSide][0] = aCapX + ex + hx;
+    g_probe.heelPoint[aSide][1] = aCapY + ey + hy;
+    g_probe.haveHeel[aSide] = std::isfinite(g_probe.heelPoint[aSide][0]) && std::isfinite(g_probe.heelPoint[aSide][1]);
+    return true;
+}
+
+// The heel trace point (world x, y) of foot aSide from the last ProbePoint of that side. False = none.
+inline bool HeelPoint(int aSide, float& aOutX, float& aOutY)
+{
+    if (aSide < 0 || aSide > 1 || !g_probe.haveHeel[aSide])
+        return false;
+    aOutX = g_probe.heelPoint[aSide][0];
+    aOutY = g_probe.heelPoint[aSide][1];
     return true;
 }
 
@@ -205,8 +232,28 @@ inline void ArmIkJoints(uint64_t aRig, std::span<const uint64_t> aNames, std::sp
     g_ikJoints.Publish(j);
 }
 
+// Game thread: the heel traces of this frame (world hit points), taken right before the ball traces; the next PublishSamples takes
+// them (and clears them).
+struct HeelTraces
+{
+    bool set = false;
+    bool hit[2] = {false, false};
+    float pos[2][3] = {};
+};
+inline HeelTraces g_heelTraces;
+inline void SetHeelSamples(const bool (&aHit)[2], const float (&aPos)[2][3])
+{
+    g_heelTraces.set = true;
+    for (int k = 0; k < 2; ++k)
+    {
+        g_heelTraces.hit[k] = aHit[k];
+        for (int i = 0; i < 3; ++i)
+            g_heelTraces.pos[k][i] = aPos[k][i];
+    }
+}
+
 // Game thread: the traces of this frame in world space (hit points and normals) with the capsule they were taken with, stored in its
-// model frame.
+// model frame, with the heel traces set since the last call (level ground normal; none set: no heel samples).
 inline void PublishSamples(const bool (&aHit)[2], const float (&aPos)[2][3], const float (&aNormal)[2][3], float aCapX, float aCapY,
                            float aCapZ, float aYaw, int64_t aTicks)
 {
@@ -223,7 +270,15 @@ inline void PublishSamples(const bool (&aHit)[2], const float (&aPos)[2][3], con
         f.z = aPos[k][2];
         math::Rot2(-aYaw, aNormal[k][0], aNormal[k][1], f.nx, f.ny);
         f.nz = aNormal[k][2];
+        if (g_heelTraces.set && g_heelTraces.hit[k])
+        {
+            FootSample& h = s.heel[k];
+            h.hit = 1u;
+            math::Rot2(-aYaw, g_heelTraces.pos[k][0] - aCapX, g_heelTraces.pos[k][1] - aCapY, h.x, h.y);
+            h.z = g_heelTraces.pos[k][2];
+        }
     }
+    g_heelTraces = HeelTraces{};
     g_samples.Publish(s);
 }
 

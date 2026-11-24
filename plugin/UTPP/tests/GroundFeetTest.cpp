@@ -1,6 +1,7 @@
 // Feet on uneven ground (mm/GroundFeet.hpp, mm/GroundFeetRuntime.hpp): flat ground is the body height stage bit for bit (named
 // GroundFeetFlatIdentity), slopes 10 / 20 / 30 deg, a 17 cm step up and down, stairs 15 / 20 cm with one foot per step, a 12 cm curb
 // snap of the capsule (sudden motion taken by the pelvis), a plane jump under a swinging foot, 30 / 60 / 144 Hz, missing / NaN traces,
+// stairs down with the ball past the step nose (the heel trace keeps the foot on its tread),
 // the reach and knee limits, the planted ball kept, a swinging foot over a slope (no tilt, the knee's fold kept), ground two steps
 // ahead of a climbing capsule, the moving platform and the gate fade, and the animation-thread stepper; then the
 // same terrain checks on the poses of the motion database when its path is given.
@@ -71,8 +72,9 @@ static math::Vec3 Normal(const Ground& h, float x, float y)
     return legik::Norm(math::Vec3{-gx, -gy, 1.0f});
 }
 
-// samples under the balls of aPose (model = world xy, capsule at the origin, height aCapZ)
-static Samples Sample(const Ground& h, const bodyheight::LegRig& rig, const std::vector<float>& pose, float aCapZ, int64_t ticks = 1)
+// samples under the balls and heels of aPose (model = world xy, capsule at the origin, height aCapZ; aHeels false: no heel traces)
+static Samples Sample(const Ground& h, const bodyheight::LegRig& rig, const std::vector<float>& pose, float aCapZ, int64_t ticks = 1,
+                      bool aHeels = true)
 {
     PoseFrame f;
     Gather(rig, pose.data(), rig.numBones, f);
@@ -84,8 +86,22 @@ static Samples Sample(const Ground& h, const bodyheight::LegRig& rig, const std:
         const float x = f.leg[k].ball.x, y = f.leg[k].ball.y;
         const math::Vec3 n = Normal(h, x, y);
         s.foot[k] = FootSample{1u, x, y, h(x, y), n.x, n.y, n.z};
+        if (aHeels)
+            s.heel[k] = FootSample{1u, f.leg[k].heel.x, f.leg[k].heel.y, h(f.leg[k].heel.x, f.leg[k].heel.y), 0.0f, 0.0f, 1.0f};
     }
     return s;
+}
+
+// ground the planted foot of leg l stands on: under the ball, or under the heel when that is above the ball's plane there by more than
+// the stage's margin
+static float Support(const Ground& h, const LegFrame& l)
+{
+    const float gb = h(l.ball.x, l.ball.y), gh = h(l.heel.x, l.heel.y);
+    math::Vec3 n = Normal(h, l.ball.x, l.ball.y);
+    if (!(n.z > 0.5f)) // a step edge under the trace: level, as the stage takes it
+        n = math::Vec3{0.0f, 0.0f, 1.0f};
+    const float plane = gb - (n.x * (l.heel.x - l.ball.x) + n.y * (l.heel.y - l.ball.y)) / n.z;
+    return gh > plane + Config{}.heelAbove ? gh : gb;
 }
 
 struct Outcome
@@ -99,7 +115,7 @@ struct Outcome
 // runs the stage for aSeconds at aHz on a static pose over the ground h with the capsule at aCapZ(t); returns the last frame
 static Outcome Run(const Ground& h, const std::vector<float>& pose, int hz, float aSeconds, const std::function<float(float)>& aCapZ,
                    float aBody = 0.0f, Stage* aStage = nullptr, std::vector<float>* aPelvisWorld = nullptr,
-                   std::vector<float>* aBallWorld = nullptr)
+                   std::vector<float>* aBallWorld = nullptr, bool aHeels = true)
 {
     MockDb db;
     bodyheight::LegRig rig;
@@ -112,7 +128,7 @@ static Outcome Run(const Ground& h, const std::vector<float>& pose, int hz, floa
     for (int i = 0; i < n; ++i)
     {
         const float t = float(i) * dt, cz = aCapZ(t);
-        const Samples s = Sample(h, rig, pose, cz);
+        const Samples s = Sample(h, rig, pose, cz, 1, aHeels);
         const float drawn[3] = {0.0f, 0.0f, cz};
         o.plan = st.Step(dt, &s, true, false, drawn, true, aBody, rig, pose.data(), rig.numBones); // a fresh stage takes dt 0 itself
         o.pose = pose;
@@ -281,6 +297,41 @@ static void Steps()
     }
 }
 
+static void StairsDownHeel()
+{
+    // stairs down, standing on the upper step with the left ball past the step nose (the edge halfway between heel and ball, the next
+    // step 17 cm lower): the ball trace alone sees the lower step and sinks the foot into the tread; with the heel trace the foot stays
+    // on the tread it stands on (heel and ball not below it; standing: no extra knee fold). The capsule stands on the upper step, still
+    // and descending at 1 m/s with the ground moving with it (the plane then trails the sinking ground a few cm above it).
+    MockDb db;
+    bodyheight::LegRig rig;
+    rig.Init(db);
+    const auto pose = MockPose(12.0f, 18.0f);
+    PoseFrame f;
+    Gather(rig, pose.data(), rig.numBones, f);
+    const float edge = 0.5f * (f.leg[0].heel.y + f.leg[0].ball.y);
+    for (float v : {0.0f, 1.0f})
+        for (bool heels : {false, true})
+        {
+            float tNow = 0.0f;
+            Ground h = [&tNow, v, edge](float, float y) { return (y > edge ? -0.17f : 0.0f) - v * tNow; };
+            Stage st;
+            const Outcome o = Run(h, pose, 60, 1.0f, [&tNow, v](float t) { tNow = t; return -v * t; }, 0.0f, &st, nullptr, nullptr, heels);
+            // depth of the left heel / ball below the upper tread (the ground the foot stands on), in the capsule frame
+            const float heelDepth = o.anim.leg[0].heel.z - o.after.leg[0].heel.z;
+            const float ballDepth = o.anim.leg[0].ball.z - o.after.leg[0].ball.z;
+            const float flex = KneeInterior(o.anim.leg[0]) - KneeInterior(o.after.leg[0]);
+            char name[260];
+            std::snprintf(name, sizeof name, "stairs down %.0f m/s, ball past the nose, %s: left heel %.1f cm / ball %.1f cm below the tread, knee fold %.1f deg, heel used %llu",
+                          double(v), heels ? "ball + heel traces" : "ball trace only (old)", double(heelDepth) * 100, double(ballDepth) * 100,
+                          double(flex), static_cast<unsigned long long>(st.Diagnostics().heel));
+            if (heels)
+                Check(heelDepth < 0.01f && ballDepth < 0.01f && (v > 0.0f || flex <= 1.0f) && st.Diagnostics().heel > 0, name);
+            else
+                Check(heelDepth > 0.1f && st.Diagnostics().heel == 0, name); // the defect without the heel trace (documents the case)
+        }
+}
+
 static void CurbSnap()
 {
     // a 12 cm curb: the capsule snaps up in one frame while the left foot stays on the lower level (the right one stepped up). The left
@@ -417,9 +468,9 @@ static void BadTraces()
     for (int i = 0; i < 60; ++i)
     {
         Samples s = Sample(h, rig, pose, 0.0f);
-        s.foot[0].hit = i % 3 == 0 ? 0u : 1u;
-        s.foot[0].z = i % 3 == 1 ? std::nanf("") : 0.5f;
-        s.foot[1].z = std::nanf("");
+        s.foot[0].hit = s.heel[0].hit = i % 3 == 0 ? 0u : 1u;
+        s.foot[0].z = s.heel[0].z = i % 3 == 1 ? std::nanf("") : 0.5f;
+        s.foot[1].z = s.heel[1].z = std::nanf("");
         p = st.Step(1.0f / 60, &s, true, false, drawn, true, 0.0f, rig, pose.data(), rig.numBones);
     }
     std::vector<float> a = pose;
@@ -565,8 +616,27 @@ static void ProbeAndSamples()
     rt::g_samples.Read(s);
     PoseFrame f;
     Gather(rig, pose.data(), rig.numBones, f);
-    Check(ok && std::hypot(s.foot[0].x - f.leg[0].ball.x, s.foot[0].y - f.leg[0].ball.y) < 1e-4f && s.foot[0].z == 1.5f,
-          "probe point -> world -> sample: the same model point");
+    Check(ok && std::hypot(s.foot[0].x - f.leg[0].ball.x, s.foot[0].y - f.leg[0].ball.y) < 1e-4f && s.foot[0].z == 1.5f &&
+              s.heel[0].hit == 0 && s.heel[1].hit == 0,
+          "probe point -> world -> sample: the same model point (no heel traces set: no heel samples)");
+    // the heel point of the same probe and the heel traces handed in before the samples: the model heel of the published pose
+    rt::ProbeFromPose(pose.data(), rig.numBones);
+    float bx = 0, by = 0, hx = 0, hy = 0;
+    const bool okB = rt::ProbePoint(1, 10.0f, -4.0f, yaw, bx, by);
+    const bool okH = rt::HeelPoint(1, hx, hy);
+    const bool heelHit[2] = {false, true};
+    const float heelPos[2][3] = {{0, 0, 0}, {hx, hy, 1.7f}};
+    rt::SetHeelSamples(heelHit, heelPos);
+    rt::PublishSamples(hit, pos, nrm, 10.0f, -4.0f, 1.5f, yaw, 8);
+    Samples s2;
+    rt::g_samples.Read(s2);
+    rt::PublishSamples(hit, pos, nrm, 10.0f, -4.0f, 1.5f, yaw, 9);
+    Samples s3;
+    rt::g_samples.Read(s3);
+    Check(okB && okH && s2.heel[0].hit == 0 && s2.heel[1].hit == 1 &&
+              std::hypot(s2.heel[1].x - f.leg[1].heel.x, s2.heel[1].y - f.leg[1].heel.y) < 1e-4f && s2.heel[1].z == 1.7f &&
+              s2.heel[1].nz == 1.0f && s3.heel[1].hit == 0,
+          "heel point -> world -> heel sample: the model heel, level normal, used by one publish only");
     rt::SetEnabled(false);
 }
 
@@ -625,7 +695,7 @@ static void DatabasePoses(const char* aPath)
                 else if (r.kneeLimited == 0 && r.clamped == 0)
                 {
                     const math::Vec3 b0 = f0.leg[s].ball;
-                    const float g = h(b0.x, b0.y);
+                    const float g = Support(h, f0.leg[s]);
                     worstSole = std::fmax(worstSole, std::fabs(f1.leg[s].ball.z - b0.z - g) - (std::fabs(g) > 0.006f ? 0.0051f : std::fabs(g)));
                 }
             }
@@ -696,6 +766,7 @@ int main(int argc, char** argv)
     FlatIdentity();
     Slopes();
     Steps();
+    StairsDownHeel();
     CurbSnap();
     SteadyDescent();
     PlaneJump();

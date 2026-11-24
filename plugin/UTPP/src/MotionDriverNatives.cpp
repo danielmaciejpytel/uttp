@@ -683,6 +683,42 @@ void Native_GroundProbePoint(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame
         aOut->W = ok ? 1.0f : 0.0f;
     }
 }
+// The heel trace point of one foot (0 left, 1 right) from the last UTPPGroundProbePoint of that side: x, y = the point, w = 1 valid,
+// 0 none (the stage off: the recorder alone traces no heels).
+void Native_GroundProbeHeel(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::Vector4* aOut, int64_t)
+{
+    int32_t side = 0;
+    RED4ext::GetParameter(aFrame, &side);
+    aFrame->code++;
+    namespace gf = mm::groundfeet::rt;
+    float x = 0.0f, y = 0.0f;
+    const bool ok = gf::Enabled() && gf::HeelPoint(side, x, y);
+    if (aOut)
+    {
+        aOut->X = ok ? x : 0.0f;
+        aOut->Y = ok ? y : 0.0f;
+        aOut->Z = 0.0f;
+        aOut->W = ok ? 1.0f : 0.0f;
+    }
+}
+// The heel traces of this frame (hit flags, world hit points), sent right before UTPPFeedGround, which hands them to the stage.
+void Native_FeedGroundHeel(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool hit[2] = {false, false};
+    RED4ext::Vector4 pos[2]{};
+    RED4ext::GetParameter(aFrame, &hit[0]);
+    RED4ext::GetParameter(aFrame, &pos[0]);
+    RED4ext::GetParameter(aFrame, &hit[1]);
+    RED4ext::GetParameter(aFrame, &pos[1]);
+    aFrame->code++;
+    namespace gf = mm::groundfeet::rt;
+    if (!gf::Enabled())
+        return;
+    float p[2][3];
+    for (int s = 0; s < 2; ++s)
+        p[s][0] = pos[s].X, p[s][1] = pos[s].Y, p[s][2] = pos[s].Z;
+    gf::SetHeelSamples(hit, p);
+}
 void Native_GroundTraceBegin(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     aFrame->code++;
@@ -995,6 +1031,11 @@ void RegisterNatives()
     gf7->AddParam("Vector4", "capsule"); gf7->AddParam("Float", "yawDeg"); rtti->RegisterFunction(gf7);
     auto* gf8 = RED4ext::CGlobalFunction::Create("UTPPGroundRecorderOn", "UTPPGroundRecorderOn", &Native_GroundRecorderOn);
     gf8->flags = flags; gf8->SetReturnType("Bool"); rtti->RegisterFunction(gf8);
+    auto* gf9 = RED4ext::CGlobalFunction::Create("UTPPGroundProbeHeel", "UTPPGroundProbeHeel", &Native_GroundProbeHeel);
+    gf9->flags = flags; gf9->AddParam("Int32", "side"); gf9->SetReturnType("Vector4"); rtti->RegisterFunction(gf9);
+    auto* gf10 = RED4ext::CGlobalFunction::Create("UTPPFeedGroundHeel", "UTPPFeedGroundHeel", &Native_FeedGroundHeel);
+    gf10->flags = flags; gf10->AddParam("Bool", "hitL"); gf10->AddParam("Vector4", "posL"); gf10->AddParam("Bool", "hitR");
+    gf10->AddParam("Vector4", "posR"); rtti->RegisterFunction(gf10);
 }
 
 void Install(const std::wstring& aDllDir)

@@ -1200,13 +1200,23 @@ int main(int argc, char** argv)
             namespace gf = mm::groundfeet::rt;
             const float yaw = rows[i].yawDeg * 0.0174532925f;
             const float cx = inputs[i].capsulePos[0], cy = inputs[i].capsulePos[1], cz = capZAt(i);
-            bool hit[2] = {false, false};
-            float pos[2][3] = {}, nrm[2][3] = {{0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}};
+            bool hit[2] = {false, false}, heelHit[2] = {false, false};
+            float pos[2][3] = {}, nrm[2][3] = {{0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}}, heelPos[2][3] = {};
             for (int s = 0; s < 2; ++s)
             {
                 float px = 0.0f, py = 0.0f;
                 if (!gf::ProbePoint(s, cx, cy, yaw, px, py))
                     continue;
+                float hx = 0.0f, hy = 0.0f;
+                if (gf::HeelPoint(s, hx, hy))
+                {
+                    const double gh = terrain.Ground(hx, hy);
+                    if (std::fabs(gh - double(cz)) <= 0.6)
+                    {
+                        heelHit[s] = true;
+                        heelPos[s][0] = hx, heelPos[s][1] = hy, heelPos[s][2] = float(gh);
+                    }
+                }
                 const double g = terrain.Ground(px, py);
                 if (std::fabs(g - double(cz)) > 0.6)
                     continue;
@@ -1214,6 +1224,7 @@ int main(int argc, char** argv)
                 pos[s][0] = px, pos[s][1] = py, pos[s][2] = float(g);
                 terrain.Normal(px, py, nrm[s]);
             }
+            gf::SetHeelSamples(heelHit, heelPos);
             gf::PublishSamples(hit, pos, nrm, cx, cy, cz, yaw, feedTicks(i));
             ++gfTraced;
             gfHits += uint64_t(hit[0]) + uint64_t(hit[1]);
