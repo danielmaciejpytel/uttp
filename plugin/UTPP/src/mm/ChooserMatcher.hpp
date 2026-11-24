@@ -507,12 +507,16 @@ struct MatcherConfig
     // velocity direction at 1 s has no PSS_Stop counterpart and gets weight 0), i.e. every dimension of the stored row and of the query is
     // multiplied by sqrt(PSS_Stop normalized weight / PSS_Default normalized weight). Needs both schemas in the bundle; otherwise inactive.
     bool crouchStopStopWeights = false;
-    // Stop entry brake gate (stand and crouch stops). 0 = off, bit for bit. A NEW Stop row on the ground is not a candidate when its authored
-    // root speed is below (1 - stopBrakeGate) x min(chooser speed, the clip's approach speed = median root speed of its frames at or above
+    // Stop entry brake gate (stand and crouch stops; crouch stops only with stopBrakeGateCrouchOnly). 0 = off, bit for bit. A NEW Stop row
+    // on the ground is not a candidate when its authored root speed is below (1 - stopBrakeGate) x min(chooser speed, the clip's approach speed = median root speed of its frames at or above
     // half the peak); the continuing pose is not affected, and when the gate would leave no Stop row of a database the search stays
     // ungated there. Measured with 0.25: the 66.949 crouch stop passes, but the stand stops get worse (stop lock path p95 +4 / +8 cm).
     // 0.25 by default with crouchCapsuleRate.
     float stopBrakeGate = 0.25f;
+    // true = the brake gate applies only while the chooser stance is Crouch (the crouch stop late entry it exists for); stand stops pick as with
+    // the gate off. false (default) = every stop on the ground, bit for bit. Measured true vs false (6 default sessions, capsule speed rate on):
+    // stop lock path p95 Female -12 %, Male -8 %, but Male idle lock path p95 +36 % and start lock path +8 % (gate FAIL), Female CONFLICTING.
+    bool stopBrakeGateCrouchOnly = false;
     // Sprint starts without reselection: entries of PSD_Dense / Sparse_Stand_Sprint_Starts are treated as DisableReselection (their rows
     // are not picked again while the clip plays as a candidate, like the entries the bake flags), so a sprint start runs through to its loop.
     // 0 = the entry flags of the bake only (default); 1 = every sprint start entry; 2 = the sprint starts without the reface starts.
@@ -876,7 +880,8 @@ inline void TestCrouchStopOn(MatcherConfig& c)
 #endif
 
 // Crouch stop options switched ON by name (offline tools and tests; comma separated): rate (crouchCapsuleRate), legfade (crouchStopLegFade),
-// long (crouchStopBlendS 0.8), fade (legfade + long), lower (crouchStopLowerFeet), schema (crouchStopStopWeights), gate (stopBrakeGate 0.25).
+// long (crouchStopBlendS 0.8), fade (legfade + long), lower (crouchStopLowerFeet), schema (crouchStopStopWeights), gate (stopBrakeGate 0.25),
+// gatecrouch (stopBrakeGateCrouchOnly).
 inline void ApplyCrouchStopOptions(MatcherConfig& c, std::string_view aList)
 {
     const std::string list = "," + std::string(aList) + ",";
@@ -887,6 +892,7 @@ inline void ApplyCrouchStopOptions(MatcherConfig& c, std::string_view aList)
     if (has("lower")) c.crouchStopLowerFeet = true;
     if (has("schema")) c.crouchStopStopWeights = true;
     if (has("gate")) c.stopBrakeGate = 0.25f;
+    if (has("gatecrouch")) c.stopBrakeGateCrouchOnly = true;
 }
 
 class ChooserMatcher
@@ -1457,7 +1463,10 @@ public:
         m_sinceFastS = aState.gait >= 1 || aState.speed2dCmS > m_cfg.walkTransitionFastCmS ? 0.0f : m_sinceFastS + aDt;
         m_sinceSlowS = aState.speed2dCmS <= m_cfg.runTransitionSlowCmS ? 0.0f : m_sinceSlowS + aDt;
         m_speedCmS = aState.speed2dCmS;
-        m_stopGateRefCmS = m_cfg.stopBrakeGate > 0.0f && aState.movementMode == 0 && std::isfinite(aState.speed2dCmS) ? aState.speed2dCmS : 0.0f;
+        m_stopGateRefCmS = m_cfg.stopBrakeGate > 0.0f && aState.movementMode == 0 && (!m_cfg.stopBrakeGateCrouchOnly || aState.stance == 1) &&
+                                   std::isfinite(aState.speed2dCmS)
+                               ? aState.speed2dCmS
+                               : 0.0f;
         m_traj = aTraj;
         m_numTraj = aNumTraj;
         m_hist = aHist;
