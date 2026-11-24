@@ -563,6 +563,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tests/motion_traversal.cmake OPTIONAL)
 # stage 10.1 p.4: offline replay of recorded game feeds through MotionAdapter (utpp_motion_replay; data outside git).
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/replay.cmake OPTIONAL)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/jumppick.cmake OPTIONAL) # fix3/jump: jump pick + quick slide combinations (P6 K2, N3)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tests/speedconv_terrain.cmake OPTIONAL) # speed converter: stair step dips held in the query
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/slowwalk.cmake OPTIONAL) # G1: established slow walk plays the Walk_Loop clips
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/steadyrun.cmake OPTIONAL) # G10: steady Run gait (stick 0.7-0.82) plays Walk_Loop / Run_Loop clips, no pose reset
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/analogfloor.cmake OPTIONAL) # minimum analog walk speed: floor multiplier, floor stick, modifier identity

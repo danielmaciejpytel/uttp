@@ -5620,6 +5620,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     // motion WantsToWalk = the game's walk toggle (PSM permanent bool WalkToggled, batch 1b UTPPFeedLocomotionExtra; raw flag,
     // the game clears it on sprint / combat). An older script without the extra call: false (as before).
     f.wantsToWalk = aRaw.haveExtra && aRaw.walkToggled;
+    f.haveCapsuleZ = aRaw.haveExtra && std::isfinite(aRaw.capsulePos[2]); // speedconv::kStepHold
+    f.capsuleZ = f.haveCapsuleZ ? aRaw.capsulePos[2] : 0.0f;
     // G5: Tier2 Slow (separate native, sent right before this feed) lowers the stand run cap; G2: the walk toggle speed (0 = off)
     f.tier2Slow = g_tier2Slow.load(std::memory_order_acquire);
     // G9: aim jog off -> AimWalk at the vanilla speed asks for the Walk gait (MotionAdapter MapToChooser)
