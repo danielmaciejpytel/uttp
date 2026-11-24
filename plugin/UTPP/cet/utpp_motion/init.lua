@@ -1123,7 +1123,7 @@ function M.RegisterSettings(core)
       .. "match; a foot in the air lifts over the step ahead. On (default); off = the feet follow the animations as on flat ground.",
     apply = function(v) M.SetOption("groundFeet", v == true) end })
   core.Register({ key = "mm.stairSteps", section = "motion", type = "bool", default = false,
-    label = "Step on every stair",
+    label = "Fit steps to stairs",
     desc = "On stairs V takes shorter, quicker steps that fit the stairs, so her feet land on the steps instead of across their "
       .. "edges; her speed stays the same. At walking and running pace a step still spans two to four stairs. Needs Feet on uneven "
       .. "ground and Stride matching. Off (default) = the steps of the animations as on flat ground.",

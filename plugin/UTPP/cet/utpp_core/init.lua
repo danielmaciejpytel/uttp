@@ -587,7 +587,7 @@ local LAYOUT = {
   -- speed (m/s)" (mm.minAnalogWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
   -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less), then "Firm feet in turns and
   -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default on), then "Feet on uneven ground"
-  -- (mm.groundFeet, utpp_motion: the feet stand on the traced ground, default on), then "Step on every stair" (mm.stairSteps,
+  -- (mm.groundFeet, utpp_motion: the feet stand on the traced ground, default on), then "Fit steps to stairs" (mm.stairSteps,
   -- utpp_motion: shorter steps fitted to the stair treads, default off), then "Planted feet keep their direction"
   -- (mm.footYawLock, utpp_motion: a planted foot keeps its direction while the body turns, default on), then "Body lean" and
   -- "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns)

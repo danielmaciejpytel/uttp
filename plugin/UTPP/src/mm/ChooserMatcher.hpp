@@ -823,6 +823,7 @@ struct MatchResult
     float playRateRatio = 1.0f; // diagnostic: unclamped query / pose speed ratio of the last rate calculation (rate2::Result::ratio)
     float stairCadence = 1.0f;  // ChooserState::stairTreadM: the stair cadence included in playRate (1 = none)
     int32_t stairTreads = 0;    // ... treads per step of that cadence (0 = no fit)
+    float stairFlightCadence = 1.0f; // ... the flight's smoothed cadence without the landing correction (1 = no fitted flight)
     bool stairLanded = false;   // ... a foot landed in this update (contact onset of the loop); stairLandErr = its phase error (m)
     float stairLandErr = 0.0f;
     float cost = std::numeric_limits<float>::max();
@@ -2584,6 +2585,7 @@ public:
             m_stairPhaseSmooth += (m_stairPhase - m_stairPhaseSmooth) * (1.0f - std::exp(-aDt / kStairPhaseTau));
         m_stairApplied = loop ? m_stairCadence * (1.0f + m_stairPhaseSmooth) : 1.0f;
         aRes.stairCadence = m_stairApplied;
+        aRes.stairFlightCadence = loop ? m_stairCadence : 1.0f;
         aRes.stairTreads = m_stairApplied != 1.0f ? treads : 0;
     }
 

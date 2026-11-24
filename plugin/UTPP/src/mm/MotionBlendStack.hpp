@@ -632,9 +632,12 @@ class BlendStack
             head.rootApproximate = false;
         }
         m_strideScale = 1.0f;
-        // a stair cadence (StairSteps.hpp, MatchResult::stairCadence) lowers the stride floor so the warp shortens the step by it
-        m_strideFloor = selected.stairCadence > 1.0f && std::isfinite(selected.stairCadence)
-                            ? stridewarp::kScaleFloor / selected.stairCadence
+        // a fitted stair flight (StairSteps.hpp, MatchResult::stairFlightCadence above 1) lowers the stride floor so the warp shortens
+        // the step by the played cadence (stairCadence, with the landing correction); gated on the flight's own cadence, so a landing
+        // correction that dips the played cadence under 1 does not switch the floor and the knee limit (LegStrideScale) back and forth
+        m_strideFloor = selected.stairFlightCadence > 1.0f && std::isfinite(selected.stairFlightCadence) &&
+                                std::isfinite(selected.stairCadence)
+                            ? stridewarp::kScaleFloor / std::fmax(selected.stairCadence, selected.stairFlightCadence)
                             : stridewarp::kScaleFloor;
         if (m_strideWarp && (m_strideYawFade || m_strideCrouchMode == 2) && m_graph.enabled)
         {

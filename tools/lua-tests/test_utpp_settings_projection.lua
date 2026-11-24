@@ -667,8 +667,8 @@ if not WRITE then
     -- 2026-11-13: Run pelvis yaw trim, Body yaw offset and Minimum walk speed are hidden in 0.1.0 (level "hidden", layout place kept)
     -- 2026-11-18: Body yaw offset is one option per body (female V, male V, both hidden); Stride matching (player level) after
     -- Minimum walk speed; 2026-11-21: Firm feet in turns and stops (player level) after Stride matching; 2026-11-23: Body lean and
-    -- Head lean (player level) after Firm feet; 2026-11-24: Feet on uneven ground (player level) between Firm feet and Body lean; Planted feet keep their direction (player level) after it; Step on every stair (player level) between them
-    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Firm feet in turns and stops, Feet on uneven ground, Step on every stair, Planted feet keep their direction, Body lean, Head lean, Shoulder width, Feminine figure, then the advanced camera options",
+    -- Head lean (player level) after Firm feet; 2026-11-24: Feet on uneven ground (player level) between Firm feet and Body lean; Planted feet keep their direction (player level) after it; Fit steps to stairs (player level) between them
+    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Firm feet in turns and stops, Feet on uneven ground, Fit steps to stairs, Planted feet keep their direction, Body lean, Head lean, Shoulder width, Feminine figure, then the advanced camera options",
       placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffsetFemale") == "hidden/frame/60"
       and placeOf("mm.bodyYawOffsetMale") == "hidden/frame/70" and placeOf("mm.headLead") == "hidden/frame/80"
       and placeOf("mm.walkToggleSpeed") == "player/frame/90" and placeOf("mm.minAnalogWalkSpeed") == "hidden/frame/100"

@@ -248,7 +248,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category", "Camera")
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "19")
-  @runtimeProperty("ModSettings.displayName", "Step on every stair")
+  @runtimeProperty("ModSettings.displayName", "Fit steps to stairs")
   @runtimeProperty("ModSettings.description", "On stairs V takes shorter, quicker steps that fit the stairs, so her feet land on the steps instead of across their edges; her speed stays the same. At walking and running pace a step still spans two to four stairs. Needs Feet on uneven ground and Stride matching. Off (default) = the steps of the animations as on flat ground. No effect with the Game Animations pack.")
   public let mm_stairSteps: Bool = false;
 

@@ -254,8 +254,8 @@ do
     and yl.label == "Planted feet keep their direction" and type(yl.desc) == "string"
     and yl.desc:find("does not twist", 1, true) ~= nil)
   local st = defs["mm.stairSteps"]
-  check("registered mm.stairSteps: bool, off by default, motion section, label 'Step on every stair', native in M.OPTIONS",
-    st ~= nil and st.type == "bool" and st.default == false and st.section == "motion" and st.label == "Step on every stair"
+  check("registered mm.stairSteps: bool, off by default, motion section, label 'Fit steps to stairs', native in M.OPTIONS",
+    st ~= nil and st.type == "bool" and st.default == false and st.section == "motion" and st.label == "Fit steps to stairs"
     and type(st.desc) == "string" and st.desc:find("speed stays the same", 1, true) ~= nil and v.want.stairSteps == false
     and (function() for _, o in ipairs(v.OPTIONS) do if o.want == "stairSteps" then return o.native == "UTPPSetMMStairSteps" end end return false end)())
   check("registered mm.orientWarp on by default, bool, animation section",
