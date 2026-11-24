@@ -102,7 +102,7 @@ M.PACK_FORCED = {
 M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
-  "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
+  "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.footYawLock", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
@@ -587,14 +587,15 @@ local LAYOUT = {
   -- speed (m/s)" (mm.minAnalogWalkSpeed, utpp_motion: capsule speed floor of a small stick tilt), then "Stride matching"
   -- (mm.strideWarp, utpp_motion: steps shortened to the movement speed so the feet slide less), then "Firm feet in turns and
   -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default on), then "Feet on uneven ground"
-  -- (mm.groundFeet, utpp_motion: the feet stand on the traced ground, default on), then "Body lean" and "Head lean"
-  -- (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns)
+  -- (mm.groundFeet, utpp_motion: the feet stand on the traced ground, default on), then "Planted feet keep their direction"
+  -- (mm.footYawLock, utpp_motion: a planted foot keeps its direction while the body turns, default on), then "Body lean" and
+  -- "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
                          "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.headLead", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
-                         "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth",
-                         "mm.feminineFigure" } },
+                         "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.footYawLock", "mm.leanScale", "mm.leanHeadScale",
+                         "mm.shoulderWidth", "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
   { "developer", "frame", { "body.impl", "headGuard.impl" } },

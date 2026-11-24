@@ -11,7 +11,7 @@ local function fresh()
 end
 local function mock()
   local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    stride = {}, firm = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
+    stride = {}, firm = {}, yawLock = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -94,6 +94,10 @@ local function mock()
     setFirmFeet = function(on)
       t.firm[#t.firm + 1] = on
       return not t.firmReject
+    end,
+    setFootYawLock = function(on)
+      t.yawLock[#t.yawLock + 1] = on
+      return not t.yawLockReject
     end,
     setWalkSpeed = function(ms)
       t.walk[#t.walk + 1] = ms
@@ -244,6 +248,11 @@ do
   check("registered mm.firmFeet: bool, on by default, animation section, label 'Firm feet in turns and stops'",
     ff ~= nil and ff.type == "bool" and ff.default == true and ff.section == "animation"
     and ff.label == "Firm feet in turns and stops" and type(ff.desc) == "string" and ff.desc:find("slide less", 1, true) ~= nil)
+  local yl = defs["mm.footYawLock"]
+  check("registered mm.footYawLock: bool, on by default, animation section, label 'Planted feet keep their direction'",
+    yl ~= nil and yl.type == "bool" and yl.default == true and yl.section == "animation"
+    and yl.label == "Planted feet keep their direction" and type(yl.desc) == "string"
+    and yl.desc:find("does not twist", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
@@ -712,6 +721,25 @@ do
   t.firmReject = false
   v.Sync(t.api)
   check("rejected firmFeet retries", #t.firm == 4 and t.firm[4] == true and v.rt.optionsApplied.firmFeet == true)
+end
+
+-- mm.footYawLock (one of M.OPTIONS; DLL default on): on is sent once when motion comes on, then only on a change
+do
+  local v, t = fresh(), mock()
+  check("footYawLock starts on", v.want.footYawLock == true)
+  v.SetEnabled(true)
+  check("footYawLock on is sent when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.yawLock == 1 and t.yawLock[1] == true and v.rt.optionsApplied.footYawLock == true)
+  check("steady footYawLock is not resent", v.Sync(t.api) == "same" and #t.yawLock == 1)
+  v.SetOption("footYawLock", false, t.api)
+  check("footYawLock switched off is sent once",
+    #t.yawLock == 2 and t.yawLock[2] == false and v.rt.optionsApplied.footYawLock == false)
+  t.yawLockReject = true
+  v.SetOption("footYawLock", true, t.api)
+  check("rejected footYawLock is never acknowledged", #t.yawLock == 3 and v.rt.optionsApplied.footYawLock == false)
+  t.yawLockReject = false
+  v.Sync(t.api)
+  check("rejected footYawLock retries", #t.yawLock == 4 and t.yawLock[4] == true and v.rt.optionsApplied.footYawLock == true)
 end
 
 -- turn steering is one fixed behaviour of the DLL: no option is registered, and the stored keys of the earlier choice

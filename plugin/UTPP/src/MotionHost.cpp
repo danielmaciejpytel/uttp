@@ -1531,6 +1531,7 @@ bool g_pelvisPlacementOn = false; // pelvis stage of the foot locker (false = th
 uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis stage
 bool g_firmFeetOn = true;        // firm feet in turns and stops (CET mm.firmFeet, default on; mm/FootLocker.hpp FirmFeetConfig)
 FirmFeetConfig g_firmFeetCfg;    // its limits (SetFirmFeetParams; applied to the foot locker every feed while it is on)
+bool g_footYawLockOn = true;     // planted foot yaw lock (CET mm.footYawLock, default on; mm/FootLocker.hpp FootYawLockConfig)
 // Body height smoothing (mm/BodyHeightRuntime.hpp; option, default on): the stage runs on the animation thread with the drawn height;
 // the feed only publishes its gate (ground locomotion of this feed) and a reset request (teleport, hand-back).
 bool g_bodyHeightOn = true; // the menu default (mm.bodyHeightSmooth)
@@ -1903,6 +1904,7 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
         pol.classTurn = FootSlipGroup(aCtx.clipClass) == 2;
         pol.firmFeet = g_firmFeetOn;
         pol.firmGate = g_effGate == 0 && !g_holdActive && aIn.tppActive;
+        pol.yawLock = g_footYawLockOn;
         if (g_firmFeetOn)
             g_footLock.SetFirmFeetConfig(g_firmFeetCfg);
         ApplyFootFeedPolicy(g_footLock, pol);
@@ -7492,6 +7494,46 @@ bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg,
     std::lock_guard lock(g_mutex);
     g_firmFeetCfg = c;
     return true;
+}
+
+bool SetFootYawLock(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    g_footYawLockOn = aOn; // read at the next feed
+    return true;
+}
+
+bool FootYawLock()
+{
+    std::lock_guard lock(g_mutex);
+    return g_footYawLockOn;
+}
+
+bool SetFootYawLockParams(float aTwistReduction, float aMaxCorrection, float aUnplantAngle)
+{
+    std::lock_guard lock(g_mutex);
+    FootYawLockConfig c = g_footLock.YawLockConfig();
+    if (!(aTwistReduction < 0.0f))
+        c.twistReduction = aTwistReduction;
+    if (!(aMaxCorrection < 0.0f))
+        c.maxCorrection = aMaxCorrection;
+    if (!(aUnplantAngle < 0.0f))
+        c.unplantAngle = aUnplantAngle;
+    return g_footLock.SetYawLockConfig(c);
+}
+
+void FootYawLockStats(uint64_t* aUpdates, uint64_t* aUnplants, uint64_t* aReplants, uint64_t* aBounds)
+{
+    std::lock_guard lock(g_mutex);
+    const FootLockDiagnostics& d = g_footLock.Diagnostics();
+    if (aUpdates)
+        *aUpdates = d.yawLockUpdates;
+    if (aUnplants)
+        *aUnplants = d.yawLockUnplants;
+    if (aReplants)
+        *aReplants = d.yawLockReplants;
+    if (aBounds)
+        *aBounds = d.yawLockBounds;
 }
 
 void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds, uint64_t* aHandBacks)

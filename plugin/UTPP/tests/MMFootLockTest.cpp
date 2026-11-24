@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <string>
@@ -1354,6 +1355,144 @@ static void ToeWorld(const FootLocker& fl, std::span<const BoneTransform> aPose,
     aX = double(aCx) + std::cos(double(aYaw)) * t.x - std::sin(double(aYaw)) * t.y;
     aY = double(aCy) + std::sin(double(aYaw)) * t.x + std::cos(double(aYaw)) * t.y;
 }
+// Planted foot yaw lock of the soft-slip path (FootYawLockConfig, FootLocker::SetYawLock): the world yaw is held about the toe through a
+// turn, an angle beyond 60 deg unplants it and the spring plants it again within 12 deg, the correction bound limits the ankle chord,
+// and off is the previous path bit for bit.
+static void SectionYawLock(const Database& db)
+{
+    int32_t wc = FindClip("M_Neutral_Walk_Loop_F");
+    if (wc < 0)
+        wc = 0;
+    std::vector<BoneTransform> pose(db.NumBones());
+    FramePose(db, db.Clips()[size_t(wc)].firstFrame + 6, pose);
+    const std::span<const BoneTransform> in(pose);
+    struct Run
+    {
+        float drift = 0.0f, maxApplied = 0.0f, maxCorr = 0.0f, endApplied = 0.0f;
+        std::vector<double> toe; // shown toe world x, y per update
+        uint64_t unplants = 0, replants = 0, bounds = 0;
+        bool ok = false;
+    };
+    // turn by aTurn over 20 updates, then hold aHold s, left foot in contact: aTwist false = the capsule turns under a still pose; true =
+    // the animated foot turns about its ankle (model space) on a still capsule, with the soft slip on (start 2 cm: the toe follows the
+    // animation, the shipped path)
+    FootLocker probe;
+    probe.Init(db);
+    const int32_t fb = probe.ChainBone(0, 2);
+    const int32_t fpar = probe.Parents()[size_t(fb)];
+    auto run = [&](bool aOn, float aTurnDeg, float aHold, const FootYawLockConfig& aCfg, bool aTwist = false) {
+        Run r;
+        FootLocker fl;
+        r.ok = fl.Init(db) && fl.SetYawLockConfig(aCfg);
+        fl.SetYawLock(aOn);
+        if (aTwist)
+            fl.SetSlip(0.02f, 0.04f);
+        fl.Update(kDt, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, in);
+        for (int i = 0; i < 12; ++i) // full lock weight
+            fl.Update(kDt, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, in);
+        const float lockYaw = DisplayedFootYaw(fl, fl.Output(), 0, 0.0f);
+        const float turn = aTurnDeg / kRad2Deg;
+        float yaw = 0.0f;
+        std::vector<BoneTransform> tw = pose;
+        const int n = 20 + int(std::lround(aHold / kDt));
+        for (int i = 1; i <= n; ++i)
+        {
+            const float u = turn * float(std::min(i, 20)) / 20.0f;
+            if (aTwist)
+            {
+                tw = pose; // local' = inv(parent) * Rz(u) * parent * local: the foot turns about its ankle in model space
+                const math::Quat pq = fl.ModelSpace(in, fpar).q;
+                const math::Quat rz = legik::AxisAngle(math::Vec3{0.0f, 0.0f, 1.0f}, u);
+                tw[size_t(fb)].q = math::QuatNormalize(math::QuatMul(math::QuatMul(math::QuatInv(pq), math::QuatMul(rz, pq)), tw[size_t(fb)].q));
+            }
+            else
+                yaw = u;
+            fl.Update(kDt, 0.0f, 0.0f, yaw, 1.0f, 0.0f, std::span<const BoneTransform>(aTwist ? tw : pose));
+            const FootLockDiagnostics& d = fl.Diagnostics();
+            r.maxApplied = std::max(r.maxApplied, std::fabs(d.foot[0].yawLockOffset));
+            r.maxCorr = std::max(r.maxCorr, d.foot[0].correction);
+            double x = 0.0, y = 0.0;
+            ToeWorld(fl, fl.Output(), 0, 0.0f, 0.0f, yaw, x, y);
+            r.toe.push_back(x);
+            r.toe.push_back(y);
+        }
+        r.drift = std::fabs(math::WrapAngle(DisplayedFootYaw(fl, fl.Output(), 0, yaw) - lockYaw)) * kRad2Deg;
+        r.endApplied = std::fabs(fl.Diagnostics().foot[0].yawLockOffset) * kRad2Deg;
+        r.unplants = fl.Diagnostics().yawLockUnplants;
+        r.replants = fl.Diagnostics().yawLockReplants;
+        r.bounds = fl.Diagnostics().yawLockBounds;
+        return r;
+    };
+    auto toeDiff = [](const Run& x, const Run& y) {
+        double m = 0.0;
+        for (size_t i = 0; i + 1 < std::min(x.toe.size(), y.toe.size()); i += 2)
+            m = std::max(m, std::hypot(x.toe[i] - y.toe[i], x.toe[i + 1] - y.toe[i + 1]));
+        return m;
+    };
+    FootYawLockConfig c;
+    c.maxCorrection = 0.35f; // the angle tests run without the correction bound
+    {
+        const Run on = run(true, 20.0f, 0.0f, c), off = run(false, 20.0f, 0.0f, c);
+        const double dt = toeDiff(on, off);
+        Expect("(y1) yaw lock: the planted foot keeps its world yaw through a 20 deg turn, the toe stays on its lock point",
+               on.ok && on.drift < 1.0f && on.unplants == 0 && dt < 0.003 && off.drift > 18.0f,
+               Fmt("drift on %.2f deg (off %.2f), shown toe on vs off %.2f mm, unplants %.0f", on.drift, off.drift, dt * 1000.0,
+                   double(on.unplants)));
+    }
+    {
+        const Run r = run(true, 70.0f, 0.6f, c);
+        Expect("(y2) yaw lock: a 70 deg turn unplants on the angle (60 deg), the spring plants it again within 12 deg",
+               r.ok && r.unplants >= 1 && r.replants >= 1 && r.endApplied <= 12.0f + 0.01f && r.maxApplied * kRad2Deg <= 60.5f,
+               Fmt("unplants %.0f replants %.0f, applied max %.1f deg, at the end %.2f deg", double(r.unplants), double(r.replants),
+                   r.maxApplied * kRad2Deg, r.endApplied));
+    }
+    {
+        // the animated foot twists 40 deg about its ankle, the slip keeps the toe near the animated one: holding the yaw turns the ankle
+        // about the toe (6-7 cm with the slip); the bound keeps that correction within 4 cm
+        FootYawLockConfig b = c;
+        b.maxCorrection = 0.04f;
+        const Run free = run(true, 40.0f, 0.0f, c, true), bound = run(true, 40.0f, 0.0f, b, true), off = run(false, 40.0f, 0.0f, c, true);
+        Expect("(y3) yaw lock: the correction bound limits the applied yaw (ankle correction <= bound)",
+               bound.ok && bound.bounds > 0 && bound.maxCorr <= b.maxCorrection + 0.005f && free.maxCorr > b.maxCorrection + 0.01f &&
+                   bound.maxApplied > 0.0f,
+               Fmt("correction max bounded %.2f cm (unbounded %.2f cm, off %.2f cm), bounded updates %.0f, applied max %.1f deg",
+                   bound.maxCorr * 100.0, free.maxCorr * 100.0, off.maxCorr * 100.0, double(bound.bounds), bound.maxApplied * kRad2Deg));
+    }
+    {
+        // (y4) off = never switched on, bit for bit, over a turn with capsule motion and contact changes
+        FootLocker a, b;
+        bool ok = a.Init(db) && b.Init(db);
+        FootYawLockConfig y = c;
+        y.twistReduction = 0.5f;
+        ok = ok && b.SetYawLockConfig(y);
+        b.SetYawLock(true);
+        b.SetYawLock(false);
+        size_t diff = 0;
+        for (int i = 0; i < 240; ++i)
+        {
+            const float t = float(i) * kDt;
+            const float yaw = 0.8f * std::sin(t * 2.0f);
+            const float cl = std::fmod(t, 1.0f) < 0.6f ? 1.0f : 0.0f;
+            a.Update(kDt, 0.4f, 0.1f, yaw, cl, 1.0f - cl, in);
+            b.Update(kDt, 0.4f, 0.1f, yaw, cl, 1.0f - cl, in);
+            if (std::memcmp(a.Output().data(), b.Output().data(), a.Output().size() * sizeof(BoneTransform)) != 0)
+                ++diff;
+        }
+        FootFeedPolicy p;
+        p.stance = 1;
+        FootLocker pl;
+        pl.Init(db);
+        ApplyFootFeedPolicy(pl, p);
+        const bool polOff = !pl.YawLock();
+        p.yawLock = true;
+        ApplyFootFeedPolicy(pl, p);
+        const bool polOn = pl.YawLock();
+        Expect("(y4) yaw lock off: the output equals a locker that never had it, bit for bit; the feed policy switches it",
+               ok && diff == 0 && polOff && polOn && b.Diagnostics().yawLockUpdates == 0,
+               Fmt("updates that differ %.0f of 240, policy off %.0f on %.0f", double(diff), polOff, polOn));
+    }
+}
+
 static void SectionPlantReference(const Database& db)
 {
     // (r0) the spring is exact for any step: same state after 0.5 s at 30 / 60 / 144 Hz as the closed form
@@ -2393,6 +2532,7 @@ int main(int argc, char** argv)
     SectionPoleCarry();
     SectionStopSwing(); // loco-stop-knees 2026-11-09
     SectionPlantReference(db);
+    SectionYawLock(db);
     SectionFirmFeet(db);
     SectionSwivelPole(db);
 

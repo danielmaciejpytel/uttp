@@ -917,6 +917,7 @@ void ConfigureMode(int aMode)
     SetUpperMaskStates(7);
     SetHoldPose(false);
     SetFirmFeet(false); // firm feet in turns and stops (on by default since 0.2.0): the sections were measured without it
+    SetFootYawLock(false); // planted foot yaw lock (on by default): likewise
     // 0.6.3: likewise (compared in Section063); diagnostic UTPP_LOCO_TURNRATE_ALL=1 keeps it on in modes 1 and 2
     char e63[4] = {};
     const bool tr63 = GetEnvironmentVariableA("UTPP_LOCO_TURNRATE_ALL", e63, sizeof e63) > 0 && e63[0] == '1';

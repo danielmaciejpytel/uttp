@@ -386,6 +386,7 @@ void DriverOptionBaseline()
     motiondriver::SetStrideWarp(false);
     motiondriver::SetStickSpeedMode(0);
     motionhost::SetFirmFeet(false); // host option, on by default like mm.firmFeet; the expectations were measured without it
+    motionhost::SetFootYawLock(false); // likewise (mm.footYawLock)
 }
 
 // ------------------------------------------------------------------ v1 driver setup (identical before every run)
@@ -2991,6 +2992,7 @@ int MotionFixChildMain(const std::string& aData, const std::string& aDb, const s
 int main(int argc, char** argv)
 {
     const bool firmFeetAtStart = motionhost::FirmFeet(); // the DLL default, read before the baseline switches it off
+    const bool footYawLockAtStart = motionhost::FootYawLock(); // likewise
     DriverOptionBaseline();
     utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
     utpp::testdefaults::LegacyHostDefaults();
@@ -3032,7 +3034,10 @@ int main(int argc, char** argv)
     }
     const bool coreShard = shardIdx == 0;
     if (coreShard)
+    {
         Check(firmFeetAtStart, "firm feet in turns and stops is on at DLL start (menu default mm.firmFeet = true)");
+        Check(footYawLockAtStart, "planted foot yaw lock is on at DLL start (menu default mm.footYawLock = true)");
+    }
     int tailUnit = 0; // the tail units are numbered in their original order; unit u belongs to shard u % n
     auto mineTail = [&](int aUnit) { return aUnit % shardCnt == shardIdx; };
     // optional --replay-csv <csv of utpp_motion_replay --db <woman v2> run in the same build>: the woman reference picks must equal

@@ -124,6 +124,10 @@ public native func UTPPSetMMStrideWarp(on: Bool) -> Bool
 // Firm feet in turns and stops (DLL default on; CET setting mm.firmFeet): a planted foot stays fixed on the ground through turns and
 // stops (larger leg correction, limited by the leg reach and knee bend). Always true. Keep in sync with MotionDriverNatives.cpp.
 public native func UTPPSetMMFirmFeet(on: Bool) -> Bool
+// Planted foot yaw lock (DLL default on; CET setting mm.footYawLock): a planted foot keeps the direction it points in while the body
+// turns over it, turned about its toe, and follows the animation again only after a large turn. Always true. Keep in sync with
+// MotionDriverNatives.cpp.
+public native func UTPPSetMMFootYawLock(on: Bool) -> Bool
 // Inertialized weapon pose switch (DLL default off; CET setting mm.overlayInertialSwitch): drawing, holstering or changing the weapon
 // class swaps the weapon pose at once and blends the body without overshoot (arms and hands relative to the chest over 0.2 s; legs,
 // pelvis and root over 0.4 s). Always true. Keep in sync with

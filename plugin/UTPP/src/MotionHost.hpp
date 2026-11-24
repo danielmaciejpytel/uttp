@@ -450,6 +450,16 @@ bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg 
 // Foot locker counters of the firm feet since its last reset: locks latched, locked-foot updates with a hold, of them lowered by a leg
 // limit, latches ended by the hand-back (any pointer may be null).
 void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds, uint64_t* aHandBacks);
+// Planted foot yaw lock (CET mm.footYawLock, default on; mm/FootLocker.hpp FootYawLockConfig): a planted foot of the soft-slip path
+// keeps its world yaw, turned about its toe, until it is 60 deg from the animated foot yaw, then follows it through a spring and plants again within
+// 12 deg. Off = the previous leg tail bit for bit. Always true.
+bool SetFootYawLock(bool aOn);
+bool FootYawLock();
+// Twist reduction (share of the planted yaw difference left to the animation, 0..0.99), correction bound (m, 0..0.35) and unplant
+// angle (rad, above the replant angle); a negative value keeps the current one. False = invalid / NaN, previous kept. C++ API (tools, tests).
+bool SetFootYawLockParams(float aTwistReduction, float aMaxCorrection = -1.0f, float aUnplantAngle = -1.0f);
+// Foot locker counters of the yaw lock since its last reset (any pointer may be null).
+void FootYawLockStats(uint64_t* aUpdates, uint64_t* aUnplants, uint64_t* aReplants, uint64_t* aBounds);
 // Radii (m, 0.02..0.15: the 15 cm foot-correction guard), relock ratios (0..0.95), step speeds (m/s, 0.2..10), lift (m, 0..0.1);
 // the other replant constants keep their defaults. False = invalid / NaN, previous kept. Applies from the next step.
 bool SetFootReplantParams(float aRadius, float aStopsRadius, float aRatio, float aStopsRatio, float aStepSpeed, float aStopsStepSpeed,

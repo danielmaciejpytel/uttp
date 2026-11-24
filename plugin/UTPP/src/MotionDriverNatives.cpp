@@ -615,6 +615,17 @@ void Native_SetMMFirmFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, b
     if (aOut)
         *aOut = ok;
 }
+// planted foot yaw lock (CET utpp_motion mm.footYawLock; DLL default on). Logged in the setting-call form the offline replay applies.
+void Native_SetMMFootYawLock(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = motionhost::SetFootYawLock(on);
+    pluginlog::LogInfo("UTPPSetMMFootYawLock(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // ---- feet on uneven ground (mm/GroundFeetRuntime.hpp; CET utpp_motion mm.groundFeet, default on) and the ground recorder
 // (mm.trace: traces under the published feet, logged as UTPP GRT lines, no pose change). Script side: scripts/utpp.reds
 // UTPPFeedGroundFromLocomotion, right before the locomotion feed. Yaw: the feed's player yaw (deg, forward = (-sin, cos)).
@@ -962,6 +973,8 @@ void RegisterNatives()
     o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);
     auto* o11 = RED4ext::CGlobalFunction::Create("UTPPSetMMFirmFeet", "UTPPSetMMFirmFeet", &Native_SetMMFirmFeet);
     o11->flags = flags; o11->AddParam("Bool", "on"); o11->SetReturnType("Bool"); rtti->RegisterFunction(o11);
+    auto* o12 = RED4ext::CGlobalFunction::Create("UTPPSetMMFootYawLock", "UTPPSetMMFootYawLock", &Native_SetMMFootYawLock);
+    o12->flags = flags; o12->AddParam("Bool", "on"); o12->SetReturnType("Bool"); rtti->RegisterFunction(o12);
     // feet on uneven ground + ground recorder
     auto* gf1 = RED4ext::CGlobalFunction::Create("UTPPSetMMGroundFeet", "UTPPSetMMGroundFeet", &Native_SetMMGroundFeet);
     gf1->flags = flags; gf1->AddParam("Bool", "on"); rtti->RegisterFunction(gf1);

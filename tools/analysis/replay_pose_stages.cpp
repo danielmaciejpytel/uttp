@@ -75,6 +75,11 @@
 //   --firm-limit L      hold limit (m), --firm-handback V hand-back speed (m/s), --firm-knee D knee fold margin (deg),
 //                       --firm-release V release speed (m/s) and --firm-latch-speed V latch capsule speed (m/s) of the firm feet
 //                       (motionhost::SetFirmFeetParams; not passed = build default)
+//   --foot-yaw-lock 0|1 planted foot yaw lock off / on (motionhost::SetFootYawLock); adds one YAWLOCK line (yaw lock updates, unplants,
+//                       replants, updates held at the correction bound)
+//   --foot-yaw-twist R  twist reduction of the yaw lock (0..0.99), --foot-yaw-corr M its correction bound (m),
+//                       --foot-yaw-unplant DEG its unplant angle
+//                       (motionhost::SetFootYawLockParams; not passed = build default)
 //                       With --settings-log, the driver first gets the values a game session held before its first setting call in
 //                       builds whose defaults were off (lean, head lean, slide, orientation warp, stride warping off, analog stick),
 //                       then the logged calls: an older log without one of these calls replays as recorded with any build default.
@@ -340,6 +345,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMKneeFix") motionhost::SetKneeFix(static_cast<int32_t>(arg(0)));
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
         else if (name == "MMFirmFeet") motionhost::SetFirmFeet(flag(0));
+        else if (name == "MMFootYawLock") motionhost::SetFootYawLock(flag(0));
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
@@ -371,6 +377,7 @@ void ApplyLogBaseline()
     motionhost::SetAirSteer(false);
     motionhost::SetMeleeGuardSetting(false);
     motionhost::SetFirmFeet(false);
+    motionhost::SetFootYawLock(false);
     motiondriver::SetOverlayInertialSwitch(false);
 }
 // --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped
@@ -567,6 +574,9 @@ int main(int argc, char** argv)
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
     int32_t firmFeet = -1;                     // -1 = not passed
+    int32_t footYawLock = -1;                  // -1 = not passed
+    float footYawTwist = -1.0f, footYawCorr = -1.0f, footYawUnplant = -1.0f; // < 0 = not passed (build defaults)
+    uint64_t yawTotal[4] = {}, yawLast[4] = {}; // --foot-yaw-lock: YAWLOCK counters (summed over the foot locker resets)
     uint64_t firmTotal[4] = {}, firmLast[4] = {}; // --firm-feet: FIRMFEET counters (summed over the foot locker resets)
     // < 0 = not passed (build defaults)
     float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f;
@@ -679,6 +689,14 @@ int main(int argc, char** argv)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--firm-feet") == 0)
             firmFeet = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--foot-yaw-lock") == 0)
+            footYawLock = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--foot-yaw-twist") == 0)
+            footYawTwist = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--foot-yaw-corr") == 0)
+            footYawCorr = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--foot-yaw-unplant") == 0)
+            footYawUnplant = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-limit") == 0)
             firmLimit = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-handback") == 0)
@@ -925,6 +943,11 @@ int main(int argc, char** argv)
         motiondriver::SetStickSpeedMode(stickSpeed);
     if (firmFeet >= 0)
         motionhost::SetFirmFeet(firmFeet != 0);
+    if (footYawLock >= 0)
+        motionhost::SetFootYawLock(footYawLock != 0);
+    if ((footYawTwist >= 0.0f || footYawCorr >= 0.0f || footYawUnplant >= 0.0f) &&
+        !motionhost::SetFootYawLockParams(footYawTwist, footYawCorr, footYawUnplant >= 0.0f ? footYawUnplant * 0.017453293f : -1.0f))
+        return 2;
     if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f)
     {
         // a value not passed keeps the build default (negative)
@@ -1533,6 +1556,16 @@ int main(int argc, char** argv)
             clipsSeen.emplace(clip, std::string(db->ClipName(uint32_t(clip))));
         const std::string hs = motionhost::Status();
         const motiondriver::RootProbe rp = motiondriver::TestRootProbe();
+        if (footYawLock >= 0)
+        {
+            uint64_t now[4] = {};
+            motionhost::FootYawLockStats(&now[0], &now[1], &now[2], &now[3]);
+            for (int k = 0; k < 4; ++k)
+            {
+                yawTotal[k] += now[k] >= yawLast[k] ? now[k] - yawLast[k] : now[k];
+                yawLast[k] = now[k];
+            }
+        }
         if (firmFeet >= 0)
         {
             uint64_t now[4] = {};
@@ -1683,6 +1716,10 @@ int main(int argc, char** argv)
             std::printf("FIRMFEET run=%s on=%d latches=%llu heldUpdates=%llu legBoundUpdates=%llu handBacks=%llu\n", name.c_str(), firmFeet,
                         static_cast<unsigned long long>(firmTotal[0]), static_cast<unsigned long long>(firmTotal[1]),
                         static_cast<unsigned long long>(firmTotal[2]), static_cast<unsigned long long>(firmTotal[3]));
+        if (footYawLock >= 0)
+            std::printf("YAWLOCK run=%s on=%d updates=%llu unplants=%llu replants=%llu bounds=%llu\n", name.c_str(), footYawLock,
+                        static_cast<unsigned long long>(yawTotal[0]), static_cast<unsigned long long>(yawTotal[1]),
+                        static_cast<unsigned long long>(yawTotal[2]), static_cast<unsigned long long>(yawTotal[3]));
         if (turnRate >= 0 || turnRateMax >= 0.0f) // turn clip rate state of the legacy matcher (raised feeds, turns, cap)
             std::printf("TURNRATE run=%s %s\n", name.c_str(), motionhost::TurnRateStatus().c_str());
         if (leanPack >= 0) // loaded: the pack state of the installed bundle (1 / 0), -1 = no bundle seen

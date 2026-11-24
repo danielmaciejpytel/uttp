@@ -58,6 +58,16 @@ if(UTPP_MMDB_TEST_FILE)
     add_test(NAME utpp_mm_footlock_flstop_mut1 COMMAND utpp_mm_footlock_flstop_mut1 "${UTPP_MMDB_TEST_FILE}")
     set_tests_properties(utpp_mm_footlock_flstop_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "\\[FAIL\\] [(]s1[)] walk stop, false swing contact: the foot spacing")
 endif()
+# FootLocker planted foot yaw lock (FootLocker::SetYawLock): UTPP_FLYAW_MUTATION=1 holds no yaw while planted, the 20 deg turn of
+# tests/MMFootLockTest.cpp (check y1) must then report the foot turned with the animation.
+if(UTPP_MMDB_TEST_FILE)
+    add_executable(utpp_mm_footlock_flyaw_mut1 tests/MMFootLockTest.cpp src/BaseDatabase.hpp src/mm/MMMath.hpp src/mm/BaseTrajectory.hpp
+                   src/mm/Inertializer.hpp src/mm/BaseMatcher.hpp src/mm/FootLocker.hpp)
+    target_compile_options(utpp_mm_footlock_flyaw_mut1 PRIVATE ${UTPP_WARNINGS} /EHsc)
+    target_compile_definitions(utpp_mm_footlock_flyaw_mut1 PRIVATE UTPP_FLYAW_MUTATION=1)
+    add_test(NAME utpp_mm_footlock_flyaw_mut1 COMMAND utpp_mm_footlock_flyaw_mut1 "${UTPP_MMDB_TEST_FILE}")
+    set_tests_properties(utpp_mm_footlock_flyaw_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "\\[FAIL\\] [(]y1[)] yaw lock: the planted foot keeps its world yaw")
+endif()
 # FootLocker standing-stop firm plant (FootLocker::SetStopFirmPlant): UTPP_FLFIRM_MUTATION=1 removes the wait for a firm contact, the short
 # partial contact of tests/StandingStopSupportTest.cpp must then plant the foot.
 if(UTPP_MMDB_TEST_FILE)
