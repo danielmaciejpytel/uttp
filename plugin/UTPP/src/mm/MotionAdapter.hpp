@@ -37,6 +37,7 @@
 #include "StationaryShotTurn.hpp"
 #include "MotionTrajectory.hpp"
 #include "SpeedConverter.hpp"
+#include "speedconv_startstop.hpp"
 
 namespace utpp::mm::adapter
 {
@@ -1388,6 +1389,7 @@ struct MapState
     } querySpeed;
     float rateSpeedScale = 1.0f; // MapConfig::capsuleSpeedRate: this feed's play-rate scale (1 = off)
     speedconv::State speedConverter; // MapConfig::speedConverter: the converted velocity of the last feed
+    speedconv::StartStopState speedConverterStartStop; // speedconv::kStartStopWindow: the start / stop window
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -2140,6 +2142,16 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
         if ((c.speedConverter & speedconv::kGameSpeedRate) && active)
             gameSpeedRate = speedconv::GameSpeedRateScale(motiontraj::SizeXY(vel), motiontraj::SizeXY(velQ));
+        if (c.speedConverter & speedconv::kStartStopWindow)
+        {
+            velQ = speedconv::StartStopStep(m.speedConverterStartStop, vel, velQ, input, ground, dt, lim.acceleration, lim.brakingNoInput);
+            if (speedconv::StartStopConverting(m.speedConverterStartStop))
+            {
+                d.capsuleStart = {}; // the prediction continues the converted speed (reference movement model)
+                d.capsuleStop = {};
+                gameSpeedRate = 1.0f;
+            }
+        }
     }
     m.traj.Update(dt, velQ, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);
     m.capsuleAccelModel = m.traj.CapsuleAcceleration();
