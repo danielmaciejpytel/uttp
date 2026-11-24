@@ -826,6 +826,79 @@ inline float CapsuleRateScaleForMode(CapsuleRateMode aMode, float aScale)
         return std::fmin(1.0f, aScale);
     return aScale;
 }
+#ifndef UTPP_CAPSULE_RATE_MUTATION
+#define UTPP_CAPSULE_RATE_MUTATION 0
+#endif
+// Guards of the capsule speed play rate (MapConfig::capsuleRateGuards, capsuleRateBlendS)
+namespace caprate
+{
+inline constexpr int kDirection = 1; // ratio against the reference movement speed of the strafe direction
+inline constexpr int kDodge = 2;     // the dodge and its decay at the rate of the mapped query
+inline constexpr int kStart = 4;     // the start phase (IsStarting): the ratio at the speed the start accelerates to
+inline constexpr int kCrouch = 8;    // crouched: loop clips only (rateScaleScope 1)
+inline constexpr int kAll = kDirection | kDodge | kStart | kCrouch;
+inline constexpr float kBlendS = 0.2f; // time constant of the blend between feeds (s)
+inline constexpr float kSnap = 1.0e-4f; // closer than this to the target: the target (the scale returns to exactly 1)
+
+// kDirection: the scale of a strafe feed times forward / direction reference speed (MotionMaxSpeed of the gait and stance, forward and
+// along the direction of travel against the actor). The query history is mapped from the game velocity, its prediction is capped at the
+// direction's reference speed, while the game keeps the forward speed in every direction: the capsule per mapped ratio alone plays a back
+// or side strafe loop below the capsule speed. 1 when not strafing or when the direction is not slower than forward.
+inline float DirectionFactor(float aForwardMaxCmS, float aDirectionMaxCmS)
+{
+#if UTPP_CAPSULE_RATE_MUTATION == 1
+    return 1.0f; // mutation 1: the forward ratio in every direction
+#else
+    if (!std::isfinite(aForwardMaxCmS) || !std::isfinite(aDirectionMaxCmS) || aForwardMaxCmS <= 1.0f || aDirectionMaxCmS <= 1.0f ||
+        aDirectionMaxCmS >= aForwardMaxCmS)
+        return 1.0f;
+    return aForwardMaxCmS / aDirectionMaxCmS;
+#endif
+}
+// kStart: the mapped speed the capsule per mapped ratio is read at. A start (IsStarting) is matched on a query whose prediction already
+// runs at the speed it accelerates to (aTargetCmS = the prediction's maximum speed), so its ratio is the one of that speed (a sprint start
+// plays at the sprint ratio, not at the walk ratio of the first feeds); otherwise the chooser speed.
+inline float RatioSpeed(float aChooserCmS, int aGuards, bool aStarting, float aTargetCmS)
+{
+#if UTPP_CAPSULE_RATE_MUTATION == 4
+    return aChooserCmS; // mutation 4: a start reads the ratio at the speed of the feed
+#else
+    return (aGuards & kStart) && aStarting && std::isfinite(aTargetCmS) && aTargetCmS > aChooserCmS ? aTargetCmS : aChooserCmS;
+#endif
+}
+// The wanted scale of one feed: aScale (capsule per mapped speed, 1 = off) with the guards; aDodge = dodge or its decay.
+inline float Target(float aScale, int aGuards, bool aDodge, float aDirectionFactor)
+{
+    if (aScale == 1.0f)
+        return 1.0f;
+#if UTPP_CAPSULE_RATE_MUTATION != 3
+    if ((aGuards & kDodge) && aDodge)
+        return 1.0f;
+#endif
+    return (aGuards & kDirection) ? aScale * aDirectionFactor : aScale;
+}
+// kCrouch: the scope of a crouched feed (loop clips only), else aScope
+inline int Scope(int aScope, int aGuards, int aStance)
+{
+#if UTPP_CAPSULE_RATE_MUTATION == 5
+    return aScope; // mutation 5: crouched picks keep the configured scope
+#else
+    return (aGuards & kCrouch) && aStance == 1 ? 1 : aScope;
+#endif
+}
+// One feed of the first-order blend toward aTarget (time constant aTauS, <= 0 = the target at once); within kSnap of it, the target.
+inline float Blend(float aPrev, float aTarget, float aDt, float aTauS)
+{
+#if UTPP_CAPSULE_RATE_MUTATION == 2
+    return aTarget; // mutation 2: the scale switches per feed
+#else
+    if (!(aTauS > 0.0f) || !std::isfinite(aPrev) || !(aDt >= 0.0f))
+        return aTarget;
+    const float next = aPrev + (aTarget - aPrev) * std::fmin(1.0f, aDt / aTauS);
+    return std::fabs(aTarget - next) < kSnap ? aTarget : next;
+#endif
+}
+} // namespace caprate
 
 struct MapConfig
 {
@@ -1022,6 +1095,15 @@ struct MapConfig
     // capsuleRateScope: the picks that play at the capsule speed (ChooserState::rateScaleScope): 0 every pick, 1 loop clips only, 2 every
     // pick but a start clip (a start keeps the rate of the mapped query, so its authored acceleration stays in step with the query).
     int capsuleRateScope = 0;
+    // capsuleRateGuards (caprate bits, with capsuleSpeedRate on): kDirection = the ratio is taken against the reference movement speed of
+    // the strafe direction (the prediction of a back / side strafe is capped below the forward speed the game keeps); kDodge = the dodge
+    // with its decay plays at the rate of the mapped query (its clip is timed by the dodge, not by a held speed); kStart = a start
+    // (IsStarting) reads the ratio at the speed its prediction accelerates to; kCrouch = crouched, only loop clips take the scale (the
+    // crouch loop rule, CR-5).
+    // capsuleRateBlendS: time constant (s) of the first-order blend of the scale between feeds (a guard toggles the rate smoothly);
+    // 0 = the scale of each feed as computed. 0 / 0 = the unguarded rate, bit for bit.
+    int capsuleRateGuards = caprate::kDirection | caprate::kDodge | caprate::kCrouch; // kStart off: it costs the steady loop gain
+    float capsuleRateBlendS = caprate::kBlendS;
     // Speed converter (speedconv bits, 0 = off): kQuery = the query trajectory and the movement predicates use the velocity the
     // reference character movement would have while chasing the game velocity (speedconv::Step: curved turns, limited acceleration and
     // braking) on the ground while the input is held and the capsule moves, outside the landing window; without kStartsStops only a
@@ -1388,6 +1470,7 @@ struct MapState
     } querySpeed;
     float rateSpeedScale = 1.0f; // MapConfig::capsuleSpeedRate: this feed's play-rate scale (1 = off)
     speedconv::State speedConverter; // MapConfig::speedConverter: the converted velocity of the last feed
+    float rateScaleBlend = 1.0f; // MapConfig::capsuleRateBlendS: the blended play-rate scale of the last feed
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -2331,7 +2414,9 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.restTurn = stationaryRestTurn; // finishes an admitted same-side clip like the aim turn, but is no aim start
 #endif
     s.explicitWalk = f.wantsToWalk;
-    WriteRateScaleScope(s, EffectiveCapsuleRateScope(c));
+    // caprate::kCrouch: crouched, the capsule speed play rate takes loop clips only (with capsuleSpeedRate on)
+    const int rateGuards = c.capsuleSpeedRate != CapsuleRateMode::Off ? c.capsuleRateGuards : 0;
+    WriteRateScaleScope(s, caprate::Scope(EffectiveCapsuleRateScope(c), rateGuards, st.stance));
     if (facing.shotTurn)
     {
         shotturn::Hold side; // R3 review L1: the error is read on the admitted side near 180 deg (same rule as the hold)
@@ -2345,9 +2430,25 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.stationaryAimTargetYawDeg = (s.stationaryAimTurn || s.restTurn) ? aimGoalYaw : 0;
     s.speed2dCmS = chooserSpeed;
     // the capsule speed play rate on the ground only: the ratio is the one of the ground speed map, air clips keep the mapped rate
+    // caprate::kStart: a start reads the ratio at the speed its prediction accelerates to
+    const float ratioSpeed = caprate::RatioSpeed(chooserSpeed, rateGuards, st.isStarting, d.maxSpeed);
     m.rateSpeedScale = m.querySpeed.rate && chooserSpeed > 1.0f && st.movementMode == 0
-                           ? CapsuleRateScaleForMode(EffectiveCapsuleRate(c), CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
+                           ? CapsuleRateScaleForMode(EffectiveCapsuleRate(c), CapsuleCmPerMappedCm(m.querySpeed, ratioSpeed))
                            : 1.0f;
+    // MapConfig::capsuleRateGuards / capsuleRateBlendS (with capsuleSpeedRate on): the direction ratio, the dodge at the mapped query
+    // rate, and the blend of the scale between feeds
+    if (c.capsuleSpeedRate != CapsuleRateMode::Off)
+    {
+        float direction = 1.0f;
+        if ((rateGuards & caprate::kDirection) && m.rateSpeedScale != 1.0f && rot != motiontraj::RotationMode::OrientToMovement)
+            direction = caprate::DirectionFactor(motiontraj::MotionMaxSpeed(c.cmc, gait, stance, false, 0.0f),
+                                                 motiontraj::MotionMaxSpeed(c.cmc, gait, stance, true, motiontraj::CalculateDirection(vel, actorYawPre)));
+        const float target = caprate::Target(m.rateSpeedScale, rateGuards, f.psmDetailed == kPsmDodge || dodgeHeld, direction);
+        m.rateScaleBlend = caprate::Blend(m.rateScaleBlend, target, dt, c.capsuleRateBlendS);
+        m.rateSpeedScale = m.rateScaleBlend;
+    }
+    else
+        m.rateScaleBlend = 1.0f;
     if (m.querySpeed.rate && chooserSpeed > 1.0f && gameSpeedRate != 1.0f)
         m.rateSpeedScale *= gameSpeedRate; // speedconv::kGameSpeedRate
     // speedconv::kSteadyLoopRate: the converter's loop rate only while the capsule speed holds on the ground with the input held, outside
