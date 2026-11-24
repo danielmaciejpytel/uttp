@@ -923,8 +923,10 @@ int main(int argc, char** argv)
         Variant off = prod;
         off.cfg.slowCrouchLoops = false;
         CrouchRateChecks(fr, Replay(*model, rows, off));
-        // the plain crouch rate without the stop brake gate (the configuration before CR-5 and the gate became the default)
+        // the plain crouch rate without the stop brake gate (the configuration before CR-5 and the gate became the default); the capsule
+        // speed play rate (on by default) replaces the CR-5 scale, so these variants run with it off
         Variant noCrouchRate = prod;
+        noCrouchRate.mc.capsuleSpeedRate = adapter::CapsuleRateMode::Off;
         noCrouchRate.cfg.crouchCapsuleRate = false;
         noCrouchRate.cfg.stopBrakeGate = 0.0f;
         const std::vector<Frame> frPlainCrouchRate = Replay(*model, rows, noCrouchRate);
@@ -954,6 +956,7 @@ int main(int argc, char** argv)
         Check(prod.cfg.crouchCapsuleRate && prod.cfg.stopBrakeGate > 0.0f, "CR-5 default on: production has the crouch capsule rate and the stop brake gate");
         Variant rateGate = crouchRate;
         rateGate.cfg.stopBrakeGate = prod.cfg.stopBrakeGate;
+        rateGate.mc.capsuleSpeedRate = prod.mc.capsuleSpeedRate;
         const auto dRateGate = Diff(fr, Replay(*model, rows, rateGate));
         Check(dRateGate.empty(), "CR-5 default on: production equals the CR-5 rate with the stop brake gate (differing frames)", double(dRateGate.size()));
         CrouchStopChecks(*model, rows, crouchRate, frCrouchRate);

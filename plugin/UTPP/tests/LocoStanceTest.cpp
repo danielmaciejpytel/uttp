@@ -301,8 +301,9 @@ struct ResetProbe
     bool done = false, jumped = false, groundFade = false, stanceChange = false, valid = false;
 };
 std::vector<Frame> Replay(Model& m, const std::vector<Row>& aRows, double aHolster0 = -1.0, double aHolster1 = -1.0, double aForceStanceAt = -1.0, double aUnflagGroundFrom = 1e9,
-                          ResetProbe* aReset = nullptr)
+                          ResetProbe* aReset = nullptr, bool aMappedRate = false)
 {
+    // aMappedRate: the capsule speed play rate (on by default) off, for the probes whose forced pick times were set on the mapped play rate
     std::vector<Frame> out;
     motion::ChooserMatcher matcher;
     std::string err;
@@ -344,6 +345,8 @@ std::vector<Frame> Replay(Model& m, const std::vector<Row>& aRows, double aHolst
     mcBase.stanceCleanEdge = true;
     mcBase.stanceCleanHoldS = adapter::kStanceCleanHoldSeconds;
     mcBase.stanceCleanMaxSpeedMs = adapter::kStanceCleanMaxSpeedMs;
+    if (aMappedRate)
+        mcBase.capsuleSpeedRate = adapter::CapsuleRateMode::Off;
     adapter::MapState map;
     std::vector<motion::TrajSample> traj(adapter::kQueryTrajMax);
     const uint32_t n = m.db.NumBones();
@@ -1505,10 +1508,10 @@ int main(int argc, char** argv)
         GroundChecks(*model, frU, "unarmed");
         GateChecks(fr, "recorded feed", 6);
         // the stance gate also lowers: a swinging foot that floats 5 cm when the forced stance pick lands comes down over the alpha ramp (2 cm / frame)
-        GateChecks(Replay(*model, rows, -1.0, -1.0, 80.172), "stance pick inside the 79.989 gait fade", 6, 0.02f);
+        GateChecks(Replay(*model, rows, -1.0, -1.0, 80.172, 1e9, nullptr, true), "stance pick inside the 79.989 gait fade", 6, 0.02f);
         // FS-9: the stance fade ends under a newer fade that is not flagged (the 79.989 pick flagged as a stance change, the 80.172 pick, as an
         // unflagged slide / air entry would be, lands inside it and outlives it)
-        GateChecks(Replay(*model, rows, -1.0, -1.0, 79.989, 80.1), "stance fade ending under the newer 80.172 gait fade", 6);
+        GateChecks(Replay(*model, rows, -1.0, -1.0, 79.989, 80.1, nullptr, true), "stance fade ending under the newer 80.172 gait fade", 6);
         CollapseProbe(*model);
         CollapseProbeGround(*model);
         UnflaggedOverFlagged(*model);

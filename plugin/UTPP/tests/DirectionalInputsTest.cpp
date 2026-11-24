@@ -227,7 +227,7 @@ int main()
                                 CapsuleRateScaleForMode(CapsuleRateMode::LowerOnly, 1.3f) == 1.0f);
         Check("non-finite or non-positive scale is 1", CapsuleRateScaleForMode(CapsuleRateMode::Both, std::numeric_limits<float>::quiet_NaN()) == 1.0f &&
                                                           CapsuleRateScaleForMode(CapsuleRateMode::Both, 0.0f) == 1.0f);
-        Check("default mode is off", kCapsuleSpeedRateDefault == CapsuleRateMode::Off || UTPP_CAPSULE_SPEED_RATE_DEFAULT != 0);
+        Check("shipped default mode is both", kCapsuleSpeedRateDefault == CapsuleRateMode::Both);
         WithScale a;
         WithoutScale b;
         WriteRateSpeedScale(a, 1.2f);
@@ -247,11 +247,11 @@ int main()
                                                                                 w.moveDirectionRecent == 0 && w.isStartingDirectional &&
                                                                                 !w.isPivotingDirectional);
     }
-    // defaults: every new option is off
+    // defaults: the directional inputs are off, the capsule speed play rate is on (mode both)
     {
         const MapConfig d;
-        Check("MapConfig defaults: directional inputs and capsule rate off",
-              !d.moveDirection && !d.directionalPredicates && (d.capsuleSpeedRate == CapsuleRateMode::Off || UTPP_CAPSULE_SPEED_RATE_DEFAULT != 0));
+        Check("MapConfig defaults: directional inputs off, capsule rate both",
+              !d.moveDirection && !d.directionalPredicates && d.capsuleSpeedRate == CapsuleRateMode::Both);
         const motion::ChooserState cs;
         Check("capsule rate scope defaults: every pick in the map, no scale in the chooser state",
               d.capsuleRateScope == 0 && cs.rateSpeedScale == 1.0f && cs.rateScaleScope == 0);
@@ -370,6 +370,7 @@ int main()
               std::equal(s0.q.end() - tail, s0.q.end(), s1.q.end() - tail, [](float x, float y) { return std::fabs(x - y) < 0.01f; }));
         MapConfig loop;
         loop.speedConverter = speedconv::kQuery | speedconv::kLoopRate;
+        loop.capsuleSpeedRate = CapsuleRateMode::Off; // the converter's loop rate applies only with the capsule speed play rate off
         Check("converter loop rate: capsule rate Both on loop clips while capsuleSpeedRate is off",
               EffectiveCapsuleRate(loop) == CapsuleRateMode::Both && EffectiveCapsuleRateScope(loop) == 1);
         loop.capsuleSpeedRate = CapsuleRateMode::RaiseOnly;

@@ -2,7 +2,7 @@
 // non-loop Run_to_Walk transition clips, and its loop tempo may go below the ordinary 0.85 bound (MatcherConfig::slowWalkLoops).
 // Usage: utpp_mm_slowwalk_test <utpp_motion_woman*.utppmm> [--dump]   (chooser.json next to it; --dump prints the cheapest clips of the
 // walk-loop database per channel group at 1.7 s of the analog case, the evidence of MatcherConfig::slowWalkLoops)
-// Path: synthetic feed -> adapter::MapToChooser (production MapConfig defaults) -> BuildQueryTrajectory -> ChooserMatcher::Update.
+// Path: synthetic feed -> adapter::MapToChooser (production MapConfig defaults, capsule speed play rate off unless shippedRate) -> BuildQueryTrajectory -> ChooserMatcher::Update.
 // Mutants of the fix are the config switches themselves (a rule off must fail the check that pins it, see ExpectFail below).
 #include <algorithm>
 #include <cmath>
@@ -39,6 +39,8 @@ struct Rig
     std::vector<TrajSample> traj;
     float dt = 1.f / 60.f;
     std::string path;
+    // the checks below were written for the mapped play rate: the capsule speed play rate (on by default) is off unless shippedRate
+    bool shippedRate = false;
     bool Load(const char* p)
     {
         path = p;
@@ -62,6 +64,8 @@ struct Rig
         mc.stanceCleanHoldS = adapter::kStanceCleanHoldSeconds;
         mc.stanceCleanMaxSpeedMs = adapter::kStanceCleanMaxSpeedMs;
         mc.gameWalkTogglePoint = togglePoint;
+        if (!shippedRate)
+            mc.capsuleSpeedRate = adapter::CapsuleRateMode::Off;
         adapter::SetAnalogFloor(mc, analogFloorMs);
         return matcher.Init(&db, &table, cfg, err);
     }
@@ -211,6 +215,17 @@ int main(int argc, char** argv)
         auto g = rig.Steady(1.6f, 1.0f, true, 8.0f);
         CHECK(TailLoops(g, 3.0f, rig.dt, tr, lo, hi) && tr == 0, "Hz=%d G walk 1.6 m/s: only Walk_Loop_* in the last 3 s (transitions %d)", hz, tr);
         CHECK(std::fabs(g.back().speedCmS - 200.f) < 5.f && lo > 0.8f && hi < 1.0f, "Hz=%d G walk queries 200 cm/s (%.0f), rate %.3f..%.3f", hz, g.back().speedCmS, lo, hi);
+        {
+            // shipped default (capsule speed play rate on): the same loops, the rate scaled by capsule / mapped speed (160 / 200 cm/s)
+            const float offLo = lo, offHi = hi;
+            rig.shippedRate = true;
+            rig.Reset(on, 1.6f);
+            auto gs = rig.Steady(1.6f, 1.0f, true, 8.0f);
+            rig.shippedRate = false;
+            const bool loops = TailLoops(gs, 3.0f, rig.dt, tr, lo, hi) && tr == 0;
+            CHECK(loops && std::fabs(lo - 0.8f * offLo) < 0.03f && std::fabs(hi - 0.8f * offHi) < 0.03f,
+                  "Hz=%d G walk, shipped capsule rate: only Walk_Loop_*, rate %.3f..%.3f = 0.8 x %.3f..%.3f", hz, lo, hi, offLo, offHi);
+        }
 
         // ---- motion walk range: 1.2 m/s at |mv| 0.6 -> 150 cm/s, rate below the ordinary 0.85
         rig.Reset(on);

@@ -2,7 +2,7 @@
 // plays Walk_Loop_* (up to the walk-loop pace) and Run_Loop_* clips with no pose reset, not the non-loop Walk_to_Run transition clips
 // (MatcherConfig::steadyRunLoops). Evidence: the recorded log (game feed 15:44, analog ramp), replayed through the installed bake.
 // Usage: utpp_mm_steadyrun_test <utpp_motion_woman*.utppmm>   (chooser.json next to it)
-// Path: synthetic feed -> adapter::MapToChooser (production MapConfig defaults) -> BuildQueryTrajectory -> ChooserMatcher::Update.
+// Path: synthetic feed -> adapter::MapToChooser (production MapConfig defaults, capsule speed play rate off unless shippedRate) -> BuildQueryTrajectory -> ChooserMatcher::Update.
 // Mutants of the fix are the config switches themselves (a rule off must fail the check that pins it).
 #include <algorithm>
 #include <cmath>
@@ -42,6 +42,8 @@ struct Rig
     adapter::QueryTimes qtimes;
     std::vector<TrajSample> traj;
     float dt = 1.f / 60.f;
+    // the rate checks were written for the mapped play rate: the capsule speed play rate (on by default) is off unless shippedRate
+    bool shippedRate = false;
     bool Load(const char* p)
     {
         std::string err, chooserPath(p);
@@ -62,6 +64,8 @@ struct Rig
         mc.stanceCleanHoldS = adapter::kStanceCleanHoldSeconds;
         mc.stanceCleanMaxSpeedMs = adapter::kStanceCleanMaxSpeedMs;
         mc.gameWalkTogglePoint = togglePoint;
+        if (!shippedRate)
+            mc.capsuleSpeedRate = adapter::CapsuleRateMode::Off;
         return matcher.Init(&db, &table, cfg, err);
     }
     Step1 Step(float speedMs, float stick, bool walk, int psm = adapter::kPsmStand)
@@ -294,9 +298,11 @@ int main(int argc, char** argv)
     // ---- F: steady-speed sweep over the whole band, 1.9-3.3 m/s in 0.1 steps (the stick from the measured stick / speed curve, kGameStickSpeedMotion),
     // from rest and from a walk, at three update rates: no Walk_to_Run pick at clip time 0, loops only in the last 2 s, at most one jump there
     int sweepBad = 0, sweepRuns = 0;
+    for (const bool shipped : {false, true})
     for (const int hz : {30, 60, 144})
         for (int i = 0; i <= 14; ++i)
         {
+            rig.shippedRate = shipped;
             rig.dt = 1.f / float(hz);
             const float v = 1.9f + 0.1f * float(i);
             const float stick = v <= 1.94f ? 0.73f : (v <= 2.48f ? 0.73f + (v - 1.94f) / 0.54f * 0.09f : 0.82f + (v - 2.48f) / 1.36f * 0.18f);
@@ -311,24 +317,29 @@ int main(int argc, char** argv)
                 if (!ok)
                 {
                     ++sweepBad;
-                    std::printf("FAIL sweep Hz=%d v=%.1f stick=%.3f %s: head %d loops %d jumps %d trans %d rate %.2f..%.2f last %s\n", hz, v, stick,
-                                fromWalk ? "from walk" : "from rest", HeadPicks(q), int(tq.allLoops), tq.jumps, tq.transitionUpdates, tq.minRate, tq.maxRate, q.back().clip.c_str());
+                    std::printf("FAIL sweep%s Hz=%d v=%.1f stick=%.3f %s: head %d loops %d jumps %d trans %d rate %.2f..%.2f last %s\n",
+                                shipped ? " (shipped capsule rate)" : "", hz, v, stick, fromWalk ? "from walk" : "from rest", HeadPicks(q), int(tq.allLoops), tq.jumps, tq.transitionUpdates, tq.minRate, tq.maxRate, q.back().clip.c_str());
                 }
             }
         }
-    CHECK(sweepBad == 0, "F steady sweep 1.9-3.3 m/s: %d of %d runs not clean", sweepBad, sweepRuns);
+    rig.shippedRate = false;
+    CHECK(sweepBad == 0, "F steady sweep 1.9-3.3 m/s, mapped and shipped capsule rate: %d of %d runs not clean", sweepBad, sweepRuns);
 
     // ---- G: a deceleration that keeps the stick >= 0.7 (Run gait all the way down to 247 cm/s: the walk-loop injection on the way down)
+    for (const bool shipped : {false, true})
     for (const int hz : {30, 60, 144})
     {
         rig.dt = 1.f / float(hz);
+        rig.shippedRate = shipped;
         rig.Reset(on);
+        rig.shippedRate = false;
         const auto dn = rig.Run({full, s247});
         const Tail tg = TailOf(dn, 2.5f, rig.dt);
         int rw = 0;
         for (const Step1& st : dn) rw += st.clip.find("Transition_Run_to_Walk") != std::string::npos ? 1 : 0;
-        CHECK(tg.allLoops && tg.jumps == 0 && tg.transitionUpdates == 0, "Hz=%d G full run -> stick 0.73: loops only, no jump in the last 2.5 s (jumps %d, trans %d)", hz, tg.jumps, tg.transitionUpdates);
-        CHECK(rw == 0, "Hz=%d G no Run_to_Walk clip in the Run gait (%d updates)", hz, rw);
+        CHECK(tg.allLoops && tg.jumps == 0 && tg.transitionUpdates == 0, "Hz=%d%s G full run -> stick 0.73: loops only, no jump in the last 2.5 s (jumps %d, trans %d)", hz,
+              shipped ? " shipped capsule rate" : "", tg.jumps, tg.transitionUpdates);
+        CHECK(rw == 0, "Hz=%d%s G no Run_to_Walk clip in the Run gait (%d updates)", hz, shipped ? " shipped capsule rate" : "", rw);
     }
 
     std::printf("SteadyRunLoop: %d PASS, %d FAIL\n", passed, failed);

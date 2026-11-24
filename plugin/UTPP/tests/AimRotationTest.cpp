@@ -3,7 +3,7 @@
 // (MapConfig::aimPivotGateS 0.5 s).
 // Checks: the predicate thresholds 0 / 10 / 15 against the strafe 30; the default threshold ignores the small turn angle of straight
 // movement (within 2 deg) that threshold 0 reports as a pivot; the velocity floor; the gate holds a new pivot while a pivot / start
-// pick is young and releases it after, a gate of 0 holds nothing; MapToChooser off (default) and on without aiming give the strafe IsPivoting and the same
+// pick is young and releases it after, a gate of 0 holds nothing; the default is on; MapToChooser off and on without aiming give the strafe IsPivoting and the same
 // chooser state, bit for bit; on while aiming follows the reported turn angle at the configured threshold; the gate reaches
 // MapToChooser through MapContext (currentDbPivots / currentDbStarts / currentPickAgeS).
 #include "../src/mm/MotionAdapter.hpp"
@@ -97,22 +97,27 @@ int main()
               "default threshold: a 12 deg turn pivots (strafe 30 does not)");
     }
 
-    // MapToChooser: off identity
+    // MapToChooser: off identity (the option is on by default; off is set explicitly)
     adapter::MapConfig off;
+    off.aimRotation = false;
     adapter::MapConfig on = off;
     on.aimRotation = true;
-    bool offSame = true, noAimSame = true, aimFlagOff = true;
+    Check(adapter::MapConfig{}.aimRotation, "shipped default: aim rotation on");
+    bool offSame = true, noAimSame = true, aimFlagOff = true, defaultIsOn = true;
     for (float a : {0.0f, 10.0f, 20.0f, 35.0f, 60.0f, 120.0f})
     {
-        const Frame base = Run(off, true, a), explicitOff = Run(adapter::MapConfig{}, true, a);
-        offSame = offSame && SameChooser(base.cs, explicitOff.cs) && !base.state.st.aimRotation &&
+        const Frame base = Run(off, true, a);
+        offSame = offSame && !base.state.st.aimRotation &&
                   base.cs.isPivoting == IsPivoting(base.state.st.isMoving, base.state.st.trjFuture, base.state.st.velocity, RotationMode::Strafe);
+        const Frame def = Run(adapter::MapConfig{}, true, a), explicitOn = Run(on, true, a);
+        defaultIsOn = defaultIsOn && SameChooser(def.cs, explicitOn.cs) && def.state.st.aimRotation;
         const Frame noAimOff = Run(off, false, a), noAimOn = Run(on, false, a);
         noAimSame = noAimSame && SameChooser(noAimOff.cs, noAimOn.cs) && !noAimOn.state.st.aimRotation &&
                     std::memcmp(&noAimOff.state.st.trjFuture, &noAimOn.state.st.trjFuture, sizeof(motiontraj::V3)) == 0;
         aimFlagOff = aimFlagOff && base.state.st.rotationMode == RotationMode::Strafe;
     }
-    Check(offSame, "off (default): the strafe IsPivoting while aiming, aimRotation flag false");
+    Check(offSame, "off: the strafe IsPivoting while aiming, aimRotation flag false");
+    Check(defaultIsOn, "default: the same chooser state as explicitly on while aiming");
     Check(noAimSame, "on without aiming: the same chooser state and trajectory as off");
     Check(aimFlagOff, "aiming keeps the strafe rotation mode");
 

@@ -1017,7 +1017,7 @@ struct MapConfig
     // A slow start or a slide along a wall keeps its heading and never latches. 0 = off.
     float blockedIdleS = 0.15f;
     // Capsule speed play rate (see CapsuleRateMode). Ignored while capsuleSpeedQuery is on (that query already carries the capsule speed)
-    // and inside the slide map.
+    // inside the slide map and in the air (the ratio comes from the ground speed map; air clips keep the mapped rate).
     CapsuleRateMode capsuleSpeedRate = kCapsuleSpeedRateDefault;
     // capsuleRateScope: the picks that play at the capsule speed (ChooserState::rateScaleScope): 0 every pick, 1 loop clips only, 2 every
     // pick but a start clip (a start keeps the rate of the mapped query, so its authored acceleration stays in step with the query).
@@ -2331,7 +2331,8 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.stationaryAimYawDeg = (s.stationaryAimTurn || s.restTurn) ? std::remainder(aimGoalYaw - x.rootYawDeg, 360.f) : 0;
     s.stationaryAimTargetYawDeg = (s.stationaryAimTurn || s.restTurn) ? aimGoalYaw : 0;
     s.speed2dCmS = chooserSpeed;
-    m.rateSpeedScale = m.querySpeed.rate && chooserSpeed > 1.0f
+    // the capsule speed play rate on the ground only: the ratio is the one of the ground speed map, air clips keep the mapped rate
+    m.rateSpeedScale = m.querySpeed.rate && chooserSpeed > 1.0f && st.movementMode == 0
                            ? CapsuleRateScaleForMode(EffectiveCapsuleRate(c), CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
                            : 1.0f;
     // speedconv::kSteadyLoopRate: the converter's loop rate only while the capsule speed holds on the ground with the input held, outside
