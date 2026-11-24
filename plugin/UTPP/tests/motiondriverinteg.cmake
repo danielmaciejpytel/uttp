@@ -480,7 +480,7 @@ endforeach()
 # 27 no gait return hold, 28 no start upshift hold (MatcherConfig::startUpshiftHoldS), 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell (check D),
 # 31 the gait return hold's rise test per feed instead of per second (check F, uneven frame times), 32 no turn commit (MatcherConfig::turnCommit, check G),
 # 33 no heading catch-up (MatcherConfig::headingCatchUpS, check K: keyboard-like direction keys), 44 no blocked capsule idle (MapConfig::blockedIdleS,
-# the Male wall window), 45 no loop dwell against a shuffle of the same database (MatcherConfig::loopDwellShuffle, the Female loop vs shuffle window),
+# the Male wall window), 45 no loop dwell against a shuffle of the same database (MatcherConfig::loopDwellShuffle, the Female loop vs shuffle window, run with the dodge facing hold off),
 # 46 no dodge facing hold (MatcherConfig::dodgeFacingHoldS), 47 no heading catch-up after the dodge facing hold;
 # each must print a FAIL line of the churn checks. Arguments: <data dir> <v1 database> <slice dir>.
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/data" _utpp_churn_slices)
