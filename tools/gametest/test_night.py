@@ -2138,6 +2138,18 @@ class MacroTests(unittest.TestCase):
         self.assertEqual(calls, [['settle'], ['toggle'], ['straight', 'arc_90', 'stop', 'clear_toggle']])
         self.assertEqual([s['name'] for s in rec['steps']], [s.name for s in sc.steps])  # thresholds keep their steps
 
+    def test_walk_toggle_calibration_is_a_separate_keyboard_scenario(self):
+        """The speed calibration copy taps G like walk_toggle, holds each direction twice, and stays out of the loco set (whose
+        walk_toggle keeps its steps, so loco numbers stay comparable with earlier runs)."""
+        cal = self.n.scenarios['walk_toggle_calibration']
+        self.assertEqual(self.n.scenario_key_steps('walk_toggle_calibration'), ['toggle'])
+        self.assertNotIn('walk_toggle_calibration', gn.resolve_sets('loco'))
+        self.assertEqual([s.name for s in self.n.scenarios['walk_toggle'].steps],
+                         ['settle', 'toggle', 'straight', 'arc_90', 'stop', 'clear_toggle'])
+        held = [s for s in cal.steps if s.name in ('straight', 'reverse', 'straight_again', 'side_right', 'side_left')]
+        self.assertEqual(len(held), 5)
+        self.assertTrue(all(s.duration >= 4.0 for s in held))
+
     def test_walk_toggle_is_switched_off_when_the_sprint_did_not_clear_it(self):
         rec, fails, state, calls = self._walk_toggle(sprint_clears=False)
         self.assertEqual(fails, [])

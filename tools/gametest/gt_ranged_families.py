@@ -39,7 +39,8 @@ magazine that is full again although rounds were fired belongs to a weapon one p
 reloads it by itself, so the two phases pull the trigger where they would press the reload button (`reload_by: shot` in the phase
 record). The standing reload waits for the end of the reload as well, so its duration is known to the moving phases.
 Option `ranged_phases` (night.py: --ranged-phases a,b) runs only the listed phases (equip, draw and the cleanup always run; `reload`
-is added when `reload_then_run` is listed, it supplies the duration).
+is added when `reload_then_run` is listed, it supplies the duration). The measurement phases (EXTRA_PHASES: drawn_moves, aim_moves,
+aim_turns, crouch_moves; static pad parts of scenarios.json) run only when this option names them, after the sprint phase.
 
 Records: the first candidate the game knows and whose item type belongs to the family is used. A family without such a record is
 skipped with a `record not found` line (never a silent pass). Candidates are base game `_Default` presets of the 2.5 weapon
@@ -74,10 +75,22 @@ from gt_input import file_size, read_since  # noqa: E402
 SET_NAME = 'ranged_families'
 SET_MEMBERS = {SET_NAME: [SET_NAME]}
 # static pad parts of scenarios.json: the family copies of them (rf_<family>_<phase>) keep their thresholds
-PARTS = ['ranged_walk', 'ranged_walk_aimed', 'ranged_sprint']
 MOVING_PARTS = {'walk': 'ranged_walk', 'walk_aimed': 'ranged_walk_aimed', 'sprint': 'ranged_sprint'}
 PHASES = ('draw', 'aim_idle', 'hip_fire', 'aim_fire', 'bash', 'reload', 'reload_walk', 'reload_then_run', 'walk', 'walk_aimed',
           'sprint', 'crouch_aim', 'holster')
+# Measurement phases that run only when --ranged-phases names them (never part of the default run of every phase), each a static pad
+# part of scenarios.json: drawn_moves = run, arcs and strafe taps with the weapon drawn; aim_moves = aimed full-stick holds forward /
+# back / right / left (two of each) and aimed strafe taps; aim_turns = standing aimed camera pans (turn in place); crouch_moves =
+# crouched full-stick walks, plain and aimed, and a crouched arc (stance checked afterwards as in crouch_aim). They run after the
+# sprint phase, in this order. EXTRA_SECONDS = the time each adds to the family's time limit (pad input + walking probes + margin).
+EXTRA_PARTS = {'drawn_moves': 'ranged_drawn_moves', 'aim_moves': 'ranged_aim_moves', 'aim_turns': 'ranged_aim_turns',
+               'crouch_moves': 'ranged_crouch_moves'}
+EXTRA_PHASES = tuple(EXTRA_PARTS)
+EXTRA_SECONDS = {'drawn_moves': 35.0, 'aim_moves': 55.0, 'aim_turns': 60.0, 'crouch_moves': 40.0}
+EXTRA_WALKING = ('drawn_moves', 'aim_moves')    # played as walking scenarios (open ground first, one repeat when V is blocked)
+ALL_PHASES = PHASES[:-2] + EXTRA_PHASES + PHASES[-2:]
+PART_OF = {**MOVING_PARTS, **EXTRA_PARTS}
+PARTS = list(PART_OF.values())
 BASH_BUTTON = 'LB'                    # QuickMelee_Button_Alternative (the harness runs under the Alternative scheme: crouch = R3)
 BASH_TAP_S = 0.08                     # a longer LB hold is the scanner (VisionHold times out at 0.1 s), not the quick melee
 BASH_WINDOW_S = 1.5                   # length of the phase
@@ -105,7 +118,7 @@ WEAPON_BUSY = {2: 'reloading', 3: 'in a quick melee', 4: 'out of ammunition', 8:
 WEAPON_READY_WAIT_S = 4.0             # longest wait for the weapon to leave such a state before shots or a reload press
 WEAPON_READY_POLL_S = 0.25
 WEAPON_STATE_TAIL = 20000             # bytes at the end of the log searched for the newest position line
-PROBE_PHASES = ('walk', 'sprint')       # walking phases that look at the ground ahead first (the others reuse the ground just covered)
+PROBE_PHASES = ('walk', 'sprint') + EXTRA_WALKING   # walking phases that look at the ground ahead first (the others reuse the ground just covered)
 DRAW_POLLS = 4                        # hand reads (0.6 s apart) before the one re-draw
 LOG_PREFIX = '[ranged]'
 
@@ -193,10 +206,10 @@ def options_of(args) -> tuple[list[str], dict]:
 def parse_phases(text) -> list[str] | None:
     """'a,b' -> phase names in the table order; None / '' = every phase. ValueError for an unknown name."""
     names = [t.strip() for t in str(text or '').split(',') if t.strip()]
-    bad = [n for n in names if n not in PHASES]
+    bad = [n for n in names if n not in ALL_PHASES]
     if bad:
-        raise ValueError(f'unknown ranged phase {bad}; known: {", ".join(PHASES)}')
-    return [p for p in PHASES if p in names] if names else None
+        raise ValueError(f'unknown ranged phase {bad}; known: {", ".join(ALL_PHASES)}')
+    return [p for p in ALL_PHASES if p in names] if names else None
 
 
 def phase_filter(args) -> set[str] | None:
@@ -220,8 +233,16 @@ def option_errors(args) -> list[str]:
     return []
 
 
-def time_limit_s(n_families: int) -> float:
-    return 60.0 + SECONDS_PER_FAMILY * max(1, n_families)
+def time_limit_s(n_families: int, phases=None) -> float:
+    """Time limit of the set; `phases` = the phase filter (phase_filter): every listed measurement phase adds its EXTRA_SECONDS
+    per family."""
+    extra = sum(EXTRA_SECONDS[p] for p in EXTRA_PHASES if phases and p in phases)
+    return 60.0 + (SECONDS_PER_FAMILY + extra) * max(1, n_families)
+
+
+def set_time_limit_s(args) -> float:
+    """Time limit of the set for the night.py arguments (families and phase filter)."""
+    return time_limit_s(len(options_of(args)[0]), phase_filter(args))
 
 
 # ---------------------------------------------------------------------------------------------- script commands
@@ -820,9 +841,9 @@ def _register(run: _Run, phase: str, shots=(3, 3), reload_s: float | None = None
     """The Scenario of a phase, registered in the runner's table under its own name (the walking helpers look scenarios up there)."""
     n = run.night
     name = phase_label(run.tag, phase)
-    if phase in MOVING_PARTS:
-        base = n.scenarios[MOVING_PARTS[phase]]
-        sc = dataclasses.replace(base, name=name, description=f'ranged family {run.tag}: {phase} ({MOVING_PARTS[phase]})')
+    if phase in PART_OF:
+        base = n.scenarios[PART_OF[phase]]
+        sc = dataclasses.replace(base, name=name, description=f'ranged family {run.tag}: {phase} ({PART_OF[phase]})')
     else:
         sc = scenario_for(run.tag, phase, shots, reload_s, by_shot)
     n.scenarios[name] = sc
@@ -883,7 +904,7 @@ def _walk_phase(run: _Run, phase: str) -> dict:
     # open ground is probed before the walk and the sprint (the aimed walk follows the walk on the ground it just covered)
     walked = run.night.play_walking(run.pad, run.guard, run.plan, sc.name,
                                     clear=gn.commands_movement(sc) and phase in PROBE_PHASES)
-    _tag_part(run.plan, sc.name, MOVING_PARTS[phase])
+    _tag_part(run.plan, sc.name, PART_OF[phase])
     return run.window(phase, walked.get('start') or datetime.now(), datetime.now())
 
 
@@ -1285,15 +1306,30 @@ def _stand_up(run: _Run, why: str) -> str | None:
     return stance
 
 
-def _crouch_aim_phase(run: _Run) -> dict:
+def _crouch_aim_phase(run: _Run, phase: str = 'crouch_aim') -> dict:
+    """A pad phase that crouches and stands up again by its own R3 taps (crouch_aim, crouch_moves): the stance is read afterwards and
+    one more R3 tap is sent only when V is still crouched."""
     off = file_size(run.night.utpp_log)
-    rec = _pad_phase(run, 'crouch_aim')
+    rec = _pad_phase(run, phase)
+    if phase in PART_OF:
+        _tag_part(run.plan, phase_label(run.tag, phase), PART_OF[phase])
     stance = _settled_stance(run, off)
     rec['stance_end'] = stance
     if stance == 'crouched':
-        rec['stance_end'] = _stand_up(run, 'crouch_aim')
+        rec['stance_end'] = _stand_up(run, phase)
     elif stance is None:
-        run.warns.append('crouch_aim: no MMTRACE stance lines, the crouch was not verified')
+        run.warns.append(f'{phase}: no MMTRACE stance lines, the crouch was not verified')
+    return rec
+
+
+def _extra_phase(run: _Run, phase: str) -> dict:
+    """One measurement phase of EXTRA_PHASES (the weapon is in the hand)."""
+    if phase in EXTRA_WALKING:
+        return _walk_phase(run, phase)
+    if phase == 'crouch_moves':
+        return _crouch_aim_phase(run, phase)
+    rec = _pad_phase(run, phase)                 # aim_turns: standing, no left stick
+    _tag_part(run.plan, phase_label(run.tag, phase), PART_OF[phase])
     return rec
 
 
@@ -1384,6 +1420,13 @@ def run_one(night, pad, guard, plan, tag: str, records, out: dict | None = None,
                     run.fails.append(f'{ph}: the weapon could not be put back in the hand; phase skipped')
                     continue
                 _walk_phase(run, ph)
+            for ph in EXTRA_PHASES:                  # measurement phases: only when the filter names them
+                if only is None or ph not in only:
+                    continue
+                if not _ensure_in_hand(run, ph):
+                    run.fails.append(f'{ph}: the weapon could not be put back in the hand; phase skipped')
+                    continue
+                _extra_phase(run, ph)
             if want('crouch_aim'):
                 if _ensure_in_hand(run, 'crouch_aim'):
                     _crouch_aim_phase(run)
@@ -1552,7 +1595,7 @@ def merge_second_try(rec: dict, tag: str, view: dict, key: str = 'families') -> 
 
 # ---------------------------------------------------------------------------------------------- dry run
 
-def dry_run_lines(tag: str, records=None, scenarios: dict | None = None) -> list[str]:
+def dry_run_lines(tag: str, records=None, scenarios: dict | None = None, phases=None) -> list[str]:
     fam = FAMILIES[tag]
     recs = tuple(records or fam['records'])
     ev = ', '.join(f'{r} [{record_evidence(r)}]' for r in recs)
@@ -1562,12 +1605,15 @@ def dry_run_lines(tag: str, records=None, scenarios: dict | None = None) -> list
              f'   give    : {give_cmd(fam, recs[0])}  (record from the pick echo)',
              f'   hand    : {hand_cmd(recs[0])}']
     shots = plan_shots(None)
-    for ph in phases_of(tag):
+    extra = [p for p in EXTRA_PHASES if phases and p in phases]
+    for ph in phases_of(tag)[:-2] + tuple(extra) + phases_of(tag)[-2:]:
+        if phases and ph not in phases and ph not in ('draw', 'holster'):
+            continue
         if ph in ('draw', 'holster'):
             continue
-        if ph in MOVING_PARTS:
-            sc = (scenarios or {}).get(MOVING_PARTS[ph])
-            lines.append(f'   {ph:10}: static pad part {MOVING_PARTS[ph]}' + (f', {sc.duration:.1f} s of pad input' if sc else '')
+        if ph in PART_OF:
+            sc = (scenarios or {}).get(PART_OF[ph])
+            lines.append(f'   {ph:10}: static pad part {PART_OF[ph]}' + (f', {sc.duration:.1f} s of pad input' if sc else '')
                          + f' (family copy {phase_label(tag, ph)})')
         else:
             sc = scenario_for(tag, ph, shots)
