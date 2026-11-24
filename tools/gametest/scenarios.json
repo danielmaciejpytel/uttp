@@ -132,7 +132,22 @@
       ]
     },
     "walk_toggle": {
-      "description": "walk toggle (keyboard G, no pad binding: the night runner taps G at the start of the 'toggle' step and waits for '[utpp_walk] walkToggled=1', one more tap only when no walk line came; needs the keyboard, skipped with --background), full-stick walk straight, reversed (back), straight again, 90 deg arc right, held right, reversed (left), stop, then an L3 sprint tap that clears the toggle (sprint ends WalkToggled); every held direction lasts at least 4 s and forward / back / side come twice each, so the steady-speed extraction gets two segments per stick direction; after the scenario the runner reads the newest walk line and taps G once more only while it still says walkToggled=1, so the toggle never carries into the next scenario; FAILs with 'walk toggle not engaged' when the full stick moves the capsule at run speed (toggle walk 1.9 m/s with mm.walkSpeed 1.9, vanilla 2.72, run 3.84); the feed dump column 'walk' shows the toggle state",
+      "description": "walk toggle (keyboard G, no pad binding: the night runner taps G at the start of the 'toggle' step and waits for '[utpp_walk] walkToggled=1', one more tap only when no walk line came; needs the keyboard, skipped with --background), full-stick walk straight, 90 deg arc right, stop, then an L3 sprint tap that clears the toggle (sprint ends WalkToggled); after the scenario the runner reads the newest walk line and taps G once more only while it still says walkToggled=1, so the toggle never carries into the next scenario; FAILs with 'walk toggle not engaged' when the full stick moves the capsule at run speed (toggle walk 1.9 m/s with mm.walkSpeed 1.9, vanilla 2.72, run 3.84); the feed dump column 'walk' shows the toggle state",
+      "thresholds": {
+        "straight.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
+        "arc_90.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"}
+      },
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "toggle", "duration": 1.0, "ls": [[0, 0, 0]], "metrics": false, "key": "G"},
+        {"name": "straight", "duration": 4.0, "ls_polar": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "arc_90", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 0, 1], [3, 90, 1]]},
+        {"name": "stop", "duration": 2.5, "ls_polar": [[0, 90, 1], [0.2, 90, 0]]},
+        {"name": "clear_toggle", "duration": 1.5, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1], [0.9, 0, 1], [1.0, 0, 0]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}], "metrics": false}
+      ]
+    },
+    "walk_toggle_calibration": {
+      "description": "speed calibration copy of walk_toggle (not in a set; the loco set keeps the short walk_toggle so its numbers stay comparable with earlier runs): walk toggle (keyboard G, no pad binding: the night runner taps G at the start of the 'toggle' step and waits for '[utpp_walk] walkToggled=1', one more tap only when no walk line came; needs the keyboard, skipped with --background), full-stick walk straight, reversed (back), straight again, 90 deg arc right, held right, reversed (left), stop, then an L3 sprint tap that clears the toggle (sprint ends WalkToggled); every held direction lasts at least 4 s and forward / back / side come twice each, so the steady-speed extraction gets two segments per stick direction; after the scenario the runner reads the newest walk line and taps G once more only while it still says walkToggled=1, so the toggle never carries into the next scenario; FAILs with 'walk toggle not engaged' when the full stick moves the capsule at run speed (toggle walk 1.9 m/s with mm.walkSpeed 1.9, vanilla 2.72, run 3.84); the feed dump column 'walk' shows the toggle state",
       "thresholds": {
         "straight.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
         "reverse.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
