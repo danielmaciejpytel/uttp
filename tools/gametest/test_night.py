@@ -2135,7 +2135,8 @@ class MacroTests(unittest.TestCase):
         self.assertEqual(fails, [])
         self.assertEqual(state['taps'], 1)                                          # on once; the sprint cleared it
         self.assertFalse(state['on'])
-        self.assertEqual(calls, [['settle'], ['toggle'], ['straight', 'arc_90', 'stop', 'clear_toggle']])
+        self.assertEqual(calls, [['settle'], ['toggle'], ['straight', 'reverse', 'straight_again', 'arc_90', 'side_right', 'side_left',
+                                                           'stop', 'clear_toggle']])
         self.assertEqual([s['name'] for s in rec['steps']], [s.name for s in sc.steps])  # thresholds keep their steps
 
     def test_walk_toggle_is_switched_off_when_the_sprint_did_not_clear_it(self):

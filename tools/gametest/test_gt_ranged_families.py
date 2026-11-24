@@ -237,7 +237,7 @@ class Registration(unittest.TestCase):
         self.assertEqual(gn.MACROS['ranged_families'], rf.PARTS)
         for part in rf.PARTS:
             self.assertIn(part, scen)
-        self.assertEqual(set(rf.MOVING_PARTS.values()), set(rf.PARTS))
+        self.assertEqual(set(rf.MOVING_PARTS.values()) | set(rf.EXTRA_PARTS.values()), set(rf.PARTS))
 
     def test_pad_parts_are_pad_only_and_the_melee_sets_are_untouched(self):
         scen = load_scenarios(gw.SCENARIO_FILE)
@@ -1153,6 +1153,56 @@ def phase_rec(res, phase, tag='handgun'):
 
 def stamp_time(text):
     return datetime.strptime(text, '%Y-%m-%d %H:%M:%S.%f')
+
+
+class MeasurementPhases(unittest.TestCase):
+    EXTRA = 'drawn_moves,aim_moves,aim_turns,crouch_moves'
+
+    def test_they_run_only_when_listed(self):
+        n, res, plan = run_macro(good_script('handgun'), fams='handgun')
+        self.assertFalse([p for p in n.plays() if any(p.endswith(x) for x in rf.EXTRA_PHASES)])
+        args = types.SimpleNamespace(ranged_families='handgun', ranged_records=[], ranged_phases='walk,' + self.EXTRA)
+        n, res, plan = run_macro(good_script('handgun'), args=args)
+        r = res['families']['handgun']
+        self.assertEqual(r['verdict'], 'PASS', r['fails'])
+        self.assertEqual([w['phase'] for w in res['phase_windows']],
+                         ['draw', 'walk', 'drawn_moves', 'aim_moves', 'aim_turns', 'crouch_moves', 'holster'])
+        self.assertEqual([p for p in n.plays() if p != 'rf_setup_walk'],
+                         ['rf_handgun_walk', 'rf_handgun_drawn_moves', 'rf_handgun_aim_moves', 'rf_handgun_aim_turns',
+                          'rf_handgun_crouch_moves'])
+        walks = {c[0]: c[1] for c in n.called('walk')}
+        self.assertTrue(walks['rf_handgun_drawn_moves'] and walks['rf_handgun_aim_moves'])     # open ground probed first
+        self.assertNotIn('rf_handgun_aim_turns', walks)                                         # standing: a plain pad phase
+        self.assertNotIn('rf_handgun_crouch_moves', walks)                                      # own R3 taps: never repeated
+        parts = {r['scenario']: r.get('part') for r in plan['runs']}
+        for ph, part in rf.EXTRA_PARTS.items():
+            self.assertEqual(parts[f'rf_handgun_{ph}'], part)
+        self.assertIn('stance_end', phase_rec(res, 'crouch_moves'))
+
+    def test_options_parsing_and_time_limit(self):
+        self.assertEqual(rf.parse_phases('aim_turns,walk,crouch_moves'), ['walk', 'aim_turns', 'crouch_moves'])
+        self.assertEqual(rf.option_errors(types.SimpleNamespace(ranged_phases=self.EXTRA)), [])
+        args = types.SimpleNamespace(ranged_families='handgun,assault_rifle', ranged_records=[], ranged_phases=self.EXTRA)
+        base = rf.time_limit_s(2)
+        self.assertAlmostEqual(rf.set_time_limit_s(args), base + 2 * sum(rf.EXTRA_SECONDS.values()))
+        self.assertEqual(rf.time_limit_s(2, {'walk'}), base)
+
+    def test_parts_hold_long_enough_for_the_speed_extraction(self):
+        scen = load_scenarios(gw.SCENARIO_FILE)
+        for ph, part in rf.EXTRA_PARTS.items():
+            sc = scen[part]
+            self.assertTrue(all(b.button in BUTTONS for st in sc.steps for b in st.buttons), part)
+            self.assertLess(sc.duration + 15.0, rf.EXTRA_SECONDS[ph] + 10.0, part)   # the added time limit covers the pad input
+        holds = [st for st in scen['ranged_aim_moves'].steps if st.name.startswith('aim_') and st.name != 'aim_strafe_taps']
+        self.assertEqual(len(holds), 6)
+        self.assertTrue(all(st.duration >= 4.0 for st in holds))      # 0.6 s settle + >= 3 s steady per hold, two holds per direction
+        lt = [f.lt for _, f in scen['ranged_aim_moves'].sample(0.1)]
+        self.assertTrue(all(v > 0.99 for v in lt[3:-12]))             # aimed from the first hold to the strafe taps
+        turns = [st for st in scen['ranged_aim_turns'].steps if st.name.startswith('turn_')]
+        self.assertEqual(len(turns), 12)
+        frames = scen['ranged_aim_turns'].sample(0.05)
+        self.assertTrue(all(abs(f.ls[0]) < 1e-9 and abs(f.ls[1]) < 1e-9 for _, f in frames))   # turn in place: left stick never moves
+        self.assertTrue(all(f.lt > 0.99 for _, f in frames if 0.3 < f.t < scen['ranged_aim_turns'].duration - 0.5))
 
 
 class ReloadMotion(unittest.TestCase):

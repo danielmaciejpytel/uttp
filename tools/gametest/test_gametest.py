@@ -212,7 +212,7 @@ class ScenarioTests(unittest.TestCase):
         # slide_sprint presses R3 while sprinting (a slide) and once to stand up (its steps: test_gt_states)
         intentional = {'sprint_dash', 'veh_exit'}
         for n, sc in self.all.items():
-            if n in ('crouch_walk_turns', 'shoulder_swap_input', 'slide_sprint'):
+            if n in ('crouch_walk_turns', 'crouch_full_stick', 'shoulder_swap_input', 'slide_sprint', 'ranged_crouch_moves'):
                 continue
             for st in sc.steps:
                 self.assertFalse([b for b in st.buttons if b.button in ('R3', 'RS')], f'{n}.{st.name}')

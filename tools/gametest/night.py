@@ -3956,7 +3956,7 @@ class Night:
                         if name in gw.WEAPON_SETS:
                             limit = max(limit, gw.time_limit_s(name))
                         if name in rf.SET_MEMBERS:
-                            limit = max(limit, rf.time_limit_s(len(rf.options_of(self.args)[0])))
+                            limit = max(limit, rf.set_time_limit_s(self.args))
                         self.scenario_deadline = time.monotonic() + limit
                         self.log(f'[scenarios] {name} run {r}')
                         self.current_scenario = f'{name}#{r}'
@@ -4770,9 +4770,9 @@ def dry_run(args) -> int:
                 fams, recs = [], {}
             print(f'     {n}: ranged weapon families (gt_ranged_families.py), one weapon per family; options '
                   f'--ranged-families / --ranged-records; record not found = that family is skipped with a line; the weapon that was '
-                  f'in the hand, the inventory and the ammunition are restored; scenario time limit {rf.time_limit_s(len(fams)):.0f} s:')
+                  f'in the hand, the inventory and the ammunition are restored; scenario time limit {rf.time_limit_s(len(fams), rf.phase_filter(args)):.0f} s:')
             for tag in fams:
-                print('\n'.join('       ' + ln for ln in rf.dry_run_lines(tag, recs[tag], scenarios)))
+                print('\n'.join('       ' + ln for ln in rf.dry_run_lines(tag, recs[tag], scenarios, rf.phase_filter(args))))
     if 'melee_fists_target' in names:
         rec0 = args.enemy_record.split(',')[0]
         print(f'       place (Codeware, tag {gn.ENEMY_TAG}; the first one defines UTPPENEMY, {len(gn.ENEMY_DEFINE)} chars): '
@@ -5112,7 +5112,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help='set ranged_families: comma list of the weapon families to run (default all: ' + ', '.join(rf.FAMILIES) + ')')
     p.add_argument('--ranged-phases', default='',
                    help='set ranged_families: comma list of the phases to run (default all: ' + ', '.join(rf.PHASES) + '); e.g. '
-                        '--ranged-phases reload_walk,reload_then_run')
+                        '--ranged-phases reload_walk,reload_then_run; measurement phases run only when listed: '
+                        + ', '.join(rf.EXTRA_PHASES))
     p.add_argument('--ranged-records', action='append', default=[], metavar='FAMILY=RECORDS',
                    help='set ranged_families: candidate item records of a family, tried in order (replaces the built-in list; '
                         'repeatable), e.g. --ranged-records handgun=Items.Preset_Lexington_Default')

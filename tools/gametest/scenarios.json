@@ -107,18 +107,50 @@
         {"name": "stand_check", "duration": 2.5, "ls": [[0, 0, 0]]}
       ]
     },
+    "crouch_full_stick": {
+      "description": "crouch (R3 tap 0.08 s, one toggle, as crouch_walk_turns), crouch-walk at FULL stick forward, back, right, left, forward, back (4 s each: two steady segments per stick direction for the speed extraction), then an arc right, stop, uncrouch (one toggle), stand check; FAILs with 'crouch not engaged' / 'crouch not released' when MMTRACE loco is not 2 / 1",
+      "thresholds": {
+        "fwd.crouch_fraction": {"min": 0.8, "msg": "crouch not engaged"},
+        "back.crouch_fraction": {"min": 0.8, "msg": "crouch not engaged"},
+        "right.crouch_fraction": {"min": 0.8, "msg": "crouch not engaged"},
+        "left.crouch_fraction": {"min": 0.8, "msg": "crouch not engaged"},
+        "stand_check.stand_fraction": {"min": 0.8, "msg": "crouch not released"}
+      },
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "crouch", "duration": 2.0, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "fwd", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "back", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "right", "duration": 4.0, "interp": "linear", "ls": [[0, 0, -1], [0.1, 1, 0]]},
+        {"name": "left", "duration": 4.0, "interp": "linear", "ls": [[0, 1, 0], [0.1, -1, 0]]},
+        {"name": "fwd_again", "duration": 4.0, "interp": "linear", "ls": [[0, -1, 0], [0.1, 0, 1]]},
+        {"name": "back_again", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "arc_right", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 180, 1], [3, 450, 1]]},
+        {"name": "stop", "duration": 2.5, "ls_polar": [[0, 450, 1], [0.2, 450, 0]]},
+        {"name": "uncrouch", "duration": 1.5, "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "stand_check", "duration": 2.5, "ls": [[0, 0, 0]]}
+      ]
+    },
     "walk_toggle": {
-      "description": "walk toggle (keyboard G, no pad binding: the night runner taps G at the start of the 'toggle' step and waits for '[utpp_walk] walkToggled=1', one more tap only when no walk line came; needs the keyboard, skipped with --background), full-stick walk straight, 90 deg arc right, stop, then an L3 sprint tap that clears the toggle (sprint ends WalkToggled); after the scenario the runner reads the newest walk line and taps G once more only while it still says walkToggled=1, so the toggle never carries into the next scenario; FAILs with 'walk toggle not engaged' when the full stick moves the capsule at run speed (toggle walk 1.9 m/s with mm.walkSpeed 1.9, vanilla 2.72, run 3.84); the feed dump column 'walk' shows the toggle state",
+      "description": "walk toggle (keyboard G, no pad binding: the night runner taps G at the start of the 'toggle' step and waits for '[utpp_walk] walkToggled=1', one more tap only when no walk line came; needs the keyboard, skipped with --background), full-stick walk straight, reversed (back), straight again, 90 deg arc right, held right, reversed (left), stop, then an L3 sprint tap that clears the toggle (sprint ends WalkToggled); every held direction lasts at least 4 s and forward / back / side come twice each, so the steady-speed extraction gets two segments per stick direction; after the scenario the runner reads the newest walk line and taps G once more only while it still says walkToggled=1, so the toggle never carries into the next scenario; FAILs with 'walk toggle not engaged' when the full stick moves the capsule at run speed (toggle walk 1.9 m/s with mm.walkSpeed 1.9, vanilla 2.72, run 3.84); the feed dump column 'walk' shows the toggle state",
       "thresholds": {
         "straight.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
-        "arc_90.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"}
+        "reverse.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
+        "straight_again.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
+        "arc_90.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
+        "side_right.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"},
+        "side_left.pushed_speed_max": {"max": 3.0, "msg": "walk toggle not engaged"}
       },
       "steps": [
         {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
         {"name": "toggle", "duration": 1.0, "ls": [[0, 0, 0]], "metrics": false, "key": "G"},
-        {"name": "straight", "duration": 4.0, "ls_polar": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "straight", "duration": 4.5, "ls_polar": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "reverse", "duration": 4.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "straight_again", "duration": 4.5, "interp": "linear", "ls": [[0, 0, -1], [0.1, 0, 1]]},
         {"name": "arc_90", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 0, 1], [3, 90, 1]]},
-        {"name": "stop", "duration": 2.5, "ls_polar": [[0, 90, 1], [0.2, 90, 0]]},
+        {"name": "side_right", "duration": 4.0, "interp": "linear", "ls": [[0, 1, 0]]},
+        {"name": "side_left", "duration": 4.0, "interp": "linear", "ls": [[0, 1, 0], [0.1, -1, 0]]},
+        {"name": "stop", "duration": 2.5, "ls": [[0, -1, 0], [0.2, 0, 0]]},
         {"name": "clear_toggle", "duration": 1.5, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1], [0.9, 0, 1], [1.0, 0, 0]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}], "metrics": false}
       ]
     },
@@ -139,6 +171,38 @@
         {"name": "run_out", "duration": 1.4, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "rs": [[0, 0, 0]], "metrics": false},
         {"name": "run_back", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]], "metrics": false},
         {"name": "stop", "duration": 1.0, "interp": "linear", "ls": [[0, 0, -1], [0.15, 0, 0]], "metrics": false}
+      ]
+    },
+    "slope_spoke": {
+      "description": "standing, walking and running on uneven ground around a known spot (run with --repeat 8 --home-at X,Y,Z --home-radius 1, like curb_spoke): turn the camera ~50 deg right, stand 2 s, walk out 2.5 s (stick 0.5), stand 2 s, run back 2.5 s (full stick), stand 2 s. V starts each repeat at the --home-at point, so eight repeats go up, down and across the slope or stairs in several directions; read from the feed dump and the ground trace lines (UTPP GRT, written while the MM trace is on), not scored",
+      "steps": [
+        {"name": "turn", "duration": 0.6, "interp": "step", "ls": [[0, 0, 0]], "rs": [[0, 0, 0], [0.05, 1, 0], [0.22, 0, 0]], "metrics": false},
+        {"name": "stand_start", "duration": 2.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "walk_out", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 0], [0.2, 0, 0.5]], "metrics": false},
+        {"name": "stand_mid", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 0.5], [0.15, 0, 0]], "metrics": false},
+        {"name": "run_back", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, -1]], "metrics": false},
+        {"name": "stand_end", "duration": 2.0, "interp": "linear", "ls": [[0, 0, -1], [0.15, 0, 0]], "metrics": false}
+      ]
+    },
+    "shooter_strafe_back": {
+      "description": "speed calibration of side and back movement (run the session with --shooter-mode on: the body keeps facing the camera, so the stick direction is the direction of movement relative to the body): full stick forward, back, forward, back, right, left, right, left, then half stick (0.5) forward, back, forward, back, right, left; every hold lasts 3.5-4 s (two steady segments per stick direction and magnitude), opposite directions in pairs so V ends near the start; stop",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "metrics": false},
+        {"name": "fwd", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "back", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "fwd_again", "duration": 4.0, "interp": "linear", "ls": [[0, 0, -1], [0.1, 0, 1]]},
+        {"name": "back_again", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "right", "duration": 4.0, "interp": "linear", "ls": [[0, 0, -1], [0.1, 1, 0]]},
+        {"name": "left", "duration": 4.0, "interp": "linear", "ls": [[0, 1, 0], [0.1, -1, 0]]},
+        {"name": "right_again", "duration": 4.0, "interp": "linear", "ls": [[0, -1, 0], [0.1, 1, 0]]},
+        {"name": "left_again", "duration": 4.0, "interp": "linear", "ls": [[0, 1, 0], [0.1, -1, 0]]},
+        {"name": "half_fwd", "duration": 3.5, "interp": "linear", "ls": [[0, -1, 0], [0.1, 0, 0.5]]},
+        {"name": "half_back", "duration": 3.5, "interp": "linear", "ls": [[0, 0, 0.5], [0.1, 0, -0.5]]},
+        {"name": "half_fwd_again", "duration": 3.5, "interp": "linear", "ls": [[0, 0, -0.5], [0.1, 0, 0.5]]},
+        {"name": "half_back_again", "duration": 3.5, "interp": "linear", "ls": [[0, 0, 0.5], [0.1, 0, -0.5]]},
+        {"name": "half_right", "duration": 3.5, "interp": "linear", "ls": [[0, 0, -0.5], [0.1, 0.5, 0]]},
+        {"name": "half_left", "duration": 3.5, "interp": "linear", "ls": [[0, 0.5, 0], [0.1, -0.5, 0]]},
+        {"name": "stop", "duration": 2.0, "interp": "linear", "ls": [[0, -0.5, 0], [0.2, 0, 0]]}
       ]
     },
     "idle_then_start_sideways": {
@@ -443,6 +507,16 @@
         {"name": "stop", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.2, 0, 0]]}
       ]
     },
+    "jump_sprint": {
+      "description": "state scenario (far jump): sprint 3 s (full stick + L3 tap), one A tap while sprinting = a sprint jump (the longest flight on level ground), 1.8 s air phase (not scored), 2 s run on after the landing, stop 2.5 s (scored with the default limits)",
+      "steps": [
+        {"name": "settle", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "metrics": false},
+        {"name": "sprint", "duration": 3.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}]},
+        {"name": "jump", "duration": 1.8, "interp": "linear", "ls": [[0, 0, 1]], "buttons": [{"t": 0.2, "button": "A", "hold": 0.12}], "metrics": false},
+        {"name": "land", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 1]]},
+        {"name": "stop", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 1], [0.2, 0, 0]]}
+      ]
+    },
     "trav_vault_jump": {
       "description": "traversal macro part (gt_traversal.py): V stands at the hood side of the car facing it; the stick is pushed into the car for 1.4 s with one A tap at 0.5 s (a vault over the hood), then 1.5 s landing; no locomotion limits (the macro judges the traversal from the log)",
       "steps": [
@@ -506,6 +580,61 @@
       "steps": [
         {"name": "sprint", "duration": 2.0, "interp": "linear", "ls": [[0, 0, 0], [0.15, 0, 1]], "buttons": [{"t": 0.3, "button": "LS", "hold": 0.12}]},
         {"name": "stop", "duration": 1.0, "ls": [[0, 0, 1], [0.3, 0, 0]], "metrics": false}
+      ]
+    },
+    "ranged_drawn_moves": {
+      "description": "ranged family macro part (phase drawn_moves, only when listed in --ranged-phases): the weapon drawn and not aimed, full-stick run, arc right then left at 60 deg/s, keyboard-like left / right strafe taps every 0.35 s, stop (lean and foot slide with a weapon in the hand)",
+      "steps": [
+        {"name": "run", "duration": 2.5, "interp": "linear", "ls": [[0, 0, 0], [0.3, 0, 1]], "lt": [[0, 0]], "rt": [[0, 0]]},
+        {"name": "arc_right", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 0, 1], [3, 180, 1]]},
+        {"name": "arc_left", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 180, 1], [3, 0, 1]]},
+        {"name": "strafe_taps", "duration": 2.8, "interp": "step", "ls": [[0.00, -1, 0], [0.35, 1, 0], [0.70, -1, 0], [1.05, 1, 0], [1.40, -1, 0], [1.75, 1, 0], [2.10, -1, 0], [2.45, 1, 0]]},
+        {"name": "stop", "duration": 1.2, "interp": "linear", "ls": [[0, 1, 0], [0.2, 0, 0]], "metrics": false}
+      ]
+    },
+    "ranged_aim_moves": {
+      "description": "ranged family macro part (phase aim_moves, only when listed in --ranged-phases): aimed (LT held) at FULL stick forward, back, right, left, forward, back (4 s each: two steady segments per stick direction for the speed extraction, opposite directions in pairs so V ends near the start), then keyboard-like left / right strafe taps every 0.35 s while aimed, stop (aim speed, barrel and lean while moving)",
+      "steps": [
+        {"name": "aim_fwd", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 0], [0.3, 0, 1]], "lt": [[0, 0], [0.1, 1]], "rt": [[0, 0]]},
+        {"name": "aim_back", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "aim_right", "duration": 4.0, "interp": "linear", "ls": [[0, 0, -1], [0.1, 1, 0]]},
+        {"name": "aim_left", "duration": 4.0, "interp": "linear", "ls": [[0, 1, 0], [0.1, -1, 0]]},
+        {"name": "aim_fwd_again", "duration": 4.0, "interp": "linear", "ls": [[0, -1, 0], [0.1, 0, 1]]},
+        {"name": "aim_back_again", "duration": 4.0, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "aim_strafe_taps", "duration": 2.8, "interp": "step", "ls": [[0.00, -1, 0], [0.35, 1, 0], [0.70, -1, 0], [1.05, 1, 0], [1.40, -1, 0], [1.75, 1, 0], [2.10, -1, 0], [2.45, 1, 0]]},
+        {"name": "stop", "duration": 1.0, "interp": "linear", "ls": [[0, 1, 0], [0.2, 0, 0]], "lt": [[0, 1], [0.7, 1], [0.8, 0]], "metrics": false}
+      ]
+    },
+    "ranged_aim_turns": {
+      "description": "ranged family macro part (phase aim_turns, only when listed in --ranged-phases): standing and aimed (LT held, left stick untouched), camera pans by full right-stick pulses of 0.25, 0.375, 0.5, 0.75, 1.5 and 2.5 s, each to the right and back to the left, every pulse followed by a 2.5 s hold (turn in place). The pulse lengths aim at 30, 45, 60, 90 and 180 deg at the 120 deg/s hip rate; the aimed camera rate depends on the game's pad sensitivity, so the turn angle is read from the feed dump (camDeg), not from these names",
+      "steps": [
+        {"name": "aim", "duration": 1.5, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0], [0.1, 1]], "rt": [[0, 0]], "metrics": false},
+        {"name": "turn_030_r", "duration": 2.75, "interp": "linear", "rs": [[0, 0, 0], [0.03, 1, 0], [0.25, 1, 0], [0.28, 0, 0]]},
+        {"name": "turn_030_l", "duration": 2.75, "interp": "linear", "rs": [[0, 0, 0], [0.03, -1, 0], [0.25, -1, 0], [0.28, 0, 0]]},
+        {"name": "turn_045_r", "duration": 2.88, "interp": "linear", "rs": [[0, 0, 0], [0.03, 1, 0], [0.375, 1, 0], [0.405, 0, 0]]},
+        {"name": "turn_045_l", "duration": 2.88, "interp": "linear", "rs": [[0, 0, 0], [0.03, -1, 0], [0.375, -1, 0], [0.405, 0, 0]]},
+        {"name": "turn_060_r", "duration": 3.0, "interp": "linear", "rs": [[0, 0, 0], [0.03, 1, 0], [0.5, 1, 0], [0.53, 0, 0]]},
+        {"name": "turn_060_l", "duration": 3.0, "interp": "linear", "rs": [[0, 0, 0], [0.03, -1, 0], [0.5, -1, 0], [0.53, 0, 0]]},
+        {"name": "turn_090_r", "duration": 3.25, "interp": "linear", "rs": [[0, 0, 0], [0.03, 1, 0], [0.75, 1, 0], [0.78, 0, 0]]},
+        {"name": "turn_090_l", "duration": 3.25, "interp": "linear", "rs": [[0, 0, 0], [0.03, -1, 0], [0.75, -1, 0], [0.78, 0, 0]]},
+        {"name": "turn_180_r", "duration": 4.0, "interp": "linear", "rs": [[0, 0, 0], [0.03, 1, 0], [1.5, 1, 0], [1.53, 0, 0]]},
+        {"name": "turn_180_l", "duration": 4.0, "interp": "linear", "rs": [[0, 0, 0], [0.03, -1, 0], [1.5, -1, 0], [1.53, 0, 0]]},
+        {"name": "turn_300_r", "duration": 5.0, "interp": "linear", "rs": [[0, 0, 0], [0.03, 1, 0], [2.5, 1, 0], [2.53, 0, 0]]},
+        {"name": "turn_300_l", "duration": 5.0, "interp": "linear", "rs": [[0, 0, 0], [0.03, -1, 0], [2.5, -1, 0], [2.53, 0, 0]]},
+        {"name": "lower", "duration": 0.4, "lt": [[0, 1], [0.1, 0]], "metrics": false}
+      ]
+    },
+    "ranged_crouch_moves": {
+      "description": "ranged family macro part (phase crouch_moves, only when listed in --ranged-phases): the weapon drawn, crouch (R3 tap), crouch-walk at full stick forward and back, the same aimed (LT held), a crouched arc right, stop, stand up (R3 tap; the macro checks the stance afterwards and taps R3 once more only when V is still crouched)",
+      "steps": [
+        {"name": "crouch", "duration": 1.0, "ls": [[0, 0, 0]], "rs": [[0, 0, 0]], "lt": [[0, 0]], "rt": [[0, 0]], "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false},
+        {"name": "crouch_fwd", "duration": 3.5, "interp": "linear", "ls": [[0, 0, 0], [0.3, 0, 1]]},
+        {"name": "crouch_back", "duration": 3.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "crouch_aim_fwd", "duration": 3.5, "interp": "linear", "ls": [[0, 0, -1], [0.1, 0, 1]], "lt": [[0, 0], [0.1, 1]]},
+        {"name": "crouch_aim_back", "duration": 3.5, "interp": "linear", "ls": [[0, 0, 1], [0.1, 0, -1]]},
+        {"name": "crouch_arc", "duration": 3.0, "interp": "linear", "ls_polar": [[0, 180, 1], [3, 360, 1]], "lt": [[0, 1], [0.1, 0]]},
+        {"name": "stop", "duration": 0.8, "ls_polar": [[0, 360, 1], [0.2, 360, 0]], "metrics": false},
+        {"name": "stand", "duration": 1.0, "ls": [[0, 0, 0]], "buttons": [{"t": 0.3, "button": "R3", "hold": 0.08}], "metrics": false}
       ]
     }
   }
