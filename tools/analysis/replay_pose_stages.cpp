@@ -25,9 +25,11 @@
 //                       ways, 2 raise only, 3 lower only); --capsule-rate-scope S: the picks that take it (MapConfig::capsuleRateScope:
 //                       0 every pick, 1 loop clips only, 2 every pick but a start clip)
 //   --speed-converter B query velocity of the reference character movement chasing the game velocity (MapConfig::speedConverter bits:
-//                       1 query and predicates, 2 also starts and stops, 4 loop clips at the capsule speed); --speed-converter-friction F
+//                       1 query and predicates, 2 also starts and stops, 4 loop clips at the capsule speed, 8 heading only, 16 loop
+//                       rate only at a steady speed, 32 converted feeds play at the game speed); --speed-converter-friction F
 //                       its turn friction per second (default: the gait ground friction); --speed-converter-max-turn D: larger turns
-//                       keep the game velocity (default: every turn is converted)
+//                       keep the game velocity (default: every turn is converted); --speed-converter-preset P: a named setting
+//                       (speedconv::PresetFor: 0 off, 1 safe, 2 stronger; replaces the three values above)
 //   --velocity-predicates 1  moving / pivot predicates from the current velocity and the input acceleration
 //   --tip-deg D         turn-in-place angle of the chooser (deg)
 //   --pick-dump 1       one PICKDUMP line per stop / start pick (inspection)
@@ -624,6 +626,13 @@ int main(int argc, char** argv)
             capsuleRate = std::atoi(argv[i + 1]) & 3;
         else if (std::strcmp(argv[i], "--speed-converter") == 0)
             speedConverter = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--speed-converter-preset") == 0)
+        {
+            const utpp::mm::speedconv::Preset p = utpp::mm::speedconv::PresetFor(std::atoi(argv[i + 1]));
+            speedConverter = p.bits;
+            speedConverterFriction = p.friction;
+            speedConverterMaxTurnDeg = p.maxTurnDeg;
+        }
         else if (std::strcmp(argv[i], "--speed-converter-max-turn") == 0)
             speedConverterMaxTurnDeg = static_cast<float>(std::atof(argv[i + 1]));
         else if (std::strcmp(argv[i], "--speed-converter-friction") == 0)

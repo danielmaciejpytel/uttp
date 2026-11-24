@@ -1028,7 +1028,8 @@ struct MapConfig
     // turn is reshaped (the speed is the game speed while the two velocities are aligned); kStartsStops = the speed too, also from rest
     // and after the input is released; kLoopRate = loop clips play at the capsule speed (capsuleSpeedRate Both with scope 1, when
     // capsuleSpeedRate is off); kDirectionOnly = only the heading is converted (the speed is the game speed); kSteadyLoopRate = the loop
-    // rate only while the capsule speed holds (speedconv::UpdateSteady).
+    // rate only while the capsule speed holds (speedconv::UpdateSteady); kGameSpeedRate = a converted feed plays at the game speed (the
+    // rate scale times game / converted speed).
     // 0 = the game velocity everywhere, bit for bit.
     int speedConverter = 0;
     speedconv::Limits speedConverterLimits;
@@ -1054,6 +1055,15 @@ struct MapConfig
     float aimPivotDeg = motiontraj::kPivotAim;
     float aimPivotGateS = motiontraj::kPivotAimGateS;
 };
+
+// MapConfig speed converter fields from a named setting (speedconv::PresetFor: 0 off, 1 safe, 2 stronger)
+inline void ApplySpeedConverterPreset(MapConfig& c, int aLevel)
+{
+    const speedconv::Preset p = speedconv::PresetFor(aLevel);
+    c.speedConverter = p.bits;
+    c.speedConverterFriction = p.friction;
+    c.speedConverterMaxTurnDeg = p.maxTurnDeg;
+}
 
 // The capsule speed play rate in effect: MapConfig::capsuleSpeedRate, or with it off the loop rate of the speed converter
 // (speedconv::kLoopRate: Both, loop clips only).
@@ -2113,6 +2123,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // Speed converter (MapConfig::speedConverter): the query velocity the reference character movement would have while chasing the
     // game velocity; vel itself (play rate, speed, landing, feet) stays the game's
     motiontraj::V3 velQ = vel;
+    float gameSpeedRate = 1.0f; // speedconv::kGameSpeedRate: game / converted speed of this feed (play-rate factor)
     if (c.speedConverter & speedconv::kQuery)
     {
         const bool input = !motiontraj::IsZero(acc);
@@ -2127,6 +2138,8 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
             lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
         velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
+        if ((c.speedConverter & speedconv::kGameSpeedRate) && active)
+            gameSpeedRate = speedconv::GameSpeedRateScale(motiontraj::SizeXY(vel), motiontraj::SizeXY(velQ));
     }
     m.traj.Update(dt, velQ, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);
     m.capsuleAccelModel = m.traj.CapsuleAcceleration();
@@ -2334,6 +2347,8 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     m.rateSpeedScale = m.querySpeed.rate && chooserSpeed > 1.0f
                            ? CapsuleRateScaleForMode(EffectiveCapsuleRate(c), CapsuleCmPerMappedCm(m.querySpeed, chooserSpeed))
                            : 1.0f;
+    if (m.querySpeed.rate && chooserSpeed > 1.0f && gameSpeedRate != 1.0f)
+        m.rateSpeedScale *= gameSpeedRate; // speedconv::kGameSpeedRate
     // speedconv::kSteadyLoopRate: the converter's loop rate only while the capsule speed holds on the ground with the input held, outside
     // the landing window (a start, a stop or a speed change plays at the mapped query rate)
     if ((c.speedConverter & speedconv::kSteadyLoopRate) && c.capsuleSpeedRate == CapsuleRateMode::Off)
