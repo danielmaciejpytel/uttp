@@ -52,7 +52,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-VERSION = "0.1.2"
+VERSION = "0.2.0"
 GAME_VERSION = "2.50"
 AUTHOR = "Daniel Maciej Pytel"
 # NVIDIA attribution in THIRD_PARTY_NOTICES (L3). MotionBricks clips are in the motion databases, in
