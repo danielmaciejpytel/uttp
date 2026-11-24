@@ -37,6 +37,7 @@
 #include "StationaryShotTurn.hpp"
 #include "MotionTrajectory.hpp"
 #include "SpeedConverter.hpp"
+#include "speedconv_terrain.hpp"
 
 namespace utpp::mm::adapter
 {
@@ -308,6 +309,8 @@ struct MotionFeed
     // gait in AimWalk (2) like the walk toggle, instead of Run strafe loops played at the rate floor. false = nothing changes, bit for bit.
     // Set by MotionDriver Step, not by MakeMotionFeed.
     bool aimWalkVanilla = false;
+    bool haveCapsuleZ = false; // capsule height (m) of the feed (speedconv::kStepHold); set by MotionDriver Step from the extra feed
+    float capsuleZ = 0.0f;
     AirFeed air;                  // UTPPFeedAir (runtime session)
     // UTPP-MOTION SEAM motionfix (item 1): v1 FeedInput haveTarget / targetYawDeg = world run direction (camera yaw + Locomotion raw
     // stick angle, or player yaw + stick angle without Locomotion: scripts/utpp.reds UTPPOwnMoveTarget).
@@ -1388,6 +1391,7 @@ struct MapState
     } querySpeed;
     float rateSpeedScale = 1.0f; // MapConfig::capsuleSpeedRate: this feed's play-rate scale (1 = off)
     speedconv::State speedConverter; // MapConfig::speedConverter: the converted velocity of the last feed
+    speedconv::StepHoldState speedConverterStep; // speedconv::kStepHold
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -2131,13 +2135,16 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         const bool ground = mode == 0 && PsmGround(locoDetail) && !slideActive && !x.vehicleExit && !jumpOutFlight &&
                             st.movementMode == 0 && m.sinceLand >= motiontraj::kJustLandedSeconds;
         const bool shapeSpeed = (c.speedConverter & speedconv::kStartsStops) != 0;
-        const bool active = ground && ((input && sp > motiontraj::kHasVelocity) || shapeSpeed);
+        // kStepHold: a stair step dip of the game speed keeps the speed before it (speedconv_terrain.hpp)
+        const motiontraj::V3 velHold = speedconv::StepHoldVelocity(m.speedConverterStep, vel, f.capsuleZ, f.haveCapsuleZ,
+                                                                 (c.speedConverter & speedconv::kStepHold) && ground && input, dt);
+        const bool active = ground && ((input && motiontraj::SizeXY(velHold) > motiontraj::kHasVelocity) || shapeSpeed);
         speedconv::Limits lim = c.speedConverterLimits;
         lim.friction = c.speedConverterFriction > 0.0f ? c.speedConverterFriction : motiontraj::MotionGroundFriction(c.cmc, gait, sp);
         lim.acceleration = motiontraj::MotionMaxAcceleration(c.cmc, gait, sp);
         if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
             lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
-        velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
+        velQ = speedconv::Step(m.speedConverter, velHold, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
         if ((c.speedConverter & speedconv::kGameSpeedRate) && active)
             gameSpeedRate = speedconv::GameSpeedRateScale(motiontraj::SizeXY(vel), motiontraj::SizeXY(velQ));
     }
