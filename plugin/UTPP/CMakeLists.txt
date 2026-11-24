@@ -631,6 +631,7 @@ target_sources(UTPP PRIVATE src/PoseCaptureRuntime.cpp src/PoseCaptureRuntime.hp
 target_sources(UTPP PRIVATE src/DiagReportRuntime.cpp src/DiagReportRuntime.hpp src/DiagReport.hpp src/PathScrub.hpp) # UTPPDiagWriteReport + path scrub of every log line
 target_sources(UTPP PRIVATE src/EarlyPoseRuntime.cpp src/EarlyPoseRuntime.hpp)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/earlyposeruntime.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tests/speedconv_traj.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/shooter_mode_evidence.cmake OPTIONAL) # shooterMode mode: evidence tools (A8 decision dump, A9 H2 session gate replay)
 foreach(probe IN ITEMS SemanticPoseDiscovery PerspectiveWriteGate MappingByteReceipt MappingCycleReceipt)
   add_executable(utpp_${probe}_test tests/${probe}Test.cpp)

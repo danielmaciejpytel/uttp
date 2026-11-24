@@ -561,6 +561,12 @@ public:
     int NumHistory() const { return m_init ? kHistoryCount : 0; }
     const Sample& History(int i) const { return m_hist[i]; }
     const Sample& Prediction(int k) const { return m_pred[k]; }
+    // Horizontal positions of the prediction samples replaced (speedconv::ApplyConvertedPrediction); times, heights and facings kept.
+    void SetPredictionXY(const V3 (&aPos)[kPredictionCount + 1])
+    {
+        for (int k = 0; k <= kPredictionCount; ++k)
+            m_pred[k].pos = V3{aPos[k].x, aPos[k].y, m_pred[k].pos.z};
+    }
 
 private:
     Sample m_hist[kHistoryCount];

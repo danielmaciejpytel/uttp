@@ -37,6 +37,7 @@
 #include "StationaryShotTurn.hpp"
 #include "MotionTrajectory.hpp"
 #include "SpeedConverter.hpp"
+#include "speedconv_traj.hpp"
 
 namespace utpp::mm::adapter
 {
@@ -1029,7 +1030,8 @@ struct MapConfig
     // and after the input is released; kLoopRate = loop clips play at the capsule speed (capsuleSpeedRate Both with scope 1, when
     // capsuleSpeedRate is off); kDirectionOnly = only the heading is converted (the speed is the game speed); kSteadyLoopRate = the loop
     // rate only while the capsule speed holds (speedconv::UpdateSteady); kGameSpeedRate = a converted feed plays at the game speed (the
-    // rate scale times game / converted speed).
+    // rate scale times game / converted speed); kTrajectory (speedconv_traj.hpp) = while a turn is converted, the query prediction
+    // continues from the converted state (the converter integrated over the horizon) instead of the gait-friction ground steps.
     // 0 = the game velocity everywhere, bit for bit. Default: the stronger preset (speedconv::PresetFor(kPresetStronger)).
     int speedConverter = speedconv::PresetFor(speedconv::kPresetStronger).bits;
     speedconv::Limits speedConverterLimits;
@@ -2124,6 +2126,8 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // game velocity; vel itself (play rate, speed, landing, feet) stays the game's
     motiontraj::V3 velQ = vel;
     float gameSpeedRate = 1.0f; // speedconv::kGameSpeedRate: game / converted speed of this feed (play-rate factor)
+    speedconv::Limits convLim;  // speedconv::kTrajectory: the limits and the activity of this feed's conversion
+    bool convActive = false, convShape = false;
     if (c.speedConverter & speedconv::kQuery)
     {
         const bool input = !motiontraj::IsZero(acc);
@@ -2138,10 +2142,15 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
             lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
         velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
+        convLim = lim, convActive = active && input, convShape = shapeSpeed;
         if ((c.speedConverter & speedconv::kGameSpeedRate) && active)
             gameSpeedRate = speedconv::GameSpeedRateScale(motiontraj::SizeXY(vel), motiontraj::SizeXY(velQ));
     }
     m.traj.Update(dt, velQ, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);
+    if ((c.speedConverter & speedconv::kTrajectory) && convActive)
+        speedconv::ApplyConvertedPrediction(m.traj, m.speedConverter, vel, trajAcc, true, convLim, convShape,
+                                            (c.speedConverter & speedconv::kDirectionOnly) != 0,
+                                            speedconv::TrajectoryRamp(d.capsuleStart.Active(), motiontraj::SizeXY(vel), d.maxSpeed));
     m.capsuleAccelModel = m.traj.CapsuleAcceleration();
     st.trjPast = m.traj.PastVelocity();
     st.trjCurrent = m.traj.CurrentVelocity();
