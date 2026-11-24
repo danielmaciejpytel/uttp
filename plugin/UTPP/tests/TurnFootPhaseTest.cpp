@@ -263,9 +263,6 @@ int main(int argc, char** argv)
         std::puts("usage TurnFootPhaseTest <driver-data> <basedb>");
         return 2;
     }
-    // the foot phase re-rank is compared with the stronger converter preset (bits 33): with the start / stop window stage (bit 64, default
-    // since 0.2.0) the 60 Hz sprint re-rank loses its margin over the trajectory-only pick
-    motiondriver::TestSetMapSpeedConverter(mm::speedconv::PresetFor(mm::speedconv::kPresetStronger).bits, 0.0f, 0.0f);
     g_baseDb = std::wstring(argv[2], argv[2] + std::strlen(argv[2]));
     motiondriver::SetOverlayInputs(0, 0, false, false);
     motionhost::MotionHooks hooks{&WStep, &WApply, &motiondriver::OnArmed, &motiondriver::OnDisarmed, &PhaseFrameHook, &motiondriver::OwnsTraversal};
@@ -311,6 +308,11 @@ int main(int argc, char** argv)
             for (bool sprint : {false, true})
             {
                 const std::string tag = std::string(bd.body) + " " + std::to_string(int(hz)) + " Hz" + (sprint ? " sprint" : " run");
+                // the 60 Hz sprint case is compared with the stronger converter preset (bits 33): with the start / stop window stage
+                // (bit 64) the sprint stop before the flick leaves the re-ranked pick no shorter toe path than the trajectory-only pick
+                // (Female 427.9 vs 407.7 cm, Male 451.3 vs 450.6 cm); every other case runs the default converter
+                const bool pinConverter = sprint && hz == 60.0f;
+                motiondriver::TestSetMapSpeedConverter(pinConverter ? mm::speedconv::PresetFor(mm::speedconv::kPresetStronger).bits : -1, 0.0f, 0.0f);
                 const float cycle = sprint ? 0.62f : 0.72f; // one gait cycle of the loop (s); the offsets cover it
                 float pathOn = 0, pathOff = 0;
                 uint64_t changed = 0;
@@ -352,6 +354,7 @@ int main(int argc, char** argv)
                             static_cast<unsigned long long>(changed), pickDiffers, kPhases);
                 Check(sprint ? (changed > 0 ? pathOn < pathOff : pathOn == pathOff) : pathOn < pathOff,
                       tag + ": turn clip enters on the shown foot phase (planted toe path vs the trajectory-only pick)", d);
+                motiondriver::TestSetMapSpeedConverter(-1, 0.0f, 0.0f);
             }
     }
     motiondriver::SetEnabled(false);

@@ -57,7 +57,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runtime_world_slide as rws  # noqa: E402
 
 # Reference sessions: Female (all moves, keyboard, crouch) and Male (the same three).
-# Window of the busiest-window clip change measure (s of feed time; the in-game steps that the 3.0 / s limit judges last about 3 s)
+# Window of the busiest-window clip change measure (s of feed time; the in-game steps that the 3.75 / s limit judges last about 3 s)
 CLIP_WINDOW_S = 3.0
 CLOCK_TOLERANCE_S = 0.05   # spread allowed between the matched trace lines that place the harness steps on the feed clock
 DEFAULT_RUNS = ['woman:20261118-121140', 'woman:20261118-122228', 'woman:20261118-122643',

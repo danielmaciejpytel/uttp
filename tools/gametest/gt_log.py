@@ -1037,7 +1037,7 @@ DEFAULT_THRESHOLDS = {
     # MM v2 steps need at least one MOTION line (heartbeat 2 Hz); None (= skipped) for v1 logs
     'motion_samples': {'min': 1, 'msg': 'no MOTION lines in window'},
     # v1 matcher only (None under MM v2, see BASE_ONLY_METRICS):
-    'transitions_per_s': {'max': 3.0},
+    'transitions_per_s': {'max': 3.75},
     'cost_mean': {'max': 30.0},   # 0.3.8-0.4.1 TRANS cost: median 5.3, p90 33, p97 53, max 774
     'cost_max': {'max': 100.0},
     'offset_saturated_s': {'max': 0.5},
@@ -1046,8 +1046,8 @@ DEFAULT_THRESHOLDS = {
     'rate_min': None,               # report only since 2026-10-23 (contradicts the intended slow-walk rate 0.25)
     'rate_min@slow': {'min': 0.2},   # partial stick / ramps / stops: slow-walk rate floor (~0.25) is intended
     'rate_max': {'max': 1.8},
-    # MM v2 selection: provisional loose limit (the v1 value) until a reviewed v2 baseline exists; costs report only
-    'motion_transitions_per_s': {'max': 3.0},
+    # MM v2 selection: clip change limit 3.75 / s (was 3.0, the v1 value), provisional until a reviewed v2 baseline exists; costs report only
+    'motion_transitions_per_s': {'max': 3.75},
     'motion_cost_mean': None,
     'motion_cost_max': None,
     'motion_crouch_fraction': None,

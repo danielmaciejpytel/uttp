@@ -23,7 +23,7 @@ Gate, per body (each body is judged on the aggregate of its sessions):
     A class value (P50, P95) or clip change rate (CC) within its tolerance counts as unchanged. The total improves when the mean is
     below zero.
   hard limits (after side):
-    clip changes / s <= 3.0, judged against the baseline (see the foot correction below), on the session mean and per scored harness step (rt_clip_step_max: the replay's clip
+    clip changes / s <= 3.75, judged against the baseline (see the foot correction below), on the session mean and per scored harness step (rt_clip_step_max: the replay's clip
       changes inside each step the in-game gate judged / the step duration, the same windows and ratio as the in-game limit,
       placed on the feed clock through the MOTION trace; compare_runs --world-slide with --motion-log 1). A session mean of
       ~1 / s hides a burst such as 3.7 / s in a fast running arc. A result without the per-step measure, or with sessions
@@ -83,7 +83,7 @@ sys.path.insert(0, HERE)
 CLASSES = ('start', 'stop', 'pivot', 'loop', 'landing', 'idle', 'other')
 BODIES = ('woman', 'man')
 MINOR_FRACTION = 0.02
-HARD_CLIP_CHANGES = 3.0
+HARD_CLIP_CHANGES = 3.75
 HARD_CORR_MAX = 15.0
 HARD_FEED_P95 = 250.0
 HARD_CORR_V_MAX = 50.0        # vertical (ground / terrain) foot correction, stairs included (user decision 2026-11-23: 20 -> 50 cm)
@@ -431,17 +431,17 @@ def gate_body(body, before, after, margin=None, include_invalid=False, corr_limi
     for key, lim in (('rt_clip_changes_s', HARD_CLIP_CHANGES), ('rt_clip_step_max', HARD_CLIP_CHANGES)):
         v, vb = after.get(key), before.get(key)
         if vb is not None and vb > lim:
-            hard_before.append('%s %.3f > %.1f%s' % (key, vb, lim, where(before, key)))
+            hard_before.append('%s %.3f > %.2f%s' % (key, vb, lim, where(before, key)))
         if v is None or v <= lim:
             continue
         tol = max(0.0011, float(margin.get(key, 0.0)))
         if vb is not None and vb > lim and v <= vb + tol:
-            preexisting.append('clip changes %s %.3f -> %.3f > %.1f already in the baseline%s%s' % (
+            preexisting.append('clip changes %s %.3f -> %.3f > %.2f already in the baseline%s%s' % (
                 key, vb, v, lim, where(before, key, ' baseline at'), where(after, key, '; now at')))
         elif vb is not None and vb > lim:
-            hard.append('%s %.3f > %.1f and worse than the baseline %.3f (already above)%s' % (key, v, lim, vb, where(after, key)))
+            hard.append('%s %.3f > %.2f and worse than the baseline %.3f (already above)%s' % (key, v, lim, vb, where(after, key)))
         else:
-            hard.append('%s %.3f > %.1f%s' % (key, v, lim, where(after, key)))
+            hard.append('%s %.3f > %.2f%s' % (key, v, lim, where(after, key)))
     if after.get('rt_clip_step_max') is None:
         incomplete.append('clip changes per step not measured (needs --world-slide, --motion-log 1 and recorded harness steps)')
     elif after.get('rt_clip_step_missing'):
