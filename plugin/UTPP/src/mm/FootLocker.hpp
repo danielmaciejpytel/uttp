@@ -754,7 +754,8 @@ private:
         float yawApply = 0.0f;    // rad, yaw applied to the foot this update (before the IK weight)
         // yaw lock (SetYawLock), separate from the reference plant model's yaw state
         bool ylFree = false;      // the yaw follows the animated yaw through its spring
-        float ylLock = 0.0f;      // rad, locked world yaw
+        float ylLock = 0.0f;      // rad, locked planar heel - toe world heading
+        float ylPrev = 0.0f;      // rad, animated planar heel - toe world heading of the previous update
         float ylX = 0.0f, ylV = 0.0f; // rad, rad/s: shown - animated world yaw while following, and its rate
         float ylApply = 0.0f;     // rad, yaw applied to the foot this update (before the IK weight)
         float ylShown = 0.0f;     // rad, applied yaw x IK weight of the last locked update (relock during the blend-out)
@@ -1020,7 +1021,7 @@ private:
         Foot& f = m_foot[aSide];
         const FootYawLockConfig& c = m_ycfg;
         const float keep = 1.0f - c.twistReduction;
-        const float animYaw = m_animYawW[aSide];
+        const float animTw = m_animHeadingW[aSide];
         // bound: the ankle correction with the yaw (shown toe offset + the ankle turned about the toe) stays within maxCorrection, or within
         // the correction without the yaw where that is larger; a yaw beyond it is scaled down (bisection, the correction is 0-yaw bounded)
         const float limit = std::fmax(c.maxCorrection, std::sqrt(aOx * aOx + aOy * aOy));
@@ -1044,7 +1045,8 @@ private:
         ++m_diag.yawLockUpdates;
         if (!f.ylFree)
         {
-            const float err = math::WrapAngle(f.ylLock - animYaw);
+            // a rotation of the foot about +Z adds to its heading exactly, so the held yaw is the heading difference
+            const float err = math::WrapAngle(f.ylLock - animTw);
             if (std::fabs(err) <= c.unplantAngle)
             {
 #if defined(UTPP_FLYAW_MUTATION) && UTPP_FLYAW_MUTATION == 1 // mutation 1: nothing held while planted
@@ -1056,15 +1058,15 @@ private:
                 if (bounded != apply)
                 {
                     apply = bounded;
-                    f.ylLock = animYaw + apply / keep; // the planted yaw slides with the bound
+                    f.ylLock = math::WrapAngle(animTw + apply / keep); // the planted yaw slides with the bound
                 }
                 f.ylApply = apply;
                 return;
             }
             // unplant: the spring starts from the shown yaw of the previous update and runs this update's dt (no step)
             f.ylFree = true;
-            f.ylX = (err + m_animYawRate[aSide] * aDt) * keep;
-            f.ylV = -m_animYawRate[aSide] * keep;
+            f.ylX = (err + m_animHeadingRate[aSide] * aDt) * keep;
+            f.ylV = -m_animHeadingRate[aSide] * keep;
             ++m_diag.yawLockUnplants;
         }
         SpringCritical(f.ylX, f.ylV, std::sqrt(c.angularStiffness), aDt);
@@ -1079,7 +1081,7 @@ private:
         if (std::fabs(f.ylX) <= c.replantAngle)
         {
             f.ylFree = false; // plant again where the foot is shown
-            f.ylLock = animYaw + f.ylX / keep;
+            f.ylLock = math::WrapAngle(animTw + f.ylX / keep);
             ++m_diag.yawLockReplants;
         }
     }
@@ -1259,6 +1261,19 @@ private:
             m_animToeVel[aSide] = rate ? math::Vec3{(tx - f.prevToeX) / aDt, (ty - f.prevToeY) / aDt, 0.0f} : math::Vec3{};
             m_animYawRate[aSide] = rate ? math::WrapAngle(yawW - f.prevYaw) / aDt : 0.0f;
             m_animYawW[aSide] = yawW;
+            // yaw lock: animated planar heel - toe world heading (the sole line on the ground; the toe - ankle direction above also turns
+            // with the foot's roll) and its rate; a rotation of the foot about +Z adds to it exactly. A sole too steep to give a heading
+            // keeps the previous one.
+            float twW = f.ylPrev;
+            {
+                const math::Vec3 heel = m_toePathLen[aSide] >= 2 ? Mul(gc, m_out[size_t(m_toePath[aSide][0])]).p : gc.p;
+                const float hx = gl.p.x - heel.x, hy = gl.p.y - heel.y;
+                if (hx * hx + hy * hy > kYawLockMinSole * kYawLockMinSole || !f.prevValid)
+                    twW = math::WrapAngle(std::atan2(hy, hx) + m_charYaw);
+            }
+            m_animHeadingW[aSide] = twW;
+            m_animHeadingRate[aSide] = rate ? math::WrapAngle(twW - f.ylPrev) / aDt : 0.0f;
+            f.ylPrev = twW;
             f.prevToeX = tx;
             f.prevToeY = ty;
             f.prevYaw = yawW;
@@ -1341,7 +1356,8 @@ private:
             f.yawX = f.yawV = f.yawApply = 0.0f;
             // yaw lock: planted at the shown foot yaw (a relock during the blend-out keeps the faded yaw)
             f.ylFree = false;
-            f.ylLock = math::WrapAngle(m_animYawW[aSide] + (wPrev > 0.0f ? f.ylShown * relockRelease / (1.0f - m_ycfg.twistReduction) : 0.0f));
+            f.ylLock = math::WrapAngle(m_animHeadingW[aSide] +
+                                       (wPrev > 0.0f ? f.ylShown * relockRelease / (1.0f - m_ycfg.twistReduction) : 0.0f));
             f.ylX = f.ylV = f.ylApply = 0.0f;
             f.firm = false; // firm feet: latched in the locked update below
             f.firmHold = f.firmShown = f.releaseTime = 0.0f;
@@ -1653,6 +1669,8 @@ private:
         return std::isfinite(s) ? std::fmax(s, 0.0f) : 0.0f;
     }
 
+    static constexpr float kYawLockMinSole = 0.02f; // m, yaw lock: shortest planar heel - toe line that gives a heading
+
     // Displayed lock point (model space) when the stored deltas are applied with weight aW (pose not modified).
     // Delta already contains the positional blend-in weight: release it relative
     // to its captured weight, otherwise a partial contact loss applies the weight twice.
@@ -1829,6 +1847,8 @@ private:
     math::Vec3 m_animToeVel[2] = {}; // reference plant model: animated toe world velocity of this update
     float m_animYawRate[2] = {0.0f, 0.0f}; // rad/s, animated planar foot world yaw rate of this update
     float m_animYawW[2] = {0.0f, 0.0f};    // rad, animated planar foot world yaw of this update
+    float m_animHeadingW[2] = {0.0f, 0.0f};   // rad, yaw lock: animated planar heel - toe world heading of this update
+    float m_animHeadingRate[2] = {0.0f, 0.0f}; // rad/s, yaw lock: its rate
     FootLockDiagnostics m_diag{};
     PelvisPlacement m_pelvis;            // pelvis stage (SetPelvisPlacement)
     bool m_pelvisOn = false;
