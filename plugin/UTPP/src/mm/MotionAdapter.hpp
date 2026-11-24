@@ -1030,11 +1030,11 @@ struct MapConfig
     // capsuleSpeedRate is off); kDirectionOnly = only the heading is converted (the speed is the game speed); kSteadyLoopRate = the loop
     // rate only while the capsule speed holds (speedconv::UpdateSteady); kGameSpeedRate = a converted feed plays at the game speed (the
     // rate scale times game / converted speed).
-    // 0 = the game velocity everywhere, bit for bit.
-    int speedConverter = 0;
+    // 0 = the game velocity everywhere, bit for bit. Default: the stronger preset (speedconv::PresetFor(kPresetStronger)).
+    int speedConverter = speedconv::PresetFor(speedconv::kPresetStronger).bits;
     speedconv::Limits speedConverterLimits;
-    float speedConverterFriction = 0.0f; // turn friction of the converter (per second); 0 = the gait ground friction of the character movement
-    float speedConverterMaxTurnDeg = 0.0f; // larger turns (reversals) keep the game velocity (speedconv::Limits::maxTurnCos); 0 = every turn
+    float speedConverterFriction = speedconv::PresetFor(speedconv::kPresetStronger).friction; // turn friction of the converter (per second); 0 = the gait ground friction of the character movement
+    float speedConverterMaxTurnDeg = speedconv::PresetFor(speedconv::kPresetStronger).maxTurnDeg; // larger turns (reversals) keep the game velocity (speedconv::Limits::maxTurnCos); 0 = every turn
     // Directional locomotion inputs for the directional database rows (MapState::st.moveDirection, isStartingDirectional,
     // isPivotingDirectional). Computed only when on; the existing inputs (slide direction, IsStarting, IsPivoting) are unchanged.
     // moveDirection: the six-way movement direction with hysteresis (motiontraj::UpdateMoveDirection), from the input direction on the

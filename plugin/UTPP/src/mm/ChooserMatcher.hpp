@@ -514,9 +514,9 @@ struct MatcherConfig
     // 0.25 by default with crouchCapsuleRate.
     float stopBrakeGate = 0.25f;
     // true = the brake gate applies only while the chooser stance is Crouch (the crouch stop late entry it exists for); stand stops pick as with
-    // the gate off. false (default) = every stop on the ground, bit for bit. Measured true vs false (6 default sessions, capsule speed rate on):
+    // the gate off (default). false = every stop on the ground. Measured true vs false (6 default sessions, capsule speed rate on):
     // stop lock path p95 Female -12 %, Male -8 %, but Male idle lock path p95 +36 % and start lock path +8 % (gate FAIL), Female CONFLICTING.
-    bool stopBrakeGateCrouchOnly = false;
+    bool stopBrakeGateCrouchOnly = true;
     // Sprint starts without reselection: entries of PSD_Dense / Sparse_Stand_Sprint_Starts are treated as DisableReselection (their rows
     // are not picked again while the clip plays as a candidate, like the entries the bake flags), so a sprint start runs through to its loop.
     // 0 = the entry flags of the bake only (default); 1 = every sprint start entry; 2 = the sprint starts without the reface starts.
