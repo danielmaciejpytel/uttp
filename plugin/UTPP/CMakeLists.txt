@@ -598,6 +598,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tests/shooter_mode.cmake OPTIONAL) # feat/sh
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/vehexit.cmake OPTIONAL) # vehicle batch: exit gate / traversal release tests
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/vehtrans.cmake OPTIONAL) # vehicle batch: mount/exit pose transition tests
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/speedconv_stance.cmake) # speed converter strafe travel (bit 512)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tests/speedconv_air.cmake OPTIONAL) # speed converter through jumps and landings
 # UTPP-MOTION SEAM review minor 7: the v2 glue next to the DLL in the staging package - the DLL always registers the mm.motionDriver
 # UTPP-MOTION SEAM natives (MotionDriverNatives.cpp), so its script (scripts/utpp_motion.reds) and CET mod (cet/utpp_motion) are staged with it
 # UTPP-MOTION SEAM (utpp_package builds / copies the DLL first). Additive target: utpp_package itself is unchanged. The v2 data folder

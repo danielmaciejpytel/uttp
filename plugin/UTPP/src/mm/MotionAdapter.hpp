@@ -42,6 +42,7 @@
 #include "speedconv_traj.hpp"
 #include "speedconv_stance.hpp"
 #include "speedconv_terrain.hpp"
+#include "speedconv_air.hpp"
 
 namespace utpp::mm::adapter
 {
@@ -1400,6 +1401,7 @@ struct MapState
     speedconv::StartStopState speedConverterStartStop; // speedconv::kStartStopWindow: the start / stop window
     speedconv::GaitState speedConverterGait; // speedconv::kGaitRamp: the gait ramp of the converted speed
     speedconv::StepHoldState speedConverterStep; // speedconv::kStepHold
+    speedconv::LandingState speedConverterLanding; // speedconv::kLanding: flight and landing scope of the converter
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -2148,14 +2150,22 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         // kStepHold: a stair step dip of the game speed keeps the speed before it (speedconv_terrain.hpp)
         const motiontraj::V3 velHold = speedconv::StepHoldVelocity(m.speedConverterStep, vel, f.capsuleZ, f.haveCapsuleZ,
                                                                  (c.speedConverter & speedconv::kStepHold) && ground && input, dt);
-        const bool active = ground && ((input && motiontraj::SizeXY(velHold) > motiontraj::kHasVelocity) || shapeSpeed);
+        bool active = ground && ((input && motiontraj::SizeXY(velHold) > motiontraj::kHasVelocity) || shapeSpeed);
         speedconv::Limits lim = c.speedConverterLimits;
         lim.friction = c.speedConverterFriction > 0.0f ? c.speedConverterFriction : motiontraj::MotionGroundFriction(c.cmc, gait, sp);
         lim.acceleration = motiontraj::MotionMaxAcceleration(c.cmc, gait, sp);
         if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
             lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
         lim = speedconv::StanceLimits(lim, c.speedConverter, rot == motiontraj::RotationMode::Strafe, motiontraj::MotionGroundFriction(c.cmc, gait, sp));
-        velQ = speedconv::Step(m.speedConverter, velHold, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
+        motiontraj::V3 velConv = velHold; // speedconv::kLanding: a touch-down spike is replaced (the converter's input only)
+        if (c.speedConverter & speedconv::kLanding) // speedconv_air.hpp: the converter also runs through the landing
+            active = (speedconv::LandingFeed(m.speedConverterLanding, m.speedConverter, velConv, acc, mode == 1,
+                                             mode == 0 && PsmGround(locoDetail) && !slideActive && !x.vehicleExit && !jumpOutFlight &&
+                                                 !m.jumpOutHeavyLand,
+                                             ground, dt, lim.maxTurnCos) &&
+                      ((input && sp > motiontraj::kHasVelocity) || shapeSpeed)) ||
+                     active;
+        velQ = speedconv::Step(m.speedConverter, velConv, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
         if (c.speedConverter & speedconv::kGaitRamp)
             velQ = speedconv::GaitStep(m.speedConverterGait, velQ, vel, gait, active && input, dt,
                                        motiontraj::MotionMaxAcceleration(c.cmc, gait, m.speedConverterGait.speed), lim.brakingInput);
