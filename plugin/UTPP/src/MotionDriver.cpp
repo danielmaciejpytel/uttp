@@ -2756,6 +2756,15 @@ void TestSetStrafePivotTail(float aS)
     std::lock_guard lock(g_m);
     g_testStrafePivotTailS = aS >= 0.0f ? aS : ProductionMatcherConfig().strafePivotTailS;
 }
+// MatcherConfig::aimTipSettleS / aimTipSettleContact of the running matcher from the next update on (aS 0 = off, < 0 = back to the
+// production values); -1 until the first call = never touched
+float g_testAimTipSettleS = -1.0f, g_testAimTipSettleContact = -1.0f;
+void TestSetAimTipSettle(float aS, float aContact)
+{
+    std::lock_guard lock(g_m);
+    g_testAimTipSettleS = aS >= 0.0f ? aS : ProductionMatcherConfig().aimTipSettleS;
+    g_testAimTipSettleContact = aS >= 0.0f && aContact > 0.0f ? aContact : ProductionMatcherConfig().aimTipSettleContact;
+}
 void TestApplyMapOverrides(adapter::MapConfig& aMc)
 {
     if (g_testSpeedConverter >= 0)
@@ -5959,6 +5968,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         b.matcher.TestSetDodgeFacingHoldS(g_testDodgeFacingHoldS);
     if (g_testStrafePivotTailS >= 0.0f)
         b.matcher.TestSetStrafePivotTailS(g_testStrafePivotTailS);
+    if (g_testAimTipSettleS >= 0.0f)
+        b.matcher.TestSetAimTipSettle(g_testAimTipSettleS, g_testAimTipSettleContact);
 #endif
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)

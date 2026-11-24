@@ -2562,7 +2562,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
 #else
     s.shooterStrafe = m.shooterModeActive && rot == motiontraj::RotationMode::Strafe && mode == 0 && !slideActive;
 #endif
-    s.strafeRotation = rot == motiontraj::RotationMode::Strafe && mode == 0 && !slideActive; // MatcherConfig::strafePivotTailS
+    s.aimStrafeRotation = st.aimRotation && mode == 0 && !slideActive; // MatcherConfig::strafePivotTailS (aimed strafe only)
     s.jumpOutFlight = jumpOutFlight; // fix/jumpout-cam (MatcherConfig::jumpOutNoBack / jumpOutFallHandover)
     // Chooser MovementMode / MovementMode_LastFrame / MovementDirection. Slide off: movementMode = st.movementMode (0 / 1) as
     // before and movementModeLast its previous-frame value. Slide on: MovementMode Sliding and Stance Crouch for the whole PSM

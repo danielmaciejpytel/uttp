@@ -43,6 +43,12 @@
 //   6 without MatcherConfig::downshiftDeferS (Run_to_Walk shown for one feed before the Stop of the release), 5 when a new press during the
 //   stop does not take the side of the reface start it picks (refacestart::Episode pending press; R_180 used to swap to L_180 at clip time 0.30).
 //   The replayed body yaw is the recorded one, so the later L_180 after Walk_to_Run stays in this replay; in game the body turns the picked side.
+//   churn_aim_strafe_taps_handgun.feed / churn_aim_strafe_taps_rifle.feed (Female 2026-11-24 18:02, weapon aim_moves / aim_strafe_taps;
+//   also run with the Male body): left / right taps 0.35 s apart while aiming at the jog gait; the game counted 15 and 19 changes in 2.8 s
+//   (each tap reversal met the 0.5 s aim pivot gate of the previous pivot: a one-feed loop, then the pivot). Budget 10 = 3.75 per second
+//   (9 / 10 / 10 / 10 with MapConfig::aimPivotRegateDeg and MatcherConfig::strafePivotTailS; no margin left on three of them). The slices
+//   set the aim jog answer on every feed (Slice::aimJog, an approximation of the per-feed query of the game script); with the vanilla aim
+//   walk instead the walk pivots hand to a loop before the next tap (13 - 14 changes).
 //   L (FootLockConfig::maxSlipOffset): the replay foot lock correction stays below 15.0 cm (the in-game limit) in the keyboard strafe taps (both
 //   bodies), the unarmed walk start, the Male sprint flick and the footlock_*.feed windows (run starts from standing, a start over a capsule that
 //   does not move, a walk-to-run transition: 15.2 - 17.7 cm without the bound; the soft slip lagged a toe running away at 3 - 8 m/s while the lock
@@ -59,7 +65,8 @@
 // Mutations (UTPP_MUTATION_JUMPPICK, run-time, src/MutationSelect.hpp): 24 no loop dwell, 25 no young event clip bias, 26 no dodge hold,
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
 // (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets),
-// 33 no heading catch-up (check K), 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered),
+// 33 no heading catch-up (check K), 36 no strafe pivot commit (MatcherConfig::strafePivotTailS; the aimed strafe taps windows 11 - 15 > 10),
+// 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered),
 // 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered), 44 no blocked
 // capsule idle (flick_180_sprint cruise (Male, wall) 10 > 6), 45 no loop dwell against a shuffle of the same database (sprint_dash
 // dash_right (loop vs shuffle, no dodge facing hold) 7 > 5), 46 no dodge facing hold (MatcherConfig::dodgeFacingHoldS) and 47 no heading catch-up after it
@@ -155,6 +162,9 @@ struct Slice
     bool converterOff = false; // speed converter off (MapConfig::speedConverter 0) for this slice only
     bool dodgeFacingOff = false; // dodge facing hold off (MatcherConfig::dodgeFacingHoldS 0) for this slice only
     int converterBits = -1; // speed converter bits (MapConfig::speedConverter) for this slice only; -1 = the default
+    // the aim jog answers a target (motiondriver::SetAimJogOff(false), the shipped aim jog: utpp.reds UTPPUpdateAimSpeed asks the host after
+    // every feed; the recordings of aimed moves ran at the jog gait) for this slice only; otherwise the vanilla aim walk as before
+    bool aimJog = false;
 };
 
 // the clip / database changes of the frames the v2 driver stepped (what the MOTION trace lines show), counted like gt_log.py _motion_metrics: the same
@@ -509,6 +519,12 @@ int main(int argc, char** argv)
                                         {"kbd_strafe_weave strafe_taps key edges (second run)", 103.2f, 106.1f, 99, false, false, false, 1}}},
         {"churn_kbd_strafe_taps_man.feed", {{"kbd_strafe_weave strafe_taps (Male)", 95.91f, 98.71f, 8, false, false, false, -1, 15.0f},
                                             {"kbd_strafe_weave strafe_taps key edges (Male)", 95.75f, 98.65f, 99, false, false, false, 1}}, true},
+        // aimed keyboard left / right taps (Female 2026-11-24 18:02, weapon aim_moves / aim_strafe_taps, handgun and rifle; the same feeds once
+        // more with the Male body): the game counted 15 and 19 changes in 2.8 s; budget 10 = 3.75 per second
+        {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun)", 265.86f, 268.66f, 10}}, false, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle)", 400.81f, 403.61f, 10}}, false, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun, Male body)", 265.86f, 268.66f, 10}}, true, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle, Male body)", 400.81f, 403.61f, 10}}, true, true, false, false, -1, true},
         // Female 2026-11-14 06:48 run flick (game 8 changes in 2.5 s)
         {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 5}}},
         // Female 2026-11-14 12:47 and 11:35, sprint_dash from its settle: the stick swings 90 deg at a run in 0.11 s (at most 32 deg per feed,
@@ -556,7 +572,9 @@ int main(int argc, char** argv)
             motiondriver::TestSetDodgeFacingHold(s.dodgeFacingOff ? 0.0f : -1.0f);
         dodgeFacingPinned = dodgeFacingPinned || s.dodgeFacingOff;
         const mm::motion::MotionDatabase& sdb = s.man ? *dbM : *db;
+        motiondriver::SetAimJogOff(!s.aimJog);
         const std::vector<FrameOut> run = RunDriver(s.man ? rigM : rig, f);
+        motiondriver::SetAimJogOff(true); // the driver's start value
         if (trace)
             for (const Window& w : s.windows)
             {

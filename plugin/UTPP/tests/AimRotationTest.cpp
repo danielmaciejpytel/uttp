@@ -7,7 +7,8 @@
 // chooser state, bit for bit; on while aiming follows the reported turn angle at the configured threshold; the gate reaches
 // MapToChooser through MapContext (currentDbPivots / currentDbStarts / currentPickAgeS); a new reversal (MapConfig::aimPivotRegateDeg,
 // motiontraj::AimPivotNewReversal: the wanted direction relative to the camera turned by at least 150 deg since the gate began) skips
-// the gate, a smaller stick change or a camera turn under a held stick does not, 0 = the gate as before.
+// the gate, a smaller stick change or a camera turn under a held stick does not, 0 = the gate as before; ChooserState::aimStrafeRotation
+// is set only while aiming in the aim rotation sub-mode (not in Shooter mode without aiming).
 #include "../src/mm/MotionAdapter.hpp"
 #include <cmath>
 #include <cstdio>
@@ -178,6 +179,17 @@ int main()
         Check(!Run(on, true, 120.0f, young).cs.isPivoting, "on, aiming: a 120 deg stick change during a young pick stays held");
         Check(!RunCamera(on, 0.0f, 180.0f, young).cs.isPivoting && RunCamera(on, 0.0f, 180.0f, old).cs.isPivoting,
               "on, aiming: a camera turn of 180 deg under a held stick stays held while young (released when old)");
+    }
+    // ChooserState::aimStrafeRotation (MatcherConfig::strafePivotTailS): only the aimed strafe rotation, not Shooter mode without aiming
+    {
+        adapter::MapConfig shooterOn = on, shooterOff = off;
+        shooterOn.shooterMode = shooterOff.shooterMode = true;
+        Check(Run(on, true, 0.0f).cs.aimStrafeRotation, "aimStrafeRotation: on while aiming");
+        Check(!Run(off, true, 0.0f).cs.aimStrafeRotation, "aimStrafeRotation: off with the aim rotation off");
+        Check(!Run(on, false, 0.0f).cs.aimStrafeRotation && !Run(shooterOn, false, 0.0f).cs.aimStrafeRotation,
+              "aimStrafeRotation: off without aiming, Shooter mode included");
+        Check(Run(shooterOn, true, 0.0f).cs.aimStrafeRotation && !Run(shooterOff, true, 0.0f).cs.aimStrafeRotation,
+              "aimStrafeRotation: Shooter mode while aiming follows the aim rotation setting");
     }
     // AimPivotNewReversal alone
     {

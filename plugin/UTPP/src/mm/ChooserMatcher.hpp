@@ -166,9 +166,10 @@ struct ChooserState
     // Shooter mode drives the strafe rotation mode on the ground (the facing is held on the camera, the travel direction turns against
     // it). Written by adapter::MapToChooser; a hand-built state leaves it false (MatcherConfig::strafeSectorDelayS then never acts).
     bool shooterStrafe = false;
-    // The strafe rotation mode on the ground (aiming or Shooter mode: the facing is held, the travel turns against it). Written by
-    // adapter::MapToChooser; a hand-built state leaves it false (MatcherConfig::strafePivotTailS then never acts).
-    bool strafeRotation = false;
+    // The aim rotation sub-mode on the ground (MapConfig::aimRotation while aiming in the strafe rotation mode: the facing is held on the
+    // camera, the travel turns against it). Not Shooter mode without aiming. Written by adapter::MapToChooser; a hand-built state leaves
+    // it false (MatcherConfig::strafePivotTailS then never acts).
+    bool aimStrafeRotation = false;
 };
 
 inline cancelstart::State CancellationState(const ChooserState& state)
@@ -408,6 +409,14 @@ struct MatcherConfig
     // still rising: its Hips are more than tipRiseGapM below the Hips of the turn-in-place row (the lying -> crouching change then ran in 0.1 s).
     float blendTipAfterSlide = kBlendTipAfterSlideS;
     float tipRiseGapM = kTipRiseGapM;
+    // aimTipSettleS / aimTipSettleContact (off by default): a stationary aim turn-in-place clip whose goal moved on to the same side (the
+    // view kept turning) keeps playing until its footwork has settled: both foot contacts of the playing frame at least
+    // aimTipSettleContact for aimTipSettleS seconds (counted from the pick). A chained aimed turn (Turn_045 -> Turn_090 / 135) is
+    // re-picked at clip time ~0.72 while the stepping foot of the 45 deg turn is still landing; 0.1 defers that to ~0.87, but the
+    // planted-foot slide of the chained turn comes from the next clip's own swing (replay: rifle turn_090_r 14.3 -> 15.1 cm) and the
+    // 180 deg turns corrected more, so it stays off. Not for rest turns or shot turns. 0 = off (the re-pick as before).
+    float aimTipSettleS = 0.0f;
+    float aimTipSettleContact = 0.98f;
     // blendSlideFamily: cross-fade of a FootOut <-> KneesOut switch inside a slide (the leg pose differs by ~90 deg).
     float blendSlideFamily = kBlendSlideFamilyS;
 
@@ -734,7 +743,7 @@ struct MatcherConfig
     // otherwise handed the finished turn to a loop one to seven feeds before the next tap picked the next turn (two changes for one
     // tap). 0 = the commit ends at the turn end.
     float turnCommitTailS = 0.2f;
-    // strafePivotTailS: in the strafe rotation mode (ChooserState::strafeRotation) a pivot clip entered where its authored root turn is
+    // strafePivotTailS: in the aim rotation sub-mode (ChooserState::aimStrafeRotation) a pivot clip entered where its authored root turn is
     // already done (the strafe pivots: Run_Pivot_LL_RL ..., the body keeps its facing and only the travel reverses) is committed the same
     // way, with its turn treated as done at the pick and this tail in place of turnCommitTailS. Not in the orient mode: there such a
     // clip is a facing-keeping pick the heading catch-up hands on as the facing turns (headingCatchUpS). Aimed keyboard strafe taps
@@ -1344,6 +1353,12 @@ public:
     void TestSetDodgeFacingHoldS(float aS) { m_cfg.dodgeFacingHoldS = aS; }
     // tests only: MatcherConfig::strafePivotTailS of a running matcher (motiondriver::TestSetStrafePivotTail; 0 = off)
     void TestSetStrafePivotTailS(float aS) { m_cfg.strafePivotTailS = aS; }
+    // tests only: MatcherConfig::aimTipSettleS / aimTipSettleContact of a running matcher (motiondriver::TestSetAimTipSettle; 0 = off)
+    void TestSetAimTipSettle(float aS, float aContact)
+    {
+        m_cfg.aimTipSettleS = aS;
+        m_cfg.aimTipSettleContact = aContact;
+    }
 #endif
     uint64_t StrafeSectorHolds() const { return m_strafeSectorHolds; }
     // Authored ROOT, not a name suffix or the already steered blended root rate.
@@ -1374,6 +1389,7 @@ public:
         m_headingRestArmed = false;
         m_slideExitAge = 1.0e9f;
         m_sinceJumpS = 1.0e9f;
+        m_tipPlantedS = 0.0f;
         m_refaceSwapAgeS = 1.0e9f;
         m_sinceDodgeS = 1.0e9f;
         m_sinceDodgeFacingS = 1.0e9f;
@@ -2041,6 +2057,19 @@ public:
             continueAimTurn = steer::ClassifyClip(name) == steer::kClassTurnInPlace &&
                 name.ends_with(aState.stationaryAimYawDeg > 0 ? "_L" : "_R");
         }
+        // aimTipSettleS: the goal of an aimed turn moved on (the view keeps turning to the same side); the playing turn-in-place clip is
+        // kept until both feet have been planted for aimTipSettleS (m_tipPlantedS, from the pick on), then the search may chain the next turn
+        bool tipUnsettled = false;
+        if (m_cfg.aimTipSettleS > 0.0f && m_cur.valid && contValid && steer::ClassifyClip(db.ClipName(static_cast<uint32_t>(m_cur.clip))) == steer::kClassTurnInPlace)
+        {
+            const bool planted = cancelstart::Contact(db, m_cur.clip, m_cur.clipTime, 0) >= m_cfg.aimTipSettleContact &&
+                                 cancelstart::Contact(db, m_cur.clip, m_cur.clipTime, 1) >= m_cfg.aimTipSettleContact;
+            m_tipPlantedS = planted ? m_tipPlantedS + aDt : 0.0f;
+            tipUnsettled = !planted || m_tipPlantedS < m_cfg.aimTipSettleS;
+        }
+        if (!continueAimTurn && tipUnsettled && contEvaluated && stationaryAim &&
+            aState.stationaryAimTurn && last.stationaryAimTurn && res.interrupt == Interrupt::DoNotInterrupt && res.dbSet.Test(bestDb))
+            continueAimTurn = db.ClipName(static_cast<uint32_t>(m_cur.clip)).ends_with(aState.stationaryAimYawDeg > 0 ? "_L" : "_R");
 
         // Preserve the admitted reface's footwork while the caller still owns
         // this exact start and direction. A changed state/forced interrupt,
@@ -2390,8 +2419,9 @@ public:
                 // turnCommit: armed only by a pivot / moving-turn clip selected on a reversal while moving on the stand ground
                 // mutation 32: no turn commit (the selected turn competes on cost from its next update on)
                 // strafePivotTailS: a pivot entered past its authored root turn is committed for that tail from the pick on
+                // mutation 36: no strafe pivot commit (the aimed strafe taps)
                 const bool turnLeft = m_clipTurnEndS[en.clip] > newTime;
-                const bool strafePivot = !turnLeft && m_cfg.strafePivotTailS > 0.0f && m_guardsOn && aState.strafeRotation &&
+                const bool strafePivot = UTPP_AND_NOT(JUMPPICK, 36) !turnLeft && m_cfg.strafePivotTailS > 0.0f && m_guardsOn && aState.aimStrafeRotation &&
                                          steer::IsPivot(steer::ClassifyClip(db.ClipName(en.clip)));
                 m_turnHoldClip = UTPP_AND_NOT(JUMPPICK, 32) m_cfg.turnCommit && aState.isPivoting && aState.movementMode == 0 && aState.movementState == 1 &&
                                  aState.stance == 0 && (turnLeft || strafePivot) ? static_cast<int32_t>(en.clip) : -1;
@@ -2478,6 +2508,7 @@ public:
                 m_slideExitHoldLeft = m_dbSlideExit[static_cast<uint32_t>(bestDb)] ? m_cfg.slideExitMinHoldS : 0.0f;
                 m_slideExitAge = 0.0f;
                 m_sinceJumpS = 0.0f;
+                m_tipPlantedS = 0.0f;
                 m_upshiftEdgeDone = false;
                 m_holdStance = aState.stance;
                 m_holdGait = aState.gait;
@@ -3507,6 +3538,7 @@ private:
     float m_sinceDodgeS = 1.0e9f;       // seconds since the last dodge feed (MatcherConfig::dodgeFacingHoldS)
     float m_sinceDodgeFacingS = 1.0e9f; // seconds since the dodge facing hold last held (heading catch-up after it)
     float m_sinceJumpS = 1.0e9f;        // seconds since the playing clip was selected (MatcherConfig::freshEventS, loopDwellS)
+    float m_tipPlantedS = 0.0f;         // MatcherConfig::aimTipSettleS: seconds both feet of the playing turn-in-place clip are planted (0 at a pick)
     float m_refaceSwapAgeS = 1.0e9f;    // seconds since a reface start replaced another reface start (MatcherConfig::refaceSwapDwellS)
     float m_slideExitAge = 1.0e9f;      // fix/slide-exit: seconds since an exit clip was selected (MatcherConfig::slideExitBiasS)
     int m_holdStance = 0, m_holdGait = 0, m_holdMovementState = 0, m_holdFlags = 0; // fix/slide-exit: chooser state when the exit clip was selected
