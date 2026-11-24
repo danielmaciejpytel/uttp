@@ -289,12 +289,24 @@ private:
     bool m_haveSlot[kSlots] = {false, false, false, false};
 };
 
+// Distance (m) of a point from the nearest tread centre along the flight (the travel direction of the estimate), within [-tread / 2,
+// tread / 2]; > 0 = past the centre. The tread centres lie half a tread from the noses.
+inline float TreadPhaseError(const Estimate& aEst, float aX, float aY)
+{
+    if (!aEst.valid || !(aEst.tread > 1.0e-3f))
+        return 0.0f;
+    const float s = (aX - aEst.noseX) * aEst.dirX + (aY - aEst.noseY) * aEst.dirY - 0.5f * aEst.tread;
+    return s - aEst.tread * std::round(s / aEst.tread);
+}
+
 // Game-thread state: the detector fed by the ground traces and read by the feed.
 struct FeedOut
 {
     float treadM = 0.0f; // m, 0 = no stairs
     float weight = 0.0f; // [0, 1]
     float minScale = UTPP_STAIR_MIN_SCALE;
+    float phaseErr[2] = {0.0f, 0.0f};  // m, TreadPhaseError of each foot this frame (0 = left, 1 = right)
+    bool phaseOk[2] = {false, false}; // the foot has a trace this frame
 };
 
 class Tracker
@@ -315,6 +327,7 @@ public:
         m_sinceValid = 1.0e9f;
         m_weight = 0.0f;
         m_est = Estimate{};
+        m_footOk[0] = m_footOk[1] = false;
     }
     // The traces of one frame (world hits; hit false = none).
     void AddTraces(const bool (&aHit)[2], const float (&aPos)[2][3], const bool (&aHeelHit)[2], const float (&aHeelPos)[2][3])
@@ -325,6 +338,13 @@ public:
                 m_det.Add(m_cfg, k, aPos[k][0], aPos[k][1], aPos[k][2], m_time);
             if (aHeelHit[k])
                 m_det.Add(m_cfg, 2 + k, aHeelPos[k][0], aHeelPos[k][1], aHeelPos[k][2], m_time);
+            // the foot's middle (between ball and heel; the ball alone without a heel hit)
+            m_footOk[k] = aHit[k];
+            if (aHit[k])
+            {
+                m_foot[k][0] = aHeelHit[k] ? 0.5f * (aPos[k][0] + aHeelPos[k][0]) : aPos[k][0];
+                m_foot[k][1] = aHeelHit[k] ? 0.5f * (aPos[k][1] + aHeelPos[k][1]) : aPos[k][1];
+            }
         }
     }
     // One feed: capsule position and velocity (m, m/s, world); aGround = ground locomotion (else the stairs fade out).
@@ -364,6 +384,11 @@ public:
         {
             out.treadM = m_est.tread;
             out.weight = m_weight;
+            for (int k = 0; k < 2; ++k)
+            {
+                out.phaseOk[k] = m_footOk[k];
+                out.phaseErr[k] = m_footOk[k] ? TreadPhaseError(m_est, m_foot[k][0], m_foot[k][1]) : 0.0f;
+            }
         }
         return out;
     }
@@ -378,6 +403,8 @@ private:
     float m_time = 0.0f, m_sinceFit = 1.0e9f, m_sinceValid = 1.0e9f, m_weight = 0.0f;
     Estimate m_est;
     uint64_t m_fits = 0, m_valid = 0;
+    float m_foot[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}}; // last traced foot middle (x, y) per side
+    bool m_footOk[2] = {false, false};
 };
 
 namespace rt
@@ -386,6 +413,7 @@ inline std::atomic<bool> g_on{false}; // the menu default (mm.stairSteps)
 inline Tracker g_tracker;             // game thread only (ground traces and the feed)
 inline std::atomic<float> g_cadence{1.0f}, g_tread{0.0f}, g_weight{0.0f}; // diagnostics of the last feed
 inline std::atomic<int32_t> g_treads{0};
+inline std::atomic<float> g_landErr{0.0f}; // m, phase error of the foot that landed in the last feed (NaN = no landing)
 
 inline bool Enabled() { return g_on.load(std::memory_order_relaxed); }
 inline void SetEnabled(bool aOn)

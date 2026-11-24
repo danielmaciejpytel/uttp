@@ -132,6 +132,8 @@ struct ChooserState
     float stairWeight = 0.0f;
     float stairSpeedMs = 0.0f;
     float stairMinScale = 1.0f;
+    float stairPhaseErr[2] = {0.0f, 0.0f};  // m, each foot from the nearest tread centre (> 0 = past it; StairSteps.hpp)
+    bool stairPhaseOk[2] = {false, false}; // the foot had a trace this frame
     // Slide (motion, sprint -> crouch). FEED fields written by adapter::MapToChooser (the matcher / chooser side that reads them
     // is owned by the motion session; chooser.json "slide" section: MovementMode value sliding_value, inputs MovementDirection
     // and MovementMode_LastFrame). Defaults = no slide: a feed that never slides leaves movementModeLast = the previous frame's
@@ -821,6 +823,8 @@ struct MatchResult
     float playRateRatio = 1.0f; // diagnostic: unclamped query / pose speed ratio of the last rate calculation (rate2::Result::ratio)
     float stairCadence = 1.0f;  // ChooserState::stairTreadM: the stair cadence included in playRate (1 = none)
     int32_t stairTreads = 0;    // ... treads per step of that cadence (0 = no fit)
+    bool stairLanded = false;   // ... a foot landed in this update (contact onset of the loop); stairLandErr = its phase error (m)
+    float stairLandErr = 0.0f;
     float cost = std::numeric_limits<float>::max();
     float continuingCost = std::numeric_limits<float>::max();
     bool jumped = false;
@@ -1383,6 +1387,8 @@ public:
         m_cur = {};
         m_stairCadence = m_stairApplied = 1.0f;
         m_stairTreads = 0;
+        m_stairPhase = m_stairPhaseSmooth = 0.0f;
+        m_stairPrevClip = -1;
         m_slideExitHoldLeft = 0.0f;
         m_riseHoldLeft = 0.0f;
         m_exitHoldClip = -1;
@@ -2571,9 +2577,64 @@ public:
             m_stairCadence += (target - m_stairCadence) * (1.0f - std::exp(-aDt / kStairCadenceTau));
         if (!std::isfinite(m_stairCadence) || (target == 1.0f && std::fabs(m_stairCadence - 1.0f) < 1.0e-3f))
             m_stairCadence = 1.0f;
-        m_stairApplied = loop ? m_stairCadence : 1.0f;
+        StairPhase(aState, loop && treads > 0, aRes);
+        if (m_stairPhase == 0.0f && std::fabs(m_stairPhaseSmooth) < 1.0e-4f)
+            m_stairPhaseSmooth = 0.0f;
+        else if (std::isfinite(aDt) && aDt > 0.0f)
+            m_stairPhaseSmooth += (m_stairPhase - m_stairPhaseSmooth) * (1.0f - std::exp(-aDt / kStairPhaseTau));
+        m_stairApplied = loop ? m_stairCadence * (1.0f + m_stairPhaseSmooth) : 1.0f;
         aRes.stairCadence = m_stairApplied;
         aRes.stairTreads = m_stairApplied != 1.0f ? treads : 0;
+    }
+
+    // Phase of the stair steps: the n x tread fit keeps the landing spot constant from step to step but does not choose it. At every
+    // landing of a foot (contact onset of the playing loop) its distance from the nearest tread centre (ChooserState::stairPhaseErr) sets
+    // the cadence of the coming step: a foot past the centre makes the next step quicker, so it is shorter at the same speed and the next
+    // foot lands further back. Correction = gain x error / (treads x tread), at most a quarter tread; it holds until the next landing and
+    // is 0 off a fitted flight.
+    static constexpr float kStairPhaseGain = 0.6f;
+    static constexpr float kStairPhaseTau = 0.08f; // s, the correction eases in (an abrupt rate step slid the planted foot)
+    static constexpr float kStairPhaseMaxTread = 0.25f; // largest correction, fraction of a tread
+    void StairPhase(const ChooserState& aState, bool aFitted, MatchResult& aRes)
+    {
+        float contact[2] = {0.0f, 0.0f};
+        const bool clipOk = m_cur.valid && m_cur.clip >= 0 && static_cast<uint32_t>(m_cur.clip) < m_db->NumClips();
+        if (clipOk)
+        {
+            const MotionClipRecord& cl = m_db->Clip(static_cast<uint32_t>(m_cur.clip));
+            if (cl.numFrames > 0 && std::isfinite(m_cur.clipTime))
+            {
+                const float frames = static_cast<float>(cl.numFrames);
+                float f = std::fmod(m_cur.clipTime * m_db->Header().fps, frames);
+                if (f < 0.0f)
+                    f += frames;
+                const uint32_t i = std::min(static_cast<uint32_t>(f + 0.5f), cl.numFrames - 1);
+                const auto& c = m_db->Contact(cl.firstFrame + i);
+                contact[0] = c.l;
+                contact[1] = c.r;
+            }
+        }
+        const bool sameClip = clipOk && m_cur.clip == m_stairPrevClip;
+        if (!aFitted || !(aState.stairTreadM > 0.0f) || m_stairTreads <= 0)
+            m_stairPhase = 0.0f;
+        else if (sameClip)
+        {
+            for (int k = 0; k < 2; ++k)
+            {
+                if (!(m_stairPrevContact[k] < 0.5f && contact[k] >= 0.5f) || !aState.stairPhaseOk[k] ||
+                    !std::isfinite(aState.stairPhaseErr[k]))
+                    continue;
+                const float step = static_cast<float>(m_stairTreads) * aState.stairTreadM;
+                const float lim = kStairPhaseMaxTread * aState.stairTreadM;
+                const float e = std::clamp(aState.stairPhaseErr[k], -lim, lim);
+                m_stairPhase = std::clamp(kStairPhaseGain * e / step, -0.5f, 0.5f);
+                aRes.stairLanded = true;
+                aRes.stairLandErr = aState.stairPhaseErr[k];
+            }
+        }
+        m_stairPrevClip = clipOk ? m_cur.clip : -1;
+        m_stairPrevContact[0] = contact[0];
+        m_stairPrevContact[1] = contact[1];
     }
 
     // fix3/jump: model-space height of the Hips (metres) of a database frame, the FK of the game-local poses along the skeleton chain
@@ -3527,6 +3588,10 @@ private:
     std::vector<float> m_clipStepTimeS;      // ChooserState::stairTreadM: clip index -> clip time of one step of a loop clip (0 = none)
     float m_stairCadence = 1.0f;             // ... smoothed cadence of the stair flight (1 = none)
     int32_t m_stairTreads = 0;               // ... treads per step of the last fit (hysteresis of stairsteps::FitStride)
+    float m_stairPhase = 0.0f;               // ... cadence correction of the current step (StairPhase), 0 = none
+    float m_stairPhaseSmooth = 0.0f;         // ... the same eased in (kStairPhaseTau)
+    int32_t m_stairPrevClip = -1;            // ... clip of the last update and its contacts (landing detection)
+    float m_stairPrevContact[2] = {0.0f, 0.0f};
     float m_stairApplied = 1.0f;             // ... the cadence the current clip advanced with (1 = none)
     std::vector<uint8_t> m_clipRunToWalk;    // G1: clip index -> 1 = M_Neutral_Transition_Run_to_Walk_L/Rfoot
     bool m_runGaitWalkLoops = false;         // G10: this update searches the Walk_Loops database in the Run gait (runWalkLoopsMaxCmS)

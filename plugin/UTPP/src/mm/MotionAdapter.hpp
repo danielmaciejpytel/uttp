@@ -328,6 +328,8 @@ struct MotionFeed
     float stairWeight = 0.0f;
     float stairSpeedMs = 0.0f;
     float stairMinScale = 1.0f;
+    float stairPhaseErr[2] = {0.0f, 0.0f};  // m, each foot from the nearest tread centre (stairsteps::TreadPhaseError)
+    bool stairPhaseOk[2] = {false, false}; // the foot had a trace
     AirFeed air;                  // UTPPFeedAir (runtime session)
     // UTPP-MOTION SEAM motionfix (item 1): v1 FeedInput haveTarget / targetYawDeg = world run direction (camera yaw + Locomotion raw
     // stick angle, or player yaw + stick angle without Locomotion: scripts/utpp.reds UTPPOwnMoveTarget).
@@ -2540,6 +2542,11 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         s.stairWeight = f.stairWeight;
         s.stairSpeedMs = f.stairSpeedMs;
         s.stairMinScale = f.stairMinScale;
+        for (int k = 0; k < 2; ++k)
+        {
+            s.stairPhaseErr[k] = f.stairPhaseErr[k];
+            s.stairPhaseOk[k] = f.stairPhaseOk[k];
+        }
     }
     WriteCrouchRateScale(s, c, st.stance);
     WriteDirectionalInputs(s, st);

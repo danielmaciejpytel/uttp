@@ -1114,12 +1114,14 @@ int main(int argc, char** argv)
     uint64_t stairRows = 0, stairOnRows = 0;
     double stairCadenceSum = 0.0, stairCadenceMax = 1.0;
     uint64_t stairTreadsHist[8] = {};
+    uint64_t stairLandN = 0; // landings with a phase error and the sum of |error| (m)
+    double stairLandAbs = 0.0;
     if (terrain.kind != Terrain::None && out != "-" && mm::stairsteps::rt::Enabled())
     {
         stairsOut = std::fopen((out + ".stairs.txt").c_str(), "w");
         if (!stairsOut)
             return 7;
-        std::fprintf(stairsOut, "# t tread weight cadence treads\n");
+        std::fprintf(stairsOut, "# t tread weight cadence treads landErr (m, nan = no landing)\n");
     }
     // --qpc-feed: feed time t -> QueryPerformanceCounter ticks (offset by 1 s so the first stamp is not 0, which the host reads as unset)
     LARGE_INTEGER qpcHz{};
@@ -1369,7 +1371,14 @@ int main(int argc, char** argv)
                 namespace ss = mm::stairsteps::rt;
                 const float cad = ss::g_cadence.load(), wgt = ss::g_weight.load();
                 const int32_t tr = ss::g_treads.load();
-                std::fprintf(stairsOut, "%.6f %.4f %.3f %.4f %d\n", double(rows[i].t), double(ss::g_tread.load()), double(wgt), double(cad), tr);
+                const float landErr = ss::g_landErr.load();
+                std::fprintf(stairsOut, "%.6f %.4f %.3f %.4f %d %.4f\n", double(rows[i].t), double(ss::g_tread.load()), double(wgt), double(cad), tr,
+                             double(landErr));
+                if (std::isfinite(landErr))
+                {
+                    ++stairLandN;
+                    stairLandAbs += std::fabs(double(landErr));
+                }
                 ++stairRows;
                 if (cad != 1.0f)
                 {
@@ -1715,13 +1724,14 @@ int main(int argc, char** argv)
     {
         std::fclose(stairsOut);
         const auto& tk = mm::stairsteps::rt::g_tracker;
-        std::printf("STAIRSTEPS rows=%llu cadenceRows=%llu cadenceMean=%.3f cadenceMax=%.3f treads1=%llu treads2=%llu treads3=%llu treads4=%llu treads5+=%llu fits=%llu validFits=%llu\n",
+        std::printf("STAIRSTEPS rows=%llu cadenceRows=%llu cadenceMean=%.3f cadenceMax=%.3f treads1=%llu treads2=%llu treads3=%llu treads4=%llu treads5+=%llu fits=%llu validFits=%llu landings=%llu landErrMeanCm=%.2f\n",
                     static_cast<unsigned long long>(stairRows), static_cast<unsigned long long>(stairOnRows),
                     stairOnRows ? stairCadenceSum / double(stairOnRows) : 1.0, stairCadenceMax,
                     static_cast<unsigned long long>(stairTreadsHist[1]), static_cast<unsigned long long>(stairTreadsHist[2]),
                     static_cast<unsigned long long>(stairTreadsHist[3]), static_cast<unsigned long long>(stairTreadsHist[4]),
                     static_cast<unsigned long long>(stairTreadsHist[5] + stairTreadsHist[6] + stairTreadsHist[7]),
-                    static_cast<unsigned long long>(tk.Fits()), static_cast<unsigned long long>(tk.ValidFits()));
+                    static_cast<unsigned long long>(tk.Fits()), static_cast<unsigned long long>(tk.ValidFits()),
+                    static_cast<unsigned long long>(stairLandN), stairLandN ? 100.0 * stairLandAbs / double(stairLandN) : 0.0);
     }
     motionhost::SetMotionHooks(nullptr);
     motionhost::TestSetQpcTicks(-1);

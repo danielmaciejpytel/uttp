@@ -5656,6 +5656,11 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             f.stairWeight = stairs.weight;
             f.stairSpeedMs = std::hypot(aRaw.velWorld[0], aRaw.velWorld[1]);
             f.stairMinScale = stairs.minScale;
+            for (int k = 0; k < 2; ++k)
+            {
+                f.stairPhaseErr[k] = stairs.phaseErr[k];
+                f.stairPhaseOk[k] = stairs.phaseOk[k];
+            }
         }
     }
     // G5: Tier2 Slow (separate native, sent right before this feed) lowers the stand run cap; G2: the walk toggle speed (0 = off)
@@ -5964,6 +5969,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     {
         mm::stairsteps::rt::g_cadence.store(r.stairCadence, std::memory_order_relaxed);
         mm::stairsteps::rt::g_treads.store(r.stairTreads, std::memory_order_relaxed);
+        mm::stairsteps::rt::g_landErr.store(r.stairLanded ? r.stairLandErr : NAN, std::memory_order_relaxed);
     }
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_strafeProbe.strafeSectorHolds = b.matcher.StrafeSectorHolds();

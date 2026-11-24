@@ -1064,7 +1064,10 @@ class BlendStack
     float LegStrideScale(const std::vector<BoneTransform> &pose, const std::vector<int32_t> &chain, size_t k, math::Vec3 ankle,
                          math::Vec3 thigh, math::Vec3 direction, float scale) const
     {
-        if (!m_strideKneeLimit || k + 2 >= chain.size())
+        // On a stair flight with a raised cadence (m_strideFloor below kScaleFloor) the knee limit is off: lifting the scale of the
+        // trailing leg late in its stance moved the planted foot backwards (walk loops on 17 cm steps: planted-foot slide p95 43 -> 120
+        // cm/s with it, 25 cm/s without).
+        if (!m_strideKneeLimit || m_strideFloor < stridewarp::kScaleFloor || k + 2 >= chain.size())
             return scale;
         const math::Vec3 shinOffset = pose[size_t(chain[k + 1])].p, ankleOffset = pose[size_t(chain[k + 2])].p;
         const math::Vec3 r = ankle - thigh;
