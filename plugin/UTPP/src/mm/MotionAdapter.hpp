@@ -322,6 +322,12 @@ struct MotionFeed
     bool aimWalkVanilla = false;
     bool haveCapsuleZ = false; // capsule height (m) of the feed (speedconv::kStepHold); set by MotionDriver Step from the extra feed
     float capsuleZ = 0.0f;
+    // mm.stairSteps (StairSteps.hpp): tread depth (m, 0 = no stairs), weight [0, 1], horizontal capsule speed (m/s) and shortest step of
+    // a stair flight under V; set by MotionDriver Step (0 = no stairs: nothing changes, bit for bit). MapToChooser copies them.
+    float stairTreadM = 0.0f;
+    float stairWeight = 0.0f;
+    float stairSpeedMs = 0.0f;
+    float stairMinScale = 1.0f;
     AirFeed air;                  // UTPPFeedAir (runtime session)
     // UTPP-MOTION SEAM motionfix (item 1): v1 FeedInput haveTarget / targetYawDeg = world run direction (camera yaw + Locomotion raw
     // stick angle, or player yaw + stick angle without Locomotion: scripts/utpp.reds UTPPOwnMoveTarget).
@@ -2527,6 +2533,14 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
             m.rateSpeedScale = 1.0f;
     }
     WriteRateSpeedScale(s, m.rateSpeedScale);
+    // mm.stairSteps: the stair flight under V (the matcher fits a stand loop's step to its treads; 0 = none)
+    if (f.stairTreadM > 0.0f && f.stairWeight > 0.0f)
+    {
+        s.stairTreadM = f.stairTreadM;
+        s.stairWeight = f.stairWeight;
+        s.stairSpeedMs = f.stairSpeedMs;
+        s.stairMinScale = f.stairMinScale;
+    }
     WriteCrouchRateScale(s, c, st.stance);
     WriteDirectionalInputs(s, st);
     s.verticalVelocityCmS = vel.z;

@@ -18,6 +18,7 @@
 #include "BodyHeightRuntime.hpp"
 #include "GameIntegration.hpp"
 #include "GroundFeet.hpp"
+#include "StairSteps.hpp"
 
 namespace utpp::mm::groundfeet::rt
 {
@@ -277,6 +278,11 @@ inline void PublishSamples(const bool (&aHit)[2], const float (&aPos)[2][3], con
             math::Rot2(-aYaw, g_heelTraces.pos[k][0] - aCapX, g_heelTraces.pos[k][1] - aCapY, h.x, h.y);
             h.z = g_heelTraces.pos[k][2];
         }
+    }
+    if (stairsteps::rt::Enabled())
+    {
+        const bool heelHit[2] = {g_heelTraces.set && g_heelTraces.hit[0], g_heelTraces.set && g_heelTraces.hit[1]};
+        stairsteps::rt::AddTraces(aHit, aPos, heelHit, g_heelTraces.pos); // the stair profile of mm.stairSteps (StairSteps.hpp)
     }
     g_heelTraces = HeelTraces{};
     g_samples.Publish(s);

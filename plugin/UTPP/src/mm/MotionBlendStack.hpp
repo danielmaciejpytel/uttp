@@ -632,6 +632,10 @@ class BlendStack
             head.rootApproximate = false;
         }
         m_strideScale = 1.0f;
+        // a stair cadence (StairSteps.hpp, MatchResult::stairCadence) lowers the stride floor so the warp shortens the step by it
+        m_strideFloor = selected.stairCadence > 1.0f && std::isfinite(selected.stairCadence)
+                            ? stridewarp::kScaleFloor / selected.stairCadence
+                            : stridewarp::kScaleFloor;
         if (m_strideWarp && (m_strideYawFade || m_strideCrouchMode == 2) && m_graph.enabled)
         {
             if (m_strideYawValid)
@@ -1005,6 +1009,7 @@ class BlendStack
         in.alpha = m_warpCurve >= 0 ? Curve(p, m_warpCurve) : 1.0f;
         const bool crouched = StrideCrouchClip(p.clip);
         in.allowed = p.strideGround && !p.airFade && IsLoop(p.clip) && !(crouched && m_strideCrouchMode == 1);
+        in.floor = m_strideFloor;
         if (crouched && m_strideCrouchMode == 2)
             in.yawFade = stridewarp::YawFade(m_strideYawRate, m_strideCrouchYawStart, m_strideCrouchYawEnd);
         else if (m_strideYawFade)
@@ -1512,6 +1517,7 @@ class BlendStack
     int32_t m_warpCurve = -1; // clip warping curve that gates stride warping (see Init)
     int32_t m_thighBones[2]{-1, -1};
     bool m_strideWarp = UTPP_STRIDE_WARP != 0; // SetStrideWarp
+    float m_strideFloor = stridewarp::kScaleFloor; // shortest stride of this update (WarpStride; a stair cadence lowers it)
     float m_strideScale = 1.0f;                // StrideScale
     std::vector<float> m_strideClipFactor;     // StrideClipFactor, per clip
     std::vector<uint8_t> m_strideCrouchClip;   // StrideCrouchClip, per clip
