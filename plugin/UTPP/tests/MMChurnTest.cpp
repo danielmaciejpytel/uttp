@@ -63,11 +63,16 @@
 // 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered), 44 no blocked
 // capsule idle (flick_180_sprint cruise (Male, wall) 10 > 6), 45 no loop dwell against a shuffle of the same database (sprint_dash
 // dash_right (loop vs shuffle) 7 > 5), 46 no dodge facing hold (MatcherConfig::dodgeFacingHoldS) and 47 no heading catch-up after it
-// (Male sprint_dash dash_right 10 and 7 > 6).
+// (Male sprint_dash dash_right 10 and 7 > 6), 48 no reface swap dwell (MatcherConfig::refaceSwapDwellS; flick_180_sprint accel (second run)
+// 5 > 4; not registered).
 // Each must fail its check
 // (tests/motiondriverinteg.cmake).
 #define UTPP_DECISIONDUMP_NO_MAIN
 #include "MotionDriverDecisionDump.cpp"
+namespace utpp::motiondriver
+{
+void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg); // MapConfig::speedConverter (-1 = the default)
+}
 
 namespace
 {
@@ -146,6 +151,7 @@ struct Slice
     std::vector<Window> windows;
     bool man = false; // Male V bundle (body slot 1)
     bool stickFixed = false; // fixed stick speed model (motiondriver::SetStickSpeedMode 1, the shipped default) for this slice only
+    bool converterOff = false; // speed converter off (MapConfig::speedConverter 0) for this slice only
 };
 
 // the clip / database changes of the frames the v2 driver stepped (what the MOTION trace lines show), counted like gt_log.py _motion_metrics: the same
@@ -451,6 +457,9 @@ int main(int argc, char** argv)
 
     const std::vector<Slice> slices = {
         {"churn_slalom.feed", {{"slalom", 118.203f, 126.203f, 16}}},
+        // the slalom once more without the speed converter (default since 0.2.0): with the converted query the sibling loops no longer race on a
+        // rounding error (1 change in 8 s with or without guard 1), so only this run still shows guard 1 (mutation 24: 31 > 16 changes)
+        {"churn_slalom.feed", {{"slalom (no speed converter)", 118.203f, 126.203f, 16}}, false, false, true},
         {"churn_flick_run.feed", {{"flick_180_run flick", 151.308f, 153.808f, 6, false, false, true}}},
         {"churn_flick_sprint.feed", {{"flick_180_sprint accel", 162.384f, 163.884f, 4, true}}},
         {"churn_reface_sprint.feed", {{"flick_180_sprint accel (second run)", 169.529f, 171.029f, 4, true}}},
@@ -530,6 +539,7 @@ int main(int argc, char** argv)
         }
         g_dumpBody = s.man ? 1 : 0;
         motiondriver::SetStickSpeedMode(s.stickFixed ? 1 : 0); // DriverOptionBaseline: 0
+        motiondriver::TestSetMapSpeedConverter(s.converterOff ? 0 : -1, 0.0f, 0.0f);
         const mm::motion::MotionDatabase& sdb = s.man ? *dbM : *db;
         const std::vector<FrameOut> run = RunDriver(s.man ? rigM : rig, f);
         if (trace)

@@ -709,6 +709,13 @@ struct MatcherConfig
     float startRestartDwellS = 1.0f;
     float startRestartOverride = 0.3f;
     float startStalledSpeedCmS = 30.0f;
+    //  5b. refaceSwapDwellS / refaceSwapDwellOverride (full-stick sprint start with a 180 deg reversal): a reface start that replaced another
+    //     reface start (Sprint_Reface_Start_F_R_180 -> _R_090) was handed to a Walk_to_Sprint transition 0.13 s later by 0.03 of cost, without a
+    //     stick edge (5 changes in 1.5 s). Without a stick edge (DoNotInterrupt) such a reface start younger than refaceSwapDwellS gives way to a
+    //     clip that is not a reface start only if that one is better by more than refaceSwapDwellOverride. Reface -> reface swaps, stop clips,
+    //     stick edges and every other clip are untouched. 0 = off.
+    float refaceSwapDwellS = 0.2f;
+    float refaceSwapDwellOverride = 0.05f;
 
     // TURN COMMIT. On a reversal of the stick the capsule velocity flips within one or two frames; the pivot query then matches the
     // straight run of the new direction and the continuing cost of a just picked 180 deg turn lost to a loop half way through its turn
@@ -1348,6 +1355,7 @@ public:
         m_headingRestArmed = false;
         m_slideExitAge = 1.0e9f;
         m_sinceJumpS = 1.0e9f;
+        m_refaceSwapAgeS = 1.0e9f;
         m_sinceDodgeS = 1.0e9f;
         m_sinceDodgeFacingS = 1.0e9f;
         m_sinceSlideS = 1.0e9f;
@@ -1458,6 +1466,7 @@ public:
         const bool holdExpiredNow = holdWasActive && m_slideExitHoldLeft <= 0.0f;
         m_slideExitAge += aDt;
         m_sinceJumpS += aDt;
+        m_refaceSwapAgeS += aDt;
         m_sinceDodgeS = aState.dodge ? 0.0f : m_sinceDodgeS + aDt;
         m_sinceDodgeFacingS += aDt;
         m_riseHoldLeft = std::fmax(0.0f, m_riseHoldLeft - aDt);
@@ -2243,6 +2252,18 @@ public:
                 bestRow = contRow;
                 bestEntry = contEntry;
             }
+            // churn guard 5b (MatcherConfig::refaceSwapDwellS): a reface start that just replaced another reface start gives way to a clip that is
+            // not a reface start only by a clear margin (mutation 48: off)
+            if (UTPP_AND_NOT(JUMPPICK, 48) jump && m_guardsOn && res.interrupt == Interrupt::DoNotInterrupt && m_cfg.refaceSwapDwellS > 0.0f && contDb >= 0 &&
+                m_cur.valid && m_refaceSwapAgeS < m_cfg.refaceSwapDwellS && !aForce && aState.movementMode == 0 && last.movementMode == 0 &&
+                aState.stance == 0 && m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 2 && m_clipStart[en.clip] != 2 && !m_clipStop[en.clip] &&
+                static_cast<int32_t>(en.clip) != m_cur.clip && bestCost > contBestCost - m_cfg.refaceSwapDwellOverride)
+            {
+                jump = false;
+                bestDb = contDb;
+                bestRow = contRow;
+                bestEntry = contEntry;
+            }
             // churn guard 1 (MatcherConfig::loopDwellS): a young loop gives way to another loop only by a clear margin
             if (UTPP_AND_NOT(JUMPPICK, 24) jump && m_guardsOn && res.interrupt == Interrupt::DoNotInterrupt && m_cfg.loopDwellS > 0.0f && contDb >= 0 && m_cur.valid && m_sinceJumpS < m_cfg.loopDwellS &&
                 aState.movementMode == 0 && last.movementMode == 0 && aState.stance == 0 && !aForce &&
@@ -2406,6 +2427,9 @@ public:
                         m_cur.clipTime, steer::ClassifyClip(db.ClipName(en.clip)),
                         res.interrupt == Interrupt::ForceInterrupt || res.interrupt == Interrupt::ForceInterruptAndInvalidateContinuingPose);
                 }
+                // churn guard 5b: a reface start replacing another reface start starts the dwell; a same-clip jump keeps it; any other pick ends it
+                if (!m_cur.valid || m_cur.clip != static_cast<int32_t>(en.clip))
+                    m_refaceSwapAgeS = m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] == 2 && m_clipStart[en.clip] == 2 ? 0.0f : 1.0e9f;
                 m_cur.valid = true;
                 m_cur.db = bestDb;
                 m_cur.localRow = bestRow;
@@ -3444,6 +3468,7 @@ private:
     float m_sinceDodgeS = 1.0e9f;       // seconds since the last dodge feed (MatcherConfig::dodgeFacingHoldS)
     float m_sinceDodgeFacingS = 1.0e9f; // seconds since the dodge facing hold last held (heading catch-up after it)
     float m_sinceJumpS = 1.0e9f;        // seconds since the playing clip was selected (MatcherConfig::freshEventS, loopDwellS)
+    float m_refaceSwapAgeS = 1.0e9f;    // seconds since a reface start replaced another reface start (MatcherConfig::refaceSwapDwellS)
     float m_slideExitAge = 1.0e9f;      // fix/slide-exit: seconds since an exit clip was selected (MatcherConfig::slideExitBiasS)
     int m_holdStance = 0, m_holdGait = 0, m_holdMovementState = 0, m_holdFlags = 0; // fix/slide-exit: chooser state when the exit clip was selected
     float m_holdChangeAge = 0.0f;       // fix/slide-exit: seconds the gait / movementState has differed from the hold start
