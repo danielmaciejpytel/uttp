@@ -229,9 +229,10 @@ struct FirmFeetConfig
     }
 };
 
-// Planted foot yaw lock (option, default off; FootLocker::SetYawLock / FootFeedPolicy::yawLock). On a lock of the soft-slip path (the
-// position handling is unchanged: soft slip, firm feet, settle, drift unlock) the foot keeps the world yaw it had when it locked, turned
-// about its lock point (the toe), instead of following the animated foot yaw:
+// Planted foot yaw lock (option, off in a fresh FootLocker, on by default in the host: CET mm.footYawLock; FootLocker::SetYawLock /
+// FootFeedPolicy::yawLock). On a lock of the soft-slip path (the position handling is unchanged: soft slip, firm feet, settle, drift
+// unlock) the foot keeps the world yaw it had when it locked, turned about its lock point (the toe), instead of following the animated
+// foot yaw:
 //   - planted: the foot is shown at (1 - twistReduction) x (locked yaw - animated yaw) from the animated yaw;
 //   - more than unplantAngle between them: the yaw unplants and follows the animated yaw through a critically damped spring
 //     (angularStiffness), started from the shown yaw and its rate, so the foot leaves its plant without a step;

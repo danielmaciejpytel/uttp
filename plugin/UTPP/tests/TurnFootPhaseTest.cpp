@@ -264,6 +264,8 @@ int main(int argc, char** argv)
     motionhost::MotionHooks hooks{&WStep, &WApply, &motiondriver::OnArmed, &motiondriver::OnDisarmed, &PhaseFrameHook, &motiondriver::OwnsTraversal};
     hooks.published = &motiondriver::RecordPublishedPose; // the shown pose ring, as the mod's natives install it
     motionhost::SetMotionHooks(&hooks);
+    // planted foot yaw lock (host option, on by default like mm.footYawLock): the turn foot phase picks were measured without it
+    motionhost::SetFootYawLock(false);
     const struct
     {
         const char* body;

@@ -345,6 +345,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMKneeFix") motionhost::SetKneeFix(static_cast<int32_t>(arg(0)));
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
         else if (name == "MMFirmFeet") motionhost::SetFirmFeet(flag(0));
+        else if (name == "MMFootYawLock") motionhost::SetFootYawLock(flag(0));
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
@@ -376,6 +377,7 @@ void ApplyLogBaseline()
     motionhost::SetAirSteer(false);
     motionhost::SetMeleeGuardSetting(false);
     motionhost::SetFirmFeet(false);
+    motionhost::SetFootYawLock(false);
     motiondriver::SetOverlayInertialSwitch(false);
 }
 // --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped

@@ -1531,7 +1531,7 @@ bool g_pelvisPlacementOn = false; // pelvis stage of the foot locker (false = th
 uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis stage
 bool g_firmFeetOn = true;        // firm feet in turns and stops (CET mm.firmFeet, default on; mm/FootLocker.hpp FirmFeetConfig)
 FirmFeetConfig g_firmFeetCfg;    // its limits (SetFirmFeetParams; applied to the foot locker every feed while it is on)
-bool g_footYawLockOn = false;    // planted foot yaw lock (SetFootYawLock, default off; mm/FootLocker.hpp FootYawLockConfig)
+bool g_footYawLockOn = true;     // planted foot yaw lock (CET mm.footYawLock, default on; mm/FootLocker.hpp FootYawLockConfig)
 // Body height smoothing (mm/BodyHeightRuntime.hpp; option, default on): the stage runs on the animation thread with the drawn height;
 // the feed only publishes its gate (ground locomotion of this feed) and a reset request (teleport, hand-back).
 bool g_bodyHeightOn = true; // the menu default (mm.bodyHeightSmooth)
