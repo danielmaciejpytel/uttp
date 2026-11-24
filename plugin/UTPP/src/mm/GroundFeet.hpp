@@ -1,8 +1,12 @@
 // UTPP motion matching runtime - feet on uneven ground (stairs, slopes, curbs, rubble). Header-only, C++20, deterministic,
 // allocation-free.
 //
-// Ground traces (one per foot, taken by the game script under the ball of the drawn foot of the previous frame) give a world hit
-// height and a surface normal per foot. This stage places the feet on that ground and lets the whole leg chain adapt:
+// Ground traces (two per foot, taken by the game script under the ball and the heel of the drawn foot of the previous frame) give a
+// world hit height and a surface normal per foot. This stage places the feet on that ground and lets the whole leg chain adapt:
+//   - support under the sole: the ball trace sets the ground unless the heel trace hits more than heelAbove above the ball's plane
+//     there (stairs down: the ball reaches past the step nose to the step below while the heel stands on the tread; a bump under the
+//     heel); then the heel hit is the ground of that foot (level), so a planted foot rests on the tread it stands on and a swinging
+//     one keeps its clearance above the higher step.
 //   - planting plane per foot: the hit height follows the trace through a critically damped spring (stiffness heightStiffness) and
 //     the normal through another one (normalStiffness), both in closed form of dt; the smoothed plane may stay at most
 //     maxPenetration below the traced ground. The plane is held in world height, so a snap of the drawn capsule never moves a foot
@@ -76,6 +80,7 @@ struct Config
     float frontLegSpeed = 0.5f;      // m/s, above it only the front leg sets the pelvis drop
     float suddenRateTau = 0.1f;      // s, how fast a snap update moves the expected vertical rate
     float bias = 0.0f;               // m, ground hit minus capsule height on flat ground (calibration)
+    float heelAbove = 0.01f;         // m, a heel hit this far above the ball's plane at the heel is the support of that foot
 };
 
 inline bool ValidConfig(const Config& c)
@@ -92,11 +97,11 @@ inline bool ValidConfig(const Config& c)
            pos(c.pelvisStiffness) && nonneg(c.maxDrop) && nonneg(c.maxCompensation) && nonneg(c.heelLift) && c.heelLift <= 1.0f &&
            std::isfinite(c.reach) && c.reach > 0.5f && c.reach <= 1.0f && std::isfinite(c.softReach) && c.softReach > 0.5f &&
            c.softReach <= c.reach && pos(c.suddenStep) && pos(c.frontLegSpeed) &&
-           pos(c.suddenRateTau) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f;
+           pos(c.suddenRateTau) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f && nonneg(c.heelAbove);
 }
 
-// One trace per foot, in the model frame of the capsule the trace was taken with (x, y: the traced point; n: the surface normal)
-// plus the world height of the hit.
+// One trace per foot under the ball (foot) and one under the heel (heel; hit 0 = not traced), in the model frame of the capsule the
+// traces were taken with (x, y: the traced point; n: the surface normal) plus the world height of the hit.
 struct FootSample
 {
     uint32_t hit = 0;  // 1 = the trace hit the ground
@@ -112,6 +117,7 @@ struct Samples
     uint32_t pad = 0;
     int64_t ticks = 0;     // clock of the trace (0 = unset)
     FootSample foot[2];
+    FootSample heel[2];
 };
 static_assert(std::is_trivially_copyable_v<Samples> && sizeof(Samples) % 4 == 0);
 
@@ -138,6 +144,7 @@ struct LegFrame
 {
     BoneTransform ga{}, gb{}, gc{}; // UpLeg, Leg, Foot (model space)
     math::Vec3 ball{};              // toe base (the ankle without a toe)
+    math::Vec3 heel{};              // heel (the first bone below the foot on the way to the toe base; the ankle without one)
     float thigh = 0.0f, shin = 0.0f;
 };
 struct PoseFrame
@@ -209,12 +216,17 @@ inline bool Gather(const bodyheight::LegRig& aRig, const float* aPose, uint32_t 
         l.gb = Mul(l.ga, Load(aPose, aRig.chain[s][1]));
         l.gc = Mul(l.gb, Load(aPose, aRig.chain[s][2]));
         BoneTransform t = l.gc;
+        l.heel = l.gc.p;
         for (int32_t i = 0; i < aRig.toePathLen[s]; ++i)
+        {
             t = Mul(t, Load(aPose, aRig.toePath[s][i]));
+            if (i == 0 && aRig.toePathLen[s] >= 2)
+                l.heel = t.p;
+        }
         l.ball = t.p;
         l.thigh = detail::Len(l.gb.p - l.ga.p);
         l.shin = detail::Len(l.gc.p - l.gb.p);
-        if (!math::IsFinite(l.ga.p) || !math::IsFinite(l.gc.p) || !math::IsFinite(l.ball) || !math::IsFinite(l.gc.q) ||
+        if (!math::IsFinite(l.ga.p) || !math::IsFinite(l.gc.p) || !math::IsFinite(l.ball) || !math::IsFinite(l.heel) || !math::IsFinite(l.gc.q) ||
             !(l.thigh > 1e-3f) || !(l.shin > 1e-3f))
             return false;
     }
@@ -454,7 +466,8 @@ struct StageDiag
     uint64_t steps = 0;
     uint64_t resets = 0;
     uint64_t sudden = 0;      // capsule snaps taken into the pelvis spring
-    uint64_t rejected = 0;    // foot samples not used (no hit, inconsistent with the capsule, bad normal)
+    uint64_t rejected = 0;    // feet without a usable sample (no hit, inconsistent with the capsule, bad normal)
+    uint64_t heel = 0;        // feet whose heel sample was the support
 };
 
 // Per-frame state: the planting planes, their fades and the pelvis spring.
@@ -517,30 +530,57 @@ public:
             math::Vec3 n{0.0f, 0.0f, 1.0f};
             if (allowed && aSamples)
             {
-                const FootSample& fs = aSamples->foot[s];
-                n = math::Vec3{fs.nx, fs.ny, fs.nz};
-                const float nl = detail::Len(n);
-                g = fs.z - m_cfg.bias;
-                const float drop = aSamples->capZ - g;
-                valid = fs.hit != 0 && std::isfinite(g) && std::isfinite(fs.x) && std::isfinite(fs.y) && std::isfinite(nl) && nl > 1e-3f &&
-                        std::isfinite(aSamples->capZ) &&
-                        (g - aSamples->capZ <= m_cfg.maxGroundDelta ||
-                         (g - aSamples->capZ <= m_cfg.maxGroundRiseFollow && m_vz > m_cfg.minClimbRate)) &&
-                        (drop <= m_cfg.maxGroundDrop ||
-                         (drop <= m_cfg.maxGroundDropFollow && m_vz < -m_cfg.minDescentRate));
-                if (valid)
+                // one sample: usable (hit, finite, consistent with the capsule), its height and normal (steeper than 60 deg: a step edge
+                // or riser under the trace, the height counts, the tilt does not)
+                auto use = [&](const FootSample& fs, float& aG, math::Vec3& aN) {
+                    aN = math::Vec3{fs.nx, fs.ny, fs.nz};
+                    const float nl = detail::Len(aN);
+                    aG = fs.z - m_cfg.bias;
+                    const float drop = aSamples->capZ - aG;
+                    const bool ok = fs.hit != 0 && std::isfinite(aG) && std::isfinite(fs.x) && std::isfinite(fs.y) && std::isfinite(nl) &&
+                                    nl > 1e-3f && std::isfinite(aSamples->capZ) &&
+                                    (aG - aSamples->capZ <= m_cfg.maxGroundDelta ||
+                                     (aG - aSamples->capZ <= m_cfg.maxGroundRiseFollow && m_vz > m_cfg.minClimbRate)) &&
+                                    (drop <= m_cfg.maxGroundDrop ||
+                                     (drop <= m_cfg.maxGroundDropFollow && m_vz < -m_cfg.minDescentRate));
+                    if (ok)
+                    {
+                        aN = aN * (1.0f / nl);
+                        if (!(aN.z > 0.5f))
+                            aN = math::Vec3{0.0f, 0.0f, 1.0f};
+                    }
+                    return ok;
+                };
+                const FootSample& fb = aSamples->foot[s];
+                const FootSample& fh = aSamples->heel[s];
+                float gh = 0.0f;
+                math::Vec3 nh{};
+                valid = use(fb, g, n);
+                const bool heelOk = use(fh, gh, nh);
+                // the support under the sole: the heel hit when it is above the ball's plane at the heel (stairs down: the ball past the
+                // step nose, the heel on the tread), level
+                bool heel = heelOk && !valid;
+                if (heelOk && valid)
                 {
-                    n = n * (1.0f / nl);
-                    if (!(n.z > 0.5f)) // steeper than 60 deg (a step edge or riser under the trace): the height counts, the tilt does not
-                        n = math::Vec3{0.0f, 0.0f, 1.0f};
+                    const float dx = fh.x - fb.x, dy = fh.y - fb.y;
+                    heel = gh > g - (n.x * dx + n.y * dy) / n.z + m_cfg.heelAbove;
+                }
+                if (heel)
+                {
+                    valid = true;
+                    g = gh;
+                    n = math::Vec3{0.0f, 0.0f, 1.0f};
+                    f.x = fh.x;
+                    f.y = fh.y;
+                    ++m_diag.heel;
+                }
+                else if (valid)
+                {
+                    f.x = fb.x;
+                    f.y = fb.y;
                 }
                 if (!valid)
                     ++m_diag.rejected;
-                else
-                {
-                    f.x = fs.x;
-                    f.y = fs.y;
-                }
             }
             if (valid)
             {

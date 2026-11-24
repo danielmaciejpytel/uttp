@@ -79,6 +79,9 @@ public native func UTPPFeedMovingPlatform(onPlatform: Bool) -> Void
 // closed (no trace). UTPPGroundProbePoint: w = 1 valid. UTPPGroundTraceBegin/End: cost of the trace block in microseconds.
 public native func UTPPGroundWantsTrace() -> Bool
 public native func UTPPGroundProbePoint(side: Int32, capsule: Vector4, yawDeg: Float) -> Vector4
+// the heel trace point of the last UTPPGroundProbePoint of that side (w = 1 valid) and the heel traces, sent right before UTPPFeedGround
+public native func UTPPGroundProbeHeel(side: Int32) -> Vector4
+public native func UTPPFeedGroundHeel(hitL: Bool, posL: Vector4, hitR: Bool, posR: Vector4) -> Void
 public native func UTPPGroundTraceBegin() -> Void
 public native func UTPPGroundTraceEnd() -> Float
 public native func UTPPFeedGround(hitL: Bool, posL: Vector4, normalL: Vector4, hitR: Bool, posR: Vector4, normalR: Vector4, capsule: Vector4, yawDeg: Float) -> Void
@@ -1126,7 +1129,8 @@ public func UTPPGroundTrace(sqs: ref<SpatialQueriesSystem>, xy: Vector4, capZ: F
   return sqs.SyncRaycastByQueryFilter(from, to, filter, hit) && TraceResult.IsValid(hit);
 }
 
-// Feet on uneven ground / ground recorder: a trace under each published foot every frame, handed to the DLL (the stage uses it;
+// Feet on uneven ground / ground recorder: a trace under each published foot every frame and, with the stage on, one under its heel
+// (the support under the sole on a step edge), handed to the DLL (the stage uses them;
 // with mm.trace on the DLL logs it as a UTPP GRT line). With mm.trace on, every 0.25 s also a stairs profile: 20 traces every
 // 5 cm ahead along the facing, logged as a UTPP GRP line (height above the capsule per point, -9 = no hit).
 public func UTPPFeedGroundFromLocomotion(player: ref<PlayerPuppet>, yawDeg: Float, timeDelta: Float) -> Void {
@@ -1148,6 +1152,23 @@ public func UTPPFeedGroundFromLocomotion(player: ref<PlayerPuppet>, yawDeg: Floa
   let pL: Vector4 = UTPPGroundProbePoint(0, cap, yawDeg);
   let pR: Vector4 = UTPPGroundProbePoint(1, cap, yawDeg);
   let hit: TraceResult;
+  let hL: Vector4 = UTPPGroundProbeHeel(0);
+  let hR: Vector4 = UTPPGroundProbeHeel(1);
+  if hL.W > 0.5 || hR.W > 0.5 {
+    let heelL: Vector4;
+    let heelR: Vector4;
+    let heelHitL: Bool = false;
+    let heelHitR: Bool = false;
+    if hL.W > 0.5 && UTPPGroundTrace(sqs, hL, cap.Z, hit) {
+      heelHitL = true;
+      heelL = Vector4(hit.position.X, hit.position.Y, hit.position.Z, 1.0);
+    }
+    if hR.W > 0.5 && UTPPGroundTrace(sqs, hR, cap.Z, hit) {
+      heelHitR = true;
+      heelR = Vector4(hit.position.X, hit.position.Y, hit.position.Z, 1.0);
+    }
+    UTPPFeedGroundHeel(heelHitL, heelL, heelHitR, heelR);
+  }
   if pL.W > 0.5 && UTPPGroundTrace(sqs, pL, cap.Z, hit) {
     hitL = true;
     posL = Vector4(hit.position.X, hit.position.Y, hit.position.Z, 1.0);
