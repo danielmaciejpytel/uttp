@@ -108,7 +108,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "wide",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
@@ -1142,10 +1142,10 @@ function M.RegisterSettings(core)
     label = "motion: aim rotation mode",
     desc = "While aiming and moving, a change of the movement direction may pick a pivot animation from a smaller angle, but not within half a second of the last pivot or start (default). Off = the strafe pivot angle.",
     apply = function(v) M.SetOption("aimRotation", v == true) end })
-  core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
+  core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "wide",
     choices = { { "standard", "Standard" }, { "wide", "Wide" } },
     label = "motion: lean coverage",
-    desc = "Standard (default) = V leans into turns only when walking or running unarmed and upright. Wide = also with a weapon drawn, while aiming (the body only, the head stays on the aim) and when moving crouched.",
+    desc = "Wide (default) = V leans into turns also with a weapon drawn, while aiming (the body only, the head stays on the aim) and when moving crouched. Standard = only when walking or running unarmed and upright.",
     apply = function(v) M.SetOption("leanCoverage", v == "wide" and "wide" or "standard") end })
   core.Register({ key = "mm.selectionGuards", section = "motion", type = "bool", default = true,
     label = "motion: clip selection guards",
