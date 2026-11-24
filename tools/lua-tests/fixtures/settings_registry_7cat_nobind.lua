@@ -101,6 +101,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
+    ["mm.aimRootAccumulate"] = "false",
     ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
@@ -305,10 +306,12 @@ return {
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
     "native UTPPSetMMFootYawLock(true)",
+    "native UTPPSetMMAimRootAccumulate(false)",
     "native UTPPSetMMOverlayInertialSwitch(true)",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
+    "apply mm.aimRootAccumulate(false,\"ok\")",
     "native UTPPSetStickSpeedMode(1)",
     "native UTPPSetMotionStickSpeedMode(1)",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
@@ -522,6 +525,7 @@ return {
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
+    "apply mm.aimRootAccumulate(false,\"ok\")",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -1542,6 +1546,14 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
+    ["mm.aimRootAccumulate"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["mm.aimRotation"] = {
       ["default"] = "true",
       ["hasApply"] = true,
@@ -2452,6 +2464,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
+    ["mm.aimRootAccumulate"] = "false",
     ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
@@ -2662,6 +2675,7 @@ return {
     "mm.strideWarp",
     "mm.firmFeet",
     "mm.footYawLock",
+    "mm.aimRootAccumulate",
     "mm.stickSpeed",
     "mm.aimAtCrosshair",
     "mm.lean",
@@ -2857,6 +2871,7 @@ return {
     "mm.strideWarp",
     "mm.firmFeet",
     "mm.footYawLock",
+    "mm.aimRootAccumulate",
     "mm.stickSpeed",
     "mm.aimAtCrosshair",
     "mm.lean",
@@ -3042,6 +3057,7 @@ return {
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
+    "apply mm.aimRootAccumulate(false,\"ok\")",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -3237,6 +3253,7 @@ mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
 mm.footYawLock=true\r\
+mm.aimRootAccumulate=false\r\
 mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
@@ -3389,6 +3406,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.strideWarp",
       "mm.firmFeet",
       "mm.footYawLock",
+      "mm.aimRootAccumulate",
       "mm.stickSpeed",
       "mm.aimAtCrosshair"
     },
@@ -3691,6 +3709,7 @@ vehicle.jumpOutSidePush=true\r\
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
+    ["mm.aimRootAccumulate"] = "false",
     ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
@@ -3870,6 +3889,7 @@ mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
 mm.footYawLock=true\r\
+mm.aimRootAccumulate=false\r\
 mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
@@ -4035,6 +4055,7 @@ other.module=42\r\
     "/utpp/animation|switch|mm.strideWarp",
     "/utpp/animation|switch|mm.firmFeet",
     "/utpp/animation|switch|mm.footYawLock",
+    "/utpp/animation|switch|mm.aimRootAccumulate",
     "/utpp/animation|selector|mm.stickSpeed",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",
     "/utpp/bodyturn|switch|bodyturn.aimStrafe",
