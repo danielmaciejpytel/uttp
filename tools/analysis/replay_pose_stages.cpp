@@ -75,6 +75,7 @@
 //   --firm-limit L      hold limit (m), --firm-handback V hand-back speed (m/s), --firm-knee D knee fold margin (deg),
 //                       --firm-release V release speed (m/s) and --firm-latch-speed V latch capsule speed (m/s) of the firm feet
 //                       (motionhost::SetFirmFeetParams; not passed = build default)
+//   --foot-lock 0|1     foot locker off / on after --settings-log (motionhost::SetFootLock; off = the animated feet, for inspection)
 //   --foot-yaw-lock 0|1 planted foot yaw lock off / on (motionhost::SetFootYawLock); adds one YAWLOCK line (yaw lock updates, unplants,
 //                       replants, updates held at the correction bound)
 //   --foot-yaw-twist R  twist reduction of the yaw lock (0..0.99), --foot-yaw-corr M its correction bound (m),
@@ -574,6 +575,7 @@ int main(int argc, char** argv)
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
     int32_t firmFeet = -1;                     // -1 = not passed
+    int32_t footLock = -1;                     // -1 = not passed
     int32_t footYawLock = -1;                  // -1 = not passed
     float footYawTwist = -1.0f, footYawCorr = -1.0f, footYawUnplant = -1.0f; // < 0 = not passed (build defaults)
     uint64_t yawTotal[4] = {}, yawLast[4] = {}; // --foot-yaw-lock: YAWLOCK counters (summed over the foot locker resets)
@@ -689,6 +691,8 @@ int main(int argc, char** argv)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--firm-feet") == 0)
             firmFeet = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--foot-lock") == 0)
+            footLock = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--foot-yaw-lock") == 0)
             footYawLock = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--foot-yaw-twist") == 0)
@@ -943,6 +947,8 @@ int main(int argc, char** argv)
         motiondriver::SetStickSpeedMode(stickSpeed);
     if (firmFeet >= 0)
         motionhost::SetFirmFeet(firmFeet != 0);
+    if (footLock >= 0)
+        motionhost::SetFootLock(footLock != 0);
     if (footYawLock >= 0)
         motionhost::SetFootYawLock(footYawLock != 0);
     if ((footYawTwist >= 0.0f || footYawCorr >= 0.0f || footYawUnplant >= 0.0f) &&
