@@ -40,6 +40,7 @@
 #include "speedconv_startstop.hpp"
 #include "speedconv_gait.hpp"
 #include "speedconv_traj.hpp"
+#include "speedconv_stance.hpp"
 
 namespace utpp::mm::adapter
 {
@@ -2146,6 +2147,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         lim.acceleration = motiontraj::MotionMaxAcceleration(c.cmc, gait, sp);
         if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
             lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
+        lim = speedconv::StanceLimits(lim, c.speedConverter, rot == motiontraj::RotationMode::Strafe, motiontraj::MotionGroundFriction(c.cmc, gait, sp));
         velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
         if (c.speedConverter & speedconv::kGaitRamp)
             velQ = speedconv::GaitStep(m.speedConverterGait, velQ, vel, gait, active && input, dt,
