@@ -583,6 +583,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tests/supportgrip.cmake OPTIONAL) # rifle gr
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/malecorrection.cmake OPTIONAL) # male V upper-body deformation correction (world-preserving chest / clavicle / arm rotations)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/bodytracecont.cmake OPTIONAL) # continuous helper-bone capture
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/posecapture.cmake OPTIONAL) # compact pose capture (format, session layer, writer)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tests/speedconv_startstop.cmake OPTIONAL) # speed converter: starts and stops window
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/diagreport.cmake OPTIONAL) # diagnostic report file + relative paths in logs
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/motiondriver.cmake OPTIONAL) # UTPP-MOTION SEAM: MotionDriver unit test
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/reloadfix.cmake OPTIONAL) # fix batch 1: reload-path policy tests
