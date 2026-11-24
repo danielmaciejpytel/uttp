@@ -29,6 +29,7 @@ inline integ::SeqlockBuffer<Plan> g_plan;           // plan of the last stage up
 inline std::atomic<float> g_bias{0.0f};              // m, calibration (Config::bias)
 inline constexpr double kSameFrameSeconds = 0.0005;
 inline constexpr double kSampleMaxAge = 0.25;         // s, older traces are not used
+inline constexpr float kProbeFloorRise = 0.001f;     // m per publish, largest rise of the probe's floor estimate
 
 struct Stepper
 {
@@ -85,6 +86,8 @@ struct Probe
 {
     bool valid = false;
     math::Vec3 ball[2];         // model space, the published pose
+    float floor = 0.0f;         // model z of the clip's floor (lowest ball of either foot, rising kProbeFloorRise per publish)
+    bool haveFloor = false;
     float world[2][2] = {};     // the last world point handed out per foot
     bool haveWorld[2] = {false, false};
 };
@@ -103,10 +106,18 @@ inline void ProbeFromPose(const float* aPose, uint32_t aNumBones)
     g_probe.valid = true;
     for (int s = 0; s < 2; ++s)
         g_probe.ball[s] = f.leg[s].ball;
+    const float low = std::fmin(f.leg[0].ball.z, f.leg[1].ball.z);
+    g_probe.floor = g_probe.haveFloor && std::isfinite(g_probe.floor) ? std::fmin(low, g_probe.floor + kProbeFloorRise) : low;
+    g_probe.haveFloor = std::isfinite(g_probe.floor);
 }
 
 // World point (x, y) to trace under for foot aSide with the capsule the pose will be drawn with (aCap, aYaw rad: world = cap + Rz(yaw)
-// model). A foot that moved since the last point is led by one more step of that motion (a swinging foot; at most 0.3 m).
+// model). A foot that moved since the last point is led by one more step of that motion (a swinging foot; at most 0.3 m) and by up to
+// kProbeToe further along it (full from kProbeToeMove of motion per point) while it is high in the swing (the ball between
+// Config::swingLow and swingHigh above the clip's floor: the share the stage keeps only clearance for), so a swinging foot sees a step
+// riser under its toe before the ball reaches it. A foot at rest or about to land is traced under its ball.
+inline constexpr float kProbeToe = 0.08f;     // m
+inline constexpr float kProbeToeMove = 0.05f; // m
 inline bool ProbePoint(int aSide, float aCapX, float aCapY, float aYaw, float& aOutX, float& aOutY)
 {
     if (aSide < 0 || aSide > 1 || !g_probe.valid || !std::isfinite(aCapX) || !std::isfinite(aCapY) || !std::isfinite(aYaw))
@@ -123,8 +134,15 @@ inline bool ProbePoint(int aSide, float aCapX, float aCapY, float aYaw, float& a
         const float l = std::sqrt(lx * lx + ly * ly);
         if (l < 0.01f || !std::isfinite(l))
             lx = ly = 0.0f;
-        else if (l > 0.3f)
-            lx *= 0.3f / l, ly *= 0.3f / l;
+        else
+        {
+            const Config c{};
+            const float above = g_probe.haveFloor ? g_probe.ball[aSide].z - g_probe.floor : 0.0f;
+            const float u = std::clamp((above - c.swingLow) / (c.swingHigh - c.swingLow), 0.0f, 1.0f);
+            const float toe = kProbeToe * std::fmin(l / kProbeToeMove, 1.0f) * (u * u * (3.0f - 2.0f * u));
+            const float lead = std::fmin(l, 0.3f);
+            lx *= (lead + toe) / l, ly *= (lead + toe) / l;
+        }
     }
     g_probe.world[aSide][0] = wx;
     g_probe.world[aSide][1] = wy;
