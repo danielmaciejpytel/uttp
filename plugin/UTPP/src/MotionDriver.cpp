@@ -2734,6 +2734,14 @@ void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg)
     g_testSpeedConverterFriction = aFriction;
     g_testSpeedConverterMaxTurnDeg = aMaxTurnDeg;
 }
+// MatcherConfig::dodgeFacingHoldS of the running matcher from the next update on (0 = guard 3b off, < 0 = back to the production value);
+// -1 until the first call = never touched
+float g_testDodgeFacingHoldS = -1.0f;
+void TestSetDodgeFacingHold(float aS)
+{
+    std::lock_guard lock(g_m);
+    g_testDodgeFacingHoldS = aS >= 0.0f ? aS : ProductionMatcherConfig().dodgeFacingHoldS;
+}
 void TestApplyMapOverrides(adapter::MapConfig& aMc)
 {
     if (g_testSpeedConverter >= 0)
@@ -5929,6 +5937,10 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     if (turnShown)
         ++g_turnFootSearches;
     b.matcher.SetTurnFootPhase(g_turnFootPhaseOn);
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    if (g_testDodgeFacingHoldS >= 0.0f)
+        b.matcher.TestSetDodgeFacingHoldS(g_testDodgeFacingHoldS);
+#endif
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
     b.matcher.SetShownPoseHistory(nullptr);

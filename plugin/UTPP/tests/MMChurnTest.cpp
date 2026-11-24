@@ -62,7 +62,7 @@
 // 33 no heading catch-up (check K), 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered),
 // 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered), 44 no blocked
 // capsule idle (flick_180_sprint cruise (Male, wall) 10 > 6), 45 no loop dwell against a shuffle of the same database (sprint_dash
-// dash_right (loop vs shuffle) 7 > 5), 46 no dodge facing hold (MatcherConfig::dodgeFacingHoldS) and 47 no heading catch-up after it
+// dash_right (loop vs shuffle, no dodge facing hold) 7 > 5), 46 no dodge facing hold (MatcherConfig::dodgeFacingHoldS) and 47 no heading catch-up after it
 // (Male sprint_dash dash_right 10 and 7 > 6), 48 no reface swap dwell (MatcherConfig::refaceSwapDwellS; flick_180_sprint accel (second run)
 // 5 > 4; not registered).
 // Each must fail its check
@@ -72,6 +72,7 @@
 namespace utpp::motiondriver
 {
 void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg); // MapConfig::speedConverter (-1 = the default)
+void TestSetDodgeFacingHold(float aS); // MatcherConfig::dodgeFacingHoldS of the running matcher (0 = off, < 0 = the production value)
 }
 
 namespace
@@ -152,6 +153,7 @@ struct Slice
     bool man = false; // Male V bundle (body slot 1)
     bool stickFixed = false; // fixed stick speed model (motiondriver::SetStickSpeedMode 1, the shipped default) for this slice only
     bool converterOff = false; // speed converter off (MapConfig::speedConverter 0) for this slice only
+    bool dodgeFacingOff = false; // dodge facing hold off (MatcherConfig::dodgeFacingHoldS 0) for this slice only
 };
 
 // the clip / database changes of the frames the v2 driver stepped (what the MOTION trace lines show), counted like gt_log.py _motion_metrics: the same
@@ -475,8 +477,12 @@ int main(int argc, char** argv)
         {"churn_wall_flick_man.feed", {{"flick_180_sprint cruise (Male, wall)", 289.721f, 292.721f, 6}}, true},
         // Female 2026-11-14 21:00 sprint_dash / dash_right (weapon drawn): after the turn, a young Run_Loop_FR lost one feed later to the
         // shuffle of its own database by 0.023 and came back 0.2 s later; 5 with guard 1c (MatcherConfig::loopDwellShuffle), 7 without
-        // (mutation 45); fixed stick speed as shipped (the shuffle needs it)
+        // (mutation 45); fixed stick speed as shipped (the shuffle needs it). Since the dodge facing hold (MatcherConfig::dodgeFacingHoldS) the
+        // turn clip of the dodge plays on, Run_Loop_FR is never picked and the window has 4 changes with or without guard 1c
         {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle)", 809.874f, 811.873f, 5}}, false, true},
+        // the same window once more without the dodge facing hold: Run_Loop_FR is picked after the turn and races the shuffle as in the game,
+        // 5 changes with guard 1c, 7 without (mutation 45); the speed converter, the capsule speed play rate and the aim rotation do not change it
+        {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle, no dodge facing hold)", 809.874f, 811.873f, 5}}, false, true, false, true},
         {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 3}, {"sprint_dash sprint_again", 264.284f, 267.284f, 7}}},
         // Female 2026-11-14 03:53, keyboard-like input (full-deflection direction keys): the harness step windows keep 3.0 changes per second; check K
         // runs over the key edges of the whole sequence (the key edge of a step reaches the feed ~0.13 s before the harness step window starts)
@@ -525,6 +531,7 @@ int main(int argc, char** argv)
     std::free(traceEnv);
     g_dumpFeet = trace2;
     g_dumpDiag = trace3;
+    bool dodgeFacingPinned = false; // a slice set MatcherConfig::dodgeFacingHoldS: the later ones set it back
     for (const Slice& s : slices)
     {
         // check L needs the per-frame foot lock correction of its slice
@@ -540,6 +547,9 @@ int main(int argc, char** argv)
         g_dumpBody = s.man ? 1 : 0;
         motiondriver::SetStickSpeedMode(s.stickFixed ? 1 : 0); // DriverOptionBaseline: 0
         motiondriver::TestSetMapSpeedConverter(s.converterOff ? 0 : -1, 0.0f, 0.0f);
+        if (s.dodgeFacingOff || dodgeFacingPinned)
+            motiondriver::TestSetDodgeFacingHold(s.dodgeFacingOff ? 0.0f : -1.0f);
+        dodgeFacingPinned = dodgeFacingPinned || s.dodgeFacingOff;
         const mm::motion::MotionDatabase& sdb = s.man ? *dbM : *db;
         const std::vector<FrameOut> run = RunDriver(s.man ? rigM : rig, f);
         if (trace)

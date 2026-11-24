@@ -1326,6 +1326,10 @@ public:
     // knobs at 0 / false. Takes effect on the next Update; no other state is touched.
     void SetSelectionGuards(bool aOn) { m_guardsOn = aOn; }
     bool SelectionGuards() const { return m_guardsOn; }
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    // tests only: MatcherConfig::dodgeFacingHoldS of a running matcher (motiondriver::TestSetDodgeFacingHold; 0 = guard 3b off)
+    void TestSetDodgeFacingHoldS(float aS) { m_cfg.dodgeFacingHoldS = aS; }
+#endif
     uint64_t StrafeSectorHolds() const { return m_strafeSectorHolds; }
     // Authored ROOT, not a name suffix or the already steered blended root rate.
     // Zero means an invalid clip, a non-reface, or no meaningful authored turn.
