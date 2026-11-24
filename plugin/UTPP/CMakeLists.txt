@@ -1180,6 +1180,13 @@ target_compile_features(utpp_motion_adapter_unit_directional_test_mut1 PRIVATE c
 target_compile_definitions(utpp_motion_adapter_unit_directional_test_mut1 PRIVATE UTPP_SPEED_CONVERTER_MUTATION=1)
 add_test(NAME utpp_motion_adapter_unit_directional_test_mut1 COMMAND utpp_motion_adapter_unit_directional_test_mut1)
 set_tests_properties(utpp_motion_adapter_unit_directional_test_mut1 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL converter: a reversal reaches")
+# mutation 2: the game speed play rate keeps the converted speed (must FAIL its scale check)
+add_executable(utpp_motion_adapter_unit_directional_test_mut2 tests/DirectionalInputsTest.cpp src/mm/MotionAdapter.hpp src/mm/SpeedConverter.hpp)
+target_compile_options(utpp_motion_adapter_unit_directional_test_mut2 PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_features(utpp_motion_adapter_unit_directional_test_mut2 PRIVATE cxx_std_20)
+target_compile_definitions(utpp_motion_adapter_unit_directional_test_mut2 PRIVATE UTPP_SPEED_CONVERTER_MUTATION=2)
+add_test(NAME utpp_motion_adapter_unit_directional_test_mut2 COMMAND utpp_motion_adapter_unit_directional_test_mut2)
+set_tests_properties(utpp_motion_adapter_unit_directional_test_mut2 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL converter game speed rate: the scale is game / converted speed")
 
 # ---- step-down reach for deeper steps and the chooser time to land at the reference gravity (mm/MotionAdapter.hpp, mm/ChooserMatcher.hpp; off by default) ----
 add_executable(utpp_motion_adapter_unit_step_down_test tests/StepDownReachTest.cpp src/mm/MotionAdapter.hpp src/mm/ChooserMatcher.hpp)

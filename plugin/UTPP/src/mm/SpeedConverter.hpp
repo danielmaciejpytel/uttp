@@ -21,6 +21,32 @@ inline constexpr int kStartsStops = 2; // also from rest and after the input is 
 inline constexpr int kLoopRate = 4;    // play rate of loop clips from the capsule speed (capsuleSpeedRate Both, scope loops only)
 inline constexpr int kDirectionOnly = 8;  // only the heading is converted, the speed is the game speed (without kStartsStops)
 inline constexpr int kSteadyLoopRate = 16; // kLoopRate only while the capsule speed holds (not on starts, stops, speed changes, landings)
+// kGameSpeedRate: the play rate of a converted feed follows the game speed (the capsule keeps moving at the game speed while the converted
+// query speed lags through a turn; the rate scale is multiplied by GameSpeedRateScale)
+inline constexpr int kGameSpeedRate = 32;
+// Named settings of the converter (MapConfig::speedConverter, speedConverterFriction, speedConverterMaxTurnDeg), selectable values
+// (the default stays off): 1 safe = only the heading of a sharp turn is converted, the speed is the game speed; 2 stronger = the
+// whole velocity of a turn is converted (curved turn with the speed change of the reference movement) and the clip plays at the game
+// speed. Both at a lower turn friction than the gait ground friction (the heading reaches the input more gradually) and with reversals
+// beyond 150 deg left to the game velocity.
+struct Preset
+{
+    int bits = 0;
+    float friction = 0.0f;   // per second; 0 = the gait ground friction
+    float maxTurnDeg = 0.0f; // 0 = every turn
+};
+inline constexpr int kPresetOff = 0;
+inline constexpr int kPresetSafe = 1;
+inline constexpr int kPresetStronger = 2;
+inline constexpr Preset PresetFor(int aLevel)
+{
+    return aLevel == kPresetSafe        ? Preset{kQuery | kDirectionOnly, 3.0f, 150.0f}
+           : aLevel == kPresetStronger ? Preset{kQuery | kGameSpeedRate, 2.0f, 150.0f}
+                                       : Preset{};
+}
+// kGameSpeedRate bounds of the scale
+inline constexpr float kGameSpeedRateMin = 0.5f;
+inline constexpr float kGameSpeedRateMax = 2.0f;
 // kSteadyLoopRate: the capsule speed counts as steady while its filtered rate of change stays below this (cm/s^2 on the query scale)
 inline constexpr float kSteadyAccelCmS2 = 150.0f;
 inline constexpr float kSteadyFilterS = 0.1f; // time constant of that filter (s)
@@ -71,6 +97,20 @@ inline bool UpdateSteady(State& s, float aSpeedCmS, float aDt, bool aEligible)
     s.steadyAccel = s.steadyAccel >= 1.0e8f ? a : s.steadyAccel + (a - s.steadyAccel) * k;
     s.steadyPrevSpeed = aSpeedCmS;
     return std::fabs(s.steadyAccel) < kSteadyAccelCmS2;
+}
+
+// kGameSpeedRate: the play-rate factor of one feed, game speed / converted speed (both cm/s on the query scale), within
+// [kGameSpeedRateMin, kGameSpeedRateMax]; 1 when either speed is below motiontraj::kHasVelocity or not finite.
+inline float GameSpeedRateScale(float aGameCmS, float aConvertedCmS)
+{
+    if (!std::isfinite(aGameCmS) || !std::isfinite(aConvertedCmS) || aGameCmS <= motiontraj::kHasVelocity ||
+        aConvertedCmS <= motiontraj::kHasVelocity)
+        return 1.0f;
+#if UTPP_SPEED_CONVERTER_MUTATION == 2
+    return 1.0f; // mutation 2: the rate keeps the converted speed
+#else
+    return std::clamp(aGameCmS / aConvertedCmS, kGameSpeedRateMin, kGameSpeedRateMax);
+#endif
 }
 
 inline void Reset(State& s, motiontraj::V3 aGame)

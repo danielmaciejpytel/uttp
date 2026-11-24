@@ -28,7 +28,8 @@ struct TurnRun
 {
     V3 past, current;
     float turnAngle = 0.0f;
-    std::vector<float> q; // every chooser output and query sample (bit identity)
+    std::vector<float> q;    // every chooser output and query sample (bit identity)
+    std::vector<float> rate; // ChooserState::rateSpeedScale of every feed
 };
 static TurnRun RunTurn(int aConverter, float aTurnDeg)
 {
@@ -50,6 +51,7 @@ static TurnRun RunTurn(int aConverter, float aTurnDeg)
         ctx.rootYawValid = true;
         const motion::ChooserState cs = MapToChooser(f, mc, ms, ctx);
         out.q.insert(out.q.end(), {float(cs.gait), float(cs.movementState), cs.isStarting ? 1.f : 0.f, cs.speed2dCmS});
+        out.rate.push_back(cs.rateSpeedScale);
         for (int k = -2; k <= 15; ++k)
         {
             const motion::TrajSample s = QuerySample(ms.traj, 0.1f * float(k));
@@ -377,6 +379,37 @@ int main()
         loop.capsuleRateScope = 2;
         Check("converter loop rate: an explicit capsuleSpeedRate wins",
               EffectiveCapsuleRate(loop) == CapsuleRateMode::RaiseOnly && EffectiveCapsuleRateScope(loop) == 2);
+        // kGameSpeedRate: game / converted speed within its bounds; 1 without a speed
+        Check("converter game speed rate: the scale is game / converted speed",
+              std::fabs(speedconv::GameSpeedRateScale(500.0f, 400.0f) - 1.25f) < 1e-4f);
+        Check("converter game speed rate: bounded and 1 without a speed",
+              speedconv::GameSpeedRateScale(500.0f, 100.0f) == speedconv::kGameSpeedRateMax &&
+                  speedconv::GameSpeedRateScale(0.0f, 400.0f) == 1.0f && speedconv::GameSpeedRateScale(500.0f, 0.0f) == 1.0f);
+        // in MapToChooser: through the converted turn the rate scale rises above the plain converter's (the converted speed lags the
+        // game speed), the steady straight run keeps it
+        const TurnRun r1 = RunTurn(speedconv::kQuery, 90.0f), r33 = RunTurn(speedconv::kQuery | speedconv::kGameSpeedRate, 90.0f);
+        bool rateUp = false, rateDown = false;
+        for (size_t i = 90; i < r1.rate.size() && i < r33.rate.size(); ++i)
+        {
+            rateUp = rateUp || r33.rate[i] > r1.rate[i] * 1.02f;
+            rateDown = rateDown || r33.rate[i] < r1.rate[i] - 1e-4f;
+        }
+        Check("converter game speed rate: a converted turn plays faster than the plain converter", rateUp && !rateDown);
+        const TurnRun g1 = RunTurn(speedconv::kQuery | speedconv::kGameSpeedRate, 0.0f);
+        Check("converter game speed rate: a steady straight run keeps the rate", g1.rate.back() == s1.rate.back());
+        // named settings: off / safe / stronger
+        MapConfig pc;
+        ApplySpeedConverterPreset(pc, speedconv::kPresetSafe);
+        Check("converter preset safe: heading only, friction 3, reversals beyond 150 deg kept",
+              pc.speedConverter == (speedconv::kQuery | speedconv::kDirectionOnly) && pc.speedConverterFriction == 3.0f &&
+                  pc.speedConverterMaxTurnDeg == 150.0f);
+        ApplySpeedConverterPreset(pc, speedconv::kPresetStronger);
+        Check("converter preset stronger: whole turn velocity at the game speed rate, friction 2",
+              pc.speedConverter == (speedconv::kQuery | speedconv::kGameSpeedRate) && pc.speedConverterFriction == 2.0f &&
+                  pc.speedConverterMaxTurnDeg == 150.0f);
+        ApplySpeedConverterPreset(pc, speedconv::kPresetOff);
+        Check("converter preset off: every field off", pc.speedConverter == 0 && pc.speedConverterFriction == 0.0f &&
+                                                           pc.speedConverterMaxTurnDeg == 0.0f);
         const MapConfig d;
         Check("MapConfig defaults: speed converter off", d.speedConverter == 0 && EffectiveCapsuleRate(d) == d.capsuleSpeedRate);
     }
