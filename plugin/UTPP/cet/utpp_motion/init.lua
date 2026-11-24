@@ -48,6 +48,9 @@
 --   mm.groundFeet bool, default true (DLL default on) - the feet stand on the traced ground (slopes, steps, stairs): one
 --                  downward trace per foot from the scripts, a planting plane per foot and one leg solve; the pelvis comes
 --                  down only when a foot needs it (native UTPPSetMMGroundFeet).
+--   mm.stairSteps bool, default false (DLL default off) - on stairs the walk / run loops take shorter, quicker steps fitted to a
+--                  whole number of treads at the same speed, the landing foot steered towards the tread centre; needs mm.groundFeet
+--                  (its traces find the treads) and mm.strideWarp (native UTPPSetMMStairSteps).
 --   mm.capsuleForecast bool, default false (DLL default off) - the predicted path of the movement also ramps at the game's own
 --                  acceleration when V starts away from the facing, with a partly tilted stick or while the camera turns (the
 --                  straight full-stick start already does); developer option (native UTPPSetMMCapsuleForecast).
@@ -108,7 +111,7 @@ M.STATUS_PERIOD = 0.5  -- s between status reads while the debug window is shown
 M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, aimGameUpper = false, slide = true, orientWarp = true,
   lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
-  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "standard",
+  aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, stairSteps = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "standard",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
@@ -924,6 +927,7 @@ M.OPTIONS = {
   { want = "pelvisPlacement", field = "setPelvisPlacement", native = "UTPPSetMMPelvisPlacement" },
   { want = "bodyHeightSmooth", field = "setBodyHeightSmooth", native = "UTPPSetMMBodyHeightSmooth" },
   { want = "groundFeet", field = "setGroundFeet", native = "UTPPSetMMGroundFeet" },
+  { want = "stairSteps", field = "setStairSteps", native = "UTPPSetMMStairSteps" },
   { want = "handBackBlend", field = "setHandBackBlend", native = "UTPPSetMMHandBackBlend" },
   { want = "stepDownReach", field = "setStepDownReach", native = "UTPPSetMMStepDownReach" },
   { want = "farJumpGravity", field = "setFarJumpGravity", native = "UTPPSetMMFarJumpGravity" },
@@ -1118,6 +1122,12 @@ function M.RegisterSettings(core)
     desc = "Places V's feet on the ground under them on slopes, steps, stairs and curbs, and bends the legs and lowers the hips to "
       .. "match; a foot in the air lifts over the step ahead. On (default); off = the feet follow the animations as on flat ground.",
     apply = function(v) M.SetOption("groundFeet", v == true) end })
+  core.Register({ key = "mm.stairSteps", section = "motion", type = "bool", default = false,
+    label = "Step on every stair",
+    desc = "On stairs V takes shorter, quicker steps that fit the stairs, so her feet land on the steps instead of across their "
+      .. "edges; her speed stays the same. At walking and running pace a step still spans two to four stairs. Needs Feet on uneven "
+      .. "ground and Stride matching. Off (default) = the steps of the animations as on flat ground.",
+    apply = function(v) M.SetOption("stairSteps", v == true) end })
   core.Register({ key = "mm.handBackBlend", section = "motion", type = "bool", default = false,
     label = "motion: smooth hand-back (experimental)",
     desc = "When an animation of the game (a climb, a vault, a scene) hands V back to the motion animations, the body carries its last motion into the blend instead of starting from a still pose. Off (default) = the earlier blend.",

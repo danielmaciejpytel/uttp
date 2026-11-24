@@ -17,6 +17,9 @@
 //     than about half of the clip's own) and a step is never lengthened: no whole n fits = no change.
 //   - The weight fades in / out over weightTime; the matcher ramps the cadence in on a slower time constant than the stride warp, so
 //     the step shortens before the rate leaves it behind.
+//   - Landing spot: the n x tread fit keeps the landing spot from step to step but does not choose it. At every landing the matcher
+//     reads the landing foot's distance from the nearest tread centre (TreadPhaseError, FeedOut::phaseErr) and quickens or slows the
+//     next step by a part of it, so the following foot lands nearer the centre; no foot is moved sideways or along the stairs.
 // Off (the default) or without stairs: no point is stored, the weight is 0 and the cadence stays exactly 1 (bit for bit).
 #pragma once
 
@@ -264,12 +267,35 @@ public:
                     bestCost = k, bestT = t, bestP = p;
             }
         }
-        for (int dp = -4; dp <= 4; ++dp)
+        // fine grid around it; the cost of a staircase is flat between two neighbouring points, so the middle of the cheapest cells
+        // (not the first one) is taken: sparse points (a run at 60 Hz, 6 cm apart) otherwise left the noses up to 5 cm off
         {
-            const float p = bestP + 0.005f * float(dp);
-            const float k = cost(bestT, p);
-            if (k < bestCost)
-                bestCost = k, bestP = p;
+            float costs[9][13];
+            float fineBest = 1.0e30f;
+            for (int dt = -4; dt <= 4; ++dt)
+                for (int dp = -6; dp <= 6; ++dp)
+                {
+                    const float t = bestT + 0.0025f * float(dt);
+                    costs[dt + 4][dp + 6] = t >= c.minTread && t <= c.maxTread ? cost(t, bestP + 0.005f * float(dp)) : 1.0e30f;
+                    fineBest = std::fmin(fineBest, costs[dt + 4][dp + 6]);
+                }
+            const float tie = fineBest + std::fmax(1.0e-6f, 1.0e-3f * fineBest);
+            double sumT = 0.0, sumP = 0.0;
+            int ties = 0;
+            for (int dt = -4; dt <= 4; ++dt)
+                for (int dp = -6; dp <= 6; ++dp)
+                    if (costs[dt + 4][dp + 6] <= tie)
+                    {
+                        sumT += 0.0025 * dt;
+                        sumP += 0.005 * dp;
+                        ++ties;
+                    }
+            if (ties > 0 && fineBest <= bestCost)
+            {
+                bestT += float(sumT / ties);
+                bestP += float(sumP / ties);
+                bestCost = cost(bestT, bestP);
+            }
         }
         e.rms = std::sqrt(std::fmax(bestCost, 0.0f) / float(n));
         if (!(e.rms <= c.maxRms))

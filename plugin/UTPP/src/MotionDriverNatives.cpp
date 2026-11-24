@@ -18,6 +18,7 @@
 #include "MotionHost.hpp"
 #include "MotionDriver.hpp"
 #include "mm/GroundFeetRuntime.hpp" // feet on uneven ground: natives of the stage and the ground recorder
+#include "mm/StairSteps.hpp"       // steps fitted to stair treads (mm.stairSteps)
 #include "PluginLog.hpp"
 #include "ragdoll/RagdollSlotProbe.hpp" // ragdoll get-up: standing belly reference sign (PelvisTracker)
 
@@ -637,6 +638,16 @@ void Native_SetMMGroundFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame,
     motionhost::SetGroundFeet(v);
     pluginlog::LogInfo("UTPPSetMMGroundFeet(%d) -> 1", v ? 1 : 0);
 }
+// Steps fitted to stair treads (mm/StairSteps.hpp; CET utpp_motion mm.stairSteps, default off). Logged in the setting-call form the
+// offline replay applies.
+void Native_SetMMStairSteps(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    mm::stairsteps::rt::SetEnabled(v);
+    pluginlog::LogInfo("UTPPSetMMStairSteps(%d) -> 1", v ? 1 : 0);
+}
 void Native_SetMMGroundFeetBias(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     float v = 0.0f;
@@ -1014,6 +1025,8 @@ void RegisterNatives()
     // feet on uneven ground + ground recorder
     auto* gf1 = RED4ext::CGlobalFunction::Create("UTPPSetMMGroundFeet", "UTPPSetMMGroundFeet", &Native_SetMMGroundFeet);
     gf1->flags = flags; gf1->AddParam("Bool", "on"); rtti->RegisterFunction(gf1);
+    auto* ss1 = RED4ext::CGlobalFunction::Create("UTPPSetMMStairSteps", "UTPPSetMMStairSteps", &Native_SetMMStairSteps);
+    ss1->flags = flags; ss1->AddParam("Bool", "on"); rtti->RegisterFunction(ss1);
     auto* gf2 = RED4ext::CGlobalFunction::Create("UTPPSetMMGroundFeetBias", "UTPPSetMMGroundFeetBias", &Native_SetMMGroundFeetBias);
     gf2->flags = flags; gf2->AddParam("Float", "bias"); rtti->RegisterFunction(gf2);
     auto* gf3 = RED4ext::CGlobalFunction::Create("UTPPGroundWantsTrace", "UTPPGroundWantsTrace", &Native_GroundWantsTrace);
