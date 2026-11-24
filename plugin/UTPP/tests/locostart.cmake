@@ -24,6 +24,8 @@ if(EXISTS "${_utpp_ls_data}/utpp_motion_woman_knee_twistfix_slide.utppmm"
     #   3 = no take-off hold: the grounded Jump 18 feed searches the jump databases with TimeToLand 1.52 and the impulse feed re-picks;
     #   4 = the first take-off hold (mode only, the detail stays 18): a sprint (4) -> 18 take-off maps to the Run gait, the matcher interrupts
     #       and picks a ground clip (Sprint_to_Run) on the held feed, right before the jump pick.
+    #       With the held-pick stages of the speed converter the matcher may keep the clip; the mutant is then caught by the
+    #       changed ground inputs on the held sprint feeds of the same fixture.
     foreach(_m 1 2 3 4)
         add_executable(utpp_mm_locostart_mut${_m} tests/LocoStartTest.cpp src/mm/MotionAdapter.hpp src/mm/MotionTrajectory.hpp src/MotionDriver.hpp)
         target_compile_features(utpp_mm_locostart_mut${_m} PRIVATE cxx_std_20)
@@ -40,5 +42,5 @@ if(EXISTS "${_utpp_ls_data}/utpp_motion_woman_knee_twistfix_slide.utppmm"
     set_tests_properties(utpp_mm_locostart_mut2 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL start replay crouch_start: first pick [^\n]* is a Crouch_Walk_Starts row")
     set_tests_properties(utpp_mm_locostart_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL jump jump_stand: [2-9] jump-database picks")
     set_tests_properties(utpp_mm_locostart_mut4 PROPERTIES PASS_REGULAR_EXPRESSION
-                         "FAIL jump fixture [^\n]*20261025_1341[.]txt orient: held feeds [0-9]+ [(]sprint [1-9][0-9]*[)], jumped picks on held feeds [1-9]")
+                         "FAIL jump fixture [^\n]*20261025_1341[.]txt orient: held feeds [0-9]+ [(]sprint [1-9][0-9]*[)], (jumped picks on held feeds [1-9]|jumped picks on held feeds [0-9]+, ground inputs changed on held feeds [1-9])")
 endif()
