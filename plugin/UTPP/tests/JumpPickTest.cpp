@@ -796,9 +796,13 @@ ComboStats MeasureCombos(Model& m, const std::vector<Section>& aSecs, const Vari
     return st;
 }
 
-void SlideComboChecks(Model& m, const std::vector<Section>& aSecs, const Variant& aProd)
+void SlideComboChecks(Model& m, const std::vector<Section>& aSecs, const Variant& aProdDefaults)
 {
-    // production: peaks of the recorded transitions; pre-fix (the three fades at their old values) must break the bounds
+    // production: peaks of the recorded transitions; pre-fix (the three fades at their old values) must break the bounds.
+    // The fades are checked with the stronger converter preset (bits 33): the trajectory stage (bit 256, default since 0.2.0) changes the
+    // run before the take-off, and on the man bundle the worst slide -> jump peak rises from within the bound to 57.4 deg per 50 ms.
+    Variant aProd = aProdDefaults;
+    aProd.mc.speedConverter = utpp::mm::speedconv::PresetFor(utpp::mm::speedconv::kPresetStronger).bits;
     Variant old = aProd;
     old.cfg.blendSlideAir = 0.0f;
     old.cfg.blendSlideFamily = 0.0f;

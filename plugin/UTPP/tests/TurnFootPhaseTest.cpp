@@ -24,6 +24,10 @@
 #include <limits>
 
 #include "../src/mm/Steering.hpp"
+namespace utpp::motiondriver
+{
+void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg); // MapConfig::speedConverter (-1 = the default)
+}
 namespace
 {
 constexpr float kDegT = mm::integ::kDegToRad;
@@ -259,6 +263,9 @@ int main(int argc, char** argv)
         std::puts("usage TurnFootPhaseTest <driver-data> <basedb>");
         return 2;
     }
+    // the foot phase re-rank is compared with the stronger converter preset (bits 33): with the start / stop window stage (bit 64, default
+    // since 0.2.0) the 60 Hz sprint re-rank loses its margin over the trajectory-only pick
+    motiondriver::TestSetMapSpeedConverter(mm::speedconv::PresetFor(mm::speedconv::kPresetStronger).bits, 0.0f, 0.0f);
     g_baseDb = std::wstring(argv[2], argv[2] + std::strlen(argv[2]));
     motiondriver::SetOverlayInputs(0, 0, false, false);
     motionhost::MotionHooks hooks{&WStep, &WApply, &motiondriver::OnArmed, &motiondriver::OnDisarmed, &PhaseFrameHook, &motiondriver::OwnsTraversal};
