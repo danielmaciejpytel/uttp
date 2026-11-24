@@ -54,6 +54,10 @@
 --   mm.aimRotation bool, default true (DLL default on) - while aiming and moving, a change of the movement direction may pick a
 --                  pivot animation from 10 deg (the strafe threshold is 30 deg), but not within 0.5 s of a pivot or start pick;
 --                  developer option (native UTPPSetMMAimRotation).
+--   mm.aimRootAccumulate bool, default false ("Natural body turn while aiming on the move"; DLL default off) - while V aims and moves,
+--                  the lower body keeps its own heading and turns with the steps of the animations instead of being turned with the
+--                  camera at once; the upper body still aims at the crosshair, the body is never more than 60 deg behind the camera
+--                  (native UTPPSetMMAimRootAccumulate).
 --   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
@@ -109,7 +113,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "standard",
-  strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true }
+  strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, aimRootAccumulate = false }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -934,6 +938,7 @@ M.OPTIONS = {
   { want = "strideWarp", field = "setStrideWarp", native = "UTPPSetMMStrideWarp" },
   { want = "firmFeet", field = "setFirmFeet", native = "UTPPSetMMFirmFeet" },
   { want = "footYawLock", field = "setFootYawLock", native = "UTPPSetMMFootYawLock" },
+  { want = "aimRootAccumulate", field = "setAimRootAccumulate", native = "UTPPSetMMAimRootAccumulate" },
   { want = "overlayInertialSwitch", field = "setOverlayInertialSwitch", native = "UTPPSetMMOverlayInertialSwitch" },
 }
 function M.ApplyOptions(api)
@@ -1065,6 +1070,13 @@ function M.RegisterSettings(core)
       .. "ground; after a large turn it follows the animation again and plants anew. On (default); off = planted feet turn "
       .. "with the animations.",
     apply = function(v) M.SetOption("footYawLock", v == true) end })
+  core.Register({ key = "mm.aimRootAccumulate", section = "animation", type = "bool", default = false,
+    label = "Natural body turn while aiming on the move",
+    desc = "While V aims and moves, her legs and hips keep their own direction and turn with her steps instead of being turned "
+      .. "with the camera at once, so her feet slide less when you turn while aiming. Her upper body and the weapon still follow "
+      .. "the crosshair, and her body never stays more than 60 degrees behind the camera. Off (default) = the body turns with "
+      .. "the camera at once.",
+    apply = function(v) M.SetOption("aimRootAccumulate", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
     label = "Gamepad stick speed",

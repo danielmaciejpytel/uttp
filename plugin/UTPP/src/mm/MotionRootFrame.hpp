@@ -36,6 +36,10 @@ struct Inputs
     // yawAlignHalfLife (s), at most yawAlignMaxRate (rad/s).
     bool yawAlign = false;
     float yawAlignWorld = 0, yawAlignHalfLife = .05f, yawAlignMaxRate = 0;
+    // Moving-aim accumulate (MotionOffsetRoot.hpp Step::aimAccumulate): the drawn heading lags the aimed world yaw aimLagWorld (rad) by at
+    // most aimLagMax (rad) instead of being locked onto the capsule.
+    bool aimAccumulate = false;
+    float aimLagWorld = 0, aimLagMax = 0;
 };
 enum class Reseed
 {
@@ -222,6 +226,12 @@ class Processor
                 step.yawAlignMaxRate = in.yawAlignMaxRate;
             }
             step.forwardLimit = in.forwardLimit;
+            if (in.aimAccumulate && std::isfinite(in.aimLagWorld) && std::isfinite(in.aimLagMax) && in.aimLagMax > 0)
+            {
+                step.aimAccumulate = true;
+                step.aimLagTarget = Wrap(double(in.aimLagWorld) - double(p.m_actor)); // relative to the drawn capsule
+                step.aimLagMax = in.aimLagMax;
+            }
             if (!p.m_native.Update(step))
                 return false;
             p.m_visual = Wrap(double(p.m_actor) + p.m_native.Yaw());

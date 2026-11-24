@@ -880,6 +880,88 @@ int main()
             C("forward: the Step default is off", motionRoot::Step{}.forwardLimit < 0);
         }
     }
+    {
+        // header item 6: moving-aim accumulate. Off = the lock (bit identical); on = the visible heading keeps its world yaw and turns
+        // with the clip yaw, and a lag behind aimLagTarget beyond aimLagMax comes back at most at the lock rate.
+        const float dt = 1.f / 60.f, deg = math::kPi / 180.f;
+        C("aim accumulate: the Step default is off", !motionRoot::Step{}.aimAccumulate);
+        Step base;
+        base.dt = dt;
+        base.movingGround = true;
+        base.aimFacing = true;
+        base.capsuleYawDelta = 4.f * deg; // the camera (and the capsule) turns 240 deg/s
+        base.animationYawDelta = .5f * deg;
+        OffsetRoot lockA, lockB, acc;
+        lockA.Seed(0, 0, .2f);
+        lockB.Seed(0, 0, .2f);
+        acc.Seed(0, 0, .2f);
+        Step offFlag = base;
+        offFlag.aimLagTarget = .3f; // ignored without the flag
+        bool identical = true;
+        for (int i = 0; i < 30; ++i)
+        {
+            lockA.Update(base);
+            lockB.Update(offFlag);
+            identical &= lockA.Yaw() == lockB.Yaw() && lockA.X() == lockB.X() && lockA.Y() == lockB.Y();
+        }
+        C("aim accumulate off: the moving-aim lock is unchanged (bit identical)", identical);
+        Step on = base;
+        on.aimAccumulate = true;
+        on.aimLagTarget = 0.f; // the aimed heading = the capsule
+        on.aimLagMax = 60.f * deg;
+        // inside the band: world heading changes by the clip yaw only (the offset absorbs the capsule turn)
+        float world = 0.f, capsule = 0.f;
+        bool accumulates = true, bounded = true, noRelease = true;
+        for (int i = 0; i < 15; ++i) // 60 deg of capsule turn, the offset reaches about -52 deg
+        {
+            const float before = math::WrapAngle(capsule + acc.Yaw());
+            acc.Update(on);
+            capsule += on.capsuleYawDelta;
+            world = math::WrapAngle(capsule + acc.Yaw());
+            accumulates &= Near(math::WrapAngle(world - before), on.animationYawDelta, 1e-4f);
+            noRelease &= !acc.Output().rotationRelease;
+        }
+        C("aim accumulate: inside the lag band the heading turns by the clip yaw only", accumulates);
+        C("aim accumulate: not a rotation release", noRelease);
+        float worst = 0.f;
+        for (int i = 0; i < 120; ++i) // the capsule keeps turning: the lag settles at the bound, never past it by more than one step
+        {
+            const float before = math::WrapAngle(capsule + acc.Yaw());
+            acc.Update(on);
+            capsule += on.capsuleYawDelta;
+            world = math::WrapAngle(capsule + acc.Yaw());
+            const float turn = std::fabs(math::WrapAngle(world - before));
+            bounded &= turn <= motionRoot::kAimLockRate * dt + 1e-4f;
+            worst = std::fmax(worst, std::fabs(acc.Yaw()));
+        }
+        C("aim accumulate: the lag stays at 60 deg while the capsule turns", worst <= 60.f * deg + 1e-4f && std::fabs(acc.Yaw()) > 59.f * deg);
+        C("aim accumulate: the heading never turns faster than the lock rate", bounded);
+        // a lag far beyond the bound (aim starts while V faces away) comes back at the lock rate, not in one step
+        OffsetRoot farLag;
+        farLag.Seed(0, 0, 150.f * deg);
+        Step still = on;
+        still.capsuleYawDelta = 0.f;
+        still.animationYawDelta = 0.f;
+        farLag.Update(still);
+        C("aim accumulate: a large lag is taken back at the lock rate", Near(farLag.Yaw(), 150.f * deg - motionRoot::kAimLockRate * dt, 1e-4f));
+        for (int i = 0; i < 60; ++i)
+            farLag.Update(still);
+        C("aim accumulate: ... until it reaches the bound", Near(farLag.Yaw(), 60.f * deg, 1e-4f));
+        // standing aim is unchanged by the flag (turn in place keeps its own path)
+        OffsetRoot standA, standB;
+        standA.Seed(0, 0, .4f);
+        standB.Seed(0, 0, .4f);
+        Step stand = base, standOn = on;
+        stand.movingGround = standOn.movingGround = false;
+        bool standSame = true;
+        for (int i = 0; i < 30; ++i)
+        {
+            standA.Update(stand);
+            standB.Update(standOn);
+            standSame &= standA.Yaw() == standB.Yaw();
+        }
+        C("aim accumulate: standing aim (turn in place) is unchanged", standSame);
+    }
     std::printf("%d PASS %d FAIL\n", pass, fail);
     return fail ? 1 : 0;
 }

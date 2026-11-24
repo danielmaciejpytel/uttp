@@ -203,6 +203,10 @@ void SetCapsuleForecast(bool aOn);
 // chooser's IsPivoting uses the Aim pivot threshold and the pivot / start elapsed-time gate (motiontraj::IsPivotingAim). Read on
 // every Step.
 void SetAimRotation(bool aOn);
+// Moving-aim root accumulate (CET mm.aimRootAccumulate, default off): while V aims on the move the visual root keeps accumulating the steered
+// clip yaw instead of the lock onto the capsule; only a lag behind the camera beyond 60 deg is taken back (MotionOffsetRoot.hpp item 6).
+// Read on every Step.
+void SetAimRootAccumulate(bool aOn);
 // Tier2 Slow flag (GameplayRestriction.Tier2LocomotionSlow; reds UTPPFeedMotionTier2Slow, sent right before every UTPPFeedLocomotion): the next
 // v2 Steps lower the stand run cap by 1.3 m/s (MotionFeed::tier2Slow). Process-lifetime atomic, false at start. Status: tier2Slow=.
 void FeedTier2Slow(bool aSlow);
@@ -248,6 +252,7 @@ struct BarrelProbe
     float aimYawDeg = 0, aimPitchDeg = 0; // the sweep target angles the evaluator used
     bool loop = false, active = false, measured = false;
     float errBeforeDeg = 0, errAfterDeg = 0, biasDeg = 0, residualDeg = 0, targetDist = 0;
+    float yawErrDeg = 0; // barrel heading - heading of muzzle -> P after the aim offset (+ = left of P; valid when measured)
     uint32_t excluded = 0;
 };
 BarrelProbe TestBarrelProbe();
@@ -259,6 +264,7 @@ struct RootProbe
     float yawAhead = 0; // the coming tick's capsule turn the frame is relative to (rad, Proposal::Ahead)
     bool movingGround = false, montage = false, aimFacing = false;
     float before[3] = {0, 0, 0}, after[3] = {0, 0, 0}; // x, y (m), yaw (rad): visual minus capsule, capsule axes
+    float visualWorldYaw = 0, cameraYawDeg = 0; // the committed visual root world yaw (rad, Proposal::VisualWorldYaw), the fed camera yaw (deg)
 };
 RootProbe TestRootProbe();
 // test targets only: searches that read the live pose history.

@@ -38,6 +38,7 @@ void SetHandBackBlend(bool aOn);
 void SetStepDownReach(bool aOn);
 void SetCapsuleForecast(bool aOn);
 void SetAimRotation(bool aOn);
+void SetAimRootAccumulate(bool aOn);
 void SetFarJumpGravityScale(bool aOn);
 bool SetOverlayInertialSwitch(bool aOn);
 }
@@ -544,6 +545,15 @@ void Native_SetMMAimRotation(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame
     SetAimRotation(v);
     pluginlog::LogInfo("UTPPSetMMAimRotation(%d) -> 1", v ? 1 : 0);
 }
+// moving-aim root accumulate (CET utpp_motion mm.aimRootAccumulate, default off)
+void Native_SetMMAimRootAccumulate(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    bool v = false;
+    RED4ext::GetParameter(aFrame, &v);
+    aFrame->code++;
+    SetAimRootAccumulate(v);
+    pluginlog::LogInfo("UTPPSetMMAimRootAccumulate(%d) -> 1", v ? 1 : 0);
+}
 void Native_SetMMFarJumpGravity(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
     bool v = false;
@@ -991,6 +1001,8 @@ void RegisterNatives()
     o3b->flags = flags; o3b->AddParam("Bool", "on"); rtti->RegisterFunction(o3b);
     auto* o3c = RED4ext::CGlobalFunction::Create("UTPPSetMMAimRotation", "UTPPSetMMAimRotation", &Native_SetMMAimRotation);
     o3c->flags = flags; o3c->AddParam("Bool", "on"); rtti->RegisterFunction(o3c);
+    auto* o3d = RED4ext::CGlobalFunction::Create("UTPPSetMMAimRootAccumulate", "UTPPSetMMAimRootAccumulate", &Native_SetMMAimRootAccumulate);
+    o3d->flags = flags; o3d->AddParam("Bool", "on"); rtti->RegisterFunction(o3d);
     auto* o4 = RED4ext::CGlobalFunction::Create("UTPPSetMMFarJumpGravity", "UTPPSetMMFarJumpGravity", &Native_SetMMFarJumpGravity);
     o4->flags = flags; o4->AddParam("Bool", "on"); rtti->RegisterFunction(o4);
     auto* o5 = RED4ext::CGlobalFunction::Create("UTPPSetMotionLeanCoverage", "UTPPSetMotionLeanCoverage", &Native_SetMotionLeanCoverage);

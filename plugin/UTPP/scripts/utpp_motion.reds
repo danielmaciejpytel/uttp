@@ -112,6 +112,8 @@ public native func UTPPSetMMFarJumpGravity(on: Bool) -> Void
 public native func UTPPSetMMCapsuleForecast(on: Bool) -> Void
 // Aim rotation sub-mode while aiming: own pivot threshold and pivot / start elapsed-time gate (off by default).
 public native func UTPPSetMMAimRotation(on: Bool) -> Void
+// While aiming on the move the lower body keeps its heading and turns with its steps; the aim offset covers up to 60 deg (off by default).
+public native func UTPPSetMMAimRootAccumulate(on: Bool) -> Void
 public native func UTPPSetMotionLeanCoverage(coverage: Int32) -> Bool
 // Aim offset on a filtered world direction of the target (hz = smoothing rate, 0 = exact tracking with the catch-up limit).
 public native func UTPPSetMMAimWorldSmoothing(on: Bool, hz: Float) -> Bool

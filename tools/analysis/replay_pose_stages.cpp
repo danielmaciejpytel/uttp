@@ -121,12 +121,18 @@
 //                       mm.capsuleForecast setting; the settings log call MMCapsuleForecast is applied as well). Off / not passed: unchanged.
 //   --aim-rotation 0|1  aim rotation sub-mode while aiming (motiondriver::SetAimRotation, the mm.aimRotation setting; the settings
 //                       log call MMAimRotation is applied as well). Off / not passed: unchanged.
+//   --aim-root-accumulate 0|1  moving-aim root accumulate off / on (motiondriver::SetAimRootAccumulate, the mm.aimRootAccumulate setting;
+//                       the settings log call MMAimRootAccumulate is applied as well). Not passed: unchanged.
 //   --aim-pivot-deg D   with --aim-rotation 1: the Aim pivot threshold (deg, default 10) (test override of MapConfig::aimPivotDeg)
 //   --aim-pivot-gate S  with --aim-rotation 1: the pivot / start elapsed-time gate (s, default 0.5; 0 = no gate)
 //   --force-aim 1       synthetic aim: every feed reads the PSM upper body Aim with a drawn weapon (the recordings have almost no
 //                       aiming while moving); combine with --aim-camera P for the overlay and the aim target. Default off.
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
 //                       its predicted displacement 0.35 / 0.7 s ahead (adapter cm) and the applied capsule acceleration of the forecast
+//                       (inspection only; the other outputs are unchanged)
+//   --aim-dump 1        also write <out prefix>.aim.txt: per written feed with a root step the feed time, the root inputs (aimFacing,
+//                       movingGround), the committed visual root world yaw and the fed camera yaw (deg), and the barrel probe of the
+//                       same evaluation (measured, active, excluded, heading error and pitch error after the aim offset, deg)
 //                       (inspection only; the other outputs are unchanged)
 //   --crouch-stop LIST  crouch stop options of the chooser switched on (motion::ApplyCrouchStopOptions names, comma separated; set as
 //                       UTPP_TEST_CROUCH_STOP for the matcher's Init). Not passed: the build configuration.
@@ -352,6 +358,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMGroundFeet") motionhost::SetGroundFeet(flag(0));
         else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
         else if (name == "MMAimRotation") motiondriver::SetAimRotation(flag(0));
+        else if (name == "MMAimRootAccumulate") motiondriver::SetAimRootAccumulate(flag(0));
         else known = false;
         (known ? aApplied : aUnknown) += 1;
     }
@@ -598,6 +605,7 @@ int main(int argc, char** argv)
     int32_t capsuleForecast = -1;              // --capsule-forecast: < 0 = not passed (the settings log / build default)
     bool forecastDump = false;                 // --forecast-dump 1
     bool selDump = false;                      // --sel-dump 1
+    bool aimDump = false;                      // --aim-dump 1
     int32_t leanPack = -1;                     // --lean-pack: < 0 = not passed (no lean pack)
     float leanScaleBody = -1.0f, leanScaleHead = -1.0f; // --lean-scale B,H: < 0 = not passed
     int32_t leanCoverage = -1;                 // --lean-coverage: < 0 = not passed
@@ -606,6 +614,7 @@ int main(int argc, char** argv)
     bool aimJogQuery = false;                  // --aim-jog-query 1
     uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
     int32_t aimRotation = -1;                  // --aim-rotation: < 0 = not passed (the settings log / build default)
+    int32_t aimRootAccumulate = -1;            // --aim-root-accumulate: < 0 = not passed (the settings log / build default)
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
     bool forceAim = false;                     // --force-aim 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
@@ -731,6 +740,8 @@ int main(int argc, char** argv)
             stepDownReach = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--sel-dump") == 0)
             selDump = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--aim-dump") == 0)
+            aimDump = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--swivel-pole") == 0)
             swivelPole = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--lean-pack") == 0)
@@ -763,6 +774,8 @@ int main(int argc, char** argv)
         }
         else if (std::strcmp(argv[i], "--aim-rotation") == 0)
             aimRotation = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--aim-root-accumulate") == 0)
+            aimRootAccumulate = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--aim-pivot-deg") == 0)
             aimPivotDeg = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-pivot-gate") == 0)
@@ -997,6 +1010,8 @@ int main(int argc, char** argv)
         motiondriver::SetCapsuleForecast(capsuleForecast != 0);
     if (aimRotation >= 0)
         motiondriver::SetAimRotation(aimRotation != 0);
+    if (aimRootAccumulate >= 0)
+        motiondriver::SetAimRootAccumulate(aimRootAccumulate != 0);
     if (std::isfinite(aimPivotDeg) || std::isfinite(aimPivotGateS))
         motiondriver::TestSetMapAimPivot(aimPivotDeg, aimPivotGateS);
     FILE* forecastOut = nullptr;
@@ -1007,6 +1022,14 @@ int main(int argc, char** argv)
         if (!selOut)
             return 7;
         std::fprintf(selOut, "# t clip db pivoting starting turnDeg searched jumped turnHold interrupt cost contCost speed gait state\n");
+    }
+    FILE* aimOut = nullptr;
+    if (aimDump && out != "-")
+    {
+        aimOut = std::fopen((out + ".aim.txt").c_str(), "w");
+        if (!aimOut)
+            return 7;
+        std::fprintf(aimOut, "# t aimFacing movingGround visualYawDeg cameraYawDeg measured active excluded yawErrDeg pitchErrDeg\n");
     }
     if (forecastDump && out != "-")
     {
@@ -1589,6 +1612,14 @@ int main(int argc, char** argv)
         }
         float aod[15];
         motiondriver::TestAoDiag(aod);
+        if (aimOut && rp.prepared)
+        {
+            const motiondriver::BarrelProbe bp = motiondriver::TestBarrelProbe();
+            std::fprintf(aimOut, "%.4f %d %d %.3f %.3f %d %d %u %.3f %.3f\n", static_cast<double>(rows[i].t), rp.aimFacing ? 1 : 0,
+                         rp.movingGround ? 1 : 0, static_cast<double>(rp.visualWorldYaw) * 57.29577951308232, static_cast<double>(rp.cameraYawDeg),
+                         bp.measured ? 1 : 0, bp.active ? 1 : 0, static_cast<unsigned>(bp.excluded), static_cast<double>(bp.yawErrDeg),
+                         static_cast<double>(bp.errAfterDeg));
+        }
         if (selOut)
         {
             const motiondriver::SelectionDiag sd = motiondriver::SelectionDiagnostics();
@@ -1642,6 +1673,8 @@ int main(int argc, char** argv)
         std::fclose(forecastOut);
     if (selOut)
         std::fclose(selOut);
+    if (aimOut)
+        std::fclose(aimOut);
     if (groundOut)
         std::fclose(groundOut);
     if (terrain.kind != Terrain::None || groundFeet >= 0)

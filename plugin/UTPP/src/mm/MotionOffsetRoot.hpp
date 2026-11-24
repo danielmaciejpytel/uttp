@@ -29,6 +29,9 @@
 //     trailing offsets (a start, where the capsule leads) are left alone. It runs before the continuity bound, so the bound still holds.
 //     With UTPP_OFFSET_ROOT_FORWARD_LIMIT 2 the driver passes the limit only outside turning and start clips while standing (a turn
 //     keeps the forward offset that absorbs it).
+//  6. Moving-aim accumulate (Step::aimAccumulate, opt-in). Instead of the moving-aim lock the rotation accumulates as in locomotion
+//     (the visible heading keeps its world yaw and turns with the clip's steered yaw), and only the lag behind aimLagTarget beyond
+//     aimLagMax is taken back, at most at the lock rate. The aim offset turns the upper body over the remaining lag.
 // (RootMontage.hpp: a reload that began on the spot is not montage once V moves.)
 #pragma once
 #include "MMMath.hpp"
@@ -91,6 +94,8 @@ inline constexpr float kForwardLimit = UTPP_OFFSET_ROOT_FORWARD_LIMIT_M;
 inline constexpr float kForwardLimitDriver = UTPP_OFFSET_ROOT_FORWARD_LIMIT_DRIVER_M;
 inline constexpr float kForwardHalflife = .15f;
 inline constexpr float kForwardMinSpeed = .5f;
+// Rate of the moving-aim lock (ADS while moving) and of the lag bound of the moving-aim accumulate (header item 6).
+inline constexpr float kAimLockRate = 540.f * math::kPi / 180.f; // the original expression (bit-identical lock)
 struct Step
 {
     float dt = 0;
@@ -126,6 +131,10 @@ struct Step
     // interpolates (moving on the ground, no montage) and the capsule moves faster than kForwardMinSpeed.
     float forwardLimit = -1.f;
     float forwardHalflife = kForwardHalflife; // s
+    // Moving-aim accumulate (header item 6): replaces the moving-aim lock while aimFacing and movingGround. aimLagTarget = the aimed
+    // heading relative to the capsule (rad, visual minus capsule convention), aimLagMax = the largest lag behind it (rad, > 0).
+    bool aimAccumulate = false;
+    float aimLagTarget = 0.f, aimLagMax = 60.f * kDegToRad;
 };
 struct State
 {
@@ -337,14 +346,24 @@ class OffsetRoot
         next.vy = (ny - m.y) / s.dt;
         next.x = nx;
         next.y = ny;
-        if (aimMoving)
+        if (aimMoving && s.aimAccumulate && std::isfinite(s.aimLagTarget) && std::isfinite(s.aimLagMax) && s.aimLagMax > 0)
+        {
+            // header item 6: accumulate, then bring a lag beyond aimLagMax back toward the band at the lock rate at most
+            next.rotationRelease = false;
+            const float yaw = math::WrapAngle(m.yaw + s.animationYawDelta - s.capsuleYawDelta);
+            const float lag = math::WrapAngle(yaw - s.aimLagTarget);
+            const float excess = std::fabs(lag) - s.aimLagMax;
+            const float rate = std::isfinite(s.lockMaxRate) && s.lockMaxRate > 0 ? s.lockMaxRate : kAimLockRate;
+            next.yaw = excess > 0 ? math::WrapAngle(yaw - std::copysign(std::fmin(excess, rate * s.dt), lag)) : yaw;
+        }
+        else if (aimMoving)
         {
             // Moving aim follows the actor. Stationary aim instead consumes
             // authored turn-in-place yaw and cancels capsule rotation below:
             // releasing it here would spin planted feet and erase the heading
             // error that requests the turn animation.
             const bool bounded = std::isfinite(s.lockMaxRate) && s.lockMaxRate > 0;
-            const float maxRate = bounded ? s.lockMaxRate : 540.f * math::kPi / 180.f;
+            const float maxRate = bounded ? s.lockMaxRate : kAimLockRate;
             if (bounded)
                 next.yaw = BoundedFollow(m.yaw, s.capsuleYawDelta, s.dt, maxRate); // Shooter / H2: the whole world turn of the root is bounded
             else
