@@ -57,7 +57,7 @@
 #include "mm/Strafe.hpp"
 #include "ragdoll/RagdollEpisode.hpp" // ragdoll episode: game-owned feed
 #include "mm/BodyHeightRuntime.hpp" // body height smoothing (option, default on): gate + leg rig for the animation-thread stage
-#include "mm/GroundFeetRuntime.hpp" // feet on uneven ground (option, default off): gate + probe points for the animation-thread stage
+#include "mm/GroundFeetRuntime.hpp" // feet on uneven ground (option, default on): gate + probe points for the animation-thread stage
 #include "mm/VehicleTransition.hpp" // vehicle batch W1 P2: mount pop / exit hand-in (CAR-5 / MOTO-3, MOTO-6 / CAR-1 step 5)
 
 namespace utpp::motionhost
@@ -1538,9 +1538,9 @@ bool g_bodyHeightAllowed = false; // set by the leg pipeline of this feed
 bool g_bodyHeightPlatform = false; // a moving platform carries V (FeedInput.onMovingPlatform of the last real feed): no smoothing
 bool g_bodyHeightReset = true;    // consumed by the next publish (first publish starts a fresh tracker)
 uint64_t g_bodyHeightTeleports = 0;
-// Feet on uneven ground (mm/GroundFeetRuntime.hpp; option, default off): the stage runs on the animation thread next to the body height
+// Feet on uneven ground (mm/GroundFeetRuntime.hpp; option, default on): the stage runs on the animation thread next to the body height
 // stage; the feed publishes its gate, a reset request and the probe points (balls of the published feet) the script traces under.
-bool g_groundFeetOn = false;     // the menu default (mm.groundFeet)
+bool g_groundFeetOn = true;      // the menu default (mm.groundFeet)
 bool g_groundFeetAllowed = false; // set by the leg pipeline of this feed
 bool g_groundFeetReset = true;   // consumed by the next publish
 uint64_t g_groundFeetTeleports = 0;
@@ -7519,7 +7519,7 @@ void SetBodyHeightSmooth(bool aOn)
         bodyheight::rt::PublishGate(false, true);
 }
 
-// Feet on uneven ground (mm/GroundFeetRuntime.hpp; CET mm.groundFeet, default off).
+// Feet on uneven ground (mm/GroundFeetRuntime.hpp; CET mm.groundFeet, default on).
 void SetGroundFeet(bool aOn)
 {
     std::lock_guard lock(g_mutex);

@@ -101,7 +101,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRotation"] = "false",
+    ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
@@ -122,7 +122,7 @@ return {
     ["mm.firmFeet"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
-    ["mm.groundFeet"] = "false",
+    ["mm.groundFeet"] = "true",
     ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
@@ -294,12 +294,12 @@ return {
     "native UTPPSetMMNeutralAimOffset(true)",
     "native UTPPSetMMPelvisPlacement(false)",
     "native UTPPSetMMBodyHeightSmooth(true)",
-    "native UTPPSetMMGroundFeet(false)",
+    "native UTPPSetMMGroundFeet(true)",
     "native UTPPSetMMHandBackBlend(false)",
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
     "native UTPPSetMMCapsuleForecast(false)",
-    "native UTPPSetMMAimRotation(false)",
+    "native UTPPSetMMAimRotation(true)",
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
@@ -322,13 +322,13 @@ return {
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
-    "apply mm.groundFeet(false,\"ok\")",
+    "apply mm.groundFeet(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
-    "apply mm.aimRotation(false,\"ok\")",
+    "apply mm.aimRotation(true,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -528,13 +528,13 @@ return {
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
-    "apply mm.groundFeet(false,\"ok\")",
+    "apply mm.groundFeet(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
-    "apply mm.aimRotation(false,\"ok\")",
+    "apply mm.aimRotation(true,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -1539,7 +1539,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.aimRotation"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -1716,7 +1716,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.groundFeet"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2440,7 +2440,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRotation"] = "false",
+    ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
@@ -2461,7 +2461,7 @@ return {
     ["mm.firmFeet"] = "true",
     ["mm.footReplant"] = "\"crouch\"",
     ["mm.grip"] = "true",
-    ["mm.groundFeet"] = "false",
+    ["mm.groundFeet"] = "true",
     ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
@@ -3036,13 +3036,13 @@ return {
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
-    "apply mm.groundFeet(false,\"ok\")",
+    "apply mm.groundFeet(true,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
-    "apply mm.aimRotation(false,\"ok\")",
+    "apply mm.aimRotation(true,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -3137,7 +3137,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=6\r\
+core.defaultsRevision=8\r\
 core.settingsReset=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
@@ -3230,13 +3230,13 @@ mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
-mm.groundFeet=false\r\
+mm.groundFeet=true\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
-mm.aimRotation=false\r\
+mm.aimRotation=true\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -3673,7 +3673,7 @@ vehicle.jumpOutSidePush=true\r\
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRotation"] = "false",
+    ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"hold\"",
@@ -3694,7 +3694,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.firmFeet"] = "true",
     ["mm.footReplant"] = "\"off\"",
     ["mm.grip"] = "true",
-    ["mm.groundFeet"] = "false",
+    ["mm.groundFeet"] = "true",
     ["mm.handBackBlend"] = "false",
     ["mm.headLead"] = "true",
     ["mm.helperZeroWeightWriters"] = "true",
@@ -3767,7 +3767,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=6\r\
+core.defaultsRevision=8\r\
 core.settingsReset=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
@@ -3860,13 +3860,13 @@ mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
-mm.groundFeet=false\r\
+mm.groundFeet=true\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
-mm.aimRotation=false\r\
+mm.aimRotation=true\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\

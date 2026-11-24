@@ -5,7 +5,7 @@
 //   - animation thread: StepAndApply (one stage update per frame, reused by every other call of the same frame; one leg solve for the
 //     body height offset and the ground plan). An inactive plan returns false and the caller runs the body height stage alone, so the
 //     pose is bit for bit what it was without this stage.
-// Off by default (mm.groundFeet). Off: no state is stepped, no trace is asked for and the snapshot is not touched.
+// On by default (mm.groundFeet). Off: no state is stepped, no trace is asked for and the snapshot is not touched.
 #pragma once
 
 #include <atomic>
@@ -21,7 +21,7 @@
 namespace utpp::mm::groundfeet::rt
 {
 
-inline std::atomic<bool> g_on{false}; // off by default (the menu default, motionhost g_groundFeetOn)
+inline std::atomic<bool> g_on{true}; // on by default (the menu default, motionhost g_groundFeetOn)
 // bit 0: the stage may act (feed gate); bit 1: a moving platform carries V; bits 8..31: reset serial
 inline std::atomic<uint32_t> g_gate{0};
 inline integ::SeqlockBuffer<Samples> g_samples;

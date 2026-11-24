@@ -585,8 +585,8 @@ static void DatabasePoses(const char* aPath)
     bodyheight::LegRig rig;
     Check(rig.Init(db), "database rig: leg rig found");
     const uint32_t step = std::max<uint32_t>(1, db.NumFrames() / 300);
-    int poses = 0, limited = 0, nonFinite = 0;
-    float worstFold = 0.0f, worstSole = 0.0f;
+    int poses = 0, limited = 0, nonFinite = 0, swinging = 0;
+    float worstFold = 0.0f, worstSole = 0.0f, worstSwingDepth = 0.0f;
     const Ground grounds[2] = {[](float, float y) { return y > 0.0f ? 0.17f : 0.0f; },
                                [](float, float y) { return std::tan(20.0f * math::kPi / 180.0f) * y; }};
     for (uint32_t fr = 0; fr < db.NumFrames(); fr += step)
@@ -615,7 +615,14 @@ static void DatabasePoses(const char* aPath)
             for (int s = 0; s < 2; ++s)
             {
                 worstFold = std::fmax(worstFold, KneeInterior(f0.leg[s]) - KneeInterior(f1.leg[s]));
-                if (r.kneeLimited == 0 && r.clamped == 0)
+                if (plan.foot[s].carry < 1.0f)
+                {
+                    // a foot in the swing keeps clearance instead of standing on the ground: its ball must not end in the ground
+                    ++swinging;
+                    const math::Vec3 b1 = f1.leg[s].ball;
+                    worstSwingDepth = std::fmax(worstSwingDepth, h(b1.x, b1.y) - b1.z);
+                }
+                else if (r.kneeLimited == 0 && r.clamped == 0)
                 {
                     const math::Vec3 b0 = f0.leg[s].ball;
                     const float g = h(b0.x, b0.y);
@@ -624,10 +631,11 @@ static void DatabasePoses(const char* aPath)
             }
         }
     }
-    char name[240];
-    std::snprintf(name, sizeof name, "database poses (%d, step 17 cm / slope 20 deg): finite, extra knee fold max %.1f deg <= 60, ball err %.1f mm, limited legs %d",
-                  poses, double(worstFold), double(worstSole) * 1000, limited);
-    Check(nonFinite == 0 && worstFold <= 60.5f && worstSole < 0.012f, name);
+    char name[300];
+    std::snprintf(name, sizeof name, "database poses (%d, step 17 cm / slope 20 deg): finite, extra knee fold max %.1f deg <= 60, planted ball err %.1f mm, "
+                  "swinging legs %d with the ball at most %.1f mm in the ground, limited legs %d",
+                  poses, double(worstFold), double(worstSole) * 1000, swinging, double(worstSwingDepth) * 1000, limited);
+    Check(nonFinite == 0 && worstFold <= 60.5f && worstSole < 0.012f && worstSwingDepth < 0.005f, name);
 }
 
 static void SwingFoot()
@@ -683,7 +691,8 @@ static void StairUpAhead()
 
 int main(int argc, char** argv)
 {
-    Check(!rt::Enabled(), "default: the stage is off at startup (the menu default mm.groundFeet)");
+    Check(rt::Enabled(), "default: the stage is on at startup (the menu default mm.groundFeet)");
+    rt::SetEnabled(false); // the checks below switch it on where they need it
     FlatIdentity();
     Slopes();
     Steps();
