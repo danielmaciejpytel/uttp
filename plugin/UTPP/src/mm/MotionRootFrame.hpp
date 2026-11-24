@@ -36,8 +36,8 @@ struct Inputs
     // yawAlignHalfLife (s), at most yawAlignMaxRate (rad/s).
     bool yawAlign = false;
     float yawAlignWorld = 0, yawAlignHalfLife = .05f, yawAlignMaxRate = 0;
-    // Moving-aim accumulate (MotionOffsetRoot.hpp Step::aimAccumulate): the drawn heading lags the aimed world yaw aimLagWorld (rad) by at
-    // most aimLagMax (rad) instead of being locked onto the capsule.
+    // Moving-aim accumulate (MotionOffsetRoot.hpp Step::aimAccumulate): the root heading lags the aimed world yaw aimLagWorld (rad, the
+    // direction the aim offset turns to) by at most aimLagMax (rad) instead of being locked onto the capsule.
     bool aimAccumulate = false;
     float aimLagWorld = 0, aimLagMax = 0;
 };

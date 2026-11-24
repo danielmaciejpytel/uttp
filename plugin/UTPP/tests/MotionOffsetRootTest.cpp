@@ -947,6 +947,52 @@ int main()
         for (int i = 0; i < 60; ++i)
             farLag.Update(still);
         C("aim accumulate: ... until it reaches the bound", Near(farLag.Yaw(), 60.f * deg, 1e-4f));
+        // once inside the band the lag is clamped at its edge: a camera turn faster than the lock rate (900 deg/s) never pushes it past
+        Step fast = on;
+        fast.capsuleYawDelta = 15.f * deg;
+        float fastWorst = 0.f;
+        for (int i = 0; i < 60; ++i)
+        {
+            acc.Update(fast);
+            fastWorst = std::fmax(fastWorst, std::fabs(acc.Yaw()));
+        }
+        C("aim accumulate: after the band is reached a 900 deg/s camera turn keeps the lag at the bound",
+          fastWorst <= 60.f * deg + 1e-4f && Near(std::fabs(acc.Yaw()), 60.f * deg, 1e-4f));
+        // a lag from before the band (V faced away) shrinks every step even while the camera turns away at 900 deg/s, no snap
+        OffsetRoot entry;
+        entry.Seed(0, 0, 150.f * deg);
+        Step away = on;
+        away.capsuleYawDelta = -15.f * deg; // the visual-minus-capsule yaw grows by 15 deg per step without a correction
+        float prevExcess = 90.f * deg;
+        bool shrinks = true, noSnap = true;
+        int stepsToBand = -1;
+        for (int i = 0; i < 40; ++i)
+        {
+            entry.Update(away);
+            const float excess = std::fabs(entry.Yaw()) - 60.f * deg;
+            shrinks &= excess <= prevExcess - motionRoot::kAimLockRate * dt + 1e-4f || excess <= 1e-4f;
+            noSnap &= prevExcess - excess <= motionRoot::kAimLockRate * dt + 1e-4f;
+            prevExcess = excess;
+            if (stepsToBand < 0 && excess <= 1e-4f)
+                stepsToBand = i + 1;
+        }
+        C("aim accumulate: a lag from before the band shrinks at the lock rate while the camera turns away", shrinks && noSnap);
+        C("aim accumulate: ... and reaches the band (90 deg at 9 deg per step = 10 steps)", stepsToBand == 10);
+        C("aim accumulate: ... and stays at the bound afterwards", Near(std::fabs(entry.Yaw()), 60.f * deg, 1e-4f));
+        // the band side follows the lag continuously: a 130 deg camera snap in one step does not flip V to the other band edge
+        OffsetRoot side;
+        side.Seed(0, 0, 0.f);
+        Step settle = on;
+        settle.capsuleYawDelta = 0.f;
+        settle.animationYawDelta = 0.f;
+        side.Update(settle); // inside the band: latched
+        Step left = settle;
+        left.capsuleYawDelta = 55.f * deg;
+        side.Update(left); // lag -55 deg
+        Step snap = settle;
+        snap.capsuleYawDelta = 130.f * deg; // wrapped lag +175 deg, continuous lag -185 deg
+        side.Update(snap);
+        C("aim accumulate: a one-step camera snap keeps the band side", Near(side.Yaw(), -60.f * deg, 1e-4f));
         // standing aim is unchanged by the flag (turn in place keeps its own path)
         OffsetRoot standA, standB;
         standA.Seed(0, 0, .4f);

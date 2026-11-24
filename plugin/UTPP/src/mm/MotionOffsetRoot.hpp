@@ -30,8 +30,10 @@
 //     With UTPP_OFFSET_ROOT_FORWARD_LIMIT 2 the driver passes the limit only outside turning and start clips while standing (a turn
 //     keeps the forward offset that absorbs it).
 //  6. Moving-aim accumulate (Step::aimAccumulate, opt-in). Instead of the moving-aim lock the rotation accumulates as in locomotion
-//     (the visible heading keeps its world yaw and turns with the clip's steered yaw), and only the lag behind aimLagTarget beyond
-//     aimLagMax is taken back, at most at the lock rate. The aim offset turns the upper body over the remaining lag.
+//     (the visible heading keeps its world yaw and turns with the clip's steered yaw). The lag behind aimLagTarget is held inside
+//     aimLagMax: once it has been inside the band it is clamped at the band edge (a camera turn of any speed never pushes it past the
+//     aim offset's reach); a lag beyond the band when the accumulate begins (V faced away) is taken back at most at the lock rate and
+//     never grows meanwhile. The aim offset turns the upper body over the remaining lag.
 // (RootMontage.hpp: a reload that began on the spot is not montage once V moves.)
 #pragma once
 #include "MMMath.hpp"
@@ -144,6 +146,10 @@ struct State
     bool translationRelease = true, rotationRelease = false;
     // rest recentering: speed (rad/s, towards zero), seconds the offset waited for a turn, authored-yaw hold (s), yaw moved this step (rad)
     float restSpeed = 0, restIdle = 0, restHold = 0, restStep = 0, turnAge = 0;
+    // moving-aim accumulate (header item 6): it ran on the last step, its lag has been inside the band since, the lag after the step
+    // (rad, continuous across steps: the band side is never flipped by a wrap)
+    bool aimActive = false, aimLatched = false;
+    float aimLag = 0;
 };
 class OffsetRoot
 {
@@ -346,15 +352,29 @@ class OffsetRoot
         next.vy = (ny - m.y) / s.dt;
         next.x = nx;
         next.y = ny;
+        next.aimActive = next.aimLatched = false;
+        next.aimLag = 0;
         if (aimMoving && s.aimAccumulate && std::isfinite(s.aimLagTarget) && std::isfinite(s.aimLagMax) && s.aimLagMax > 0)
         {
-            // header item 6: accumulate, then bring a lag beyond aimLagMax back toward the band at the lock rate at most
+            // header item 6: accumulate; the lag is clamped at the band edge once inside it, a lag from before the band shrinks at the
+            // lock rate at most (and never grows)
             next.rotationRelease = false;
             const float yaw = math::WrapAngle(m.yaw + s.animationYawDelta - s.capsuleYawDelta);
-            const float lag = math::WrapAngle(yaw - s.aimLagTarget);
+            // the lag before this step (the first step: the offset so far against the current target) and after it, continuous
+            const float prev = m.aimActive ? m.aimLag : math::WrapAngle(m.yaw - s.aimLagTarget);
+            const float lag = prev + math::WrapAngle(yaw - s.aimLagTarget - prev);
             const float excess = std::fabs(lag) - s.aimLagMax;
             const float rate = std::isfinite(s.lockMaxRate) && s.lockMaxRate > 0 ? s.lockMaxRate : kAimLockRate;
-            next.yaw = excess > 0 ? math::WrapAngle(yaw - std::copysign(std::fmin(excess, rate * s.dt), lag)) : yaw;
+            float allowed = 0.f; // excess left after this step
+            if (!m.aimLatched)
+                allowed = std::fmax(0.f, std::fmin(excess, std::fabs(prev) - s.aimLagMax) - rate * s.dt);
+            float lagNext = lag;
+            if (excess > allowed)
+                lagNext = std::copysign(s.aimLagMax + allowed, lag);
+            next.yaw = lagNext == lag ? yaw : math::WrapAngle(s.aimLagTarget + lagNext);
+            next.aimActive = true;
+            next.aimLatched = m.aimLatched || std::fabs(lagNext) <= s.aimLagMax;
+            next.aimLag = lagNext;
         }
         else if (aimMoving)
         {

@@ -474,8 +474,12 @@ constexpr int64_t kShooterModeHoldMaxNs = 3000000000; // 3 s
 constexpr float kShooterModeAirRate = 200.0f * 3.14159265358979323846f / 180.0f;
 // A capsule turn above this at idle (no stick) in Shooter mode is the camera orbit (follow mode), never UTPP's own facing turn.
 constexpr float kShooterModeOrbitDegPerS = 3.0f;
-// mm.aimRootAccumulate: largest lag of the drawn heading behind the camera while V aims on the move (the aim offset's spine yaw clamp).
-constexpr float kAimRootLagDeg = 60.0f;
+// mm.aimRootAccumulate: largest lag of the root heading behind the aimed direction while V aims on the move. The lag is measured in
+// the aim offset's own terms (the yaw of its target relative to the root); the margin below its spine yaw clamp covers what is added
+// on top of the root frame (body yaw offset, pelvis trim, orientation warp) and the rate bound of the spine yaw filter.
+constexpr float kAimRootLagMarginDeg = 8.0f;
+constexpr float kAimRootLagDeg = motionpose::kAimSpineYawClampDeg - kAimRootLagMarginDeg;
+static_assert(kAimRootLagDeg > 0.0f && kAimRootLagDeg < motionpose::kAimSpineYawClampDeg, "aim root lag inside the spine yaw clamp");
 // Rate bound of the visual-root lock while V moves in Shooter mode / H2 (MotionOffsetRoot Step::lockMaxRate): 450 deg/s = 7.5 deg per
 // 60 Hz feed, under the 8 deg per feed that reads as a snap; 540 (ADS while moving) is kept for the aim lock.
 #if UTPP_SHOOTER_MODE_MUTATION == 10
@@ -6226,12 +6230,17 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         const bool airLock = b.map.shooterModeActive && cs.movementMode == 1 && !b.map.slideActive && !ctx.aimFacing;
 #endif
         rootEvaluation.input.airFollow = airLock;
-        // mm.aimRootAccumulate: while V aims on the move the root accumulates (steered clip yaw) and only a lag behind the camera beyond
-        // kAimRootLagDeg is taken back (MotionOffsetRoot.hpp item 6); the non-aiming Shooter / H2 lock is unchanged.
+        // mm.aimRootAccumulate: while V aims on the move the root accumulates (steered clip yaw) and its lag behind the aimed direction
+        // stays within kAimRootLagDeg (MotionOffsetRoot.hpp item 6); the non-aiming Shooter / H2 lock is unchanged. The aimed direction
+        // is the world yaw the aim offset turns to (the actor-relative aim yaw of this frame, world smoothing included); without an aim
+        // target the camera yaw.
         if (g_aimRootAccumulate && ctx.aimFacing && rootEvaluation.input.aimFacing)
         {
+            const bool aimYaw = in.haveAim && std::isfinite(in.aimYawDeg) && std::isfinite(aRaw.playerYawDeg);
+            const float lagDeg = aimYaw ? aRaw.playerYawDeg + in.aimYawDeg
+                                        : (std::isfinite(f.cameraYawDeg) ? f.cameraYawDeg : aRaw.playerYawDeg);
             rootEvaluation.input.aimAccumulate = true;
-            rootEvaluation.input.aimLagWorld = (std::isfinite(f.cameraYawDeg) ? f.cameraYawDeg : aRaw.playerYawDeg) * integ::kDegToRad;
+            rootEvaluation.input.aimLagWorld = lagDeg * integ::kDegToRad;
             rootEvaluation.input.aimLagMax = kAimRootLagDeg * integ::kDegToRad;
         }
         rootEvaluation.input.lockMaxRate = airLock ? kShooterModeAirRate : (strafeLock && !ctx.aimFacing ? kShooterModeLockRate : 0.0f);
