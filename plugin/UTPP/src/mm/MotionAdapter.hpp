@@ -240,6 +240,12 @@ enum PsmDetailed : int32_t
     kPsmRecovery = 28, kPsmKnockdown = 29, kPsmCrouchSprint = 30, kPsmFelled = 31,
 };
 
+// Shipped speed converter bits (MapConfig::speedConverter): the stronger preset plus every stage
+inline constexpr int kDefaultSpeedConverter = speedconv::PresetFor(speedconv::kPresetStronger).bits | speedconv::kStartStopWindow |
+                                              speedconv::kGaitRamp | speedconv::kTrajectory | speedconv::kStanceTravel |
+                                              speedconv::kStepHold | speedconv::kLanding;
+static_assert(kDefaultSpeedConverter == 4065);
+
 inline bool PsmGround(int32_t s) { return s == kPsmStand || s == kPsmAimWalk || s == kPsmCrouch || s == kPsmSprint || s == kPsmCrouchSprint; }
 // motionfix item 7: CrouchSprint 30 (gamePSMDetailedLocomotionStates, the sprint started from the crouch: the game stands V
 // up and runs her at the sprint speed, feed dump 2026-10-13 loco 3 / detail 30) maps to Stand + Sprint, not to the crouch
@@ -1132,9 +1138,10 @@ struct MapConfig
     // rate only while the capsule speed holds (speedconv::UpdateSteady); kGameSpeedRate = a converted feed plays at the game speed (the
     // rate scale times game / converted speed); kTrajectory (speedconv_traj.hpp) = while a turn is converted, the query prediction
     // continues from the converted state (the converter integrated over the horizon) instead of the gait-friction ground steps.
-    // 0 = the game velocity everywhere, bit for bit. Default: the stronger preset (speedconv::PresetFor(kPresetStronger)).
-    // kGaitRamp (speedconv_gait.hpp, off by default): the query speed ramps across a gait change from a held speed.
-    int speedConverter = speedconv::PresetFor(speedconv::kPresetStronger).bits;
+    // 0 = the game velocity everywhere, bit for bit. Default: the stronger preset (speedconv::PresetFor(kPresetStronger)) with every
+    // stage on (kDefaultSpeedConverter: kStartStopWindow, kGaitRamp, kTrajectory, kStanceTravel, kStepHold, kLanding).
+    // kGaitRamp (speedconv_gait.hpp): the query speed ramps across a gait change from a held speed.
+    int speedConverter = kDefaultSpeedConverter;
     speedconv::Limits speedConverterLimits;
     float speedConverterFriction = speedconv::PresetFor(speedconv::kPresetStronger).friction; // turn friction of the converter (per second); 0 = the gait ground friction of the character movement
     float speedConverterMaxTurnDeg = speedconv::PresetFor(speedconv::kPresetStronger).maxTurnDeg; // larger turns (reversals) keep the game velocity (speedconv::Limits::maxTurnCos); 0 = every turn

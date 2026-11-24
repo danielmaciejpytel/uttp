@@ -411,8 +411,10 @@ int main()
         Check("converter preset off: every field off", pc.speedConverter == 0 && pc.speedConverterFriction == 0.0f &&
                                                            pc.speedConverterMaxTurnDeg == 0.0f);
         const MapConfig d;
-        Check("MapConfig defaults: speed converter preset stronger",
-              d.speedConverter == (speedconv::kQuery | speedconv::kGameSpeedRate) && d.speedConverterFriction == 2.0f &&
+        Check("MapConfig defaults: speed converter preset stronger with every stage",
+              d.speedConverter == (speedconv::kQuery | speedconv::kGameSpeedRate | speedconv::kStartStopWindow | speedconv::kGaitRamp |
+                                   speedconv::kTrajectory | speedconv::kStanceTravel | speedconv::kStepHold | speedconv::kLanding) &&
+                  d.speedConverterFriction == 2.0f &&
                   d.speedConverterMaxTurnDeg == 150.0f && EffectiveCapsuleRate(d) == d.capsuleSpeedRate);
     }
     std::printf("%d PASS %d FAIL\n", passed, failed);
