@@ -123,6 +123,8 @@
 //                       log call MMAimRotation is applied as well). Off / not passed: unchanged.
 //   --aim-pivot-deg D   with --aim-rotation 1: the Aim pivot threshold (deg, default 10) (test override of MapConfig::aimPivotDeg)
 //   --aim-pivot-gate S  with --aim-rotation 1: the pivot / start elapsed-time gate (s, default 0.5; 0 = no gate)
+//   --aim-pivot-regate D  with --aim-rotation 1: a new reversal of at least D deg skips that gate (default 150; 0 = the gate as before)
+//   --strafe-pivot-tail S  commit of pivots entered past their authored turn (MatcherConfig::strafePivotTailS, default 0.3; 0 = off)
 //   --force-aim 1       synthetic aim: every feed reads the PSM upper body Aim with a drawn weapon (the recordings have almost no
 //                       aiming while moving); combine with --aim-camera P for the overlay and the aim target. Default off.
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
@@ -195,6 +197,8 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
 void TestSetMapStepDownReach(int32_t aOn);
 void SetStepDownReach(bool aOn);
 void TestSetMapAimPivot(float aPivotDeg, float aGateS);
+void TestSetMapAimPivotRegate(float aRegateDeg);
+void TestSetStrafePivotTail(float aS);
 void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope);
 void TestSetMapCapsuleRateGuards(int32_t aGuards, float aBlendS);
 void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg);
@@ -607,6 +611,8 @@ int main(int argc, char** argv)
     uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
     int32_t aimRotation = -1;                  // --aim-rotation: < 0 = not passed (the settings log / build default)
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
+    float aimPivotRegateDeg = std::numeric_limits<float>::quiet_NaN(); // --aim-pivot-regate
+    float strafePivotTailS = -1.0f;                                     // --strafe-pivot-tail (< 0 = not passed)
     bool forceAim = false;                     // --force-aim 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
@@ -767,6 +773,10 @@ int main(int argc, char** argv)
             aimPivotDeg = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-pivot-gate") == 0)
             aimPivotGateS = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-pivot-regate") == 0)
+            aimPivotRegateDeg = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--strafe-pivot-tail") == 0)
+            strafePivotTailS = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--force-aim") == 0)
             forceAim = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--ground-feet") == 0)
@@ -999,6 +1009,10 @@ int main(int argc, char** argv)
         motiondriver::SetAimRotation(aimRotation != 0);
     if (std::isfinite(aimPivotDeg) || std::isfinite(aimPivotGateS))
         motiondriver::TestSetMapAimPivot(aimPivotDeg, aimPivotGateS);
+    if (std::isfinite(aimPivotRegateDeg))
+        motiondriver::TestSetMapAimPivotRegate(aimPivotRegateDeg);
+    if (strafePivotTailS >= 0.0f)
+        motiondriver::TestSetStrafePivotTail(strafePivotTailS);
     FILE* forecastOut = nullptr;
     FILE* selOut = nullptr;
     if (selDump && out != "-")

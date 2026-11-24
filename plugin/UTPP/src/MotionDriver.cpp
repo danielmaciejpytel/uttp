@@ -2666,6 +2666,7 @@ struct TestMapOverrides
     float turnInPlaceDeg = std::numeric_limits<float>::quiet_NaN();
     int32_t stepDownReach = -1;
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
+    float aimPivotRegateDeg = std::numeric_limits<float>::quiet_NaN(); // MapConfig::aimPivotRegateDeg
     int32_t capsuleSpeedRate = -1, capsuleRateScope = -1; // MapConfig::capsuleSpeedRate (CapsuleRateMode 0-3), capsuleRateScope (0-2)
     int32_t capsuleRateGuards = -1; // MapConfig::capsuleRateGuards (caprate bits)
     float capsuleRateBlendS = std::numeric_limits<float>::quiet_NaN(); // MapConfig::capsuleRateBlendS
@@ -2676,7 +2677,7 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
     std::lock_guard lock(g_m);
     g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach,
                                           g_testMapOverrides.aimPivotDeg, g_testMapOverrides.aimPivotGateS,
-                                          g_testMapOverrides.capsuleSpeedRate, g_testMapOverrides.capsuleRateScope,
+                                          g_testMapOverrides.aimPivotRegateDeg, g_testMapOverrides.capsuleSpeedRate, g_testMapOverrides.capsuleRateScope,
                                           g_testMapOverrides.capsuleRateGuards, g_testMapOverrides.capsuleRateBlendS};
 }
 void TestSetMapAimPivot(float aPivotDeg, float aGateS)
@@ -2684,6 +2685,11 @@ void TestSetMapAimPivot(float aPivotDeg, float aGateS)
     std::lock_guard lock(g_m);
     g_testMapOverrides.aimPivotDeg = aPivotDeg;
     g_testMapOverrides.aimPivotGateS = aGateS;
+}
+void TestSetMapAimPivotRegate(float aRegateDeg)
+{
+    std::lock_guard lock(g_m);
+    g_testMapOverrides.aimPivotRegateDeg = aRegateDeg;
 }
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth)
 {
@@ -2742,6 +2748,14 @@ void TestSetDodgeFacingHold(float aS)
     std::lock_guard lock(g_m);
     g_testDodgeFacingHoldS = aS >= 0.0f ? aS : ProductionMatcherConfig().dodgeFacingHoldS;
 }
+// MatcherConfig::strafePivotTailS of the running matcher from the next update on (0 = off, < 0 = back to the production value);
+// -1 until the first call = never touched
+float g_testStrafePivotTailS = -1.0f;
+void TestSetStrafePivotTail(float aS)
+{
+    std::lock_guard lock(g_m);
+    g_testStrafePivotTailS = aS >= 0.0f ? aS : ProductionMatcherConfig().strafePivotTailS;
+}
 void TestApplyMapOverrides(adapter::MapConfig& aMc)
 {
     if (g_testSpeedConverter >= 0)
@@ -2770,6 +2784,8 @@ void TestApplyMapOverrides(adapter::MapConfig& aMc)
         aMc.aimPivotDeg = g_testMapOverrides.aimPivotDeg;
     if (std::isfinite(g_testMapOverrides.aimPivotGateS))
         aMc.aimPivotGateS = g_testMapOverrides.aimPivotGateS;
+    if (std::isfinite(g_testMapOverrides.aimPivotRegateDeg))
+        aMc.aimPivotRegateDeg = g_testMapOverrides.aimPivotRegateDeg;
 }
 #endif
 
@@ -5941,6 +5957,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     if (g_testDodgeFacingHoldS >= 0.0f)
         b.matcher.TestSetDodgeFacingHoldS(g_testDodgeFacingHoldS);
+    if (g_testStrafePivotTailS >= 0.0f)
+        b.matcher.TestSetStrafePivotTailS(g_testStrafePivotTailS);
 #endif
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)

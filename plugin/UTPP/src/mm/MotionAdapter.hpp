@@ -1164,6 +1164,9 @@ struct MapConfig
     bool aimRotation = true;
     float aimPivotDeg = motiontraj::kPivotAim;
     float aimPivotGateS = motiontraj::kPivotAimGateS;
+    // A new reversal (the wanted direction relative to the facing turned by at least this much since the gate began) skips that gate
+    // (motiontraj::AimPivotNewReversal). 0 = the gate as before.
+    float aimPivotRegateDeg = motiontraj::kPivotAimRegateDeg;
 };
 
 // MapConfig speed converter fields from a named setting (speedconv::PresetFor: 0 off, 1 safe, 2 stronger)
@@ -1485,6 +1488,9 @@ struct MapState
     float jitterHeldS = 0.0f;
     bool blocked = false;
     float blockedFreeS = 0.0f;
+    // MapConfig::aimPivotRegateDeg: wanted direction relative to the facing stored when the aim pivot gate began (deg)
+    float aimPivotRefYawDeg = 0.0f;
+    bool aimPivotRefValid = false;
     float capsuleBrakeModel = 0.0f; // active grounded no-input CP deceleration; trace only
     float capsuleAccelModel = 0.0f; // active grounded full-input applied acceleration; trace only
     motiontraj::Trajectory traj; // Update_Trajectory (history 30 + prediction 15 x 0.1 s)
@@ -2381,8 +2387,18 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     // aim rotation sub-mode (MapConfig::aimRotation): the Aim pivot threshold and the pivot / start elapsed-time gate
     st.aimRotation = c.aimRotation && f.aiming && rot == motiontraj::RotationMode::Strafe;
     if (st.aimRotation)
-        st.isPivoting = motiontraj::IsPivotingAim(st.isMoving, turnTarget, velQ, c.aimPivotDeg, x.currentDbPivots || x.currentDbStarts,
-                                                  x.currentPickAgeS, c.aimPivotGateS);
+    {
+        const bool pivotOrStart = x.currentDbPivots || x.currentDbStarts;
+        const bool gated = c.aimPivotGateS > 0.0f && pivotOrStart && x.currentPickAgeS <= c.aimPivotGateS;
+        const float facingGameYaw = std::isfinite(f.cameraYawDeg) ? f.cameraYawDeg : (std::isfinite(yawNow) ? yawNow : 0.0f);
+        const float relYaw = motiontraj::NormalizeAxis(motiontraj::YawOf(turnTarget) - motiontraj::GameYawToTrajYaw(facingGameYaw));
+        const bool newReversal = motiontraj::AimPivotNewReversal(gated, motiontraj::SizeXY(turnTarget) > motiontraj::kKindaSmall, relYaw,
+                                                                 c.aimPivotRegateDeg, m.aimPivotRefYawDeg, m.aimPivotRefValid);
+        st.isPivoting = motiontraj::IsPivotingAim(st.isMoving, turnTarget, velQ, c.aimPivotDeg, pivotOrStart, x.currentPickAgeS,
+                                                  newReversal ? 0.0f : c.aimPivotGateS);
+    }
+    else
+        m.aimPivotRefValid = false;
     // directional locomotion inputs (MapConfig::directionalPredicates / moveDirection)
     if (c.directionalPredicates)
     {
@@ -2546,6 +2562,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
 #else
     s.shooterStrafe = m.shooterModeActive && rot == motiontraj::RotationMode::Strafe && mode == 0 && !slideActive;
 #endif
+    s.strafeRotation = rot == motiontraj::RotationMode::Strafe && mode == 0 && !slideActive; // MatcherConfig::strafePivotTailS
     s.jumpOutFlight = jumpOutFlight; // fix/jumpout-cam (MatcherConfig::jumpOutNoBack / jumpOutFallHandover)
     // Chooser MovementMode / MovementMode_LastFrame / MovementDirection. Slide off: movementMode = st.movementMode (0 / 1) as
     // before and movementModeLast its previous-frame value. Slide on: MovementMode Sliding and Stance Crouch for the whole PSM

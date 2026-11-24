@@ -54,6 +54,7 @@ inline constexpr float kPivotOrient = 45.0f;      // IsPivoting OrientToMovement
 inline constexpr float kPivotStrafe = 30.0f;      // IsPivoting Strafe
 inline constexpr float kPivotAim = 10.0f;         // IsPivoting Aim (the reference uses 0; see IsPivotingAim)
 inline constexpr float kPivotAimGateS = 0.5f;     // no new pivot within this time of a pivot / start pick (state elapsed-time gate)
+inline constexpr float kPivotAimRegateDeg = 150.0f; // a new reversal of at least this much skips that gate (AimPivotNewReversal)
 inline constexpr float kTurnInPlaceDeg = 50.0f;   // turn admission angle (rest turn, shot turn) and the previous ShouldTurnInPlace angle
 #ifndef UTPP_TURN_IN_PLACE_PREDICATE_DEG
 #define UTPP_TURN_IN_PLACE_PREDICATE_DEG 50.0f
@@ -644,6 +645,26 @@ inline bool IsPivotingAim(bool aMoving, V3 aFuture, V3 aVelocity, float aPivotDe
     if (aGateS > 0.0f && aCurrentPivotOrStart && aPickAgeS <= aGateS)
         return false;
     return SizeXY(aVelocity) > kHasVelocity && std::fabs(TurnAngle(aFuture, aVelocity)) >= aPivotDeg && aMoving;
+}
+// New reversal inside the elapsed-time gate of IsPivotingAim (MapConfig::aimPivotRegateDeg). Keyboard strafe taps 0.35 s apart met
+// the 0.5 s gate of the previous pivot: the next reversal read "not pivoting", its search went to the loops (one feed of a loop at
+// a high cost) and the pivot followed one feed later, two clip changes per tap. Returns true when the wanted travel direction,
+// relative to the facing (aRelYawDeg: the turn target yaw minus the facing yaw, so a camera turn under a held key does not count),
+// has turned by at least aRegateDeg from the direction stored when the gate began: the gate is then skipped for this feed and the
+// raw pivot predicate decides. The stored direction (aRefYawDeg / aRefValid) follows the target on every feed the gate does not
+// hold and on a new reversal; it is frozen while the gate holds. aHasTarget false (no input direction) changes nothing.
+// aRegateDeg <= 0 = off (the gate as before, nothing stored).
+inline bool AimPivotNewReversal(bool aGated, bool aHasTarget, float aRelYawDeg, float aRegateDeg, float& aRefYawDeg, bool& aRefValid)
+{
+    if (aRegateDeg <= 0.0f || !aHasTarget)
+        return false;
+    const bool fresh = aGated && aRefValid && std::fabs(NormalizeAxis(aRelYawDeg - aRefYawDeg)) >= aRegateDeg;
+    if (!aGated || fresh)
+    {
+        aRefYawDeg = aRelYawDeg;
+        aRefValid = true;
+    }
+    return fresh;
 }
 // ---------------------------------------------------------------- directional locomotion inputs (opt-in chooser inputs)
 // Movement direction of the directional locomotion rows: the angle of the movement direction from the orientation intent, split into

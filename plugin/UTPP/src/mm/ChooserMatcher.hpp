@@ -166,6 +166,9 @@ struct ChooserState
     // Shooter mode drives the strafe rotation mode on the ground (the facing is held on the camera, the travel direction turns against
     // it). Written by adapter::MapToChooser; a hand-built state leaves it false (MatcherConfig::strafeSectorDelayS then never acts).
     bool shooterStrafe = false;
+    // The strafe rotation mode on the ground (aiming or Shooter mode: the facing is held, the travel turns against it). Written by
+    // adapter::MapToChooser; a hand-built state leaves it false (MatcherConfig::strafePivotTailS then never acts).
+    bool strafeRotation = false;
 };
 
 inline cancelstart::State CancellationState(const ChooserState& state)
@@ -731,6 +734,14 @@ struct MatcherConfig
     // otherwise handed the finished turn to a loop one to seven feeds before the next tap picked the next turn (two changes for one
     // tap). 0 = the commit ends at the turn end.
     float turnCommitTailS = 0.2f;
+    // strafePivotTailS: in the strafe rotation mode (ChooserState::strafeRotation) a pivot clip entered where its authored root turn is
+    // already done (the strafe pivots: Run_Pivot_LL_RL ..., the body keeps its facing and only the travel reverses) is committed the same
+    // way, with its turn treated as done at the pick and this tail in place of turnCommitTailS. Not in the orient mode: there such a
+    // clip is a facing-keeping pick the heading catch-up hands on as the facing turns (headingCatchUpS). Aimed keyboard strafe taps
+    // 0.35 s apart handed every other such pivot to a loop ~0.2 s after the pick (the freshEvent bias ended), the next tap picked the
+    // next pivot: two changes for one tap. 0.3 keeps the taps under the clip change limit with the smallest foot lock correction of the
+    // tails tried (0.2 / 0.25 / 0.3 / 0.35). 0 = such pivots are not committed.
+    float strafePivotTailS = 0.3f;
     // turnFootPhase: a jump into a moving turn / pivot clip (steer::IsPivot / IsMoveTurn with an authored root turn, MoveTurnSign) on a
     // reversal while moving on the stand ground is re-ranked inside the winner's database among the rows of the same turn direction, with
     // the pose channels of the query read from the shown pose (SetShownPoseHistory) instead of the database mean. Without it the pick on a
@@ -1331,6 +1342,8 @@ public:
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     // tests only: MatcherConfig::dodgeFacingHoldS of a running matcher (motiondriver::TestSetDodgeFacingHold; 0 = guard 3b off)
     void TestSetDodgeFacingHoldS(float aS) { m_cfg.dodgeFacingHoldS = aS; }
+    // tests only: MatcherConfig::strafePivotTailS of a running matcher (motiondriver::TestSetStrafePivotTail; 0 = off)
+    void TestSetStrafePivotTailS(float aS) { m_cfg.strafePivotTailS = aS; }
 #endif
     uint64_t StrafeSectorHolds() const { return m_strafeSectorHolds; }
     // Authored ROOT, not a name suffix or the already steered blended root rate.
@@ -1678,10 +1691,10 @@ public:
             if (!aState.isPivoting)
                 m_turnHoldPivotDropped = true;
             // turnCommitTailS: past the turn end the hold lasts a little longer unless a heading step came after the pick
-            const bool turnDone = m_cur.valid && m_cur.clip == m_turnHoldClip && m_cur.clipTime >= m_clipTurnEndS[static_cast<uint32_t>(m_cur.clip)];
+            const bool turnDone = m_cur.valid && m_cur.clip == m_turnHoldClip && m_cur.clipTime >= m_turnHoldEndS;
             m_turnTailS = turnDone ? m_turnTailS + aDt : 0.0f;
             const bool inTurn = !turnDone ||
-                (UTPP_AND_NOT(JUMPPICK, 34) m_guardsOn && m_turnTailS <= m_cfg.turnCommitTailS && aState.headingStepAgeS + 0.05f >= m_sinceJumpS);
+                (UTPP_AND_NOT(JUMPPICK, 34) m_guardsOn && m_turnTailS <= m_turnHoldTailS && aState.headingStepAgeS + 0.05f >= m_sinceJumpS);
             const bool keep = m_cfg.turnCommit && contValid && m_cur.valid && m_cur.clip == m_turnHoldClip && !aForce &&
                               aState.movementMode == 0 && aState.stance == m_turnHoldStance && !aState.justLandedLight &&
                               !aState.justLandedHeavy && !aState.justTraversed && !(aState.isPivoting && m_turnHoldPivotDropped) &&
@@ -2376,8 +2389,14 @@ public:
                 m_stopHoldStart = newTime;
                 // turnCommit: armed only by a pivot / moving-turn clip selected on a reversal while moving on the stand ground
                 // mutation 32: no turn commit (the selected turn competes on cost from its next update on)
+                // strafePivotTailS: a pivot entered past its authored root turn is committed for that tail from the pick on
+                const bool turnLeft = m_clipTurnEndS[en.clip] > newTime;
+                const bool strafePivot = !turnLeft && m_cfg.strafePivotTailS > 0.0f && m_guardsOn && aState.strafeRotation &&
+                                         steer::IsPivot(steer::ClassifyClip(db.ClipName(en.clip)));
                 m_turnHoldClip = UTPP_AND_NOT(JUMPPICK, 32) m_cfg.turnCommit && aState.isPivoting && aState.movementMode == 0 && aState.movementState == 1 &&
-                                 aState.stance == 0 && m_clipTurnEndS[en.clip] > newTime ? static_cast<int32_t>(en.clip) : -1;
+                                 aState.stance == 0 && (turnLeft || strafePivot) ? static_cast<int32_t>(en.clip) : -1;
+                m_turnHoldEndS = turnLeft ? m_clipTurnEndS[en.clip] : newTime;
+                m_turnHoldTailS = turnLeft ? m_cfg.turnCommitTailS : m_cfg.strafePivotTailS;
                 m_turnHoldStance = aState.stance;
                 m_turnHoldFlags = HoldFlags(aState) & ~4;
                 m_turnHoldPivotDropped = false;
@@ -3510,6 +3529,8 @@ private:
     std::vector<float> m_clipTurnEndS;      // turnCommit: clip index -> clip time where the authored root turn is done (-1 = not a turn clip)
     int32_t m_turnHoldClip = -1;            // turnCommit: the held turn clip (-1 = none)
     float m_turnTailS = 0.0f;               // turnCommitTailS: seconds the held turn clip has played past its turn end
+    float m_turnHoldEndS = 0.0f;            // turnCommit: clip time of the held clip's turn end (the pick time for a strafe pivot)
+    float m_turnHoldTailS = 0.0f;           // turnCommit: tail of the held clip (turnCommitTailS / strafePivotTailS)
     bool m_downshiftDeferred = false;       // downshiftDeferS: a downshift edge was deferred and is still to be delivered
     int m_turnHoldStance = 0, m_turnHoldFlags = 0; // turnCommit: stance / HoldFlags (pivot bit cleared) when it was selected
     bool m_turnHoldPivotDropped = false;    // turnCommit: isPivoting dropped since the selection (a rise afterwards is a new reversal)
