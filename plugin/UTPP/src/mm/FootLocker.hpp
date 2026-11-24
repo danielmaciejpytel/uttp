@@ -229,6 +229,32 @@ struct FirmFeetConfig
     }
 };
 
+// Planted foot yaw lock (option, default off; FootLocker::SetYawLock / FootFeedPolicy::yawLock). On a lock of the soft-slip path (the
+// position handling is unchanged: soft slip, firm feet, settle, drift unlock) the foot keeps the world yaw it had when it locked, turned
+// about its lock point (the toe), instead of following the animated foot yaw:
+//   - planted: the foot is shown at (1 - twistReduction) x (locked yaw - animated yaw) from the animated yaw;
+//   - more than unplantAngle between them: the yaw unplants and follows the animated yaw through a critically damped spring
+//     (angularStiffness), started from the shown yaw and its rate, so the foot leaves its plant without a step;
+//   - the spring within replantAngle: the yaw plants again where it is shown;
+//   - the applied yaw is bounded so that the ankle correction (shown toe offset + the ankle turned about the toe) stays within
+//     maxCorrection, or within the correction without the yaw where that is larger (a planted yaw beyond the bound slides with it).
+// The difference is taken against the pose the locker receives (a foot turned upstream is not turned twice). Crouch contact policy,
+// replant and reference plant locks keep their own handling. Off = the previous paths bit for bit.
+struct FootYawLockConfig
+{
+    float unplantAngle = 1.04719755f; // rad (60 deg)
+    float replantAngle = 0.20943951f; // rad (12 deg)
+    float angularStiffness = 450.0f;  // 1/s^2, unplanted yaw spring (critically damped)
+    float twistReduction = 0.0f;      // share of the planted yaw difference left to the animation (0 = the world yaw is held)
+    float maxCorrection = 0.14f;      // m, bound of the ankle correction the yaw may lead to
+    static bool Valid(const FootYawLockConfig& c)
+    {
+        auto in = [](float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; };
+        return in(c.unplantAngle, 0.01f, 3.1f) && in(c.replantAngle, 0.0f, 3.1f) && c.replantAngle < c.unplantAngle &&
+               in(c.angularStiffness, 1.0f, 10000.0f) && in(c.twistReduction, 0.0f, 0.99f) && in(c.maxCorrection, 0.0f, 0.35f);
+    }
+};
+
 // Critically damped spring towards 0, exact for any step (x: value, v: its rate, w = sqrt(stiffness)).
 inline void SpringCritical(float& aX, float& aV, float aOmega, float aDt)
 {
@@ -257,6 +283,8 @@ struct FootLockFootDiag
     bool plantRef = false;     // reference plant model: this lock runs in it
     bool unplanted = false;    // reference plant model: the foot follows the animated toe through the spring (planted otherwise)
     float yawOffset = 0.0f;    // rad, reference plant model: yaw applied to the foot this update (before the IK weight)
+    float yawLockOffset = 0.0f; // rad, yaw lock: yaw applied to the foot this update (before the IK weight)
+    bool yawLockFree = false;   // yaw lock: the yaw follows the animated yaw through its spring (planted otherwise)
     bool firm = false;         // firm feet: this lock is latched after this update
     float firmHold = 0.0f;     // m, firm feet: offset held this update (latched hold after the leg limits; 0 when not latched)
     bool firmLegBound = false; // firm feet: a leg limit lowered the hold below the latched hold this update
@@ -330,6 +358,11 @@ struct FootLockDiagnostics
     uint64_t firmUpdates = 0;                   // locked-foot updates with a latched hold
     uint64_t firmLegBounds = 0;                 // ... of them with the hold lowered by a leg limit
     uint64_t firmHandBacks = 0;                 // latches ended by the hand-back on a standing capsule
+    // yaw lock (SetYawLock; zero while it is off)
+    uint64_t yawLockUpdates = 0;                // locked-foot updates of the yaw lock
+    uint64_t yawLockUnplants = 0;               // planted -> following (angle)
+    uint64_t yawLockReplants = 0;               // following -> planted
+    uint64_t yawLockBounds = 0;                 // updates with the applied yaw held at the correction bound
     // pelvis stage (SetPelvisPlacement; zero / 0 while it is off)
     math::Vec3 pelvisOffset{};                  // m, pelvis offset applied this update (model space)
     math::Vec3 pelvisTarget{};                  // m, its unfiltered target this update
@@ -532,6 +565,18 @@ public:
     const FootReplantConfig& ReplantConfig() const { return m_rcfg; }
     // Reference plant model (FootPlantReferenceConfig) for the feet that lock while it is on; the driver sets it per feed with the
     // replant mode (ApplyFootFeedPolicy). Off (default) = the previous paths bit for bit.
+    // planted foot yaw lock (FootYawLockConfig); switched off, every foot's yaw state ends at its next update
+    void SetYawLock(bool aOn) { m_yawLockOn = aOn; }
+    bool YawLock() const { return m_yawLockOn; }
+    bool SetYawLockConfig(const FootYawLockConfig& aCfg)
+    {
+        if (!FootYawLockConfig::Valid(aCfg))
+            return false;
+        m_ycfg = aCfg;
+        return true;
+    }
+    const FootYawLockConfig& YawLockConfig() const { return m_ycfg; }
+
     void SetPlantReference(bool aOn) { m_plantRef = aOn; }
     bool PlantReferenceOn() const { return m_plantRef; }
     // False = invalid (FootPlantReferenceConfig::Valid), previous kept.
@@ -707,6 +752,12 @@ private:
         float yawLock = 0.0f;     // rad, world yaw of the planted foot
         float yawX = 0.0f, yawV = 0.0f; // rad, rad/s: displayed - animated world yaw while unplanted, and its rate
         float yawApply = 0.0f;    // rad, yaw applied to the foot this update (before the IK weight)
+        // yaw lock (SetYawLock), separate from the reference plant model's yaw state
+        bool ylFree = false;      // the yaw follows the animated yaw through its spring
+        float ylLock = 0.0f;      // rad, locked world yaw
+        float ylX = 0.0f, ylV = 0.0f; // rad, rad/s: shown - animated world yaw while following, and its rate
+        float ylApply = 0.0f;     // rad, yaw applied to the foot this update (before the IK weight)
+        float ylShown = 0.0f;     // rad, applied yaw x IK weight of the last locked update (relock during the blend-out)
         // animated toe world position / foot world yaw of the previous update (unplant start velocity)
         float prevToeX = 0.0f, prevToeY = 0.0f, prevYaw = 0.0f;
         bool prevValid = false;
@@ -962,6 +1013,77 @@ private:
         }
     }
 
+    // Planted foot yaw lock of a soft-slip lock (see FootYawLockConfig). aOx, aOy = shown toe offset, aFx, aFy = animated ankle - toe
+    // (planar, character frame).
+    void UpdateYawLock(int aSide, float aDt, float aOx, float aOy, float aFx, float aFy)
+    {
+        Foot& f = m_foot[aSide];
+        const FootYawLockConfig& c = m_ycfg;
+        const float keep = 1.0f - c.twistReduction;
+        const float animYaw = m_animYawW[aSide];
+        // bound: the ankle correction with the yaw (shown toe offset + the ankle turned about the toe) stays within maxCorrection, or within
+        // the correction without the yaw where that is larger; a yaw beyond it is scaled down (bisection, the correction is 0-yaw bounded)
+        const float limit = std::fmax(c.maxCorrection, std::sqrt(aOx * aOx + aOy * aOy));
+        auto corr = [&](float aYaw) {
+            const float cs = std::cos(aYaw), sn = std::sin(aYaw);
+            const float x = aOx + cs * aFx - sn * aFy - aFx, y = aOy + sn * aFx + cs * aFy - aFy;
+            return std::sqrt(x * x + y * y);
+        };
+        auto bound = [&](float aYaw) {
+            if (!(corr(aYaw) > limit + 1e-5f))
+                return aYaw;
+            float lo = 0.0f, hi = 1.0f;
+            for (int i = 0; i < 12; ++i)
+            {
+                const float mid = 0.5f * (lo + hi);
+                (corr(aYaw * mid) > limit ? hi : lo) = mid;
+            }
+            ++m_diag.yawLockBounds;
+            return aYaw * lo;
+        };
+        ++m_diag.yawLockUpdates;
+        if (!f.ylFree)
+        {
+            const float err = math::WrapAngle(f.ylLock - animYaw);
+            if (std::fabs(err) <= c.unplantAngle)
+            {
+#if defined(UTPP_FLYAW_MUTATION) && UTPP_FLYAW_MUTATION == 1 // mutation 1: nothing held while planted
+                float apply = 0.0f;
+#else
+                float apply = err * keep;
+#endif
+                const float bounded = bound(apply);
+                if (bounded != apply)
+                {
+                    apply = bounded;
+                    f.ylLock = animYaw + apply / keep; // the planted yaw slides with the bound
+                }
+                f.ylApply = apply;
+                return;
+            }
+            // unplant: the spring starts from the shown yaw of the previous update and runs this update's dt (no step)
+            f.ylFree = true;
+            f.ylX = (err + m_animYawRate[aSide] * aDt) * keep;
+            f.ylV = -m_animYawRate[aSide] * keep;
+            ++m_diag.yawLockUnplants;
+        }
+        SpringCritical(f.ylX, f.ylV, std::sqrt(c.angularStiffness), aDt);
+        const float bx = bound(f.ylX);
+        if (bx != f.ylX)
+        {
+            f.ylX = bx;
+            if (f.ylV * f.ylX > 0.0f)
+                f.ylV = 0.0f;
+        }
+        f.ylApply = f.ylX;
+        if (std::fabs(f.ylX) <= c.replantAngle)
+        {
+            f.ylFree = false; // plant again where the foot is shown
+            f.ylLock = animYaw + f.ylX / keep;
+            ++m_diag.yawLockReplants;
+        }
+    }
+
     void UpdateCrouchContact(int aSide, float dt, math::Vec3 toe, math::Vec3 off)
     {
         Foot& f = m_foot[aSide];
@@ -1175,6 +1297,7 @@ private:
         }
 #endif
         math::Vec3 shown = gl.p;
+        const float relockRelease = ReleaseWeight(f, wPrev); // yaw lock: share of the faded yaw still shown
         if (f.contact && !f.locked && !f.suppressed && !firmWait && !(PlantRefActive() && !(aContact > m_pcfg.contact)) && wPrev > 0.0f)
         {
             // still blending out (rotation space): the relock takes the point where the toe is displayed. Relock guard: a fade of a large
@@ -1216,9 +1339,15 @@ private:
             f.springX = f.springV = math::Vec3{};
             f.yawLock = m_animYawW[aSide];
             f.yawX = f.yawV = f.yawApply = 0.0f;
+            // yaw lock: planted at the shown foot yaw (a relock during the blend-out keeps the faded yaw)
+            f.ylFree = false;
+            f.ylLock = math::WrapAngle(m_animYawW[aSide] + (wPrev > 0.0f ? f.ylShown * relockRelease / (1.0f - m_ycfg.twistReduction) : 0.0f));
+            f.ylX = f.ylV = f.ylApply = 0.0f;
             f.firm = false; // firm feet: latched in the locked update below
             f.firmHold = f.firmShown = f.releaseTime = 0.0f;
         }
+        f.ylApply = 0.0f; // yaw lock: set by the soft-slip path below
+        bool ylOn = false;
         if (f.locked)
         {
             if (!f.contact)
@@ -1364,6 +1493,12 @@ private:
                     }
                     if (f.firm)
                         f.firmShown = Len(f.offset) * f.targetScale;
+                    // yaw lock about the toe (soft-slip locks only)
+                    if (m_yawLockOn && m_toePathLen[aSide] > 0 && !m_crouchContactPolicy && !f.crouchContact)
+                    {
+                        ylOn = true;
+                        UpdateYawLock(aSide, aDt, f.offset.x * f.targetScale, f.offset.y * f.targetScale, gc.p.x - gl.p.x, gc.p.y - gl.p.y);
+                    }
                 }
             }
         }
@@ -1373,6 +1508,7 @@ private:
             f.crouchVelocity = {};
             f.plantRef = f.unplanted = false;
             f.yawApply = 0.0f;
+            f.ylFree = false; // yaw lock: f.ylShown stays for a relock during the blend-out
             if (f.firm) // firm feet: the latch ends with the lock; a large shown offset fades at releaseSpeed
                 f.releaseTime = std::fmax(m_cfg.blendOutTime, f.firmShown / m_fcfg.releaseSpeed);
             f.firm = false;
@@ -1391,6 +1527,10 @@ private:
         d.plantRef = f.locked && f.plantRef;
         d.unplanted = d.plantRef && f.unplanted;
         d.yawOffset = d.plantRef ? f.yawApply : 0.0f;
+        d.yawLockOffset = f.locked && ylOn ? f.ylApply : 0.0f;
+        d.yawLockFree = f.locked && ylOn && f.ylFree;
+        if (f.locked)
+            f.ylShown = f.ylApply * w;
         if (w <= 0.0f)
         {
             f.offset = {};
@@ -1406,10 +1546,11 @@ private:
                 target.z += f.lift * w;
             m_solveLocked[aSide] = true;
             m_prevClampTime[aSide] = f.clampTime;
-            if (f.plantRef && f.yawApply != 0.0f && m_toePathLen[aSide] > 0)
+            const float yawApply = f.plantRef ? f.yawApply : f.ylApply; // reference plant model / yaw lock
+            if (yawApply != 0.0f && m_toePathLen[aSide] > 0)
             {
                 // planted yaw: the foot turns about its locked toe (the ankle target goes round it), weight as the position
-                const math::Quat rz = legik::AxisAngle(math::Vec3{0.0f, 0.0f, 1.0f}, f.yawApply * w);
+                const math::Quat rz = legik::AxisAngle(math::Vec3{0.0f, 0.0f, 1.0f}, yawApply * w);
                 const math::Vec3 toe = gl.p + f.offset * (w * f.targetScale);
                 const math::Vec3 rel = math::QuatRotate(rz, gc.p - gl.p);
                 const math::Vec3 yawTarget{toe.x + rel.x, toe.y + rel.y, target.z};
@@ -1662,6 +1803,8 @@ private:
     bool m_poleCarry = false;                          // batch 2 knee fix
     bool m_plantRef = false;                           // reference plant model for new locks (SetPlantReference)
     FootPlantReferenceConfig m_pcfg{};
+    bool m_yawLockOn = false; // planted foot yaw lock (SetYawLock)
+    FootYawLockConfig m_ycfg{};
     int m_supportHoldSide = -1;
     bool m_supportHoldEligible = false;
     bool m_standingStopSupport = false;
@@ -1715,6 +1858,7 @@ struct FootFeedPolicy
     bool classTurn = false;          // turn / pivot / reface / turn in place (FootSlipGroup 2)
     bool firmFeet = false;           // firm feet option (FootLocker::SetFirmFeet)
     bool firmGate = false;           // gate open, no hold, tpp (driver side)
+    bool yawLock = false;            // planted foot yaw lock option (FootLocker::SetYawLock)
     bool referencePlant = UTPP_FOOT_PLANT_REFERENCE != 0; // reference plant model for stand / sprint (FootPlantReferenceConfig)
     int32_t referencePlantStopsOnly = UTPP_FOOT_PLANT_STOPS_ONLY; // ... only while 1: `stops` (idle / stop databases), 2: classStop / classIdle
 };
@@ -1773,6 +1917,7 @@ inline void ApplyFootFeedPolicy(FootLocker& aLocker, const FootFeedPolicy& p)
     aLocker.SetStandingStopSupport(standingStop && p.classStop, standingStop && p.classIdle);
     // firm feet: stand / sprint on the ground in a turn or stop clip (crouch keeps its replant / contact policy)
     aLocker.SetFirmFeet(p.firmFeet);
+    aLocker.SetYawLock(p.yawLock);
     aLocker.SetFirmHold(p.firmFeet && p.firmGate && !p.airborne && k == 1.f && (p.stance == 1 || p.stance == 3) &&
                         (p.classTurn || p.classStop));
 }
