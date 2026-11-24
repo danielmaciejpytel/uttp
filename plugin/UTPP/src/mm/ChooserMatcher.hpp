@@ -749,7 +749,9 @@ struct MatcherConfig
     // downshiftDeferS: for this long after any gait downshift while moving (seconds) the edge does not interrupt the playing clip (it is
     // delivered once afterwards) and a Run_to_Walk transition is not picked over the continuing clip. A stick falling through the Walk
     // band to a release showed the transition for one feed before the Stop; a release within this time picks its Stop directly. A
-    // downshift that stays reaches its new clip up to this much later. 0 = off.
+    // non-loop clip that has played past its last indexed row (no continuing pose) is kept without a search for this time too, so a
+    // release whose run clip runs out of rows on the downshift feed does not show a Walk clip for one feed. A downshift that stays
+    // reaches its new clip up to this much later. 0 = off.
     float downshiftDeferS = 0.04f;
     // headingDipHoldS: for this long after a heading step (ChooserState::headingStepAgeS) a gait downshift while moving is searched in the
     // gait of the playing clip. A thumbstick swung to a new direction at a run passes inside its rim for one or two feeds (the stick
@@ -2101,6 +2103,17 @@ public:
             aState.movementMode == 0 &&
             last.movementMode == 0 && aState.stance == 0 && !aForce;
         const bool continueTurn = turnHold && contEvaluated;
+        // MatcherConfig::downshiftDeferS for a clip past its indexed rows: a non-loop clip that has played beyond its last indexed row (authored
+        // frames left, so no continuing pose) keeps playing without a search while the young downshift is deferred. Otherwise a stick released
+        // from a run whose clip runs out of rows on the feed of the downshift shows a Walk clip for one feed before the Stop.
+        // Mutation 49: such a clip is replaced by the search as before.
+        bool continueRowless = false;
+        if (UTPP_AND_NOT(JUMPPICK, 49) downshiftYoung && m_holdChangeAge < m_cfg.downshiftDeferS && m_numCand == 0 && !contEvaluated &&
+            res.interrupt == Interrupt::DoNotInterrupt && m_cur.db >= 0 && !(db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop))
+        {
+            const EntryRecord& en = db.Entry(m_cur.entry);
+            continueRowless = en.numRows > 0 && db.Row(en.firstRow + en.numRows - 1).frame < m_cur.frame;
+        }
         if (turnHold && !contEvaluated)
             m_turnHoldClip = -1;
         res.turnHold = continueTurn;
@@ -2124,7 +2137,7 @@ public:
         res.stageContUs = std::chrono::duration<float, std::micro>(tSearch - tCont).count();
         std::chrono::steady_clock::duration queryTime{};
         for (uint32_t i = 0; i < numDb && !continueShotTurn && !continueAimTurn && !continueStartTurn && !continueSlideExit && !continueRise &&
-                                  !continueExitClip && !continueStopClip && !continueDodge && !continueTurn; ++i)
+                                  !continueExitClip && !continueStopClip && !continueDodge && !continueTurn && !continueRowless; ++i)
         {
             const uint32_t d = dbList[i];
             const auto tq0 = std::chrono::steady_clock::now();
@@ -2210,7 +2223,9 @@ public:
         res.stageSearchUs = std::chrono::duration<float, std::micro>(tSelect - tSearch - queryTime).count();
 
         // ---- select
-        if (bestDb >= 0)
+        if (continueRowless)
+            res.continuingOutsideSet = !res.dbSet.Test(m_cur.db); // the clip goes on at its advanced time and rate (no row: no new history entry)
+        else if (bestDb >= 0)
         {
             const DatabaseRecord& D = db.Db(static_cast<uint32_t>(bestDb));
             const RowRecord& rr = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
@@ -2486,7 +2501,8 @@ public:
             res.clipTime = m_cur.clipTime;
             res.playRate = m_cur.playRate;
             res.playRateRatio = m_lastRateRatio;
-            PushHistory(static_cast<uint32_t>(m_cur.db), static_cast<uint32_t>(m_cur.localRow));
+            if (!continueRowless)
+                PushHistory(static_cast<uint32_t>(m_cur.db), static_cast<uint32_t>(m_cur.localRow));
         }
         m_lastState = aState;
         m_haveLastState = true;
