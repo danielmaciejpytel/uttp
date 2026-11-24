@@ -28,6 +28,8 @@
 //                       1 query and predicates, 2 also starts and stops, 4 loop clips at the capsule speed, 8 heading only, 16 loop
 //                       rate only at a steady speed, 32 converted feeds play at the game speed, 64 starts and stops in a short window
 //                       (speedconv::StartStopStep)); --speed-converter-friction F
+//                       rate only at a steady speed, 32 converted feeds play at the game speed, 256 the query prediction from
+//                       the converted state); --speed-converter-friction F
 //                       its turn friction per second (default: the gait ground friction); --speed-converter-max-turn D: larger turns
 //                       keep the game velocity (default: every turn is converted); --speed-converter-preset P: a named setting
 //                       (speedconv::PresetFor: 0 off, 1 safe, 2 stronger; replaces the three values above)
