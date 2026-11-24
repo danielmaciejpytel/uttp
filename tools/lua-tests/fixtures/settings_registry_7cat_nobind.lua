@@ -101,7 +101,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRotation"] = "false",
+    ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
@@ -299,7 +299,7 @@ return {
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
     "native UTPPSetMMCapsuleForecast(false)",
-    "native UTPPSetMMAimRotation(false)",
+    "native UTPPSetMMAimRotation(true)",
     "native UTPPSetMotionLeanCoverage(0)",
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
@@ -328,7 +328,7 @@ return {
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
-    "apply mm.aimRotation(false,\"ok\")",
+    "apply mm.aimRotation(true,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -534,7 +534,7 @@ return {
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
-    "apply mm.aimRotation(false,\"ok\")",
+    "apply mm.aimRotation(true,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -1539,7 +1539,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.aimRotation"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2440,7 +2440,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRotation"] = "false",
+    ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"auto\"",
@@ -3042,7 +3042,7 @@ return {
     "apply mm.farJumpGravity(false,\"ok\")",
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
-    "apply mm.aimRotation(false,\"ok\")",
+    "apply mm.aimRotation(true,\"ok\")",
     "apply mm.leanCoverage(\"standard\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
@@ -3137,7 +3137,7 @@ return {
     "apply vehicle.jumpOutSidePush(true,\"ok\")"
   },
   ["resetFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=6\r\
+core.defaultsRevision=7\r\
 core.settingsReset=2\r\
 core.log=true\r\
 core.diagnosticLogs=off\r\
@@ -3236,7 +3236,7 @@ mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
-mm.aimRotation=false\r\
+mm.aimRotation=true\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
@@ -3673,7 +3673,7 @@ vehicle.jumpOutSidePush=true\r\
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRotation"] = "false",
+    ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
     ["mm.air"] = "\"hold\"",
@@ -3767,7 +3767,7 @@ vehicle.jumpOutSidePush=true\r\
     ["vehicle.safeTeleportExit"] = "true"
   },
   ["storedFile"] = "# UTPP settings (utpp_core 0.5.5): key=value, delete a line to restore its default\r\
-core.defaultsRevision=6\r\
+core.defaultsRevision=7\r\
 core.settingsReset=2\r\
 core.log=false\r\
 core.diagnosticLogs=off\r\
@@ -3866,7 +3866,7 @@ mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
-mm.aimRotation=false\r\
+mm.aimRotation=true\r\
 mm.leanCoverage=standard\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
