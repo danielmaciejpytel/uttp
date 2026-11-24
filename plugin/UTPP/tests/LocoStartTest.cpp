@@ -169,6 +169,7 @@ struct Options
 {
     bool strafe = false;        // the host's hipfire pose hold (mc.visualStrafe) + aim facing
     float takeoffHoldS = -1.0f; // < 0 = production MapConfig default
+    bool converterOff = false;  // speed converter off: the predicates see the game velocity the identity reference uses
 };
 
 struct Frame
@@ -239,6 +240,8 @@ std::vector<Frame> Replay(Model& m, const std::vector<Row>& aRows, const Options
         mc.visualStrafe = aOpt.strafe;
         if (aOpt.takeoffHoldS >= 0.0f)
             mc.jumpTakeoffHoldS = aOpt.takeoffHoldS;
+        if (aOpt.converterOff)
+            adapter::ApplySpeedConverterPreset(mc, utpp::mm::speedconv::kPresetOff);
         const motion::ChooserState cs = adapter::MapToChooser(f, mc, map, ctx);
         const uint32_t nt = adapter::BuildQueryTrajectory(map, m.qtimes, traj.data(), uint32_t(traj.size()));
         if (nt == 0)
@@ -755,7 +758,11 @@ int main(int argc, char** argv)
             std::snprintf(name, sizeof name, "pivot %s yaw %.0f: IsPivoting frames %d, *_Pivots picks %d (want > 0 / > 0)", c.name, yaw, pv, pvPick);
             Dump(c.name, fr, 1.48, 1.62);
             Check(pv > 0 && pvPick > 0, name);
-            CheckPredicateIdentity(c.name, fr);
+            // the identity reference evaluates the predicates on the game velocity; the speed converter (on by default) feeds them the
+            // converted velocity on a turn, so the identity runs with it off
+            Options noConv;
+            noConv.converterOff = true;
+            CheckPredicateIdentity(c.name, Replay(m, rows, noConv));
         }
 
     // ---- jump take-off (JS1)

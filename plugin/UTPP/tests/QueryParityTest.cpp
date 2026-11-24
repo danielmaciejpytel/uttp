@@ -225,6 +225,8 @@ FeedResult RunFeed(const Path& p, Cat c, const QueryTimes& qt, const FeedSpec& f
     pc.speedScale = 1.0f;          // game m/s x 100 = motion cm/s (no piecewise map): the clip speed space
     pc.gameAnalogModifier = false; // CMC AnalogInputModifier = |stick| (UE PSTL l. 73)
     pc.stickMode = StickMode::VariableSpeedWalkRun;
+    // the speed converter (on by default) replaces the history velocity by the converted one; the parity is the game velocity's
+    ApplySpeedConverterPreset(pc, utpp::mm::speedconv::kPresetOff);
     MapState ms;
     const MapContext x0;
     const double R = fs.rotDeg / kR2D, cr = std::cos(R), sr = std::sin(R);
