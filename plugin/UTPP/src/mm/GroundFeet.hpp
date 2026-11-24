@@ -83,6 +83,8 @@ struct Config
     float bias = 0.0f;               // m, ground hit minus capsule height on flat ground (calibration)
     float heelAbove = 0.01f;         // m, a heel hit this far above the ball's plane at the heel is the support of that foot
     float flightDropFollow = 0.9f;   // m, on a stair flight going down (Samples::stair) a hit this deep below the capsule is used
+    float descentBase = 0.3f;        // pelvis lowering on a flight going down: share of the rise (stairsteps::swing::DescentDrop) ...
+    float descentPerTread = 0.15f;   // ... plus this share per tread of the fitted step (at most 4)
 };
 
 inline bool ValidConfig(const Config& c)
@@ -728,6 +730,8 @@ public:
                     front = d1 > d0 ? 1 : 0;
                 }
                 target = PelvisTarget(m_cfg, pf, g, aBodyOffset, front);
+                if (fl)
+                    target = std::fmin(target, stairsteps::swing::DescentDrop(*fl, m_cfg.descentBase, m_cfg.descentPerTread, m_cfg.maxDrop));
             }
         }
         if (dt > 0.0f)

@@ -477,6 +477,17 @@ inline bool Retarget(const Config& c, const Flight& f, Plan& p, float aS, float 
     return true;
 }
 
+// Pelvis lowering on a flight going down (m, <= 0): a share of the rise that grows with the treads per step (a walk a little, a run
+// or a sprint more), so the legs reach the lower treads with the knees bent instead of the feet hanging over them; weighted by the
+// flight's weight, at most aMax.
+inline float DescentDrop(const Flight& f, float aBase, float aPerTread, float aMax)
+{
+    if (!f.valid || !(f.rise < 0.0f) || !std::isfinite(f.rise) || !(f.weight > 0.0f))
+        return 0.0f;
+    const float share = aBase + aPerTread * float(std::clamp(f.treads, 0, 4));
+    return -std::fmin(-f.rise * share * std::clamp(f.weight, 0.0f, 1.0f), std::fmax(aMax, 0.0f));
+}
+
 // Shape of the planned glide over the progress: linear, or front-loaded (1 - (1 - u)^2: the foot heads for the lower tread right
 // after the lift-off and settles onto it).
 inline float GlideShape(float aU, bool aFront)
