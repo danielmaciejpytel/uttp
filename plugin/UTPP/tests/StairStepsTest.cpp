@@ -1,7 +1,8 @@
 // Steps fitted to stair treads (mm/StairSteps.hpp, option mm.stairSteps): the tread detector on synthetic flights (17 cm / 28 cm
 // and 12 cm / 32 cm, up and down, 30 / 60 / 144 Hz), no estimate on flat ground or a smooth slope, the stride fit (whole treads per
 // step, cadence, no fit below the shortest step, hysteresis), the tread phase error, the runtime switch (off = no output) and the
-// lowered stride floor of the stride warp (StrideWarp.hpp Floor, the default floor unchanged).
+// lowered stride floor of the stride warp (StrideWarp.hpp Floor, the default floor unchanged) and the swing over a flight
+// (stairsteps::swing: smooth maximum, swing plan, glide, follow, landing from the clip, nose / tread clearance, pelvis drop).
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -213,8 +214,133 @@ static void Floor()
     Check(std::fabs(stridewarp::TargetScale(s) - 0.4f) < 1e-6f, "target scale 0.4 with a stair floor of 0.35");
 }
 
+static Flight MakeFlight(float rise, float tread, int treads)
+{
+    Flight f;
+    f.valid = 1;
+    f.weight = 1.0f;
+    f.tread = tread;
+    f.rise = rise;
+    f.dirX = 1.0f;
+    f.dirY = 0.0f;
+    f.treads = treads;
+    return f;
+}
+
+static void Swing()
+{
+    namespace sw = swing;
+    const sw::Config c{};
+    // smooth maximum: the larger one apart, no kink at equality, never below either
+    Check(std::fabs(sw::SmoothMax(1.0f, 0.0f, 0.015f) - 1.0f) < 1e-3f, "smooth max: the larger height when far apart");
+    Check(std::fabs(sw::SmoothMax(0.3f, 0.3f, 0.015f) - 0.3075f) < 1e-5f, "smooth max: equal heights raised by half the width");
+    Check(sw::SmoothMax(0.30f, 0.29f, 0.015f) >= 0.30f, "smooth max: never below the larger");
+    // plan with a standing support: the landing is the fit's treads past the support, on the tread above / below it
+    const Flight up = MakeFlight(0.17f, 0.28f, 2);
+    sw::Plan p;
+    Check(sw::PlanSwing(c, up, -0.14f, 1.0f, 0.14f, 1.17f, true, p), "plan: support foot standing");
+    Check(std::fabs(p.sLand - (0.14f + 2.0f * 0.28f)) < 1e-5f && std::fabs(p.h1 - (1.17f + 2.0f * 0.17f)) < 1e-5f && p.anchored,
+          "plan: landing two treads past the support, two rises higher, anchored");
+    // no support (the flight phase of a run): two steps past the tread the foot left, not anchored
+    Check(sw::PlanSwing(c, up, 0.14f, 1.0f, NAN, NAN, false, p), "plan: flight phase");
+    Check(std::fabs(p.sLand - (0.14f + 4.0f * 0.28f)) < 1e-5f && std::fabs(p.h1 - (1.0f + 4.0f * 0.17f)) < 1e-5f && !p.anchored,
+          "plan: flight phase lands two steps on");
+    Check(!sw::PlanSwing(c, MakeFlight(0.17f, 0.28f, 0), 0.14f, 1.0f, NAN, NAN, false, p), "plan: no fit in the flight phase = no plan");
+    // no fit with a support: as far ahead of the support as the foot is behind it
+    Check(sw::PlanSwing(c, MakeFlight(-0.17f, 0.28f, 0), -0.14f, 1.17f, 0.42f, 1.0f, true, p) && std::fabs(p.sLand - 0.98f) < 1e-5f &&
+              !p.anchored,
+          "plan: no fit mirrors the step about the support");
+    Check(!sw::PlanSwing(c, MakeFlight(0.17f, 0.28f, 0), 0.10f, 1.0f, 0.12f, 1.0f, true, p), "plan: a swing shorter than minSwing = none");
+    // glide: reaches the landing tread at the landing, linear going up, front-loaded going down, no jump when the plan moves
+    sw::Plan g;
+    g.h0 = 0.0f;
+    g.h1 = -0.34f;
+    g.s0 = 0.0f;
+    g.sLand = 1.0f;
+    float path = 0.0f, prev = 0.0f;
+    bool mono = true;
+    float half = 0.0f;
+    for (int i = 1; i <= 100; ++i)
+    {
+        const float s = 0.01f * float(i);
+        const float n = sw::PathStep(g, path, prev, s, true);
+        mono = mono && n <= path + 1e-6f;
+        path = n;
+        prev = s;
+        if (i == 50)
+            half = path;
+    }
+    Check(mono && std::fabs(path - g.h1) < 1e-4f, "glide down: monotone, on the landing tread at the landing");
+    Check(std::fabs(half - g.h1 * 0.75f) < 2e-3f, "glide down: front-loaded (3/4 of the drop at half the way)");
+    path = 0.0f;
+    prev = 0.0f;
+    g.h1 = 0.34f;
+    for (int i = 1; i <= 50; ++i)
+    {
+        const float s = 0.01f * float(i);
+        path = sw::PathStep(g, path, prev, s, false);
+        prev = s;
+    }
+    Check(std::fabs(path - 0.17f) < 1e-3f, "glide up: linear (half the rise at half the way)");
+    g.sLand = 1.28f; // the landing moved one tread on: the glide goes on from where it is
+    const float before = path;
+    path = sw::PathStep(g, path, prev, prev + 0.01f, false);
+    Check(path >= before && path - before < 0.02f, "glide: a moved landing does not jump the height");
+    // landing from the clip: a sinking ball moves a free plan's landing, an anchored plan stays
+    sw::Plan r;
+    Check(sw::PlanSwing(c, up, 0.14f, 1.0f, NAN, NAN, false, r), "retarget: plan");
+    Check(sw::Retarget(c, up, r, 0.80f, 4.0f, 0.10f, -1.0f) && std::fabs(r.sLand - 1.20f) < 1e-5f &&
+              std::fabs(r.h1 - (1.0f + 0.17f * (std::floor(1.20f / 0.28f) - std::floor(0.14f / 0.28f)))) < 1e-5f,
+          "retarget: landing 0.1 s ahead on the tread under it");
+    Check(!sw::Retarget(c, up, r, 0.80f, 4.0f, 0.10f, 0.5f), "retarget: a rising ball = no prediction");
+    Check(sw::PlanSwing(c, up, -0.14f, 1.0f, 0.14f, 1.17f, true, r) && !sw::Retarget(c, up, r, 0.30f, 4.0f, 0.1f, -1.0f),
+          "retarget: an anchored plan stays");
+    // follow: a higher target at once, a lower one smoothly and never below it, stable for a long step
+    float h = 0.0f, v = 0.0f;
+    sw::Follow(h, v, 0.1f, c.follow, 1.0f / 60.0f);
+    Check(h == 0.1f, "follow: a higher ground at once");
+    h = 0.17f;
+    v = 0.0f;
+    sw::Follow(h, v, 0.0f, c.follow, 1.0f / 60.0f);
+    Check(h > 0.0f && h < 0.17f, "follow: a lower ground smoothly");
+    bool above = true;
+    for (int i = 0; i < 200; ++i)
+    {
+        sw::Follow(h, v, 0.0f, c.follow, 1.0f / 30.0f);
+        above = above && h >= 0.0f;
+    }
+    Check(above && h < 1e-3f, "follow: settles on the lower ground, never below it");
+    h = 0.17f;
+    v = 0.0f;
+    sw::Follow(h, v, 0.0f, c.follow, 0.25f);
+    Check(std::isfinite(h) && h >= 0.0f && h < 0.17f, "follow: stable for a long step");
+    // clearance: the toe over the nose line going up, the heel over the tread it leaves going down
+    sw::Plan q;
+    Check(sw::PlanSwing(c, up, 0.14f, 0.0f, NAN, NAN, false, q), "clearance: plan");
+    const float sToe = 0.27f; // toe just short of the first nose (0.28), clip toe on the floor, half way
+    const float gUp = sw::SwingGround(c, up, q, 0.0f, 0.5f, sToe, 0.0f, 0.0f, 0.0f, 0.10f, 0.0f);
+    Check(gUp + 1e-4f >= sw::NoseLineUp(up, sToe, q.hs, q.ks), "clearance up: toe not below the nose line");
+    const Flight down = MakeFlight(-0.17f, 0.28f, 2);
+    sw::Plan d;
+    Check(sw::PlanSwing(c, down, 0.14f, 0.0f, NAN, NAN, false, d), "clearance down: plan");
+    const float gDown = sw::SwingGround(c, down, d, -0.30f, 0.4f, 0.40f, 0.05f, 0.20f, 0.0f, 0.33f, 0.05f);
+    Check(gDown >= -1e-3f, "clearance down: the heel over the tread it leaves holds the foot");
+    const float gPast = sw::SwingGround(c, down, d, -0.30f, 0.4f, 0.70f, 0.05f, 0.50f, 0.0f, 0.63f, 0.05f);
+    Check(gPast < -0.15f, "clearance down: past the nose the foot glides down");
+    // pelvis drop: only going down, more with longer steps, weighted and capped
+    Check(sw::DescentDrop(up, 0.3f, 0.15f, 0.25f) == 0.0f, "descent drop: none going up");
+    const float d1 = sw::DescentDrop(MakeFlight(-0.17f, 0.28f, 1), 0.3f, 0.15f, 0.25f);
+    const float d4 = sw::DescentDrop(MakeFlight(-0.17f, 0.28f, 4), 0.3f, 0.15f, 0.25f);
+    Check(d1 < 0.0f && d4 < d1 && std::fabs(d4 + 0.17f * 0.9f) < 1e-5f, "descent drop: more with more treads per step");
+    Flight half2 = MakeFlight(-0.17f, 0.28f, 4);
+    half2.weight = 0.5f;
+    Check(std::fabs(sw::DescentDrop(half2, 0.3f, 0.15f, 0.25f) - 0.5f * d4) < 1e-5f, "descent drop: weighted");
+    Check(sw::DescentDrop(MakeFlight(-0.40f, 0.28f, 4), 0.3f, 0.15f, 0.25f) == -0.25f, "descent drop: capped");
+}
+
 int main()
 {
+    Swing();
     Runtime();
     Detection();
     Fit();

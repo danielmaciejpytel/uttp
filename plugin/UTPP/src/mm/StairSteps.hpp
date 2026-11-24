@@ -352,11 +352,12 @@ inline float MinJerk(float aU)
     const float u = std::clamp(aU, 0.0f, 1.0f);
     return u * u * u * (10.0f + u * (-15.0f + 6.0f * u));
 }
-// Smooth maximum of two heights: max(a, b) once they are more than aEps apart, a when they are equal, without a kink in between.
+// Smooth maximum of two heights: never below either, max(a, b) once they are more than aEps apart, aEps / 2 above them when they are
+// equal, without a kink in between (a foot held above a tread never cuts into it).
 inline float SmoothMax(float aA, float aB, float aEps)
 {
     const float d = aA - aB;
-    return 0.5f * (aA + aB + std::sqrt(d * d + aEps * aEps) - aEps);
+    return 0.5f * (aA + aB + std::sqrt(d * d + aEps * aEps));
 }
 // Height of the line through the nose tips of a flight going up at s, for a support foot on tread aKs at height aHs: a toe kept above
 // it clears every nose it passes.
