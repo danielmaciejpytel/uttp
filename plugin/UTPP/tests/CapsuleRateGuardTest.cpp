@@ -81,7 +81,10 @@ int main()
     // ---- kCrouch: crouched, loop clips only
     {
         Check("crouch: crouched picks take the scale on loop clips only (scope 1)", caprate::Scope(0, caprate::kAll, 1) == 1);
-        Check("crouch: standing keeps the configured scope", caprate::Scope(0, caprate::kAll, 0) == 0 && caprate::Scope(2, caprate::kAll, 0) == 2);
+        Check("crouch: standing keeps the configured scope", caprate::Scope(0, caprate::kAll & ~caprate::kRefaceStarts, 0) == 0 &&
+                                                               caprate::Scope(2, caprate::kAll, 0) == 2 && caprate::Scope(1, caprate::kAll, 0) == 1);
+        Check("reface starts: standing with scope 0 leaves the reface start clips at the mapped rate (scope 3)",
+              caprate::Scope(0, caprate::kAll, 0) == 3 && caprate::Scope(0, caprate::kAll & ~caprate::kRefaceStarts, 0) == 0);
         Check("crouch: without the crouch guard the configured scope", caprate::Scope(0, caprate::kAll & ~caprate::kCrouch, 1) == 0);
     }
     // ---- blend: first order, no step, exact target in the end

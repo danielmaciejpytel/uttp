@@ -1200,8 +1200,8 @@ target_compile_options(utpp_motion_adapter_unit_capsule_rate_test PRIVATE ${UTPP
 target_compile_features(utpp_motion_adapter_unit_capsule_rate_test PRIVATE cxx_std_20)
 add_test(NAME utpp_motion_adapter_unit_capsule_rate_test COMMAND utpp_motion_adapter_unit_capsule_rate_test)
 # mutations (each must FAIL its check): 1 the forward ratio in every direction, 2 the scale switches per feed, 3 no dodge guard,
-# 4 a start reads the ratio at the speed of the feed, 5 crouched picks keep the configured scope
-foreach(_m 1 2 3 4 5)
+# 4 a start reads the ratio at the speed of the feed, 5 crouched picks keep the configured scope, 6 standing reface start clips take the scale
+foreach(_m 1 2 3 4 5 6)
   add_executable(utpp_motion_adapter_unit_capsule_rate_test_mut${_m} tests/CapsuleRateGuardTest.cpp src/mm/MotionAdapter.hpp)
   target_compile_options(utpp_motion_adapter_unit_capsule_rate_test_mut${_m} PRIVATE ${UTPP_WARNINGS} /EHsc)
   target_compile_features(utpp_motion_adapter_unit_capsule_rate_test_mut${_m} PRIVATE cxx_std_20)
@@ -1213,6 +1213,7 @@ set_tests_properties(utpp_motion_adapter_unit_capsule_rate_test_mut2 PROPERTIES 
 set_tests_properties(utpp_motion_adapter_unit_capsule_rate_test_mut3 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL dodge: the dodge and its decay")
 set_tests_properties(utpp_motion_adapter_unit_capsule_rate_test_mut4 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL start: a start reads the ratio")
 set_tests_properties(utpp_motion_adapter_unit_capsule_rate_test_mut5 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL crouch: crouched picks take")
+set_tests_properties(utpp_motion_adapter_unit_capsule_rate_test_mut6 PROPERTIES PASS_REGULAR_EXPRESSION "FAIL reface starts: standing with scope 0")
 
 # ---- step-down reach for deeper steps and the chooser time to land at the reference gravity (mm/MotionAdapter.hpp, mm/ChooserMatcher.hpp; off by default) ----
 add_executable(utpp_motion_adapter_unit_step_down_test tests/StepDownReachTest.cpp src/mm/MotionAdapter.hpp src/mm/ChooserMatcher.hpp)

@@ -844,7 +844,8 @@ inline constexpr int kDirection = 1; // ratio against the reference movement spe
 inline constexpr int kDodge = 2;     // the dodge and its decay at the rate of the mapped query
 inline constexpr int kStart = 4;     // the start phase (IsStarting): the ratio at the speed the start accelerates to
 inline constexpr int kCrouch = 8;    // crouched: loop clips only (rateScaleScope 1)
-inline constexpr int kAll = kDirection | kDodge | kStart | kCrouch;
+inline constexpr int kRefaceStarts = 16; // standing with scope 0: every pick but a reface start clip (rateScaleScope 3)
+inline constexpr int kAll = kDirection | kDodge | kStart | kCrouch | kRefaceStarts;
 inline constexpr float kBlendS = 0.2f; // time constant of the blend between feeds (s)
 inline constexpr float kSnap = 1.0e-4f; // closer than this to the target: the target (the scale returns to exactly 1)
 
@@ -885,13 +886,21 @@ inline float Target(float aScale, int aGuards, bool aDodge, float aDirectionFact
 #endif
     return (aGuards & kDirection) ? aScale * aDirectionFactor : aScale;
 }
-// kCrouch: the scope of a crouched feed (loop clips only), else aScope
+// kCrouch: the scope of a crouched feed (loop clips only); kRefaceStarts: a standing feed with scope 0 leaves the reface start clips at
+// the mapped query rate (a full-stick sprint start with a 180 deg reversal otherwise swaps its reface start once more; the other starts
+// keep the scale); else aScope
 inline int Scope(int aScope, int aGuards, int aStance)
 {
 #if UTPP_CAPSULE_RATE_MUTATION == 5
     return aScope; // mutation 5: crouched picks keep the configured scope
 #else
-    return (aGuards & kCrouch) && aStance == 1 ? 1 : aScope;
+    if ((aGuards & kCrouch) && aStance == 1)
+        return 1;
+#if UTPP_CAPSULE_RATE_MUTATION == 6
+    return aScope; // mutation 6: standing reface start clips take the scale
+#else
+    return (aGuards & kRefaceStarts) && aStance != 1 && aScope == 0 ? 3 : aScope;
+#endif
 #endif
 }
 // One feed of the first-order blend toward aTarget (time constant aTauS, <= 0 = the target at once); within kSnap of it, the target.
@@ -1107,10 +1116,11 @@ struct MapConfig
     // the strafe direction (the prediction of a back / side strafe is capped below the forward speed the game keeps); kDodge = the dodge
     // with its decay plays at the rate of the mapped query (its clip is timed by the dodge, not by a held speed); kStart = a start
     // (IsStarting) reads the ratio at the speed its prediction accelerates to; kCrouch = crouched, only loop clips take the scale (the
-    // crouch loop rule, CR-5).
+    // crouch loop rule, CR-5); kRefaceStarts = standing with scope 0, the reface start clips keep the mapped query rate (scope 3).
     // capsuleRateBlendS: time constant (s) of the first-order blend of the scale between feeds (a guard toggles the rate smoothly);
     // 0 = the scale of each feed as computed. 0 / 0 = the unguarded rate, bit for bit.
-    int capsuleRateGuards = caprate::kDirection | caprate::kDodge | caprate::kCrouch; // kStart off: it costs the steady loop gain
+    // kStart off: it costs the steady loop gain (kRefaceStarts acts per pick and keeps the loops at the capsule rate)
+    int capsuleRateGuards = caprate::kDirection | caprate::kDodge | caprate::kCrouch | caprate::kRefaceStarts;
     float capsuleRateBlendS = caprate::kBlendS;
     // Speed converter (speedconv bits, 0 = off): kQuery = the query trajectory and the movement predicates use the velocity the
     // reference character movement would have while chasing the game velocity (speedconv::Step: curved turns, limited acceleration and
