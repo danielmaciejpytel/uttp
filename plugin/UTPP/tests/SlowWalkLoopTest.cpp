@@ -52,7 +52,7 @@ struct Rig
         return true;
     }
     // new matcher + map state with the production stance / filter settings (MotionDriver.cpp)
-    // analogFloorMs: the minimum analog walk setting (CET mm.minWalkSpeed; MotionDriver maps it with adapter::SetAnalogFloor), 0 = off
+    // analogFloorMs: the minimum analog walk setting (CET mm.minAnalogWalkSpeed; MotionDriver maps it with adapter::SetAnalogFloor), 0 = off
     bool Reset(const MatcherConfig& cfg, float togglePoint = 0.f, float analogFloorMs = 0.f)
     {
         std::string err;
@@ -210,7 +210,7 @@ int main(int argc, char** argv)
         CHECK(a.back().gait == 0 && std::fabs(a.back().speedCmS - 102.f) < 5.f, "Hz=%d analog 0.82 m/s queries ~102 cm/s (%.0f) in the Walk gait", hz, a.back().speedCmS);
         CHECK(lo >= 0.5f - 1e-4f && hi < 0.85f - 1e-3f, "Hz=%d analog rate in [0.5, 0.85) (%.3f..%.3f)", hz, lo, hi);
 
-        // ---- walk toggle at the walk point (CET mm.walkSpeed 1.6 m/s -> 200 cm/s)
+        // ---- walk toggle at the walk point (CET mm.walkToggleSpeed 1.6 m/s -> 200 cm/s)
         rig.Reset(on, 1.6f);
         auto g = rig.Steady(1.6f, 1.0f, true, 8.0f);
         CHECK(TailLoops(g, 3.0f, rig.dt, tr, lo, hi) && tr == 0, "Hz=%d G walk 1.6 m/s: only Walk_Loop_* in the last 3 s (transitions %d)", hz, tr);
@@ -288,7 +288,7 @@ int main(int argc, char** argv)
             CHECK(SameSeq(x, y), "Hz=%d %s: flag on == flag off", hz, what);
         }
 
-        // ---- minimum analog walk speed (mm.minWalkSpeed 0.82): a small tilt |mv| 0.09 while the script lifts the capsule from 0 to
+        // ---- minimum analog walk speed (mm.minAnalogWalkSpeed 0.82): a small tilt |mv| 0.09 while the script lifts the capsule from 0 to
         // 0.82 m/s leaves the Idles database within 0.25 s (feed 2026-10-31 17:18: Idles for ~3.2 s while the capsule moved at 0.24 m/s)
         for (const int psm : {adapter::kPsmStand, adapter::kPsmCrouch})
         {

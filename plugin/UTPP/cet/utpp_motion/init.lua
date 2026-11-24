@@ -8,7 +8,7 @@
 --                  pushes body + overlay inputs; switched off again: SetEnabled(false) once.
 --   mm.pistolAuto bool, default true - model-tag and Ready/Aim policy in Glue.
 --   mm.pistol1h bool, default true - fallback for unknown/conflicting models, or manual pose when auto is off.
---   mm.debug    bool, default true - always draw the status window (it is also drawn while the CET overlay is open).
+--   mm.debug    bool, default false - always draw the status window (it is also drawn while the CET overlay is open).
 --   mm.aimGameUpper bool, default false (DLL default false too; the value is sent once after start-up, then on every change) - the
 --                  motion set-motionfix item 2: while aiming with a weapon overlay the upper body comes from the game + the aim
 --                  offset (native UTPPSetMotionAimGameUpper).
@@ -69,11 +69,11 @@
 --                  (SetAimPoint: the native aim / camera targets = the hit point P of the camera ray). P is switched on only while motion is on,
 --                  the setting is on and the DLL acknowledged the loop (never P alone: open loop from the chest at a near P); re-checked
 --                  every Sync (camera module loaded later, motion off -> P off, an older DLL without the native -> P off).
---   mm.walkSpeed float 0 .. 3.5, default 1.9 (m/s; the game walk point the motion speed map puts on the motion set Walk cap, DLL default 1.9; 0 = off) - capsule speed at the full stick while
+--   mm.walkToggleSpeed float 0 .. 3.5, default 1.9 (m/s; the game walk point the motion speed map puts on the motion set Walk cap, DLL default 1.9; 0 = off) - capsule speed at the full stick while
 --                  the game walk toggle (G) is on (native UTPPSetMotionWalkSpeed; reds UTPPUpdateWalkSpeed holds the capsule there with one
 --                  MaxSpeed multiplier = walkSpeed / 2.72, the speed the unmodified toggle gives in game 2.5; the motion driver maps it onto the
 --                  motion set Walk cap). 0 = vanilla toggle speed. Third person, on the ground, motion driving only; sprint, aim walk, crouch, air: untouched.
---   mm.minWalkSpeed float 0 .. 1.6, default 0.82 (m/s at the stand run curve, the |mv| 0.455 point; DLL default 0.82; 0 = off) - minimum capsule speed of
+--   mm.minAnalogWalkSpeed float 0 .. 1.6, default 0.82 (m/s at the stand run curve, the |mv| 0.455 point; DLL default 0.82; 0 = off) - minimum capsule speed of
 --                  a small stick tilt (native UTPPSetMotionMinAnalogWalk; reds UTPPUpdateAnalogFloor lifts the capsule with one MaxSpeed multiplier
 --                  1 .. 4 = the fraction of the full-stick speed raised to this one, the motion driver gives the prediction the lifted cap). 0 = the
 --                  game's own slow speeds. Third person, on the ground, stand / crouch, motion driving only; sprint, aim walk, air: untouched.
@@ -664,7 +664,7 @@ function M.SetBodyYawOffset(v, api)
   return M.want.bodyYawOffsetFemale
 end
 
--- Walk toggle speed (mm.walkSpeed): the same contract as the trims (process-lifetime DLL value, default 1.9, 0 = off, nothing called while
+-- Walk toggle speed (mm.walkToggleSpeed): the same contract as the trims (process-lifetime DLL value, default 1.9, 0 = off, nothing called while
 -- the wanted value equals what the DLL holds, only while motion is on). nil / non-numeric / NaN -> 0; otherwise clamped to 0 .. 3.5 (the native
 -- rejects more).
 local function walkSpeedMs(v)
@@ -687,11 +687,11 @@ function M.ApplyWalkSpeed(api)
   end
   if not ok or accepted == false then
     M.rt.errors = M.rt.errors + 1
-    if M.rt.errors <= 3 then log("mm.walkSpeed: native call failed") end
+    if M.rt.errors <= 3 then log("mm.walkToggleSpeed: native call failed") end
     return false
   end
   M.rt.walkSpeedApplied = v
-  log("mm.walkSpeed -> " .. tostring(v) .. " (native call accepted)")
+  log("mm.walkToggleSpeed -> " .. tostring(v) .. " (native call accepted)")
   return true
 end
 function M.SetWalkSpeed(v, api)
@@ -700,7 +700,7 @@ function M.SetWalkSpeed(v, api)
   return M.want.walkSpeed
 end
 
--- Minimum analog walk speed (mm.minWalkSpeed): the same contract as the walk speed (process-lifetime DLL value, default 0.82, 0 = off,
+-- Minimum analog walk speed (mm.minAnalogWalkSpeed): the same contract as the walk speed (process-lifetime DLL value, default 0.82, 0 = off,
 -- nothing called while the wanted value equals what the DLL holds, only while motion is on). nil / non-numeric / NaN -> 0; otherwise clamped
 -- to 0 .. 1.6 (the native rejects more).
 local function minAnalogWalkMs(v)
@@ -723,11 +723,11 @@ function M.ApplyMinAnalogWalk(api)
   end
   if not ok or accepted == false then
     M.rt.errors = M.rt.errors + 1
-    if M.rt.errors <= 3 then log("mm.minWalkSpeed: native call failed") end
+    if M.rt.errors <= 3 then log("mm.minAnalogWalkSpeed: native call failed") end
     return false
   end
   M.rt.minAnalogWalkApplied = v
-  log("mm.minWalkSpeed -> " .. tostring(v) .. " (native call accepted)")
+  log("mm.minAnalogWalkSpeed -> " .. tostring(v) .. " (native call accepted)")
   return true
 end
 function M.SetMinAnalogWalk(v, api)
@@ -1031,13 +1031,13 @@ function M.RegisterSettings(core)
       .. "and feet together. With the camera over the right shoulder he can look turned to the right; a few degrees to the left "
       .. "squares him with the view (default 0 = off). The movement direction is unchanged. Not while aiming or during weapon actions.",
     apply = function(v) M.SetBodyYawOffsetMale(v) end })
-  core.Register({ key = "mm.walkSpeed", section = "animation", type = "float", default = 1.9, min = 0, max = 3.5, step = 0.1,
+  core.Register({ key = "mm.walkToggleSpeed", section = "animation", type = "float", default = 1.9, min = 0, max = 3.5, step = 0.1,
     label = "Walk speed (m/s)",
     desc = "Speed of V's walk when the walk toggle (G) is on and the stick is fully pushed (default 1.9). The game's own walk "
       .. "toggle is about 2.7 m/s. 0 = the game's own speed. Only on foot in third person; sprinting, aiming, crouching and "
       .. "jumping are unchanged.",
     apply = function(v) M.SetWalkSpeed(v) end })
-  core.Register({ key = "mm.minWalkSpeed", section = "animation", type = "float", default = 0.82, min = 0, max = 1.6, step = 0.01,
+  core.Register({ key = "mm.minAnalogWalkSpeed", section = "animation", type = "float", default = 0.82, min = 0, max = 1.6, step = 0.01,
     label = "Minimum walk speed (m/s)",
     desc = "Lowest speed of V's walk when the stick is only slightly tilted. The game moves her slower than any walking animation "
       .. "there, so her feet glided over the ground; 0.82 (default) is the speed of a half-tilted stick. 0 = the game's own speed. "

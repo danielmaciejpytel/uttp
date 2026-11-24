@@ -478,7 +478,7 @@ inline float GameStickSpeedFraction(float aStick)
     return 1.0f;
 }
 
-// ---- Minimum analog walk speed (CET mm.minWalkSpeed; the game-side counterpart of motion's CMC MinAnalogWalkSpeed) ----
+// ---- Minimum analog walk speed (CET mm.minAnalogWalkSpeed; the game-side counterpart of motion's CMC MinAnalogWalkSpeed) ----
 // A small stick tilt moves the capsule slower than any clip of the database (|mv| 0.09 -> 0.24 m/s, 0.27 -> 0.42 m/s; the slowest walk
 // loop at the 0.5 rate floor is ~0.87 game m/s), so V glides. The script (utpp.reds UTPPUpdateAnalogFloor) raises the capsule with one
 // MaxSpeed multiplier = AnalogWalkFloorMul: the fraction of the full-stick speed at the stick is lifted to aFracMin (= setting /
@@ -492,7 +492,7 @@ inline constexpr float kAnalogFloorStick[kAnalogFloorPoints] = {0.09f, 0.18f, 0.
 inline constexpr float kAnalogFloorSpeed[kAnalogFloorPoints] = {0.24f, 0.30f, 0.41f, 0.82f, 1.94f, 2.48f, 3.84f};
 inline constexpr float kAnalogFloorMulMax = 4.0f;  // the |mv| < 0.09 range is not measured (linear from 0 there)
 inline constexpr float kAnalogFloorMulMin = 1.03f; // below: 1 (the measured |mv| 0.45 cluster, just under 0.455, would keep ~1.01)
-inline constexpr float kMinAnalogWalkMaxMs = 1.6f; // upper bound of the setting (CET mm.minWalkSpeed, SetMinAnalogWalk); 0 = off
+inline constexpr float kMinAnalogWalkMaxMs = 1.6f; // upper bound of the setting (CET mm.minAnalogWalkSpeed, SetMinAnalogWalk); 0 = off
 #ifndef UTPP_STICK_SPEED_FIXED_DEFAULT
 #define UTPP_STICK_SPEED_FIXED_DEFAULT 0
 #endif
@@ -571,7 +571,7 @@ inline float AnalogFloorStickFor(float aMinMs)
 }
 
 // Walk toggle: the floor is the same m/s, but the full-stick speed is the walk toggle speed (MapConfig::gameWalkTogglePoint, CET
-// mm.walkSpeed), so its fraction is setting / walk speed (0.82 / 1.6 = 0.5125) instead of setting / 3.84 (0.2135 x 1.6 = only 0.34 m/s:
+// mm.walkToggleSpeed), so its fraction is setting / walk speed (0.82 / 1.6 = 0.5125) instead of setting / 3.84 (0.2135 x 1.6 = only 0.34 m/s:
 // V glided in Idle under G with a small tilt, 2026-10-31 22:57). Capped at 1 (a floor at or above the walk speed lifts every tilt to the
 // full walk speed). 0 for a floor that is off (AnalogFloorFraction 0) or a walk speed <= 0 / NaN.
 inline float AnalogFloorFractionWalk(float aMinMs, float aWalkFullMs)
@@ -960,14 +960,14 @@ struct MapConfig
     // feeds (a thumbstick swung to a new direction; the camera under a fast mouse flick turns 3-5 deg per feed, under 35 deg in 0.1 s).
     // 0 = only the change between two feeds.
     float headingSweepS = 0.1f;
-    // G2: capsule speed (game m/s) at the FULL stick while the game walk toggle is on (CET mm.walkSpeed -> UTPPSetMotionWalkSpeed; the
+    // G2: capsule speed (game m/s) at the FULL stick while the game walk toggle is on (CET mm.walkToggleSpeed -> UTPPSetMotionWalkSpeed; the
     // script holds the capsule there with one MaxSpeed multiplier, utpp.reds UTPPUpdateWalkSpeed). 0 = off: nothing below changes, bit
     // for bit. > 0 (and < gameStandPoints[1]) and MotionFeed::wantsToWalk on the stand ground (EffectiveMapConfig): the first stand speed
     // point becomes this speed -> motion Walk cap (cmc.walkSpeed), so this speed is a steady walk (gameCap = point, analog modifier 1 at the
     // full stick) instead of the 2.72 m/s the toggle gives unmodified, which the 1.6 -> 200 / 3.85 -> 500 map put at ~350 cm/s over the
     // Walk cap 200 (measured game 2.5: G + full W = 2.72 m/s).
     float gameWalkTogglePoint = 0.0f;
-    // Minimum analog walk speed (CET mm.minWalkSpeed -> UTPPSetMotionMinAnalogWalk; the script lifts the capsule with one MaxSpeed
+    // Minimum analog walk speed (CET mm.minAnalogWalkSpeed -> UTPPSetMotionMinAnalogWalk; the script lifts the capsule with one MaxSpeed
     // multiplier, utpp.reds UTPPUpdateAnalogFloor / AnalogWalkFloorMul). Set both with SetAnalogFloor: analogFloorFrac = the floor's
     // fraction of the full-stick speed (AnalogFloorFraction), analogFloorStick = the stick of that fraction (AnalogFloorStickFor, 0.455 at
     // 0.82 m/s). With input below analogFloorStick on the ground in Stand / Crouch without sprint (the script's gate) MapToChooser queries
@@ -2639,7 +2639,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
 // same walk calibration (point -> cmc.walkSpeed). The result is a copy of c with only those fields changed; with neither condition the
 // caller keeps c itself (EffectiveMapConfigNeeded false), so the defaults stay bit-identical.
 inline constexpr float kTier2SlowDeltaMs = 1.3f;
-inline constexpr float kWalkSpeedMaxMs = 3.5f; // upper bound of the walk speed setting (CET mm.walkSpeed, SetWalkSpeed); 0 = off
+inline constexpr float kWalkSpeedMaxMs = 3.5f; // upper bound of the walk speed setting (CET mm.walkToggleSpeed, SetWalkSpeed); 0 = off
 inline bool WalkMapApplies(const MapConfig& c, const MotionFeed& f)
 {
     const float p = c.gameWalkTogglePoint;

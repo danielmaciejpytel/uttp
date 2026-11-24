@@ -1,4 +1,4 @@
-// Minimum analog walk speed (CET mm.minWalkSpeed): adapter::AnalogWalkFloorMul (the MaxSpeed multiplier the script applies), its stick
+// Minimum analog walk speed (CET mm.minAnalogWalkSpeed): adapter::AnalogWalkFloorMul (the MaxSpeed multiplier the script applies), its stick
 // AnalogFloorStickFor (MapConfig::analogFloorStick, the same extended curve both ways) and adapter::MapToChooser with the floor on / off:
 // identical at and above the floor stick (Stand, Crouch), and the predicted cap is the speed the lifted capsule really reaches. No data files.
 // Mutations (analogfloor.cmake, each must fail its own check): 1 = no 1.03 threshold (the |mv| 0.45 check), 2 = no driver lift (the

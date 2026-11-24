@@ -204,7 +204,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.description", "Holding aim (RMB) with empty hands in third person moves the camera close over the shoulder; the mouse wheel zooms further in steps (all steps stay in third person). Releasing aim returns to third person.")
   public let camera_zoomUnarmed_enabled: Bool = true;
 
-  // mm.walkSpeed
+  // mm.walkToggleSpeed
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Camera")
   @runtimeProperty("ModSettings.category.order", "2")
@@ -214,7 +214,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.min", "0.0")
   @runtimeProperty("ModSettings.max", "3.5")
   @runtimeProperty("ModSettings.step", "0.1")
-  public let mm_walkSpeed: Float = 1.9;
+  public let mm_walkToggleSpeed: Float = 1.9;
 
   // mm.strideWarp
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -758,7 +758,7 @@ public class UTPPModSettings extends IScriptable {
     s += "camera_invertX=" + UTPPMSBool(this.camera_invertX) + "\n";
     s += "camera_invertY=" + UTPPMSBool(this.camera_invertY) + "\n";
     s += "camera_zoomUnarmed_enabled=" + UTPPMSBool(this.camera_zoomUnarmed_enabled) + "\n";
-    s += "mm_walkSpeed=" + UTPPMSFloat(this.mm_walkSpeed) + "\n";
+    s += "mm_walkToggleSpeed=" + UTPPMSFloat(this.mm_walkToggleSpeed) + "\n";
     s += "mm_strideWarp=" + UTPPMSBool(this.mm_strideWarp) + "\n";
     s += "mm_firmFeet=" + UTPPMSBool(this.mm_firmFeet) + "\n";
     s += "mm_leanScale=" + UTPPMSFloat(this.mm_leanScale) + "\n";

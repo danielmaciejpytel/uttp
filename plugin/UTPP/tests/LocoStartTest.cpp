@@ -234,8 +234,8 @@ std::vector<Frame> Replay(Model& m, const std::vector<Row>& aRows, const Options
         mc.stanceCleanHoldS = adapter::kStanceCleanHoldSeconds;
         mc.stanceCleanMaxSpeedMs = adapter::kStanceCleanMaxSpeedMs;
         mc.stanceSpeedBlendTime = matcher.BlendTimeFor(motion::ChooserState{}, motion::ChooserState{});
-        mc.gameWalkTogglePoint = 1.6f;   // CET mm.walkSpeed of the session
-        adapter::SetAnalogFloor(mc, 0.82f); // CET mm.minWalkSpeed of the session
+        mc.gameWalkTogglePoint = 1.6f;   // CET mm.walkToggleSpeed of the session
+        adapter::SetAnalogFloor(mc, 0.82f); // CET mm.minAnalogWalkSpeed of the session
         mc.gravity = 16.0f;
         mc.visualStrafe = aOpt.strafe;
         if (aOpt.takeoffHoldS >= 0.0f)

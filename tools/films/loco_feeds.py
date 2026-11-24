@@ -3,7 +3,7 @@ tools/replay/footlock/gen_synth_feeds.py (columns t dt vx vy vz mvx mvy yawDeg c
 
   python -I loco_feeds.py      -> Build\\work\\loco-films-20261109\\feeds\\loco_film1.feed, loco_film3.feed (+ .json: segments)
 Capsule model (parameters measured in the recorded in-game feed dumps, loco_feed_stats.py over utpp-feed-*.txt):
-  full-stick speeds stand 3.84 m/s, crouch 2.73 m/s, sprint 8.22 m/s; walk = UTPP walk speed 1.6 m/s (mm.walkSpeed) at stick 0.42;
+  full-stick speeds stand 3.84 m/s, crouch 2.73 m/s, sprint 8.22 m/s; walk = UTPP walk speed 1.6 m/s (mm.walkToggleSpeed) at stick 0.42;
   velocity chases the stick target: speeding up at most ACCEL (p50 of the dumps 3.5 m/s2), slowing down / turning at most BRAKE
   (p50 9.3 m/s2); the actor yaw follows the velocity heading at YAW_RATE deg/s once the speed is above 0.5 m/s (as gen_synth_feeds.py;
   dumps: p90 325 deg/s while turning).  Camera yaw 0, stick in camera space (x right, y forward).

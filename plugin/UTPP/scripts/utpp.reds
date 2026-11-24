@@ -692,13 +692,13 @@ public func UTPPUpdateShooterModeSpeed(player: ref<PlayerPuppet>, scriptInterfac
   player.utppShooterModeSpeedMul = want;
 }
 
-// ---- walk toggle speed (CET mm.walkSpeed -> UTPPSetMotionWalkSpeed) ----
+// ---- walk toggle speed (CET mm.walkToggleSpeed -> UTPPSetMotionWalkSpeed) ----
 // The vanilla walk toggle (G, PSM bool WalkToggled) holds the capsule at 2.72 m/s at the full stick (measured game 2.5, capsule |v| stable;
 // without G the full stick gives 3.84 m/s), while the motion speed map puts game 1.6 m/s on the motion set walk cap (200 cm/s): at 2.72 the walk loops slid (root offset -10 .. -18 cm).
 // UTPP adds one Multiplier on MaxSpeed, owned by the fields below, only while WalkToggled is on, the locomotion state is 'stand'
 // (LocomotionDetailed Stand 1, or Crouch 3 when the toggle selects the crouch stat group), the third-person body is active, V is on the
 // ground and no Tier2 Slow applies; multiplier = target / 2.72 (the toggle's measured full-stick speed; a constant like 1.65 in the aim
-// jog, the live MaxSpeed statistic is NOT read), target = UTPPMotionWalkSpeedTarget() (CET mm.walkSpeed, default 1.6 = the game walk point
+// jog, the live MaxSpeed statistic is NOT read), target = UTPPMotionWalkSpeedTarget() (CET mm.walkToggleSpeed, default 1.9; 1.6 = the game walk point
 // of the motion speed map; 0 = vanilla). Removed (exact vanilla value) as soon as one condition fails: toggle off, sprint, aim walk (AimWalk 2), a real
 // crouch (state 'crouch'), air, first person, Tier2 Slow, motion not driving or target 0. First person is checked before the "stick released:
 // keep" rule, so a modifier from third person never survives the view change. Re-applied only when the multiplier changes by > 0.02.
@@ -797,7 +797,7 @@ public func UTPPUpdateWalkSpeed(player: ref<PlayerPuppet>, scriptInterface: ref<
   player.utppWalkSpeedMul = want;
 }
 
-// ---- Minimum analog walk speed (CET mm.minWalkSpeed -> UTPPSetMotionMinAnalogWalk) ----
+// ---- Minimum analog walk speed (CET mm.minAnalogWalkSpeed -> UTPPSetMotionMinAnalogWalk) ----
 // A small stick tilt moves the capsule slower than any walk clip (|mv| 0.09 -> 0.24 m/s, 0.27 -> 0.42 m/s), so V glided. UTPP adds one
 // Multiplier on MaxSpeed, owned by the fields below: multiplier = UTPPMotionAnalogFloorMul (1 .. 4, up to 10 under the walk toggle; the fraction of the full-stick speed at
 // the stick lifted to the floor's fraction, 0.82 m/s = the |mv| 0.455 point; exactly 1 at and above it). Only in third person, on the ground,
@@ -1617,7 +1617,7 @@ public native func UTPPMMAimJogTarget(moveX: Float, moveY: Float) -> Float
 // Shooter mode is not live, the input is not finite, |move| < 0.15 or detailed is not Stand (1) / Crouch (3). Lock-free (one atomic
 // load). Keep this declaration and the DLL native (Main.cpp) in sync.
 public native func UTPPMotionShooterModeSpeedMul(moveX: Float, moveY: Float, detailed: Int32) -> Float
-// Walk toggle speed (CET setting mm.walkSpeed, DLL default 0 = off): target capsule speed (m/s, 0 .. 3.5) at the full stick while
+// Walk toggle speed (CET setting mm.walkToggleSpeed, DLL default 1.9 like the setting, 0 = off): target capsule speed (m/s, 0 .. 3.5) at the full stick while
 // the game walk toggle is on. UTPPSetMotionWalkSpeed stores it (false = NaN / out of range, previous kept); UTPPMotionWalkSpeedTarget (internal,
 // UTPPUpdateWalkSpeed) answers it only while motion drives third-person locomotion, else exactly 0.0 (= no modifier). Lock-free (atomic loads).
 // UTPPFeedMotionTier2Slow: GameplayRestriction.Tier2LocomotionSlow is active (sent right before every UTPPFeedLocomotion); the motion driver
@@ -1625,11 +1625,11 @@ public native func UTPPMotionShooterModeSpeedMul(moveX: Float, moveY: Float, det
 public native func UTPPSetMotionWalkSpeed(metersPerSecond: Float) -> Bool
 public native func UTPPMotionWalkSpeedTarget() -> Float
 public native func UTPPFeedMotionTier2Slow(slow: Bool) -> Void
-// Minimum analog walk speed (CET setting mm.minWalkSpeed, DLL default 0 = off): capsule speed (m/s at the stand run curve, 0 .. 1.6) a
+// Minimum analog walk speed (CET setting mm.minAnalogWalkSpeed, DLL default 0.82 like the setting, 0 = off): capsule speed (m/s at the stand run curve, 0 .. 1.6) a
 // small stick tilt is lifted to. UTPPSetMotionMinAnalogWalk stores it (false = NaN / out of range, previous kept); UTPPMotionAnalogFloorMul
 // (internal, UTPPUpdateAnalogFloor) answers the MaxSpeed multiplier (1 .. 4, up to 10 under the walk toggle) only while the floor is on and motion drives third-person
 // locomotion, else exactly 1.0 (also for detailed other than Stand 1 / Crouch 3, a released stick or a stick at / above the floor).
-// walk: the game walk toggle is on in the stand state - the floor's m/s is then measured against the walk toggle speed (mm.walkSpeed).
+// walk: the game walk toggle is on in the stand state - the floor's m/s is then measured against the walk toggle speed (mm.walkToggleSpeed).
 // Lock-free (atomic loads). Keep these declarations and the DLL natives (Main.cpp) in sync.
 public native func UTPPSetMotionMinAnalogWalk(metersPerSecond: Float) -> Bool
 public native func UTPPMotionAnalogFloorMul(moveX: Float, moveY: Float, detailed: Int32, walk: Bool) -> Float
