@@ -1108,7 +1108,7 @@ int main(int argc, char** argv)
         std::fprintf(groundOut, "# terrain kind=%d anchor=%.4f %.4f %.4f dir=%.5f %.5f rise=%.4f run=%.4f slopeDeg=%.3f offset=%.4f\n",
                      int(terrain.kind), terrain.ax, terrain.ay, terrain.az, terrain.ux, terrain.uy, terrain.rise, terrain.run,
                      terrain.slopeDeg, terrain.offset);
-        std::fprintf(groundOut, "# t drawnCapZ applied liftL liftR pelvis soleErrL soleErrR plantedL plantedR\n");
+        std::fprintf(groundOut, "# t drawnCapZ applied liftL liftR pelvis soleErrL soleErrR plantedL plantedR planWL planWR planLiftL planLiftR\n");
     }
     FILE* stairsOut = nullptr; // --stair-steps with --terrain: per written feed tread, weight, cadence, treads per step
     uint64_t stairRows = 0, stairOnRows = 0;
@@ -1389,9 +1389,16 @@ int main(int argc, char** argv)
                 }
             }
             if (groundOut)
-                std::fprintf(groundOut, "%.6f %.5f %d %.5f %.5f %.5f %.3f %.3f %d %d\n", double(rows[i].t), double(capZAt(zi)),
-                             groundApplied ? 1 : 0, double(lift[0]), double(lift[1]), double(pelvisOff), err[0], err[1], planted[0] ? 1 : 0,
-                             planted[1] ? 1 : 0);
+            {
+                // the plan of this frame's stage update: the planned swing over a stair flight (weight, ground height at the ball)
+                mm::groundfeet::Plan gp;
+                if (!gf::g_plan.Read(gp))
+                    gp = mm::groundfeet::Plan{};
+                std::fprintf(groundOut, "%.6f %.5f %d %.5f %.5f %.5f %.3f %.3f %d %d %.3f %.3f %.5f %.5f\n", double(rows[i].t),
+                             double(capZAt(zi)), groundApplied ? 1 : 0, double(lift[0]), double(lift[1]), double(pelvisOff), err[0], err[1],
+                             planted[0] ? 1 : 0, planted[1] ? 1 : 0, double(gp.foot[0].planW), double(gp.foot[1].planW),
+                             double(gp.foot[0].planLift), double(gp.foot[1].planLift));
+            }
         }
         if (forecastOut)
         {
@@ -1709,7 +1716,7 @@ int main(int argc, char** argv)
         namespace gf = mm::groundfeet::rt;
         std::printf("GROUNDFEET on=%d terrain=%d rows=%llu applied=%llu traced=%llu hits=%llu plantedN=%zu soleErrP50Cm=%.2f "
                     "soleErrP95Cm=%.2f soleErrMaxCm=%.2f soleMinCm=%.2f liftP95Cm=%.2f liftMaxCm=%.2f pelvisP95Cm=%.2f pelvisMaxCm=%.2f "
-                    "kneeLimits=%llu clamps=%llu identity=%llu noSamples=%llu sudden=%llu rejected=%llu\n",
+                    "kneeLimits=%llu clamps=%llu identity=%llu noSamples=%llu sudden=%llu rejected=%llu stairSwings=%llu stairLands=%llu\n",
                     gf::Enabled() ? 1 : 0, int(terrain.kind), static_cast<unsigned long long>(gfRows),
                     static_cast<unsigned long long>(gfApplied), static_cast<unsigned long long>(gfTraced),
                     static_cast<unsigned long long>(gfHits), gfSoleErr.size(), q(gfSoleErr, 0.5), q(gfSoleErr, 0.95), q(gfSoleErr, 1.0),
@@ -1718,7 +1725,8 @@ int main(int argc, char** argv)
                     static_cast<unsigned long long>(gf::g_clamps.load() - gfClamp0), static_cast<unsigned long long>(gf::g_identity.load() - gfIdentity0),
                     static_cast<unsigned long long>(gf::g_noSamples.load() - gfNoSamples0),
                     static_cast<unsigned long long>(gf::g_sudden.load() - gfSudden0),
-                    static_cast<unsigned long long>(gf::g_rejected.load() - gfRejected0));
+                    static_cast<unsigned long long>(gf::g_rejected.load() - gfRejected0),
+                    static_cast<unsigned long long>(gf::g_stairSwings.load()), static_cast<unsigned long long>(gf::g_stairLands.load()));
     }
     if (stairsOut)
     {
