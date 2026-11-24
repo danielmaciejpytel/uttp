@@ -437,10 +437,10 @@ TRAV_H = lambda h, result='Rejected(too slow)': (f'UTPP trav: action=9 h={h:.2f}
 class SiteNight(FakeNight):
     """FakeNight with the bike at the save's start point; the placed spawn moves it to the placement (or leaves it when
     place_ok is False)."""
-    def __init__(self, tmp, script, bike, place_ok=True, **kw):
+    def __init__(self, tmp, script, bike, place_ok=True, summon_polls=0, spawn_ok=True, **kw):
         super().__init__(tmp, script, **kw)
         self.veh_xy, self.veh_r = bike['v'][:2], bike['vr']
-        self.place_ok, self.placed = place_ok, 0
+        self.place_ok, self.placed, self.summon_polls, self.spawn_ok = place_ok, 0, summon_polls, spawn_ok
 
     def console_verified(self, pad, guard, cmd, echo, label, timeout=3.0):
         if label != 'traversal/place':
@@ -449,7 +449,15 @@ class SiteNight(FakeNight):
         self.placed += 1
         if self.place_ok:
             self.veh_xy, self.veh_r = gt.BIKE_PLACE['v'], gt.BIKE_PLACE['vr']
-        return '[night] SPAWN placed ok=true userdata'
+        return '[night] SPAWN placed ok=%s userdata' % ('true' if self.spawn_ok else 'false')
+
+    def poll_pos(self, guard, pad=None, timeout=None, newer_than=None):
+        pos = super().poll_pos(guard, pad, timeout, newer_than)
+        if pos and self.placed and self.summon_polls > 0:
+            # the new entity is not there yet: the position line reports the save's own bike, elsewhere
+            self.summon_polls -= 1
+            return dict(pos, v=(1584.6, 2167.9, 177.0), vr=(0.0, 1.0), src='summon')
+        return dict(pos, src='tag') if pos else pos
 
 
 class PlacementTests(unittest.TestCase):
@@ -529,12 +537,30 @@ class PlacementTests(unittest.TestCase):
         self.assertTrue(out['placement']['before']['ok'])
         self.assertNotIn('replaced', out['placement'])
 
-    def test_a_bike_that_stays_off_is_recorded_and_the_run_goes_on(self):
+    def test_a_bike_that_stays_off_means_no_jump_and_an_invalid_setup(self):
         night, out = self.run_site(success, OFF_BIKE, place_ok=False)
         self.assertEqual(night.placed, 1)                                      # one try only
         self.assertFalse(out['placement']['after']['ok'])
+        self.assertEqual(night.plays, {})                                      # V never jumps from other ground
+        self.assertEqual(out['verdict'], 'INVALID')
+        self.assertEqual(out['fails'], [])
+        self.assertIn('still not at the level placement', out['invalid_cause'])
+        self.assertEqual(night.calls[-1], ('console', 'traversal/log_off'))    # the vault log is still switched off
+        rec = dict(out, name='traversal', run=1)
+        self.assertEqual(gn.macro_failures([rec]), [])                         # not counted against the mod
+
+    def test_an_unconfirmed_placed_spawn_means_no_jump(self):
+        night, out = self.run_site(success, OFF_BIKE, spawn_ok=False)
+        self.assertEqual((out['verdict'], night.plays), ('INVALID', {}))
+        self.assertIn('not confirmed', out['invalid_cause'])
+
+    def test_the_save_bike_reported_before_the_new_one_is_not_taken(self):
+        night, out = self.run_site(success, OFF_BIKE, summon_polls=2)
         self.assertEqual(out['verdict'], 'PASS')
-        self.assertTrue(any('still not at the level placement' in m for m in night.logs), night.logs)
+        self.assertTrue(out['placement']['after']['ok'])                       # judged on the new tagged bike
+        night, out = self.run_site(success, OFF_BIKE, summon_polls=gt.PLACE_POLLS)
+        self.assertEqual((out['verdict'], night.plays), ('INVALID', {}))      # never reported: no jump
+        self.assertIn('no position of the placed bike', out['invalid_cause'])
 
     def test_a_failed_vault_at_an_odd_height_places_the_bike_once(self):
         def script(part, n):

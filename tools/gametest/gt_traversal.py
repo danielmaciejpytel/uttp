@@ -108,13 +108,14 @@ def path_note(before: tuple | None, after: tuple | None) -> str:
 # met no obstacle once and the one it played measured 0.89 m. `vr` is the bike's world right vector, as the POS lines carry it.
 # The check applies only when the bike is within PLACE_SITE_M of that place (the same start point); then a bike more than
 # PLACE_TOL_M / PLACE_TOL_DEG off is spawned once more AT that place (absolute position and heading; spawning relative to V again
-# would repeat the error). Still off after that: the run goes on and records it. From the environment: UTPP_NIGHT_BIKE_PLACE
-# "x,y,z,rx,ry" (z = spawn height) or "off".
+# would repeat the error). Still off after that: no jump (V would jump from other ground), the run is INVALID as a setup problem.
+# From the environment: UTPP_NIGHT_BIKE_PLACE "x,y,z,rx,ry" (z = spawn height) or "off".
 BIKE_PLACE_DEFAULT = {'v': (1586.90, 2161.24), 'z': 177.40, 'vr': (-0.875, -0.411)}
 PLACE_SITE_M = 10.0
 PLACE_TOL_M = 0.5
 PLACE_TOL_DEG = 8.0
-PLACE_SETTLE_S = 1.0      # after the placed spawn, before the first position is read (the entity is created asynchronously)
+PLACE_SETTLE_S = 1.0      # between the position reads after the placed spawn (the entity is created asynchronously)
+PLACE_POLLS = 5           # reads until the new tagged bike must be reported
 # the obstacle height of the vault (h= of the first "UTPP trav: action=9" line) at the good placement; outside this range the
 # measurement is not comparable with the reference runs, and a failed vault there is the trigger for the one re-placement
 H_RANGE = (1.0, 1.15)
@@ -178,30 +179,45 @@ def height_off(h: float | None) -> bool:
     return h is not None and not (H_RANGE[0] <= h <= H_RANGE[1])
 
 
-def place_vehicle(night, pad, guard, ep: dict, pos: dict, rec: dict, why: str) -> dict:
-    """The one re-placement: spawn the bike at BIKE_PLACE, wait until it stands, check it again. Fills rec ('replaced', 'why',
-    'after' = the check afterwards); returns the new position (with the vehicle), or `pos` when nothing new was read."""
+def place_vehicle(night, pad, guard, ep: dict, pos: dict, rec: dict, why: str) -> tuple[dict, str]:
+    """The one re-placement: spawn the bike at BIKE_PLACE, wait for the new tagged bike (until the entity exists the position
+    line may report the save's own bike, src=summon) and until it stands, check it again. Fills rec ('replaced', 'replace_why',
+    'after' = the check afterwards). -> (position, '' when the bike now stands at the placement, else why not: then no jump
+    may follow, V would jump from other ground)."""
     rec.update(replaced=True, replace_why=why)
     night.log(f'[traversal] {why}: spawning the bike at the level placement once')
     t0 = datetime.now()
     txt = night.console_verified(pad, guard, placed_spawn_cmd(BIKE_PLACE), lambda t: '[night] SPAWN placed ok=' in t,
                                  'traversal/place')
+    rec['after'] = None
     if not (txt and '[night] SPAWN placed ok=true' in txt):
-        rec['after'] = None
-        night.log('[traversal] the placed spawn was not confirmed: going on with the bike as it is')
-        return pos
-    guard.wait(PLACE_SETTLE_S)
-    new = night.poll_pos(guard, pad, newer_than=t0)
-    if new and new.get('v') and new.get('vr'):
-        new, _ = night.wait_car_stopped(pad, guard, ep, new)
+        return pos, 'the placed spawn of the bike was not confirmed'
+    new = None
+    for _ in range(PLACE_POLLS):
+        guard.wait(PLACE_SETTLE_S)
+        p = night.poll_pos(guard, pad, newer_than=t0)
+        if p and p.get('src') == 'tag' and p.get('v') and p.get('vr'):
+            new = p
+            break
+    if new is None:
+        return pos, f'no position of the placed bike within {PLACE_POLLS * PLACE_SETTLE_S:.0f} s'
+    new, _ = night.wait_car_stopped(pad, guard, ep, new)
     chk = placement_check(new)
     rec['after'] = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in chk.items()}
     if chk['applies'] and chk['ok']:
         night.log(f'[traversal] bike placed: {chk["off_m"]:.2f} m / {chk["off_deg"]:.0f} deg from the level placement')
-    else:
-        night.log('[traversal] bike still not at the level placement after the placed spawn ('
-                  + (chk['why'] or 'no position of it') + '): going on, the result is recorded')
-    return new if new and new.get('v') and new.get('vr') else pos
+        return new, ''
+    return new, 'bike still not at the level placement after the placed spawn: ' + (chk['why'] or 'not near it')
+
+
+def setup_invalid(night, out: dict, text: str) -> dict:
+    """Ends the macro without (further) jumps: a harness setup problem, verdict INVALID (FAIL when a failure was already
+    recorded), not a failure of the mod."""
+    out['invalid_fails'].append('setup: ' + text)
+    out['invalid_cause'] = 'setup: ' + text
+    out['verdict'] = 'FAIL' if out['fails'] else 'INVALID'
+    night.log(f'[traversal] {text}: no jump, INVALID (setup)')
+    return out
 
 
 ATTEMPTS = 2              # per kind
@@ -436,7 +452,9 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
         chk = placement_check(pos)
         place_rec['before'] = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in chk.items()}
         if chk['applies'] and not chk['ok']:
-            pos = place_vehicle(night, pad, guard, ep, pos, place_rec, chk['why'])
+            pos, bad = place_vehicle(night, pad, guard, ep, pos, place_rec, chk['why'])
+            if bad:
+                return setup_invalid(night, out, bad)
         for kind, spec in KINDS.items():
             done = False
             for attempt in range(1, ATTEMPTS + 1):
@@ -503,8 +521,11 @@ def run_traversal_macro(night, pad, guard, plan, out: dict | None = None) -> dic
                 if (not res['ok'] and height_off(h) and not place_rec.get('replaced')
                         and placement_check(known if known and known.get('v') else pos)['applies']):
                     # the bike looked placed but the game measured another height: the one placed spawn, then the next attempt
-                    pos = place_vehicle(night, pad, guard, ep, pos, place_rec,
-                                        f'vault obstacle height {h:.2f} m outside {H_RANGE[0]:.2f}-{H_RANGE[1]:.2f} m')
+                    pos, bad = place_vehicle(night, pad, guard, ep, pos, place_rec,
+                                             f'vault obstacle height {h:.2f} m outside {H_RANGE[0]:.2f}-{H_RANGE[1]:.2f} m')
+                    if bad:
+                        out['results'][kind] = 'invalid'
+                        return setup_invalid(night, out, bad)
                 if res['ok']:
                     done = True
                     break
@@ -542,7 +563,7 @@ def dry_run_lines(scenarios: dict | None = None) -> list[str]:
              '   place   : ' + (f'a bike within {PLACE_SITE_M:.0f} m of {BIKE_PLACE["v"][0]:.2f}, {BIKE_PLACE["v"][1]:.2f} must stand within '
                             f'{PLACE_TOL_M:.1f} m / {PLACE_TOL_DEG:.0f} deg of it (right vector {BIKE_PLACE["vr"][0]:.3f}, '
                             f'{BIKE_PLACE["vr"][1]:.3f}), else it is spawned there once; a failed vault with h outside '
-                            f'{H_RANGE[0]:.2f}-{H_RANGE[1]:.2f} m does the same once' if BIKE_PLACE else 'check off (UTPP_NIGHT_BIKE_PLACE=off)')]
+                            f'{H_RANGE[0]:.2f}-{H_RANGE[1]:.2f} m does the same once; still off = no jump, INVALID (setup)' if BIKE_PLACE else 'check off (UTPP_NIGHT_BIKE_PLACE=off)')]
     for kind, spec in KINDS.items():
         sc = scenarios.get(spec['part']) if scenarios else None
         dur = f', {sc.duration:.1f} s of pad input' if sc is not None else ''
