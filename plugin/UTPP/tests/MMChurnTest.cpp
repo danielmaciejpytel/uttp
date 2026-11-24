@@ -485,8 +485,10 @@ int main(int argc, char** argv)
         // turn clip of the dodge plays on, Run_Loop_FR is never picked and the window has 4 changes with or without guard 1c
         {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle)", 809.874f, 811.873f, 5}}, false, true},
         // the same window once more without the dodge facing hold: Run_Loop_FR is picked after the turn and races the shuffle as in the game,
-        // 5 changes with guard 1c, 7 without (mutation 45); the speed converter, the capsule speed play rate and the aim rotation do not change it
-        {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle, no dodge facing hold)", 809.874f, 811.873f, 5}}, false, true, false, true},
+        // 5 changes with guard 1c, 7 without (mutation 45) with the stronger converter preset (bits 33); the capsule speed play rate and the aim
+        // rotation do not change it. The start / stop window stage (bit 64, default since 0.2.0) keeps the window at 5 also without guard 1c
+        {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle, no dodge facing hold)", 809.874f, 811.873f, 5}}, false, true, false, true,
+         mm::speedconv::PresetFor(mm::speedconv::kPresetStronger).bits},
         {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 3}, {"sprint_dash sprint_again", 264.284f, 267.284f, 7}}},
         // Female 2026-11-14 03:53, keyboard-like input (full-deflection direction keys): the harness step windows keep 3.0 changes per second; check K
         // runs over the key edges of the whole sequence (the key edge of a step reaches the feed ~0.13 s before the harness step window starts)
