@@ -2887,6 +2887,16 @@ int MotionFixChildMain(const std::string& aData, const std::string& aDb, const s
     int32_t prevClip = -1;
     float clock = 0.0f, lastPeriodicT = -1.0f;
     for (int w = 0; w < 3; ++w)
+    {
+        // The windows are separate recordings: their first frames turn the heading by ~90-100 degrees against the last frame of the
+        // previous window, a turn the game never fed. A new motion session per window (off / on: the next feed re-enters with the
+        // matcher, the trajectory and the chooser mapping state reset) keeps that seam out of the checked feeds; the warm-up and the
+        // checked feeds of every window are unchanged.
+        if (w > 0)
+        {
+            motiondriver::SetEnabled(false);
+            motiondriver::SetEnabled(true);
+        }
         for (int i = 0; i < 90; ++i)
         {
             const size_t before = g_v2fixLines.size();
@@ -2933,6 +2943,7 @@ int MotionFixChildMain(const std::string& aData, const std::string& aDb, const s
                     bad = l;
             }
         }
+    }
     const size_t linesOn = g_v2fixLines.size();
     motiondriver::SetTrace(false);
     for (int i = 0; i < 30; ++i)
