@@ -455,9 +455,9 @@ void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds,
 // 12 deg. Off = the previous leg tail bit for bit. Always true.
 bool SetFootYawLock(bool aOn);
 bool FootYawLock();
-// Twist reduction (share of the planted yaw difference left to the animation, 0..0.99) and correction bound (m, 0..0.35); a negative
-// value keeps the current one. False = invalid / NaN, previous kept. C++ API (tools, tests).
-bool SetFootYawLockParams(float aTwistReduction, float aMaxCorrection = -1.0f);
+// Twist reduction (share of the planted yaw difference left to the animation, 0..0.99), correction bound (m, 0..0.35) and unplant
+// angle (rad, above the replant angle); a negative value keeps the current one. False = invalid / NaN, previous kept. C++ API (tools, tests).
+bool SetFootYawLockParams(float aTwistReduction, float aMaxCorrection = -1.0f, float aUnplantAngle = -1.0f);
 // Foot locker counters of the yaw lock since its last reset (any pointer may be null).
 void FootYawLockStats(uint64_t* aUpdates, uint64_t* aUnplants, uint64_t* aReplants, uint64_t* aBounds);
 // Radii (m, 0.02..0.15: the 15 cm foot-correction guard), relock ratios (0..0.95), step speeds (m/s, 0.2..10), lift (m, 0..0.1);

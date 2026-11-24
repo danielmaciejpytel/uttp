@@ -77,7 +77,8 @@
 //                       (motionhost::SetFirmFeetParams; not passed = build default)
 //   --foot-yaw-lock 0|1 planted foot yaw lock off / on (motionhost::SetFootYawLock); adds one YAWLOCK line (yaw lock updates, unplants,
 //                       replants, updates held at the correction bound)
-//   --foot-yaw-twist R  twist reduction of the yaw lock (0..0.99), --foot-yaw-corr M its correction bound (m)
+//   --foot-yaw-twist R  twist reduction of the yaw lock (0..0.99), --foot-yaw-corr M its correction bound (m),
+//                       --foot-yaw-unplant DEG its unplant angle
 //                       (motionhost::SetFootYawLockParams; not passed = build default)
 //                       With --settings-log, the driver first gets the values a game session held before its first setting call in
 //                       builds whose defaults were off (lean, head lean, slide, orientation warp, stride warping off, analog stick),
@@ -572,7 +573,7 @@ int main(int argc, char** argv)
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
     int32_t firmFeet = -1;                     // -1 = not passed
     int32_t footYawLock = -1;                  // -1 = not passed
-    float footYawTwist = -1.0f, footYawCorr = -1.0f; // < 0 = not passed (build defaults)
+    float footYawTwist = -1.0f, footYawCorr = -1.0f, footYawUnplant = -1.0f; // < 0 = not passed (build defaults)
     uint64_t yawTotal[4] = {}, yawLast[4] = {}; // --foot-yaw-lock: YAWLOCK counters (summed over the foot locker resets)
     uint64_t firmTotal[4] = {}, firmLast[4] = {}; // --firm-feet: FIRMFEET counters (summed over the foot locker resets)
     // < 0 = not passed (build defaults)
@@ -692,6 +693,8 @@ int main(int argc, char** argv)
             footYawTwist = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--foot-yaw-corr") == 0)
             footYawCorr = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--foot-yaw-unplant") == 0)
+            footYawUnplant = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-limit") == 0)
             firmLimit = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-handback") == 0)
@@ -940,7 +943,8 @@ int main(int argc, char** argv)
         motionhost::SetFirmFeet(firmFeet != 0);
     if (footYawLock >= 0)
         motionhost::SetFootYawLock(footYawLock != 0);
-    if ((footYawTwist >= 0.0f || footYawCorr >= 0.0f) && !motionhost::SetFootYawLockParams(footYawTwist, footYawCorr))
+    if ((footYawTwist >= 0.0f || footYawCorr >= 0.0f || footYawUnplant >= 0.0f) &&
+        !motionhost::SetFootYawLockParams(footYawTwist, footYawCorr, footYawUnplant >= 0.0f ? footYawUnplant * 0.017453293f : -1.0f))
         return 2;
     if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f)
     {

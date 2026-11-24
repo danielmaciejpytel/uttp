@@ -7509,7 +7509,7 @@ bool FootYawLock()
     return g_footYawLockOn;
 }
 
-bool SetFootYawLockParams(float aTwistReduction, float aMaxCorrection)
+bool SetFootYawLockParams(float aTwistReduction, float aMaxCorrection, float aUnplantAngle)
 {
     std::lock_guard lock(g_mutex);
     FootYawLockConfig c = g_footLock.YawLockConfig();
@@ -7517,6 +7517,8 @@ bool SetFootYawLockParams(float aTwistReduction, float aMaxCorrection)
         c.twistReduction = aTwistReduction;
     if (!(aMaxCorrection < 0.0f))
         c.maxCorrection = aMaxCorrection;
+    if (!(aUnplantAngle < 0.0f))
+        c.unplantAngle = aUnplantAngle;
     return g_footLock.SetYawLockConfig(c);
 }
 
