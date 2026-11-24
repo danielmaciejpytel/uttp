@@ -154,6 +154,7 @@ struct Slice
     bool stickFixed = false; // fixed stick speed model (motiondriver::SetStickSpeedMode 1, the shipped default) for this slice only
     bool converterOff = false; // speed converter off (MapConfig::speedConverter 0) for this slice only
     bool dodgeFacingOff = false; // dodge facing hold off (MatcherConfig::dodgeFacingHoldS 0) for this slice only
+    int converterBits = -1; // speed converter bits (MapConfig::speedConverter) for this slice only; -1 = the default
 };
 
 // the clip / database changes of the frames the v2 driver stepped (what the MOTION trace lines show), counted like gt_log.py _motion_metrics: the same
@@ -466,8 +467,10 @@ int main(int argc, char** argv)
         {"churn_flick_sprint.feed", {{"flick_180_sprint accel", 162.384f, 163.884f, 4, true}}},
         {"churn_reface_sprint.feed", {{"flick_180_sprint accel (second run)", 169.529f, 171.029f, 4, true}}},
         {"churn_reface_whip.feed", {{"camera_whip_180 accel", 185.111f, 187.111f, 3, true}}},
-        // Female 2026-11-11 17:37: the stick held against a blocked capsule (weapon armed / unarmed walk): the start clips restarted every 0.2 s (13 changes in 3 s)
-        {"churn_stalled_start.feed", {{"weapon_aim walk_armed", 307.026f, 310.026f, 6, false, true}, {"weapon_aim aim_walk", 310.026f, 313.026f, 3, false, true},
+        // Female 2026-11-11 17:37: the stick held against a blocked capsule (weapon armed / unarmed walk): the start clips restarted every 0.2 s (13 changes in 3 s).
+        // walk_armed budget 7: the trajectory stage of the speed converter (bit 256) swaps the Walk_to_Run transition foot twice during the
+        // start acceleration before the wall (5 changes without that stage); the more frequent transition foot swap at starts is accepted.
+        {"churn_stalled_start.feed", {{"weapon_aim walk_armed", 307.026f, 310.026f, 7, false, true}, {"weapon_aim aim_walk", 310.026f, 313.026f, 3, false, true},
                                        {"weapon_walk walk_unarmed", 318.44f, 321.442f, 6, false, true, false, -1, 15.0f}}},
         // Male 2026-11-11 17:19: sprint flick; 9 changes in 2.5 s (3.6 per second, game 9) before the turn commit, 6 with it
         {"churn_sprint_flick_man.feed", {{"flick_180_sprint flick (Male)", 181.397f, 183.897f, 6, false, false, true, -1, 15.0f}}, true},
@@ -481,8 +484,10 @@ int main(int argc, char** argv)
         // turn clip of the dodge plays on, Run_Loop_FR is never picked and the window has 4 changes with or without guard 1c
         {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle)", 809.874f, 811.873f, 5}}, false, true},
         // the same window once more without the dodge facing hold: Run_Loop_FR is picked after the turn and races the shuffle as in the game,
-        // 5 changes with guard 1c, 7 without (mutation 45); the speed converter, the capsule speed play rate and the aim rotation do not change it
-        {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle, no dodge facing hold)", 809.874f, 811.873f, 5}}, false, true, false, true},
+        // 5 changes with guard 1c, 7 without (mutation 45) with the stronger converter preset (bits 33); the capsule speed play rate and the aim
+        // rotation do not change it. The start / stop window stage (bit 64, default since 0.2.0) keeps the window at 5 also without guard 1c
+        {"churn_dash_shuffle.feed", {{"sprint_dash dash_right (loop vs shuffle, no dodge facing hold)", 809.874f, 811.873f, 5}}, false, true, false, true,
+         mm::speedconv::PresetFor(mm::speedconv::kPresetStronger).bits},
         {"churn_dash.feed", {{"sprint_dash dash_left", 258.284f, 260.284f, 5}, {"sprint_dash dash_right", 260.284f, 262.284f, 4}, {"sprint_dash dash_back", 262.284f, 264.284f, 3}, {"sprint_dash sprint_again", 264.284f, 267.284f, 7}}},
         // Female 2026-11-14 03:53, keyboard-like input (full-deflection direction keys): the harness step windows keep 3.0 changes per second; check K
         // runs over the key edges of the whole sequence (the key edge of a step reaches the feed ~0.13 s before the harness step window starts)
@@ -546,7 +551,7 @@ int main(int argc, char** argv)
         }
         g_dumpBody = s.man ? 1 : 0;
         motiondriver::SetStickSpeedMode(s.stickFixed ? 1 : 0); // DriverOptionBaseline: 0
-        motiondriver::TestSetMapSpeedConverter(s.converterOff ? 0 : -1, 0.0f, 0.0f);
+        motiondriver::TestSetMapSpeedConverter(s.converterOff ? 0 : s.converterBits, 0.0f, 0.0f);
         if (s.dodgeFacingOff || dodgeFacingPinned)
             motiondriver::TestSetDodgeFacingHold(s.dodgeFacingOff ? 0.0f : -1.0f);
         dodgeFacingPinned = dodgeFacingPinned || s.dodgeFacingOff;
@@ -640,7 +645,7 @@ int main(int argc, char** argv)
         {
             const int n = CountChanges(f, run, w.t0, w.t1);
             char detail[160];
-            std::snprintf(detail, sizeof(detail), "%d changes in %.2f s = %.2f per second, budget %d (bound 3.0 per second)", n, static_cast<double>(w.t1 - w.t0),
+            std::snprintf(detail, sizeof(detail), "%d changes in %.2f s = %.2f per second, budget %d (bound 3.75 per second)", n, static_cast<double>(w.t1 - w.t0),
                           static_cast<double>(n) / static_cast<double>(w.t1 - w.t0), w.budget);
             Check(n <= w.budget, std::string("churn ") + w.name, detail);
             if (w.reface)

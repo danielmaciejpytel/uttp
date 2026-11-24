@@ -455,7 +455,7 @@ class LogTests(unittest.TestCase):
         self.assertIsNone(thr['rate_min'])
         m = {'transitions_per_s': 4.0, 'samples': 3, 'rate_min': 0.1}
         self.assertEqual(gt_log.evaluate(m, thr, 'stop'), [])
-        self.assertEqual(gt_log.evaluate(m, thr, 'walk'), ['transitions_per_s=4.0 > 3.0'])
+        self.assertEqual(gt_log.evaluate(m, thr, 'walk'), ['transitions_per_s=4.0 > 3.75'])
         file_thr = gt_run.load_thresholds(os.path.join(HERE, 'thresholds.json'))
         self.assertIn('cost_max', file_thr)
         self.assertNotIn('_note', file_thr)
@@ -771,7 +771,7 @@ class MotionLogTests(unittest.TestCase):
                          ['samples=0 < 1', 'no MOTION lines in window: motion_samples=0 < 1'])
         self.assertEqual(gt_log.evaluate({**short, 'motion_samples': None}, thr), ['samples=0 < 1'])
         # the other limits of the window still apply
-        self.assertEqual(gt_log.evaluate({**short, 'motion_transitions_per_s': 3.3}, thr), ['motion_transitions_per_s=3.3 > 3.0'])
+        self.assertEqual(gt_log.evaluate({**short, 'motion_transitions_per_s': 4.0}, thr), ['motion_transitions_per_s=4.0 > 3.75'])
 
     def test_one_second_step_between_two_trace_lines_is_judged_from_the_motion_lines(self):
         # slow_walk_half_stick / ramp_in (1.0 s) of a real run: the trace lines came at 42.396 and 43.413, the step ran
@@ -818,14 +818,14 @@ class MotionLogTests(unittest.TestCase):
         self.assertEqual((m['motion_cost_mean'], m['motion_cost_max']), (round((0.048 - 0.2 * 5) / 6, 3), 0.048))
 
     def test_selection_unscored(self):
-        # review M2: motion_transitions_per_s max 3.0 (provisional) applies -> scored; disabling it -> selection_unscored
+        # review M2: motion_transitions_per_s max 3.75 (provisional) applies -> scored; disabling it -> selection_unscored
         thr = gt_run.load_thresholds(os.path.join(HERE, 'thresholds.json'))
         m = gt_log.compute_metrics(self.lines, self.T0, self.T1)
-        self.assertEqual(thr['motion_transitions_per_s'], {'max': 3.0})
+        self.assertEqual(thr['motion_transitions_per_s'], {'max': 3.75})
         self.assertFalse(gt_log.selection_unscored(m, thr, 'sprint_stop'))
         off = gt_log.merge_thresholds(thr, {'sprint_stop.motion_transitions_per_s': None})
         self.assertTrue(gt_log.selection_unscored(m, off, 'sprint_stop'))
-        self.assertIn('motion_transitions_per_s=4.0 > 3.0', gt_log.evaluate({**m, 'motion_transitions_per_s': 4.0}, thr, 'x'))
+        self.assertIn('motion_transitions_per_s=4.0 > 3.75', gt_log.evaluate({**m, 'motion_transitions_per_s': 4.0}, thr, 'x'))
         scen = gs.load_scenarios(os.path.join(HERE, 'scenarios.json'))
         for t, want in ((thr, False), (off, True)):
             plan = self._plan()

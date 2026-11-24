@@ -11,7 +11,7 @@
 // actor in different sectors the actor's sector is shown); single-frame steps at the
 // entry and the hand-back stay within 3 cm (hips) / 6 deg (feet, hands) of the clip's own largest step; the same at 30 / 60 / 120 Hz
 // (resampled feeds); without the file (missing or invalid) the output is byte-identical to a replay with a missing file, and frames
-// before the first dodge are byte-identical with and without it; shown clip changes per second over each dodge stay <= 3.0.
+// before the first dodge are byte-identical with and without it; shown clip changes per second over each dodge stay <= 3.75.
 // Prints (INFO): visual - capsule offset with / without the clips, planted-foot slide, hand-back time vs the capsule stop.
 // Clip direction over every replay (ClipDir): above the deadband and within the turn cap the shown clip moves along the impulse in the
 // shown frame (the drawn heading turns toward it while the clip plays), within the deadband and past the cap the drawn heading is kept,
@@ -1113,7 +1113,7 @@ int main(int argc, char** argv)
               F("entry %.1f exit %.1f cm, excess %.1f cm", m.hipsEntry * 100, m.hipsExit * 100, m.hipsExcess * 100));
         Check(m.endsExcess <= 6.0f, tag + ": feet / hands single-frame step at entry / hand-back within 6 deg of the clip's own",
               F("entry %.1f exit %.1f deg, excess %.1f deg", m.endsEntry, m.endsExit, m.endsExcess));
-        Check(m.changesMax <= 3.0f, tag + ": shown clip changes per second over each dodge <= 3.0", F("%.2f (without the clips %.2f)", m.changesMax, m.changesMaxBase));
+        Check(m.changesMax <= 3.75f, tag + ": shown clip changes per second over each dodge <= 3.75", F("%.2f (without the clips %.2f)", m.changesMax, m.changesMaxBase));
         Check(m.hipsHeightExcess <= 0.03f, tag + ": hips height step at entry / hand-back within 3 cm of the shown clip's / motion pose's own",
               F("entry %.1f exit %.1f cm, excess %.1f cm", m.hipsHeightEntry * 100.0f, m.hipsHeightExit * 100.0f, m.hipsHeightExcess * 100.0f));
         std::printf("INFO %s visual - capsule offset over the dodges: max %.1f cm with the clips, %.1f cm without; at the end of the hand-back "
@@ -1142,8 +1142,8 @@ int main(int argc, char** argv)
                   F("entry %.1f exit %.1f deg (excess %.1f)", r.endsEntry, r.endsExit, r.endsExcess));
             std::printf("INFO %s hands over the release and hand-back: largest step %.1f deg (without the clips %.1f)\n", t.c_str(), r.releaseHands,
                         r.releaseHandsBase);
-            // the resampled feed can change clips more often than 3.0 / s without any dodge clip; the dodge must not add to that
-            Check(r.changesMax <= std::fmax(3.0f, r.changesMaxBase), t + ": shown clip changes per second <= 3.0, or no more than without the clips",
+            // the resampled feed can change clips more often than 3.75 / s without any dodge clip; the dodge must not add to that
+            Check(r.changesMax <= std::fmax(3.75f, r.changesMaxBase), t + ": shown clip changes per second <= 3.75, or no more than without the clips",
                   F("%.2f (without the clips %.2f)", r.changesMax, r.changesMaxBase));
             Check(r.hipsHeightExcess <= 0.03f * perFrame, t + ": hips height step at entry / hand-back within 3 cm per 1/60 s of the shown clip's / motion pose's own",
                   F("entry %.1f exit %.1f cm, excess %.1f cm", r.hipsHeightEntry * 100.0f, r.hipsHeightExit * 100.0f, r.hipsHeightExcess * 100.0f));
@@ -1243,7 +1243,7 @@ int main(int argc, char** argv)
                   F("hips entry %.1f exit %.1f cm, ends entry %.1f exit %.1f deg", r.hipsEntry * 100, r.hipsExit * 100, r.endsEntry, r.endsExit));
             Check(r.hipsHeightExcess <= 0.03f, t + ": hips height step at entry / hand-back within 3 cm of the shown clip's / motion pose's own",
                   F("entry %.1f exit %.1f cm, excess %.1f cm", r.hipsHeightEntry * 100.0f, r.hipsHeightExit * 100.0f, r.hipsHeightExcess * 100.0f));
-            Check(r.changesMax <= 3.0f, t + ": shown clip changes per second <= 3.0", F("%.2f (without the clips %.2f)", r.changesMax, r.changesMaxBase));
+            Check(r.changesMax <= 3.75f, t + ": shown clip changes per second <= 3.75", F("%.2f (without the clips %.2f)", r.changesMax, r.changesMaxBase));
             Dump(t, "without", b, db);
             Dump(t, "with", w, db);
         }

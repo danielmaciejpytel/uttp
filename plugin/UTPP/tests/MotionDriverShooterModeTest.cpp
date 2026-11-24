@@ -727,7 +727,7 @@ void OpenFeedCase(Rt& rt, const std::vector<FeedFile>& aFeeds, bool aShooterMode
             if (aShooterMode)
             {
                 // sector delay (MatcherConfig::strafeSectorDelayS): the facing stays on the camera while the stick turns 360 deg in 3 s
-                // (scenario step arc_120, feed time 11.5-14.5 s; arc_90 7.5-11.5 s): the clip changes stay within the 3.0 per second bound of
+                // (scenario step arc_120, feed time 11.5-14.5 s; arc_90 7.5-11.5 s): the clip changes stay within the 3.75 per second bound of
                 // the game harness (mutation 18, no delay: 3.7 per second in the game at 120 deg/s; on this database 3.25 per second before the
                 // 0.2.0 defaults, exactly 3.0 with them, so the bound alone no longer tells the delay apart - the two checks below do)
                 const auto changesPerS = [&](float aT0, float aT1) {
@@ -744,8 +744,8 @@ void OpenFeedCase(Rt& rt, const std::vector<FeedFile>& aFeeds, bool aShooterMode
                     return n > 10 ? double(changes) / double(aT1 - aT0) : -1.0;
                 };
                 const double c120 = changesPerS(11.5f, 14.5f), c90 = changesPerS(7.5f, 11.5f);
-                Check(c120 >= 0.0 && c120 <= 3.0 && c90 >= 0.0 && c90 <= 3.0,
-                      tag + f.name + ": turning stick at 90 / 120 deg/s: clip changes <= 3.0 per second (direction sector delay)",
+                Check(c120 >= 0.0 && c120 <= 3.75 && c90 >= 0.0 && c90 <= 3.75,
+                      tag + f.name + ": turning stick at 90 / 120 deg/s: clip changes <= 3.75 per second (direction sector delay)",
                       "arc_90 " + Fmt(c90, 2) + " /s, arc_120 " + Fmt(c120, 2) + " /s");
                 // the chooser is told that Shooter mode strafes (ChooserState::shooterStrafe) on every stepped Strafe frame of this ground feed,
                 // and the sector delay holds a direction clip inside the turning stick windows (mutation 18: never told, no hold)

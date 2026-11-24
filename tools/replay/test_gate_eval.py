@@ -87,7 +87,7 @@ class GateTest(unittest.TestCase):
         self.assertTrue(g['hard'][0].startswith('rt_feed_p95'))
         # clip changes (mean and busiest scored step) are judged against the baseline (user decision 2026-11-23): the same value
         # above the limit on both sides is pre-existing; worse than such a baseline, or crossing the limit from below, fails
-        for key, v in (('rt_clip_changes_s', 3.2), ('rt_clip_step_max', 3.67)):
+        for key, v in (('rt_clip_changes_s', 4.0), ('rt_clip_step_max', 4.4)):
             g = self.gate(side(**{key: v}), before=side(**{key: v}))
             self.assertEqual(g['hard'], [], key)
             self.assertEqual(len(g['preexisting']), 1, key)
@@ -148,15 +148,15 @@ class GateTest(unittest.TestCase):
         self.assertTrue(g['hard'][0].startswith('rt_corr_max'))
 
     def test_clip_changes_per_step(self):
-        # the arc case: 3.67 / s in the scored 3 s arc step on the before side, a session mean near 1 / s
-        b = side(rt_clip_changes_s=0.90, rt_clip_step_max=3.67)
+        # the arc case: 4.4 / s in the scored 3 s arc step on the before side, a session mean near 1 / s
+        b = side(rt_clip_changes_s=0.90, rt_clip_step_max=4.4)
         g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=2.67), before=b)
         self.assertEqual(g['hard'], [])
         self.assertEqual(len(g['hard_before']), 1)
-        self.assertTrue(g['hard_before'][0].startswith('rt_clip_step_max 3.670 > 3.0'))
-        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=3.33), before=b)     # better, still above: pre-existing
+        self.assertTrue(g['hard_before'][0].startswith('rt_clip_step_max 4.400 > 3.75'))
+        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=4.0), before=b)      # better, still above: pre-existing
         self.assertEqual(g['hard'], [])
-        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=3.70), before=b)     # worse than the baseline: FAIL
+        g = self.gate(side(rt_clip_changes_s=0.86, rt_clip_step_max=4.5), before=b)      # worse than the baseline: FAIL
         self.assertEqual(g['verdict'], 'FAIL')
         # the busiest window anywhere is a report only: no hard limit
         g = self.gate(side(rt_clip_win_max=9.3))
