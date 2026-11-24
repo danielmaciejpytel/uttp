@@ -1145,7 +1145,7 @@ function M.RegisterSettings(core)
   core.Register({ key = "mm.leanCoverage", section = "motion", type = "choice", default = "standard",
     choices = { { "standard", "Standard" }, { "wide", "Wide" } },
     label = "motion: lean coverage",
-    desc = "Standard (default) = V leans into turns only while running unarmed. Wide = also with a weapon drawn, while aiming (body only) and when moving crouched.",
+    desc = "Standard (default) = V leans into turns only when walking or running unarmed and upright. Wide = also with a weapon drawn, while aiming (the body only, the head stays on the aim) and when moving crouched.",
     apply = function(v) M.SetOption("leanCoverage", v == "wide" and "wide" or "standard") end })
   core.Register({ key = "mm.selectionGuards", section = "motion", type = "bool", default = true,
     label = "motion: clip selection guards",
