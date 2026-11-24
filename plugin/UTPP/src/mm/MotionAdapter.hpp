@@ -1119,8 +1119,9 @@ struct MapConfig
     // crouch loop rule, CR-5); kRefaceStarts = standing with scope 0, the reface start clips keep the mapped query rate (scope 3).
     // capsuleRateBlendS: time constant (s) of the first-order blend of the scale between feeds (a guard toggles the rate smoothly);
     // 0 = the scale of each feed as computed. 0 / 0 = the unguarded rate, bit for bit.
-    // kStart off: it costs the steady loop gain (kRefaceStarts acts per pick and keeps the loops at the capsule rate)
-    int capsuleRateGuards = caprate::kDirection | caprate::kDodge | caprate::kCrouch | caprate::kRefaceStarts;
+    // kStart off: it costs the steady loop gain. kRefaceStarts off: it keeps the full-stick 180 deg sprint start at 4 clip changes in 1.5 s
+    // (5 without it), but costs the Female default sessions +6.7 % of the gate total and hides the loop dwell of the churn slices.
+    int capsuleRateGuards = caprate::kDirection | caprate::kDodge | caprate::kCrouch;
     float capsuleRateBlendS = caprate::kBlendS;
     // Speed converter (speedconv bits, 0 = off): kQuery = the query trajectory and the movement predicates use the velocity the
     // reference character movement would have while chasing the game velocity (speedconv::Step: curved turns, limited acceleration and

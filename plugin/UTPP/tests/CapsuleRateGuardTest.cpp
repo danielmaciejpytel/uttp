@@ -50,7 +50,7 @@ int main()
     {
         const MapConfig d;
         Check("defaults: capsule speed play rate on with every guard but the start one and the 0.2 s blend",
-              d.capsuleSpeedRate == CapsuleRateMode::Both && d.capsuleRateScope == 0 && d.capsuleRateGuards == (caprate::kAll & ~caprate::kStart) &&
+              d.capsuleSpeedRate == CapsuleRateMode::Both && d.capsuleRateScope == 0 && d.capsuleRateGuards == (caprate::kAll & ~(caprate::kStart | caprate::kRefaceStarts)) &&
                   d.capsuleRateBlendS == caprate::kBlendS && caprate::kBlendS == 0.2f);
     }
     // ---- kDirection: forward / direction reference speed (run 500 / back 300 / side 350 cm/s)
