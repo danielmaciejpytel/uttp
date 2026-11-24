@@ -17,6 +17,8 @@
 // shown frame (the drawn heading turns toward it while the clip plays), within the deadband and past the cap the drawn heading is kept,
 // the turn stays within the cap and the rate bound;
 // driver mutations 5 (no turn) and 6 (no cap) must FAIL.
+// Matcher mutation JUMPPICK 49 (a run clip past its indexed rows is replaced on the downshift feed of a stick release) fails the 60 Hz
+// clip changes of dodge_feed_man.txt (a Walk clip for one feed before the Stop after the second dodge; not registered).
 
 #include <algorithm>
 #include <array>
