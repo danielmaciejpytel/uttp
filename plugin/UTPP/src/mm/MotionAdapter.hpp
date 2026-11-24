@@ -2285,7 +2285,10 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         }
     }
     m.traj.Update(dt, velQ, trajAcc, d, c.gravity * 100.0f, hasFloor, hasFloor ? -f.air.distanceToGround * 100.0f : 0.0f, facing);
-    if ((c.speedConverter & speedconv::kTrajectory) && convActive)
+    // kTrajectory with kStanceTravel: a strafing feed keeps the plain prediction (the strafe limits convert reversals, and a prediction
+    // integrated from that lagging state trails every left / right flip of the strafe)
+    const bool stanceConverted = (c.speedConverter & speedconv::kStanceTravel) && rot == motiontraj::RotationMode::Strafe;
+    if ((c.speedConverter & speedconv::kTrajectory) && convActive && !stanceConverted)
         speedconv::ApplyConvertedPrediction(m.traj, m.speedConverter, vel, trajAcc, true, convLim, convShape,
                                             (c.speedConverter & speedconv::kDirectionOnly) != 0,
                                             speedconv::TrajectoryRamp(d.capsuleStart.Active(), motiontraj::SizeXY(vel), d.maxSpeed));
