@@ -38,6 +38,7 @@
 #include "MotionTrajectory.hpp"
 #include "SpeedConverter.hpp"
 #include "speedconv_startstop.hpp"
+#include "speedconv_gait.hpp"
 
 namespace utpp::mm::adapter
 {
@@ -1032,6 +1033,7 @@ struct MapConfig
     // rate only while the capsule speed holds (speedconv::UpdateSteady); kGameSpeedRate = a converted feed plays at the game speed (the
     // rate scale times game / converted speed).
     // 0 = the game velocity everywhere, bit for bit. Default: the stronger preset (speedconv::PresetFor(kPresetStronger)).
+    // kGaitRamp (speedconv_gait.hpp, off by default): the query speed ramps across a gait change from a held speed.
     int speedConverter = speedconv::PresetFor(speedconv::kPresetStronger).bits;
     speedconv::Limits speedConverterLimits;
     float speedConverterFriction = speedconv::PresetFor(speedconv::kPresetStronger).friction; // turn friction of the converter (per second); 0 = the gait ground friction of the character movement
@@ -1390,6 +1392,7 @@ struct MapState
     float rateSpeedScale = 1.0f; // MapConfig::capsuleSpeedRate: this feed's play-rate scale (1 = off)
     speedconv::State speedConverter; // MapConfig::speedConverter: the converted velocity of the last feed
     speedconv::StartStopState speedConverterStartStop; // speedconv::kStartStopWindow: the start / stop window
+    speedconv::GaitState speedConverterGait; // speedconv::kGaitRamp: the gait ramp of the converted speed
     motiontraj::States st;       // Update_States values with the _LastFrame copies + predicates of this frame
     float lastAirVzCmS = 0.0f;
     float landHeavyCmS = motiontraj::kHeavyLand; // heavy-landing threshold latched at the last touchdown (HeavyLandThresholdCmS)
@@ -2140,6 +2143,9 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
         if (c.speedConverterMaxTurnDeg > 0.0f && c.speedConverterMaxTurnDeg < 180.0f)
             lim.maxTurnCos = std::cos(c.speedConverterMaxTurnDeg / motiontraj::kRad2Deg);
         velQ = speedconv::Step(m.speedConverter, vel, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
+        if (c.speedConverter & speedconv::kGaitRamp)
+            velQ = speedconv::GaitStep(m.speedConverterGait, velQ, vel, gait, active && input, dt,
+                                       motiontraj::MotionMaxAcceleration(c.cmc, gait, m.speedConverterGait.speed), lim.brakingInput);
         if ((c.speedConverter & speedconv::kGameSpeedRate) && active)
             gameSpeedRate = speedconv::GameSpeedRateScale(motiontraj::SizeXY(vel), motiontraj::SizeXY(velQ));
         if (c.speedConverter & speedconv::kStartStopWindow)

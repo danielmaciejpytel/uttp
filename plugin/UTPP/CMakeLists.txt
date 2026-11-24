@@ -566,6 +566,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tests/jumppick.cmake OPTIONAL) # fix3/jump: 
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/slowwalk.cmake OPTIONAL) # G1: established slow walk plays the Walk_Loop clips
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/steadyrun.cmake OPTIONAL) # G10: steady Run gait (stick 0.7-0.82) plays Walk_Loop / Run_Loop clips, no pose reset
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/analogfloor.cmake OPTIONAL) # minimum analog walk speed: floor multiplier, floor stick, modifier identity
+include(${CMAKE_CURRENT_SOURCE_DIR}/tests/speedconv_gait.cmake OPTIONAL) # speed converter: gait ramp
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/locostart.cmake OPTIONAL) # start from rest (no pivot without a velocity heading, slow start margin) + jump take-off hold
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/locohip.cmake OPTIONAL) # hipfire raise out of Relaxed, isolated hold / re-raise, crouch move B fade (HIP-1, HIP-2, CR-5)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/itemplane.cmake OPTIONAL) # item render plane core: policy, registry re-apply, outside writes, prune, cap
