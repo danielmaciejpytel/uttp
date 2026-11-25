@@ -205,7 +205,9 @@ void SetCapsuleForecast(bool aOn);
 void SetAimRotation(bool aOn);
 // Moving-aim root accumulate (CET mm.aimRootAccumulate, default off): while V aims on the move the visual root first squares up to the aim
 // like the lock, then keeps accumulating the steered clip yaw instead of the lock onto the capsule; its lag behind the aimed direction
-// stays within the aim offset's reach (spine yaw clamp minus a margin, 52 deg; MotionOffsetRoot.hpp item 6).
+// stays within the aim offset's reach (spine yaw clamp minus a margin, 52 deg; MotionOffsetRoot.hpp item 6); a camera turn faster than
+// the follow rate (450 deg/s) carries it past for the time of the turn, at most to the hard edge (spine yaw clamp + 30 deg). During start
+// clips V squares up to the aim again.
 // Read on every Step.
 void SetAimRootAccumulate(bool aOn);
 // Tier2 Slow flag (GameplayRestriction.Tier2LocomotionSlow; reds UTPPFeedMotionTier2Slow, sent right before every UTPPFeedLocomotion): the next

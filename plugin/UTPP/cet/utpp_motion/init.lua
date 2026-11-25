@@ -1074,8 +1074,8 @@ function M.RegisterSettings(core)
     label = "Natural body turn while aiming on the move",
     desc = "While V aims and moves, she first turns to the crosshair as before; then her legs and hips keep their own direction "
       .. "and turn with her steps instead of being turned with the camera at once. Her upper body and the weapon still follow the "
-      .. "crosshair, and her hips never turn further away from where she aims than her upper body can twist. Off (default) = the "
-      .. "body turns with the camera at once.",
+      .. "crosshair, and her hips stay within the turn her upper body can twist; after a very fast camera turn they catch up "
+      .. "smoothly. Off (default) = the body turns with the camera at once.",
     apply = function(v) M.SetOption("aimRootAccumulate", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },

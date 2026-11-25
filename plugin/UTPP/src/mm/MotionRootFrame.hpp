@@ -37,9 +37,10 @@ struct Inputs
     bool yawAlign = false;
     float yawAlignWorld = 0, yawAlignHalfLife = .05f, yawAlignMaxRate = 0;
     // Moving-aim accumulate (MotionOffsetRoot.hpp Step::aimAccumulate): the root heading lags the aimed world yaw aimLagWorld (rad, the
-    // direction the aim offset turns to) by at most aimLagMax (rad) instead of being locked onto the capsule.
-    bool aimAccumulate = false;
-    float aimLagWorld = 0, aimLagMax = 0;
+    // direction the aim offset turns to) by at most aimLagMax (rad) instead of being locked onto the capsule; past it the lag comes back at
+    // the bounded follow rate, never beyond aimLagHard (rad).
+    bool aimAccumulate = false, aimSquareUp = false;
+    float aimLagWorld = 0, aimLagMax = 0, aimLagHard = motionRoot::kAimLagHardDefault;
 };
 enum class Reseed
 {
@@ -231,6 +232,8 @@ class Processor
                 step.aimAccumulate = true;
                 step.aimLagTarget = Wrap(double(in.aimLagWorld) - double(p.m_actor)); // relative to the drawn capsule
                 step.aimLagMax = in.aimLagMax;
+                step.aimLagHard = in.aimLagHard;
+                step.aimSquareUp = in.aimSquareUp;
             }
             if (!p.m_native.Update(step))
                 return false;

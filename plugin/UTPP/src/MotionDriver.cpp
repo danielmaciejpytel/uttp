@@ -480,6 +480,11 @@ constexpr float kShooterModeOrbitDegPerS = 3.0f;
 constexpr float kAimRootLagMarginDeg = 8.0f;
 constexpr float kAimRootLagDeg = motionpose::kAimSpineYawClampDeg - kAimRootLagMarginDeg;
 static_assert(kAimRootLagDeg > 0.0f && kAimRootLagDeg < motionpose::kAimSpineYawClampDeg, "aim root lag inside the spine yaw clamp");
+// Past the band edge the lag comes back at the bounded follow rate (MotionOffsetRoot kAimFollowRate, 450 deg/s): a camera turn faster
+// than that may carry it beyond the spine yaw clamp for the time of the turn, at most this far (the hard edge, never passed).
+constexpr float kAimRootOvershootDeg = 30.0f;
+constexpr float kAimRootLagHardDeg = motionpose::kAimSpineYawClampDeg + kAimRootOvershootDeg;
+static_assert(kAimRootLagHardDeg < 120.0f, "the hard edge keeps the aim offset target on its side of the back");
 // Rate bound of the visual-root lock while V moves in Shooter mode / H2 (MotionOffsetRoot Step::lockMaxRate): 450 deg/s = 7.5 deg per
 // 60 Hz feed, under the 8 deg per feed that reads as a snap; 540 (ADS while moving) is kept for the aim lock.
 #if UTPP_SHOOTER_MODE_MUTATION == 10
@@ -6242,6 +6247,13 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             rootEvaluation.input.aimAccumulate = true;
             rootEvaluation.input.aimLagWorld = lagDeg * integ::kDegToRad;
             rootEvaluation.input.aimLagMax = kAimRootLagDeg * integ::kDegToRad;
+            rootEvaluation.input.aimLagHard = kAimRootLagHardDeg * integ::kDegToRad;
+            // A start clip is authored along the travel: during it V squares up to the aim as when the accumulate begins (a root that
+            // kept the start's steered yaw lagged the travel by up to ~37 deg in the synthetic camera sweeps and bent the knees).
+            const uint8_t fc = r.clip >= 0 && static_cast<uint32_t>(r.clip) < b.db.NumClips()
+                                   ? steer::ClassifyClip(b.db.ClipName(static_cast<uint32_t>(r.clip)))
+                                   : steer::kClassTurnInPlace;
+            rootEvaluation.input.aimSquareUp = fc == steer::kClassStart || fc == steer::kClassStartSprint;
         }
         rootEvaluation.input.lockMaxRate = airLock ? kShooterModeAirRate : (strafeLock && !ctx.aimFacing ? kShooterModeLockRate : 0.0f);
 #if UTPP_SHOOTER_MODE_MUTATION != 15
