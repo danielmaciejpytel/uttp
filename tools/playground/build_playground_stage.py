@@ -75,7 +75,7 @@ def main():
               ' Pass --anchor X Y Z [YAW].')
 
     boxes = ps.place_boxes(layout)
-    sector, bbox = ps.build_sector(boxes, SECTOR_PATH, layout.get('mesh', ps.MESH_PATH))
+    sector, bbox = ps.build_sector(boxes, SECTOR_PATH, layout.get('mesh', ps.MESH_PATH), ps.place_lights(layout))
     block = ps.build_block(SECTOR_PATH, bbox)
 
     work = os.path.join(root, 'Build', 'work', WORK_DIR, '_tmp', args.stage_name)

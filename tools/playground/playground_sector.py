@@ -197,7 +197,41 @@ def collision_node(boxes, sector_hash, debug_name):
     return node, center, extents
 
 
-def build_sector(boxes, sector_path, mesh_path=MESH_PATH):
+def place_lights(layout):
+    """Resolve layout['lights'] ([{'pos': [x, y, z], 'radius', 'intensity'}], anchor-relative) into world positions."""
+    a = layout['anchor']
+    ar = quaternion_to_matrix(_yaw_quat(a.get('yaw_deg', 0.0)))
+    out = []
+    for l in layout.get('lights', []):
+        p = l['pos']
+        c = [sum(ar[i][j] * p[j] for j in range(3)) + (a['x'], a['y'], a['z'])[i] for i in range(3)]
+        out.append({'pos': c, 'radius': float(l['radius']), 'intensity': float(l['intensity'])})
+    return out
+
+
+def light_node(debug_name, radius, intensity):
+    """A plain white point light without shadows (field set as in the base game sectors)."""
+    n = _node_base('worldStaticLightNode', debug_name)
+    n.update({
+        'allowDistantLight': 1, 'areaRectSideA': 1, 'areaRectSideB': 1, 'areaShape': 'ALS_Capsule', 'areaTwoSided': 1,
+        'attenuation': 'LA_InverseSquare', 'autoHideDistance': STREAMING_DISTANCE, 'capsuleLength': 1, 'clampAttenuation': 0,
+        'color': {'$type': 'Color', 'Alpha': 255, 'Blue': 255, 'Green': 255, 'Red': 255}, 'colorGroupSaturation': 100,
+        'contactShadows': 'CSR_None', 'directional': 0, 'enableLocalShadows': 0, 'enableLocalShadowsForceStaticsOnly': 0,
+        'envColorGroup': 'ECG_Default', 'EV': 0,
+        'flicker': {'$type': 'rendSLightFlickering', 'flickerPeriod': 0.2, 'flickerStrength': 0, 'positionOffset': 0},
+        'group': 'LG_Group0', 'iesProfile': {'DepotPath': {'$type': 'ResourcePath', '$storage': 'uint64', '$value': '0'}, 'Flags': 'Soft'},
+        'innerAngle': 30, 'intensity': intensity, 'lightChannel': '0', 'outerAngle': 45,
+        'pathTracingLightUsage': 'PTLU_Everywhere', 'pathTracingOverrideScaleGI': 1, 'portalAngleCutoff': 0, 'radius': radius,
+        'rayTracedShadowsPlatform': 'RLSP_All', 'rayTracingContactShadowRange': -1, 'rayTracingIntensityScale': 1,
+        'rayTracingLightSourceRadius': -1, 'roughnessBias': 0, 'rtxdiShadowStartingDistance': -1, 'scaleEnvProbes': 100,
+        'scaleGI': 100, 'scaleVolFog': 100, 'sceneDiffuse': 1, 'sceneSpecularScale': 100, 'shadowAngle': -1,
+        'shadowFadeDistance': 10, 'shadowFadeRange': 5, 'shadowRadius': -1, 'shadowSoftnessMode': 'LSSM_Default',
+        'softness': 2, 'sourceRadius': 0.05, 'spotCapsule': 0, 'temperature': -1, 'type': 'LT_Point', 'unit': 'LU_Lumen',
+        'useInParticles': 1, 'useInTransparents': 1})
+    return n
+
+
+def build_sector(boxes, sector_path, mesh_path=MESH_PATH, lights=()):
     """Returns (sector json, bounding box (lo, hi)). mesh_path: a base-game mesh that is a 1 m cube centred on its pivot."""
     sector_hash = fnv1a64(sector_path)
     nodes, setups = [], []
@@ -207,9 +241,13 @@ def build_sector(boxes, sector_path, mesh_path=MESH_PATH):
         scale = (b['half'][0] * 2, b['half'][1] * 2, b['half'][2] * 2)   # the mesh is a 1 m cube centred on its pivot
         setups.append(_setup(i, b['center'], b['quat'], scale, 'FLAG_Building, FLAG_Culling_IsCullable',
                              fnv1a64('utpp_playground:' + b['name']), 4294967295))
+    for k, l in enumerate(lights):
+        idx = len(nodes)
+        nodes.append({'HandleId': str(idx), 'Data': light_node('utpp_playground_light_%d' % k, l['radius'], l['intensity'])})
+        setups.append(_setup(idx, l['pos'], [0.0, 0.0, 0.0, 1.0], (1.0, 1.0, 1.0), 'FLAG_Building', 0, 4294967295))
     cnode, ccenter, _ext = collision_node(boxes, sector_hash, 'utpp_playground_collision')
-    nodes.append({'HandleId': str(len(boxes)), 'Data': cnode})
-    setups.append(_setup(len(boxes), ccenter, [0.0, 0.0, 0.0, 1.0], (1.0, 1.0, 1.0), 'FLAG_Building', 0, 0))
+    nodes.append({'HandleId': str(len(nodes)), 'Data': cnode})
+    setups.append(_setup(len(nodes) - 1, ccenter, [0.0, 0.0, 0.0, 1.0], (1.0, 1.0, 1.0), 'FLAG_Building', 0, 0))
     root = {
         '$type': 'worldStreamingSector', 'category': 'AlwaysLoaded', 'cookingPlatform': 'PLATFORM_PC',
         'externInplaceResource': _zero_path('Soft'), 'level': 1, 'localInplaceResource': [],
