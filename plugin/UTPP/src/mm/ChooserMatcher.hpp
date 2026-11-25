@@ -2586,7 +2586,7 @@ public:
         m_stairApplied = loop ? m_stairCadence * (1.0f + m_stairPhaseSmooth) : 1.0f;
         aRes.stairCadence = m_stairApplied;
         aRes.stairFlightCadence = loop ? m_stairCadence : 1.0f;
-        aRes.stairTreads = m_stairApplied != 1.0f ? treads : 0;
+        aRes.stairTreads = loop ? treads : 0; // the fit's treads while a loop plays on the flight (also at a cadence of exactly 1)
     }
 
     // Phase of the stair steps: the n x tread fit keeps the landing spot constant from step to step but does not choose it. At every

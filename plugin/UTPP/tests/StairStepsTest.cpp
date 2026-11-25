@@ -251,10 +251,36 @@ static void Swing()
               !p.anchored,
           "plan: no fit mirrors the step about the support");
     Check(!sw::PlanSwing(c, MakeFlight(0.17f, 0.28f, 0), 0.10f, 1.0f, 0.12f, 1.0f, true, p), "plan: a swing shorter than minSwing = none");
+    // a measured step: one step past the support, on the tread that many whole treads on
+    Check(sw::PlanSwing(c, up, -0.14f, 1.0f, 0.14f, 1.17f, true, p, NAN, 0.84f) && std::fabs(p.sLand - 0.98f) < 1e-5f &&
+              p.kLand == 3.0f && std::fabs(p.h1 - (1.17f + 3.0f * 0.17f)) < 1e-5f,
+          "plan: a measured step of three treads lands three treads past the support");
+    // the flight phase with the foot's own last landing: two steps past that landing, not past the lift-off
+    Check(sw::PlanSwing(c, up, 0.10f, 1.0f, NAN, NAN, false, p, NAN, 0.56f, 0.0f) && std::fabs(p.sLand - 1.12f) < 1e-5f &&
+              p.kLand == 4.0f && std::fabs(p.h1 - (1.0f + 4.0f * 0.17f)) < 1e-5f && !p.anchored,
+          "plan: flight phase lands two steps past the foot's own last landing");
+    // anchor: the other foot landed -> one step past it, anchored; not once half the swing is gone
+    sw::Plan a;
+    Check(sw::PlanSwing(c, up, 0.14f, 1.0f, NAN, NAN, false, a) &&
+              sw::Anchor(c, up, a, 0.42f, 1.17f, 0.56f) && std::fabs(a.sLand - 0.98f) < 1e-5f && a.kLand == 3.0f &&
+              std::fabs(a.h1 - (1.17f + 2.0f * 0.17f)) < 1e-5f && a.anchored,
+          "anchor: one step past the landed foot, on its tread plus the step's treads");
+    sw::Plan a2;
+    sw::PlanSwing(c, up, 0.14f, 1.0f, NAN, NAN, false, a2);
+    a2.u = 0.6f;
+    Check(!sw::Anchor(c, up, a2, 0.42f, 1.17f, 0.56f) && !a2.anchored, "anchor: none past half the swing");
+    // converge: late in the swing the own trace over the landing spot becomes the landing height
+    sw::Plan cv;
+    sw::PlanSwing(c, up, -0.14f, 1.0f, 0.14f, 1.17f, true, cv); // lands at 0.70, 1.51
+    cv.u = 0.5f;
+    Check(!sw::Converge(c, up, cv, 0.65f, 1.40f), "converge: not before convergeFrom");
+    cv.u = 0.7f;
+    Check(!sw::Converge(c, up, cv, 0.40f, 1.40f), "converge: not a trace well short of the landing");
+    Check(sw::Converge(c, up, cv, 0.65f, 1.40f) && cv.h1 == 1.40f, "converge: the trace over the landing spot is the landing height");
     // glide: reaches the landing tread at the landing, linear going up, front-loaded going down, no jump when the plan moves
     sw::Plan g;
     g.h0 = 0.0f;
-    g.h1 = -0.34f;
+    g.h1 = g.h1s = -0.34f;
     g.s0 = 0.0f;
     g.sLand = 1.0f;
     float path = 0.0f, prev = 0.0f;
@@ -274,7 +300,7 @@ static void Swing()
     Check(std::fabs(half - g.h1 * 0.75f) < 2e-3f, "glide down: front-loaded (3/4 of the drop at half the way)");
     path = 0.0f;
     prev = 0.0f;
-    g.h1 = 0.34f;
+    g.h1 = g.h1s = 0.34f;
     for (int i = 1; i <= 50; ++i)
     {
         const float s = 0.01f * float(i);
@@ -289,12 +315,31 @@ static void Swing()
     // landing from the clip: a sinking ball moves a free plan's landing, an anchored plan stays
     sw::Plan r;
     Check(sw::PlanSwing(c, up, 0.14f, 1.0f, NAN, NAN, false, r), "retarget: plan");
-    Check(sw::Retarget(c, up, r, 0.80f, 4.0f, 0.10f, -1.0f) && std::fabs(r.sLand - 1.20f) < 1e-5f &&
-              std::fabs(r.h1 - (1.0f + 0.17f * (std::floor(1.20f / 0.28f) - std::floor(0.14f / 0.28f)))) < 1e-5f,
-          "retarget: landing 0.1 s ahead on the tread under it");
-    Check(!sw::Retarget(c, up, r, 0.80f, 4.0f, 0.10f, 0.5f), "retarget: a rising ball = no prediction");
-    Check(sw::PlanSwing(c, up, -0.14f, 1.0f, 0.14f, 1.17f, true, r) && !sw::Retarget(c, up, r, 0.30f, 4.0f, 0.1f, -1.0f),
-          "retarget: an anchored plan stays");
+    // mid-sole at 0.40 (progress 0.23), 4 m/s, 0.1 s to the ground: lands near 0.80, 4 cm short of tread 3 -> tread 3 (the planned
+    // side of the boundary, within the hysteresis), 3 rises above the tread left
+    Check(sw::Retarget(c, up, r, 0.40f, 4.0f, 0.10f, -1.0f) && std::fabs(r.sLand - 0.80f) < 1e-5f && r.kLand == 3.0f &&
+              std::fabs(r.h1 - (1.0f + 0.17f * 3.0f)) < 1e-5f,
+          "retarget: landing 0.1 s ahead, the tread on the planned side within the hysteresis");
+    Check(sw::Retarget(c, up, r, 0.30f, 4.0f, 0.10f, -1.0f) && r.kLand == 2.0f && std::fabs(r.h1 - (1.0f + 0.17f * 2.0f)) < 1e-5f,
+          "retarget: well inside a tread takes it");
+    Check(!sw::Retarget(c, up, r, 0.40f, 4.0f, 0.10f, 0.5f), "retarget: a rising ball = no prediction");
+    sw::Config early = c;
+    early.retargetSinking = false; // only early in the swing of an unanchored plan
+    sw::Plan late;
+    Check(sw::PlanSwing(c, up, 0.14f, 1.0f, NAN, NAN, false, late), "retarget late: plan");
+    late.u = 0.6f;
+    Check(!sw::Retarget(early, up, late, 0.90f, 4.0f, 0.10f, -1.0f) && late.kLand == 4.0f, "retarget (early only): none past half the swing");
+    Check(sw::PlanSwing(c, up, -0.14f, 1.0f, 0.14f, 1.17f, true, r) && !sw::Retarget(early, up, r, 0.30f, 4.0f, 0.1f, -1.0f),
+          "retarget (early only): an anchored plan stays");
+    // sinking (retargetSinking): the landing follows the clip at any progress, anchored too
+    sw::Config sink = c;
+    sink.retargetSinking = true;
+    Check(sw::Retarget(sink, up, late, 0.90f, 4.0f, 0.10f, -1.0f) && late.kLand == 4.0f && std::fabs(late.sLand - 1.30f) < 1e-5f,
+          "retarget: a sinking ball late in the swing moves the landing (the tread kept within the hysteresis)");
+    Check(sw::PlanSwing(c, up, -0.14f, 1.0f, 0.14f, 1.17f, true, r) && sw::Retarget(sink, up, r, 0.30f, 4.0f, 0.1f, -1.0f) &&
+              r.kLand == 2.0f,
+          "retarget: a sinking ball moves an anchored plan, the tread on the planned side within the hysteresis");
+    Check(!sw::Retarget(sink, up, r, 0.30f, 4.0f, 0.1f, 0.2f), "retarget: a ball not sinking leaves an anchored plan");
     // follow: a higher target at once, a lower one smoothly and never below it, stable for a long step
     float h = 0.0f, v = 0.0f;
     sw::Follow(h, v, 0.1f, c.follow, 1.0f / 60.0f);
@@ -325,7 +370,7 @@ static void Swing()
     Check(sw::PlanSwing(c, down, 0.14f, 0.0f, NAN, NAN, false, d), "clearance down: plan");
     const float gDown = sw::SwingGround(c, down, d, -0.30f, 0.4f, 0.40f, 0.05f, 0.20f, 0.0f, 0.33f, 0.05f);
     Check(gDown >= -1e-3f, "clearance down: the heel over the tread it leaves holds the foot");
-    const float gPast = sw::SwingGround(c, down, d, -0.30f, 0.4f, 0.70f, 0.05f, 0.50f, 0.0f, 0.63f, 0.05f);
+    const float gPast = sw::SwingGround(c, down, d, -0.30f, 0.4f, 0.75f, 0.05f, 0.55f, 0.0f, 0.68f, 0.05f);
     Check(gPast < -0.15f, "clearance down: past the nose the foot glides down");
     // pelvis drop: only going down, more with longer steps, weighted and capped
     Check(sw::DescentDrop(up, 0.3f, 0.15f, 0.25f) == 0.0f, "descent drop: none going up");

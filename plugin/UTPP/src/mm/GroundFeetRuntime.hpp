@@ -46,6 +46,8 @@ inline std::atomic_flag g_stepLock = ATOMIC_FLAG_INIT;
 // diagnostics (feed dump / trace)
 inline std::atomic<uint64_t> g_steps{0}, g_applied{0}, g_identity{0}, g_noSamples{0}, g_kneeLimits{0}, g_clamps{0}, g_sudden{0}, g_rejected{0};
 inline std::atomic<uint64_t> g_stairSwings{0}, g_stairLands{0}; // swings planned over a stair flight and their landings
+inline std::atomic<uint64_t> g_landClamps{0};   // ... landings bounded by the foot's trace and the largest such correction (m)
+inline std::atomic<float> g_landClampMax{0.0f};
 inline std::atomic<float> g_lift[2] = {0.0f, 0.0f};  // m, ground height applied at the ball (last apply)
 inline std::atomic<float> g_tilt[2] = {0.0f, 0.0f};  // rad
 inline std::atomic<float> g_planeH[2] = {0.0f, 0.0f}; // m, planting plane height under the trace (model, last step)
@@ -285,6 +287,8 @@ inline void PublishSamples(const bool (&aHit)[2], const float (&aPos)[2][3], con
         const bool heelHit[2] = {g_heelTraces.set && g_heelTraces.hit[0], g_heelTraces.set && g_heelTraces.hit[1]};
         stairsteps::rt::AddTraces(aHit, aPos, heelHit, g_heelTraces.pos); // the stair profile of mm.stairSteps (StairSteps.hpp)
         s.stair = stairsteps::rt::CurrentFlight(); // the swing of a foot over the flight (GroundFeet Stage)
+        s.capX = aCapX;
+        s.capY = aCapY;
     }
     g_heelTraces = HeelTraces{};
     g_samples.Publish(s);
@@ -350,6 +354,9 @@ inline bool StepAndApply(integ::PoseSnapshot& aSnap, int64_t aNow, int64_t aTick
             g_rejected.fetch_add(after.rejected - before.rejected, std::memory_order_relaxed);
             g_stairSwings.fetch_add(after.stairSwings - before.stairSwings, std::memory_order_relaxed);
             g_stairLands.fetch_add(after.stairLands - before.stairLands, std::memory_order_relaxed);
+            g_landClamps.fetch_add(after.landClamps - before.landClamps, std::memory_order_relaxed);
+            if (after.landClamps != before.landClamps && after.landClampLast > g_landClampMax.load(std::memory_order_relaxed))
+                g_landClampMax.store(after.landClampLast, std::memory_order_relaxed);
             s.lastTicks = aNow;
             g_steps.fetch_add(1, std::memory_order_relaxed);
             g_plan.Publish(plan);

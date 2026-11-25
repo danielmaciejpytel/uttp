@@ -5650,6 +5650,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         const bool ground = !(f.air.valid && !f.air.onGround) && !adapter::PsmAir(f.psmDetailed) && !g_trav.active;
         const mm::stairsteps::FeedOut stairs = mm::stairsteps::rt::Update(dt, aRaw.haveExtra, aRaw.capsulePos[0], aRaw.capsulePos[1],
                                                                          aRaw.velWorld[0], aRaw.velWorld[1], ground);
+        mm::stairsteps::rt::g_strideWarp.store(b.eval.StrideWarp(), std::memory_order_relaxed);
         if (stairs.weight > 0.0f && b.eval.StrideWarp())
         {
             f.stairTreadM = stairs.treadM;

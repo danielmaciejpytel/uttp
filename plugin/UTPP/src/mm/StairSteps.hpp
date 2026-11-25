@@ -73,6 +73,8 @@ struct Estimate
     float rms = 0.0f;
     int points = 0;
     int noses = 0;
+    int fail = 0; // why a fit found no flight (diagnostics): 1 too few points / no recent rise, 2 too few nose candidates, 3 mixed
+                  // directions, 4 too few noses, 5 no nose spacing in range, 6 a poor staircase fit
 };
 
 // Nose line nearest to the world point (x, y) along the estimate's direction: signed distance (m) of the point past that nose
@@ -180,7 +182,10 @@ public:
         }
         e.points = n;
         if (n < 6 || !(recentHi - recentLo >= c.minRise))
+        {
+            e.fail = 1;
             return e;
+        }
         // nose candidates: neighbouring points along the travel with a rise between them
         float cs[kCapacity], cr[kCapacity];
         int nc = 0, up = 0;
@@ -196,11 +201,17 @@ public:
             }
         }
         if (nc < 2)
+        {
+            e.fail = 2;
             return e;
+        }
         const int sign = 2 * up >= nc ? 1 : -1;
         const int same = sign > 0 ? up : nc - up;
         if (5 * same < 4 * nc) // at least 80 % of the candidates rise the same way
+        {
+            e.fail = 3;
             return e;
+        }
         // rise: median of the same-sign candidates; noses: candidates merged within clusterGap
         float rs[kCapacity];
         int nr = 0;
@@ -228,7 +239,10 @@ public:
             noses[nn++] = sum / float(cnt);
         e.noses = nn;
         if (nn < 2)
+        {
+            e.fail = 4;
             return e;
+        }
         std::sort(rs, rs + nr);
         const float rise = float(sign) * rs[nr / 2];
         float sp[kCapacity];
@@ -240,7 +254,10 @@ public:
                 sp[ns++] = d;
         }
         if (ns < 1)
+        {
+            e.fail = 5;
             return e;
+        }
         std::sort(sp, sp + ns);
         const float t0 = sp[ns / 2];
         // least-squares staircase: tread around t0, phase over one tread
@@ -375,12 +392,17 @@ inline float TreadDownRamped(const Flight& f, float aS, float aHs, float aKs, fl
 struct Plan
 {
     float h0 = 0.0f;    // world height of the tread the foot left (its planting plane at the lift-off)
-    float h1 = 0.0f;    // world height of the tread it lands on
+    float h1 = 0.0f;    // world height of the tread it lands on (the goal)
     float s0 = 0.0f;    // mid-sole along the flight at the lift-off
     float sLand = 0.0f; // mid-sole along the flight at the landing
     float hs = 0.0f;    // support foot's plane height (world) and its tread index (heights of the other treads are relative to it)
     float ks = 0.0f;
     bool anchored = false; // the landing is the fit's tread count past a standing support foot (kept; else the clip may move it)
+    float kLand = 0.0f;    // tread index of the landing tread
+    float h1s = 0.0f, h1v = 0.0f; // the landing height the swing heads for: h1 followed critically damped (Advance), so a landing
+                                  // moved by Retarget / Reconcile never jumps the foot
+    float u = 0.0f;        // swing progress (Advance; never goes back)
+    float capFrom = 0.55f; // progress from which the nose line going up blends into the landing tread (CapStart)
 };
 
 struct Config
@@ -389,44 +411,66 @@ struct Config
     float clearance = 0.03f;  // m, toe clearance above the noses at mid swing (0 at the lift-off and the landing)
     float rampIn = 0.2f;      // swing share over which the nose clearance comes in (the toe of a foot that leaves a tread)
     float downRamp = 0.1f;    // treads past the nose over which a drop is spread for the heel / ball going down
-    float eps = 0.015f;       // m, smooth maximum width
+    float eps = 0.002f;       // m, smooth maximum width at the lift-off and the landing ...
+    float epsMid = 0.04f;     // m, ... and the extra width at mid swing (a wide blend there: no kink where two heights cross)
     float minSwing = 0.15f;   // m, shortest planned swing along the flight
     float follow = 22.0f;     // rad/s, critically damped follow of a lower ground height (a higher one is taken at once)
+    float followVMax = 0.5f;  // m/s, largest rate a higher ground hands on (a later lower one starts from it: no overshoot)
+    float landOmega = 30.0f;  // rad/s, critically damped follow of the landing height (Plan::h1s)
     float sinkMin = 0.3f;     // m/s, ball sink rate (clip) above which its landing is predicted
     float predictMax = 0.25f; // s, longest predicted time to the landing
+    float retargetUntil = 0.5f; // the predicted landing moves the plan only before this progress
+    float retargetHyst = 0.25f; // treads: a predicted landing changes the tread once it is this far inside the new one
+    bool retargetSinking = false; // a sinking ball moves the landing at any progress, anchored or not (the clip decides where the foot
+                                 // lands; the landing height follows smoothly through Plan::h1s)
+    float capLead = 0.2f;     // progress before the toe reaches the landing nose at which the nose line starts to blend into it
+    float reconcileFrom = 0.5f; // progress from which the foot's own trace may end the flight under it (Reconcile)
+    float flightLeave = 0.5f; // share of the rise by which that trace leaves the flight model
+    float convergeFrom = 0.6f; // progress from which the foot's own trace over its landing spot becomes the landing height
+    float convergeNear = 0.5f; // treads: that trace counts once it is at most this far short of the planned landing
 };
 
-// Plan at the lift-off: aS0 = the swinging foot's mid-sole along the flight, aH0 its plane height; aSs / aHs = the support foot's
-// mid-sole and plane height, aSupport = that foot stands now (a walk). With a standing support the landing is f.treads treads past it
-// (the fit of the playing step), or as far ahead of it as the swinging foot is behind it (no fit); without one (the flight phase of a
-// run) it is two steps (2 x f.treads treads) past the tread the swinging foot left. False = no plan (a flight without a tread, no fit
-// in the flight phase or a swing too short).
-inline bool PlanSwing(const Config& c, const Flight& f, float aS0, float aH0, float aSs, float aHs, bool aSupport, Plan& aOut)
+// Treads in a step of aStep metres (at least 1).
+inline float StepTreads(const Flight& f, float aStep) { return std::fmax(1.0f, std::round(aStep / f.tread)); }
+
+// Plan at the lift-off: aS0 = the swinging foot's mid-sole along the flight, aH0 its plane height, aSH0 where along the flight that
+// height was traced (NaN = aS0); aSs / aHs = the support foot's traced point along the flight and its plane height, aSupport = that
+// foot stands now (a walk). aStep = the step length (m) last measured on the flight (NaN = f.treads treads). With a standing support
+// the landing is one step past it (on the tread that many whole treads on), or as far ahead of it as the swinging foot is behind it
+// (no fit); without one (the flight phase of a run) it is two steps past the swinging foot (Anchor moves it once the other foot
+// lands; aSOwn = where this foot last landed along the flight, NaN = unknown: the landing is then two steps past that point, not past
+// the lift-off). False = no plan (a flight without a tread, no step in the flight phase or a swing too short).
+inline bool PlanSwing(const Config& c, const Flight& f, float aS0, float aH0, float aSs, float aHs, bool aSupport, Plan& aOut,
+                      float aSH0 = NAN, float aStep = NAN, float aSOwn = NAN)
 {
     if (!f.valid || !(f.tread > 1.0e-3f) || !std::isfinite(f.rise) || !std::isfinite(aS0) || !std::isfinite(aH0) ||
         (aSupport && (!std::isfinite(aSs) || !std::isfinite(aHs))))
         return false;
+    const bool measured = std::isfinite(aStep) && aStep > 0.0f;
+    const float step = measured ? aStep : float(f.treads) * f.tread;
     Plan p;
     p.h0 = aH0;
     p.s0 = aS0;
     float kLand = 0.0f;
     if (!aSupport)
     {
-        if (f.treads <= 0)
+        if (!(step > 0.0f))
             return false;
         p.hs = aH0;
-        p.ks = TreadIndex(f, aS0);
-        p.sLand = aS0 + 2.0f * float(f.treads) * f.tread;
-        kLand = p.ks + 2.0f * float(f.treads);
+        p.ks = TreadIndex(f, std::isfinite(aSH0) ? aSH0 : aS0);
+        const bool own = std::isfinite(aSOwn) && aSOwn <= aS0 + 0.5f * step;
+        const float from = own ? aSOwn : aS0;
+        p.sLand = std::fmax(from + 2.0f * step, aS0 + c.minSwing);
+        kLand = p.ks + 2.0f * StepTreads(f, step);
     }
     else
     {
         p.hs = aHs;
         p.ks = TreadIndex(f, aSs);
-        if (f.treads > 0)
+        if (step > 0.0f)
         {
-            p.sLand = aSs + float(f.treads) * f.tread;
-            kLand = p.ks + float(f.treads);
+            p.sLand = aSs + step;
+            kLand = p.ks + StepTreads(f, step);
             p.anchored = true;
         }
         else
@@ -437,19 +481,79 @@ inline bool PlanSwing(const Config& c, const Flight& f, float aS0, float aH0, fl
     }
     if (!(p.sLand - p.s0 >= c.minSwing))
         return false;
+    p.kLand = kLand;
     p.h1 = p.hs + f.rise * (kLand - p.ks);
+    p.h1s = p.h1;
+    p.h1v = 0.0f;
+    p.u = 0.0f;
     aOut = p;
     return true;
 }
 
+// The other foot landed while this one swings without an anchor (the flight phase of a run): the landing becomes one step (aStep m,
+// the last measured one) past that foot's traced point aSo with its plane height aHo, on the tread that many whole treads on; only
+// before retargetUntil. True = anchored.
+inline bool Anchor(const Config& c, const Flight& f, Plan& p, float aSo, float aHo, float aStep)
+{
+    if (p.anchored || !(f.tread > 1.0e-3f) || !std::isfinite(f.rise) || !std::isfinite(aSo) || !std::isfinite(aHo) ||
+        !std::isfinite(aStep) || !(aStep > 0.0f) || !(p.u < c.retargetUntil))
+        return false;
+    const float sLand = aSo + aStep;
+    if (!(sLand - p.s0 >= c.minSwing))
+        return false;
+    p.hs = aHo;
+    p.ks = TreadIndex(f, aSo);
+    p.sLand = sLand;
+    p.kLand = p.ks + StepTreads(f, aStep);
+    p.h1 = p.hs + f.rise * (p.kLand - p.ks);
+    p.anchored = true;
+    return true;
+}
+
+// Swing progress (0 at the lift-off, 1 at the landing) of the mid-sole at aS.
+inline float Progress(const Plan& p, float aS)
+{
+    const float span = p.sLand - p.s0;
+    return span > 1.0e-4f ? std::clamp((aS - p.s0) / span, 0.0f, 1.0f) : 1.0f;
+}
+
+// Progress from which the nose line going up blends into the landing tread: capLead before the toe tip (aToeAhead m ahead of the
+// mid-sole along the flight) reaches the nose of the landing tread, within [0.25, 0.7].
+inline float CapStart(const Config& c, const Flight& f, const Plan& p, float aToeAhead)
+{
+    const float span = p.sLand - p.s0;
+    if (!(span > 1.0e-3f) || !std::isfinite(aToeAhead))
+        return 0.55f;
+    const float uCross = (p.kLand * f.tread - std::fmax(aToeAhead, 0.0f) - p.s0) / span;
+    return std::clamp(uCross - c.capLead, 0.25f, 0.7f);
+}
+
+// One update of the plan at the mid-sole aS: the progress (monotone) and the landing height heading for h1 (critically damped).
+inline void Advance(const Config& c, Plan& p, float aS, float aDt)
+{
+    if (std::isfinite(aS))
+        p.u = std::fmax(p.u, Progress(p, aS));
+    if (!std::isfinite(p.h1s) || !std::isfinite(p.h1v))
+    {
+        p.h1s = p.h1;
+        p.h1v = 0.0f;
+        return;
+    }
+    if (!(aDt > 0.0f) || !(c.landOmega > 0.0f))
+        return;
+    const float w = c.landOmega, e0 = p.h1s - p.h1, b = p.h1v + w * e0, k = std::exp(-w * aDt);
+    p.h1s = p.h1 + (e0 + b * aDt) * k;
+    p.h1v = (p.h1v - w * b * aDt) * k;
+}
+
 // One step of the swing ground height aG (rate aGv) towards aTarget: a higher target is taken at once (the foot never goes into a
-// tread), a lower one is followed critically damped at aOmega (exact step, stable for any aDt), so a released requirement does not
-// drop the foot in one frame.
-inline void Follow(float& aG, float& aGv, float aTarget, float aOmega, float aDt)
+// tread; the target is smooth, SwingGround) and hands on its rate up to followVMax, a lower one is followed critically damped at aOmega
+// (exact step, stable for any aDt), so a released requirement does not drop the foot in one frame.
+inline void Follow(float& aG, float& aGv, float aTarget, float aOmega, float aDt, float aVMax = 3.0f)
 {
     if (!std::isfinite(aG) || !std::isfinite(aGv) || !(aDt > 0.0f) || !(aOmega > 0.0f) || aTarget >= aG)
     {
-        aGv = (std::isfinite(aG) && aDt > 0.0f) ? std::fmax((aTarget - aG) / aDt, 0.0f) : 0.0f;
+        aGv = (std::isfinite(aG) && aDt > 0.0f) ? std::clamp((aTarget - aG) / aDt, 0.0f, std::fmax(aVMax, 0.0f)) : 0.0f;
         aG = aTarget;
         return;
     }
@@ -465,16 +569,65 @@ inline void Follow(float& aG, float& aGv, float aTarget, float aOmega, float aDt
 
 // Landing seen from the clip: a foot whose ball is aAbove over the clip's floor and sinking at aVAbove (m/s) lands in about
 // aAbove / -aVAbove; with its mid-sole at aS moving at aVs along the flight (m/s) it lands near aS + aVs x that time, on the tread
-// under that point. The plan's landing then moves there (a step longer or shorter than the fit). False = no prediction (the foot is
-// not sinking fast enough or not moving along the flight); the plan stays.
+// under that point. The plan's landing then moves there (a step longer or shorter than the fit): early in the swing (progress below
+// retargetUntil, no anchor), or whenever the mid-sole ran past the planned landing by retargetHyst treads (the foot still swings; a
+// foot not yet sinking then lands half the longest prediction on). Within retargetHyst treads of a tread boundary the tread on the
+// planned side is kept. False = no change.
 inline bool Retarget(const Config& c, const Flight& f, Plan& p, float aS, float aVs, float aAbove, float aVAbove)
 {
     if (!(f.tread > 1.0e-3f) || !std::isfinite(aS) || !std::isfinite(aVs) || !std::isfinite(aAbove) || !std::isfinite(aVAbove) ||
-        !(aVAbove < -c.sinkMin) || !(aVs > 0.0f) || p.anchored)
+        !(aVs > 0.0f))
         return false;
-    const float sPred = aS + aVs * std::clamp(std::fmax(aAbove, 0.0f) / -aVAbove, 0.0f, c.predictMax);
+    const bool sinking = aVAbove < -c.sinkMin;
+    const bool early = (!p.anchored && std::fmax(p.u, Progress(p, aS)) < c.retargetUntil) || (c.retargetSinking && sinking);
+    const bool overrun = aS > p.sLand + c.retargetHyst * f.tread;
+    if (!early && !overrun)
+        return false;
+    if (!sinking && !overrun)
+        return false;
+    const float t = sinking ? std::clamp(std::fmax(aAbove, 0.0f) / -aVAbove, 0.0f, c.predictMax) : 0.5f * c.predictMax;
+    const float sPred = aS + aVs * t;
+    // within retargetHyst of a tread boundary the tread on the side of the planned one is kept
+    float k = TreadIndex(f, sPred);
+    if (k > p.kLand)
+        k = std::fmax(TreadIndex(f, sPred - c.retargetHyst * f.tread), p.kLand);
+    else if (k < p.kLand)
+        k = std::fmin(TreadIndex(f, sPred + c.retargetHyst * f.tread), p.kLand);
     p.sLand = std::fmax(sPred, aS + 0.01f);
-    p.h1 = p.hs + f.rise * (TreadIndex(f, sPred) - p.ks);
+    p.kLand = k;
+    p.h1 = p.hs + f.rise * (k - p.ks);
+    return true;
+}
+
+// The flight ends under the swinging foot (the landing at the top going up, the floor at the bottom going down): late in the swing
+// (progress from reconcileFrom) the foot's own trace aTrace at aSTrace along the flight leaves the flight model by more than
+// flightLeave x rise and lies short of the planned landing (lower going up, higher going down) -> the landing becomes the traced
+// height (followed smoothly through Plan::h1s). True = the landing moved.
+inline bool Reconcile(const Config& c, const Flight& f, Plan& p, float aSTrace, float aTrace)
+{
+    if (!(p.u >= c.reconcileFrom) || !std::isfinite(aTrace) || !std::isfinite(aSTrace) || !(f.tread > 1.0e-3f) || !std::isfinite(f.rise))
+        return false;
+    // the flight model within a third of a tread of the traced point (a nose fitted a little off does not count), the trace off it
+    // on the side of the flight's end: below it going up (the landing at the top), above it going down (the floor at the bottom)
+    const float rise = std::fabs(f.rise), m = 0.33f * f.tread;
+    const float behind = p.hs + f.rise * (TreadIndex(f, aSTrace - m) - p.ks);
+    const bool ended = f.rise > 0.0f ? aTrace < behind - c.flightLeave * rise : aTrace > behind + c.flightLeave * rise;
+    const bool shortOf = f.rise > 0.0f ? aTrace < p.h1 - c.flightLeave * rise : aTrace > p.h1 + c.flightLeave * rise;
+    if (!ended || !shortOf || std::fabs(aTrace - p.h1) < 1.0e-4f)
+        return false;
+    p.h1 = aTrace;
+    return true;
+}
+
+// Late in the swing (progress from convergeFrom) the foot's own trace aTrace at aSTrace along the flight, at most convergeNear treads
+// short of the planned landing, is the height it lands on: the landing becomes it (followed smoothly through Plan::h1s), so a plan a
+// tread off lands on the real tread without a drop at the contact. True = the landing moved.
+inline bool Converge(const Config& c, const Flight& f, Plan& p, float aSTrace, float aTrace)
+{
+    if (!(p.u >= c.convergeFrom) || !std::isfinite(aTrace) || !std::isfinite(aSTrace) || !(f.tread > 1.0e-3f) ||
+        !(aSTrace >= p.sLand - c.convergeNear * f.tread) || std::fabs(aTrace - p.h1) < 1.0e-3f)
+        return false;
+    p.h1 = aTrace;
     return true;
 }
 
@@ -497,52 +650,68 @@ inline float GlideShape(float aU, bool aFront)
     return aFront ? 1.0f - (1.0f - u) * (1.0f - u) : u;
 }
 
-// One step of the planned glide: the height aPath moves towards the landing tread by the share of the glide left that the mid-sole
-// covered since the last step (aSPrev -> aS; front-loaded with aFront); it reaches the landing tread at the landing whatever the
-// plan's later changes, without a jump of its own.
+// One step of the planned glide: the height aPath moves towards the landing height (Plan::h1s) by the share of the glide left that the
+// mid-sole covered since the last step (aSPrev -> aS; front-loaded with aFront); it reaches the landing tread at the landing whatever
+// the plan's later changes, without a jump of its own (past the planned landing it closes a third of the gap per step).
 inline float PathStep(const Plan& p, float aPath, float aSPrev, float aS, bool aFront)
 {
+    const float h1 = std::isfinite(p.h1s) ? p.h1s : p.h1;
     if (!std::isfinite(aPath))
-        return p.h1;
+        return h1;
     const float span = p.sLand - p.s0;
     if (!(span > 0.01f) || !(p.sLand - aSPrev > 0.01f))
-        return p.h1;
+        return aPath + (h1 - aPath) * (1.0f / 3.0f);
     const float e0 = GlideShape((aSPrev - p.s0) / span, aFront), e1 = GlideShape((aS - p.s0) / span, aFront);
     const float rem = 1.0f - e0;
     if (!(rem > 1.0e-4f))
-        return p.h1;
-    return aPath + (p.h1 - aPath) * std::clamp((e1 - e0) / rem, 0.0f, 1.0f);
+        return aPath + (h1 - aPath) * (1.0f / 3.0f);
+    return aPath + (h1 - aPath) * std::clamp((e1 - e0) / rem, 0.0f, 1.0f);
 }
 
-// Swing progress (0 at the lift-off, 1 at the landing) of the mid-sole at aS.
-inline float Progress(const Plan& p, float aS) { return std::clamp((aS - p.s0) / (p.sLand - p.s0), 0.0f, 1.0f); }
-
 // Ground height (world) under a swinging foot: the planned glide aPath from the tread it left to the tread it lands on (PathStep; NaN =
-// linear in the progress aU), raised where the foot needs it. Going up the toe tip (aSToe along the flight, its own height aToeAbove above the clip's
-// floor) stays aClearance above the nose line, capped at the landing tread; going down the heel and the ball (aSHeel / aSBall, their
-// own heights aHeelAbove / aBallAbove) stay above the tread they leave (each drop spread over downRamp treads), at most the tread the
-// foot left. Continuous in the positions and the progress.
+// linear in the progress aU), raised where the foot needs it. Going up the toe tip (aSToe along the flight, its own height aToeAbove
+// above the clip's floor) stays aClearance above the nose line, which blends into the landing height from Plan::capFrom on (a smooth
+// curve in the progress, never below the lower of the two); going down the heel and the ball (aSHeel / aSBall, their own heights
+// aHeelAbove / aBallAbove) stay above the tread they leave (each drop spread over downRamp treads), at most the tread the foot left.
+// The two are joined by a smooth maximum that is wide at mid swing and narrow at both ends (SwingJoin). SwingReq is the requirement
+// alone (NaN = none): the caller may follow it (a drop past a nose going down is a step in s) and join it with the glide itself.
+inline float SwingReq(const Config& c, const Flight& f, const Plan& p, float aU, float aSToe, float aToeAbove, float aSHeel,
+                      float aHeelAbove, float aSBall, float aBallAbove)
+{
+    const float u = std::clamp(aU, 0.0f, 1.0f);
+    const float h1 = std::isfinite(p.h1s) ? p.h1s : p.h1;
+    if (f.rise > 0.0f)
+    {
+        const float raw = NoseLineUp(f, aSToe, p.hs, p.ks);
+        const float from = std::clamp(p.capFrom, 0.0f, 0.95f);
+        const float cb = MinJerk((u - from) / (1.0f - from));
+        const float line = raw + (h1 - raw) * cb + c.clearance * 4.0f * u * (1.0f - u) - aToeAbove;
+        const float in = c.rampIn > 1.0e-3f ? MinJerk(u / c.rampIn) : 1.0f;
+        return p.h0 + (line - p.h0) * in;
+    }
+    if (f.rise < 0.0f)
+    {
+        const float heel = TreadDownRamped(f, aSHeel, p.hs, p.ks, c.downRamp) - aHeelAbove;
+        const float ball = TreadDownRamped(f, aSBall, p.hs, p.ks, c.downRamp) - aBallAbove;
+        return std::fmin(std::fmax(heel, ball), p.h0);
+    }
+    return NAN;
+}
+
+// The planned glide aPath joined with a requirement aReq (SwingReq, possibly followed; NaN = none) at progress aU.
+inline float SwingJoin(const Config& c, float aPath, float aReq, float aU)
+{
+    const float u = std::clamp(aU, 0.0f, 1.0f);
+    return std::isfinite(aReq) ? SmoothMax(aPath, aReq, c.eps + c.epsMid * 4.0f * u * (1.0f - u)) : aPath;
+}
+
 inline float SwingGround(const Config& c, const Flight& f, const Plan& p, float aPath, float aU, float aSToe, float aToeAbove,
                          float aSHeel, float aHeelAbove, float aSBall, float aBallAbove)
 {
     const float u = std::clamp(aU, 0.0f, 1.0f);
-    const float path = std::isfinite(aPath) ? aPath : p.h0 + (p.h1 - p.h0) * u;
-    float req = path;
-    if (f.rise > 0.0f)
-    {
-        const float line = std::fmin(NoseLineUp(f, aSToe, p.hs, p.ks), p.h1) + c.clearance * 4.0f * u * (1.0f - u) - aToeAbove;
-        const float in = c.rampIn > 1.0e-3f ? MinJerk(u / c.rampIn) : 1.0f;
-        req = p.h0 + (line - p.h0) * in;
-    }
-    else if (f.rise < 0.0f)
-    {
-        const float heel = TreadDownRamped(f, aSHeel, p.hs, p.ks, c.downRamp) - aHeelAbove;
-        const float ball = TreadDownRamped(f, aSBall, p.hs, p.ks, c.downRamp) - aBallAbove;
-        req = std::fmin(std::fmax(heel, ball), p.h0);
-    }
-    if (!std::isfinite(req))
-        return path;
-    return SmoothMax(path, req, c.eps);
+    const float h1 = std::isfinite(p.h1s) ? p.h1s : p.h1;
+    const float path = std::isfinite(aPath) ? aPath : p.h0 + (h1 - p.h0) * u;
+    return SwingJoin(c, path, SwingReq(c, f, p, u, aSToe, aToeAbove, aSHeel, aHeelAbove, aSBall, aBallAbove), u);
 }
 } // namespace swing
 
@@ -610,6 +779,7 @@ public:
         {
             m_sinceFit = 0.0f;
             const Estimate e = m_det.Fit(m_cfg, aCapX, aCapY, aVelX / speed, aVelY / speed, m_time);
+            m_lastFail = e.valid ? 0 : (e.fail > 0 ? e.fail : 6);
             if (e.valid)
             {
                 m_est = e;
@@ -642,6 +812,7 @@ public:
     const Estimate& Current() const { return m_est; }
     float Weight() const { return m_weight; }
     uint64_t Fits() const { return m_fits; }
+    int LastFail() const { return m_lastFail; } // Estimate::fail of the last fit (0 = it found a flight)
     uint64_t ValidFits() const { return m_valid; }
 
 private:
@@ -650,6 +821,7 @@ private:
     float m_time = 0.0f, m_sinceFit = 1.0e9f, m_sinceValid = 1.0e9f, m_weight = 0.0f;
     Estimate m_est;
     uint64_t m_fits = 0, m_valid = 0;
+    int m_lastFail = 0;
     float m_foot[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}}; // last traced foot middle (x, y) per side
     bool m_footOk[2] = {false, false};
 };
@@ -661,8 +833,11 @@ inline Tracker g_tracker;             // game thread only (ground traces and the
 inline std::atomic<float> g_cadence{1.0f}, g_tread{0.0f}, g_weight{0.0f}; // diagnostics of the last feed
 inline std::atomic<int32_t> g_treads{0};
 inline std::atomic<float> g_landErr{0.0f}; // m, phase error of the foot that landed in the last feed (NaN = no landing)
+inline std::atomic<bool> g_strideWarp{false}; // the stride warp was on at the last feed (the fit needs it; no flight without it)
+inline std::atomic<float> g_speedMul{1.0f};   // the stair slowdown (MaxSpeed multiplier the script applies; 1 = none)
 
 inline bool Enabled() { return g_on.load(std::memory_order_relaxed); }
+inline float SpeedMul() { return Enabled() ? g_speedMul.load(std::memory_order_relaxed) : 1.0f; }
 inline void SetEnabled(bool aOn)
 {
     if (g_on.exchange(aOn, std::memory_order_acq_rel) != aOn)
@@ -688,7 +863,7 @@ inline FeedOut Update(float aDt, bool aHaveCapsule, float aCapX, float aCapY, fl
 inline Flight CurrentFlight()
 {
     Flight f;
-    if (!Enabled())
+    if (!Enabled() || !g_strideWarp.load(std::memory_order_relaxed))
         return f;
     const Estimate& e = g_tracker.Current();
     const float w = g_tracker.Weight();
