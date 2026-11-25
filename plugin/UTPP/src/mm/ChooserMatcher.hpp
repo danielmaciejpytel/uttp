@@ -194,6 +194,10 @@ inline cancelstart::State CancellationState(const ChooserState& state)
         state.explicitWalk};
 }
 
+// ChooserMatcher::SetSteadyAirPicks: the fall speed from which a playing jump clip is kept, and the clip time it needs to be left
+inline constexpr float kSteadyFallVzCmS = 150.0f;
+inline constexpr float kSteadyFallMinLeftS = 0.15f;
+
 enum class Interrupt : uint8_t
 {
     DoNotInterrupt,
@@ -1024,6 +1028,13 @@ public:
         m_dbSlideExit.assign(aDb->NumDatabases(), 0);
         for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
             m_dbSlideExit[d] = aDb->DbName(d).starts_with("PSD_Slide_ExitTo") ? 1 : 0;
+        // SetSteadyAirPicks: the databases whose one-row ranges at a clip start are never new candidates
+        m_dbAirOrExit.assign(aDb->NumDatabases(), 0);
+        for (uint32_t d = 0; d < aDb->NumDatabases(); ++d)
+        {
+            const auto name = aDb->DbName(d);
+            m_dbAirOrExit[d] = name.find("Jumps") != std::string_view::npos || name.find("FromTraversal") != std::string_view::npos ? 1 : 0;
+        }
         // ground locomotion databases for BlendRequest::groundFade, by name: the dense / sparse locomotion sets minus jumps, landings and
         // traversal hand-overs (to); the outgoing side also accepts the landing and the slide exit databases (their feet are planted)
         m_dbFadeTo.assign(aDb->NumDatabases(), 0);
@@ -1437,6 +1448,18 @@ public:
     // knobs at 0 / false. Takes effect on the next Update; no other state is touched.
     void SetSelectionGuards(bool aOn) { m_guardsOn = aOn; }
     bool SelectionGuards() const { return m_guardsOn; }
+    // steady picks in flights and on traversal exits (setting mm.steadyAirPicks; off = the previous search, bit for bit):
+    // no one-row clip-start candidate in the jump and traversal-exit databases, no other take-off / run-off clip in a falling flight
+    void SetSteadyAirPicks(bool aOn) { m_steadyAirPicks = aOn; }
+    uint32_t SteadyFallHolds() const { return m_steadyFallHolds; }
+    // the sequence the traversal montage was playing (-1 = none): while set, a traversal-exit database that indexes it offers its rows only,
+    // so the exit continues the montage instead of entering another obstacle's tail; aEnter (the hand-back update): when the chooser result
+    // holds such a database, only that database is searched, so the exit enters the montage's own tail at once
+    void SetSteadyExitClip(int32_t aClip, bool aEnter)
+    {
+        m_steadyExitClip = aClip;
+        m_steadyExitEnter = aEnter;
+    }
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     // tests only: MatcherConfig::dodgeFacingHoldS of a running matcher (motiondriver::TestSetDodgeFacingHold; 0 = guard 3b off)
     void TestSetDodgeFacingHoldS(float aS) { m_cfg.dodgeFacingHoldS = aS; }
@@ -2059,6 +2082,14 @@ public:
                         last.movementMode == 1 && aState.verticalVelocityCmS > 0.0f;
         UTPP_IF_MUT(JUMPPICK, 14)
             m_jumpRiseOff = m_jumpRiseOff && m_flightAge == 0.0f; // mutation 14: only on the first airborne update (the impulse), not through the rise
+        // SetSteadyAirPicks (2): a falling flight (not on its first update) whose playing jump clip still has kSteadyFallMinLeftS left
+        m_steadyFallHold = m_steadyAirPicks && aState.movementMode == 1 && m_flightActive && m_flightAge > 0.0f &&
+                           aState.verticalVelocityCmS < -kSteadyFallVzCmS && m_cur.valid && m_cur.clip >= 0 &&
+                           m_clipJumpKind[static_cast<uint32_t>(m_cur.clip)] != 0 &&
+                           m_cur.clipTime < static_cast<float>(db.Clip(static_cast<uint32_t>(m_cur.clip)).numFrames - 1) / db.Header().fps -
+                                                kSteadyFallMinLeftS;
+        if (m_steadyFallHold)
+            ++m_steadyFallHolds;
         // mutation 12: the continuing F Off clip of the take-off update stays selectable in the rise
         const bool contOffOut = UTPP_AND_NOT(JUMPPICK, 12) m_jumpRiseOff && m_cur.clip >= 0 && m_clipJumpKind[static_cast<uint32_t>(m_cur.clip)] == 3;
         // fix/jumpout-cam: the Start / Off clip on display does not continue past the apex of a jump-out flight (database with a fall clip only)
@@ -2276,6 +2307,10 @@ public:
                             (m_cur.valid && m_clipStart[static_cast<uint32_t>(m_cur.clip)] != 0));
         // a start from rest arms the rule while its start clip plays; it then stays on until the facing has caught up or the window ends
         m_headingRestArmed = m_headingCatchUp && aState.headingStepFromRest;
+        m_steadyEnterDb = -1;
+        for (uint32_t i = 0; m_steadyExitEnter && i < numDb && m_steadyEnterDb < 0; ++i)
+            if (SteadyExitOwns(dbList[i]))
+                m_steadyEnterDb = static_cast<int32_t>(dbList[i]);
         // ---- search every chooser database
         const auto tSearch = std::chrono::steady_clock::now();
         res.stageContUs = std::chrono::duration<float, std::micro>(tSearch - tCont).count();
@@ -3106,6 +3141,28 @@ private:
 
     // Pose-history reselection rows + (UE PoseSearchDatabase.cpp 1557-1580) when d holds a cached continuing pose of
     // a DISABLE_RESELECTION entry, every row of every entry of that clip in d.
+    // SetSteadyExitClip: database d is a traversal-exit database with a searchable row of the montage's sequence
+    bool SteadyExitOwns(uint32_t d) const
+    {
+        if (!m_steadyAirPicks || m_steadyExitClip < 0 || m_db->DbName(d).find("FromTraversal") == std::string_view::npos)
+            return false;
+        const DatabaseRecord& D = m_db->Db(d);
+        for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+        {
+            const EntryRecord& en = m_db->Entry(e);
+            if (static_cast<int32_t>(en.clip) != m_steadyExitClip)
+                continue;
+            const uint32_t first = m_db->Clip(en.clip).firstFrame;
+            for (uint32_t r = 0; r < en.numRows; ++r)
+            {
+                const RowRecord& rr = m_db->Row(en.firstRow + r);
+                if (!(rr.flags & kRowBlock) && rr.frame != first)
+                    return true;
+            }
+        }
+        return false;
+    }
+
     uint32_t MarkExcluded(uint32_t d, int aStartTurnDirection = 0)
     {
         uint32_t n = 0;
@@ -3313,6 +3370,69 @@ private:
                     continue;
                 std::memset(m_excluded.data() + (en.firstRow - D.firstRow), 1, en.numRows);
                 n += en.numRows;
+            }
+        }
+        // SetSteadyAirPicks (1): in the jump and traversal-exit databases the one-row range at a clip start is no candidate. It is the rest
+        // of an exclusion window that starts just after time 0, so the clip would be entered on the frame before its excluded part
+        // (a take-off or an obstacle approach pose in the middle of a fall or of a traversal exit).
+        if (m_steadyAirPicks && m_dbAirOrExit[d])
+        {
+            const DatabaseRecord& D = m_db->Db(d);
+            constexpr uint32_t kOneRow = kRowRangeStart | kRowRangeEnd;
+            for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+            {
+                const EntryRecord& en = m_db->Entry(e);
+                if (en.numRows < 2)
+                    continue;
+                const RowRecord& rr = m_db->Row(en.firstRow);
+                if ((rr.flags & kOneRow) != kOneRow || rr.frame != m_db->Clip(en.clip).firstFrame)
+                    continue;
+                const uint32_t r0 = en.firstRow - D.firstRow;
+                if (!m_excluded[r0])
+                {
+                    m_excluded[r0] = 1;
+                    ++n;
+                }
+            }
+        }
+        // SetSteadyAirPicks (3): after a montage, the exit database offers the montage's own sequence when it indexes it; on the
+        // hand-back update no other database of the result offers a row
+        const bool exitOwn = SteadyExitOwns(d);
+        if (exitOwn || (m_steadyEnterDb >= 0 && static_cast<int32_t>(d) != m_steadyEnterDb))
+        {
+            const DatabaseRecord& D = m_db->Db(d);
+            for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+            {
+                const EntryRecord& en = m_db->Entry(e);
+                if (exitOwn && static_cast<int32_t>(en.clip) == m_steadyExitClip &&
+                    (m_steadyEnterDb < 0 || static_cast<int32_t>(d) == m_steadyEnterDb))
+                    continue;
+                const uint32_t r0 = en.firstRow - D.firstRow;
+                for (uint32_t r = 0; r < en.numRows; ++r)
+                    if (!m_excluded[r0 + r])
+                    {
+                        m_excluded[r0 + r] = 1;
+                        ++n;
+                    }
+            }
+        }
+        // SetSteadyAirPicks (2): while the flight falls on a playing jump clip, no other take-off / run-off clip is entered
+        if (m_steadyFallHold)
+        {
+            const DatabaseRecord& D = m_db->Db(d);
+            for (uint32_t e = D.firstEntry; e < D.firstEntry + D.numEntries; ++e)
+            {
+                const EntryRecord& en = m_db->Entry(e);
+                if (en.numRows == 0 || (!m_clipJumpKind[en.clip] && m_db->ClipName(en.clip).find("CrouchJump") == std::string_view::npos) ||
+                    static_cast<int32_t>(en.clip) == m_cur.clip)
+                    continue;
+                const uint32_t r0 = en.firstRow - D.firstRow;
+                for (uint32_t r = 0; r < en.numRows; ++r)
+                    if (!m_excluded[r0 + r])
+                    {
+                        m_excluded[r0 + r] = 1;
+                        ++n;
+                    }
             }
         }
         if (m_standJumpBack || m_standJumpTakeoff || m_standJumpOff || m_jumpRiseOff || m_jumpOutBack || m_jumpOutFall || m_airFootLock)
@@ -3782,6 +3902,13 @@ private:
     bool m_flightJumpOut = false;        // fix/jumpout-cam: an update of this flight carried ChooserState::jumpOutFlight (latched to the touchdown)
     bool m_jumpOutFallLatched = false;   // fix/jumpout-cam: the jump-out flight passed its apex (vz <= 0): the fall loop owns the descent
     bool m_jumpOutBack = false;          // fix/jumpout-cam: this update is a jump-out flight: no B / LL / RL Start row
+    bool m_steadyAirPicks = false;       // SetSteadyAirPicks
+    int32_t m_steadyExitClip = -1;       // SetSteadyExitClip
+    bool m_steadyExitEnter = false;      // SetSteadyExitClip: this update is the hand-back update
+    int32_t m_steadyEnterDb = -1;        // ... the only database searched on it (-1 = no restriction)
+    bool m_steadyFallHold = false;       // SetSteadyAirPicks: this update enters no other take-off / run-off clip
+    uint32_t m_steadyFallHolds = 0;      // telemetry: updates with m_steadyFallHold
+    std::vector<uint8_t> m_dbAirOrExit;  // jump and traversal-exit databases
     bool m_jumpOutFall = false;          // fix/jumpout-cam: ... and past the apex: no Start / Off row, no continuing Start / Off clip (databases with a fall clip)
     bool m_jumpOutFallMask = false;      // r5 air: ... and a database of this update's chooser result indexes the fall clip: the rule holds for every database of the result
     std::vector<uint8_t> m_dbHasFall;    // fix/jumpout-cam: database index -> 1 = indexes a fall clip

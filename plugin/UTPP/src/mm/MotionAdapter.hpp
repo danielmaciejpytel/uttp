@@ -660,6 +660,17 @@ inline constexpr float kExitAirGraceSeconds = 0.35f;  // MapConfig::exitAirGrace
 inline constexpr float kContactHoldSeconds = 0.05f; // MapConfig::contactHoldS the runtime uses
 inline constexpr float kJumpOutLandConfirmS = 0.10f; // review r2 finding 16: ground contact this long after the jump-out flight = its touchdown (the flag ends there)
 inline constexpr float kContactFallMs = 4.0f;          // m/s downward: a contact feed falling faster than this is no landing yet
+// MapConfig::steadyAirPicks: in any flight a ground-contact feed whose capsule still falls faster than kSteadyContactFallMs, while the floor
+// probed in this flight (dead-reckoned) is still more than kSteadyContactFloorGapM below, stays InAir for at most kSteadyContactHoldS of such
+// feeds (a capsule scraping a ledge edge reports the ground while it keeps falling; a landing on the probed floor is never held, one on a
+// higher surface zeroes the vertical speed on the contact feed or the next one).
+inline constexpr float kSteadyContactFallMs = 0.75f;
+inline constexpr float kSteadyContactHoldS = 0.12f;
+inline constexpr float kSteadyContactFloorGapM = 0.2f;
+// MapConfig::steadyAirPicks: a heavy landing keeps the standing set unless V is still faster than this after this long
+inline constexpr float kSteadyHeavyRunS = 0.2f;
+inline constexpr float kSteadyHeavyRunMs = 2.0f;
+inline constexpr int kSteadySprintGait = 2; // ChooserState::gait of the sprint
 inline constexpr float kRagdollRecoverMaxDropM = 0.5f; // MapContext::ragdollRecover: a drop up to this far above the floor is no fall
 #ifndef UTPP_RAGDOLL_RECOVER_MUTATION
 #define UTPP_RAGDOLL_RECOVER_MUTATION 0
@@ -1073,6 +1084,10 @@ struct MapConfig
     // chooser stays InAir for at most this many seconds of such feeds, so the heavy land database is not picked 0.1 s early. The real landing zeroes the vertical
     // speed on the contact feed or the next one. 0 = off (the previous mapping).
     float contactHoldS = 0.0f;
+    // steadyAirPicks (setting mm.steadyAirPicks): (1) the contact hold above for every flight (kSteadyContactFallMs / kSteadyContactHoldS);
+    // (2) for the JustLanded window the chooser keeps the gait and movement state of the touchdown feed (one landing takes one landing
+    // set: no second pick when the game changes the gait or stops V right after the touchdown). false = the previous mapping.
+    bool steadyAirPicks = false;
     // jumpTakeoffHoldS (JS1, 2026-10-31 loco diagnostic, tests/LocoStartTest.cpp): the PSM reports Jump 18 one feed BEFORE the capsule
     // launches (onGround 1, vz 0 standing / -0.39 running, the 5.66 m/s impulse arrives on the next feed). InAir on that feed searched
     // the jump databases on a query with no vertical velocity and no floor (TimeToLand = the no-hit 1.52 s: Jump_F_Start_Walk on a
@@ -1539,6 +1554,13 @@ struct MapState
     bool exitGraceActive = false; // last feed's air state was kept as ground by exitAirGraceS
     float exitAirAge = 0.0f; // seconds of a non-rising air feed inside the vehicle exit window (MapConfig::exitAirGraceS)
     float contactHoldAge = 0.0f; // seconds of ground-contact feeds kept InAir in a fast fall (MapConfig::contactHoldS)
+    // MapConfig::steadyAirPicks: the age of the current contact hold; gait / movement state / stance latched at the last touchdown (-1 = none)
+    float steadyContactAge = 0.0f;
+    float steadyFloorLeftM = -1.0f; // distance to the floor last probed in this flight, less the fall since (-1 = none probed)
+    int landGait = -1;
+    int landMovementState = -1;
+    int landStance = -1;
+    uint32_t steadyContactHolds = 0, steadyLandLatches = 0; // telemetry: feeds held InAir / feeds whose landing set was kept
     // review r2 finding 16: MapContext::jumpOutFlight stays true until the exit window of the host ends (up to 2 s), also after the jump-out touchdown. The
     // chooser state and the contact hold use it only for the flight itself: jumpOutSeenAir (an InAir feed under the flag), jumpOutGroundAge (seconds of
     // ground feeds since), jumpOutLanded (the touchdown, kJumpOutLandConfirmS of ground contact: a later jump / walk-off in the same window is an ordinary
@@ -1860,6 +1882,22 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     }
     else if (airFeed || psmAir || velIn[2] >= -kContactFallMs || st.movementMode != 1)
         m.contactHoldAge = 0.0f;
+    // MapConfig::steadyAirPicks: the same hold for every flight, with the lower threshold of a ledge-edge graze
+    if (st.movementMode != 1)
+        m.steadyFloorLeftM = -1.0f;
+    if (f.air.valid && !f.air.onGround && f.air.distanceToGround >= 0.0f)
+        m.steadyFloorLeftM = f.air.distanceToGround;
+    else if (m.steadyFloorLeftM >= 0.0f && velIn[2] < 0.0f)
+        m.steadyFloorLeftM = std::fmax(0.0f, m.steadyFloorLeftM + velIn[2] * dt);
+    if (c.steadyAirPicks && !airFeed && !psmAir && st.movementMode == 1 && f.air.valid && velIn[2] < -kSteadyContactFallMs &&
+        m.steadyFloorLeftM > kSteadyContactFloorGapM && m.steadyContactAge < kSteadyContactHoldS)
+    {
+        m.steadyContactAge += dt;
+        ++m.steadyContactHolds;
+        airFeed = true;
+    }
+    else if (velIn[2] >= -kSteadyContactFallMs || st.movementMode != 1)
+        m.steadyContactAge = 0.0f;
     // JS1 take-off hold (MapConfig::jumpTakeoffHoldS): decided in MapToChooser (TakeoffHoldFeed), which hands this function the held feed
     // with the previous feed's PSM detail, so it maps as that ground frame (mode 0) and nothing below sees the Jump 18.
 #if UTPP_LOCOSTART_MUTATION == 4
@@ -2575,6 +2613,29 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
     s.movementState = st.movementState;
     s.gait = st.gait;
     s.stance = st.stance;
+    // MapConfig::steadyAirPicks: the touchdown feed's gait and movement state for the whole JustLanded window (same stance). The
+    // game stops V on a heavy landing unless the sprint goes on (the touchdown feed already reports it), so a heavy touchdown
+    // without sprint takes the standing set at once; it is released when V still runs after kSteadyHeavyRunS
+    if (c.steadyAirPicks && st.movementMode == 0 && st.justLanded)
+    {
+        if (st.movementModeLast == 1)
+        {
+            m.landGait = st.gait;
+            m.landMovementState = st.justLandedHeavy && static_cast<int>(st.gait) != kSteadySprintGait ? 0 : static_cast<int>(st.movementState);
+            m.landStance = st.stance;
+        }
+        if (st.justLandedHeavy && m.sinceLand > kSteadyHeavyRunS && gameSp > kSteadyHeavyRunMs)
+            m.landGait = -1;
+        if (m.landGait >= 0 && m.landStance == st.stance)
+        {
+            if (m.landGait != static_cast<int>(st.gait) || m.landMovementState != static_cast<int>(st.movementState))
+                ++m.steadyLandLatches;
+            s.gait = static_cast<decltype(s.gait)>(m.landGait);
+            s.movementState = static_cast<decltype(s.movementState)>(m.landMovementState);
+        }
+    }
+    else
+        m.landGait = -1;
 #if UTPP_SLIDEEXIT_MUTATION == 13
     s.stanceRaw = st.stance; // mutation 13: the filtered stance under the raw name
 #else

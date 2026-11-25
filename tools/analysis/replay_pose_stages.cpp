@@ -72,6 +72,12 @@
 //                       (motionhost::SetStancePoleMode)
 //   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
 //                       mm.stickSpeed setting; the settings log call MotionStickSpeedMode of later sessions is applied as well)
+//   --steady-air 0|1    steady picks in flights, landings and traversal exits off / on after --settings-log
+//                       (motiondriver::SetSteadyAirPicks, the mm.steadyAirPicks setting; the settings log call MMSteadyAirPicks is
+//                       applied as well)
+//   --trav-handback FILE  the dumps carry no traversal events. FILE holds one "<feed time s> <sequence name>" line per montage that
+//                       played (time of its game log line). On the first feed after a run of Vault PSM detail (9) feeds that began
+//                       within 2 s after such a time, hand back like after that montage, to replay the exit picks
 //   --fast-turn-exit 0|1 quick straightening after turns off / on after --settings-log (motionhost::SetFastTurnExit, the
 //                       mm.fastTurnExit setting; the settings log call MMFastTurnExit is applied as well); adds one TURNEXIT line
 //                       (exit windows opened). Use with --closed-yaw 1 so the body turns as the command asks.
@@ -226,6 +232,7 @@
 
 namespace utpp::motiondriver
 {
+void TestForceTravHandback(const char* aSequence);
 void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates, float aTurnInPlaceDeg);
 void TestSetMapStepDownReach(int32_t aOn);
 void SetStepDownReach(bool aOn);
@@ -386,6 +393,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
         else if (name == "MMFirmFeet") motionhost::SetFirmFeet(flag(0));
         else if (name == "MMFastTurnExit") motionhost::SetFastTurnExit(flag(0));
+        else if (name == "MMSteadyAirPicks") motiondriver::SetSteadyAirPicks(flag(0));
         else if (name == "MMFootYawLock") motionhost::SetFootYawLock(flag(0));
         else if (name == "MMTurnFootPin") motionhost::SetTurnFootPin(flag(0));
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
@@ -610,6 +618,9 @@ int main(int argc, char** argv)
     float from = -1e30f, to = 1e30f;
     std::string settingsLog;
     int fastTurnExit = -1;
+    int steadyAir = -1;
+    std::vector<std::pair<double, std::string>> travHandback;
+    uint64_t travHandbacksForced = 0;
     bool closedYaw = false, aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int turnFootPhase = -1; // -1 = build default
     int32_t capsuleQuery = -1, velocityPredicates = -1, capsuleRate = -1, capsuleRateScope = -1;
@@ -767,6 +778,16 @@ int main(int argc, char** argv)
             overlayInertialSwitch = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stick-speed") == 0)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--steady-air") == 0)
+            steadyAir = std::atoi(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--trav-handback") == 0)
+        {
+            std::ifstream list(argv[i + 1]);
+            double t = 0.0;
+            std::string seq;
+            while (list >> t >> seq)
+                travHandback.emplace_back(t, seq);
+        }
         else if (std::strcmp(argv[i], "--fast-turn-exit") == 0)
             fastTurnExit = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-feet") == 0)
@@ -1062,6 +1083,8 @@ int main(int argc, char** argv)
         motionhost::SetFirmFeet(firmFeet != 0);
     if (fastTurnExit >= 0)
         motionhost::SetFastTurnExit(fastTurnExit != 0);
+    if (steadyAir >= 0)
+        motiondriver::SetSteadyAirPicks(steadyAir != 0);
     if (footLock >= 0)
         motionhost::SetFootLock(footLock != 0);
     if (footYawLock >= 0)
@@ -1476,6 +1499,19 @@ int main(int argc, char** argv)
             const bool slow = rows[i].t >= budgetTripAt && budgetSlowFeeds > 0;
             budgetSlowFeeds -= slow ? 1 : 0;
             motiondriver::TestSetFeedTimesUs(slow ? 800.0f : 100.0f, slow ? 800.0f : 100.0f);
+        }
+        if (i > 0 && integ::PsmDetailOf(inputs[i - 1].psmBlock) == 9 && integ::PsmDetailOf(inputs[i].psmBlock) != 9)
+        {
+            const std::string* seq = nullptr;
+            for (const auto& h : travHandback)
+                if (rows[i].t >= h.first && rows[i].t < h.first + 2.0)
+                    seq = &h.second;
+            if (seq && *seq != "-")
+            {
+                motiondriver::TestForceTravHandback(seq->c_str());
+                ++travHandbacksForced;
+                std::printf("TRAVBACK t=%.3f %s\n", rows[i].t, seq->c_str());
+            }
         }
         const auto feed0 = std::chrono::steady_clock::now();
         motionhost::Feed(inputs[i]);
