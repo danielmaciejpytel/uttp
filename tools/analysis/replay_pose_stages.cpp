@@ -602,6 +602,12 @@ int main(int argc, char** argv)
     float leanScaleBody = -1.0f, leanScaleHead = -1.0f; // --lean-scale B,H: < 0 = not passed
     int32_t leanCoverage = -1;                 // --lean-coverage: < 0 = not passed
     bool forceDrawn = false;                   // --force-drawn 1: every feed reports a drawn weapon
+    // --budget-trip-at T: the feed cost budget reads fixed times (no trip from the replaying machine), except 60 feeds from time T
+    // that read 800 us, so the budget trips once at T (about the 31st of them).
+    float budgetTripAt = std::numeric_limits<float>::quiet_NaN();
+    int budgetSlowFeeds = 60;
+    std::vector<std::pair<float, float>> shootWindows; // --shoot T0:T1[,T0:T1..]: weapon action Shoot (8) inside the windows
+    bool shooting = false;
     int leanLoaded = -1;                       // with --lean-pack: lean pack state of the bundles seen (LEANPACK line)
     bool aimJogQuery = false;                  // --aim-jog-query 1
     uint64_t aimJogQueries = 0, aimJogOnFeeds = 0;
@@ -663,6 +669,19 @@ int main(int argc, char** argv)
             capsuleRateBlendS = static_cast<float>(std::atof(argv[i + 1]));
         else if (std::strcmp(argv[i], "--velocity-predicates") == 0)
             velocityPredicates = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--budget-trip-at") == 0)
+            budgetTripAt = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--shoot") == 0)
+        {
+            std::istringstream list(argv[i + 1]);
+            for (std::string item; std::getline(list, item, ',');)
+            {
+                const size_t colon = item.find(':');
+                if (colon == std::string::npos)
+                    return 2;
+                shootWindows.emplace_back(std::stof(item.substr(0, colon)), std::stof(item.substr(colon + 1)));
+            }
+        }
         else if (std::strcmp(argv[i], "--tip-deg") == 0)
             tipDeg = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--pick-dump") == 0)
@@ -1230,6 +1249,20 @@ int main(int argc, char** argv)
             gfHits += uint64_t(hit[0]) + uint64_t(hit[1]);
         }
         g_motionLogT = rows[i].t;
+        if (!shootWindows.empty())
+        {
+            const bool now = std::any_of(shootWindows.begin(), shootWindows.end(),
+                                         [&](const auto& w) { return rows[i].t >= w.first && rows[i].t < w.second; });
+            if (now != shooting)
+                motiondriver::SetWeaponAction(now ? 8 : 0);
+            shooting = now;
+        }
+        if (std::isfinite(budgetTripAt))
+        {
+            const bool slow = rows[i].t >= budgetTripAt && budgetSlowFeeds > 0;
+            budgetSlowFeeds -= slow ? 1 : 0;
+            motiondriver::TestSetFeedTimesUs(slow ? 800.0f : 100.0f, slow ? 800.0f : 100.0f);
+        }
         const auto feed0 = std::chrono::steady_clock::now();
         motionhost::Feed(inputs[i]);
         feedUs.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - feed0).count());

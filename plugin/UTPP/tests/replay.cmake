@@ -13,7 +13,9 @@ target_compile_features(utpp_motion_replay PRIVATE cxx_std_20)
 add_executable(utpp_replay_pose_stages EXCLUDE_FROM_ALL ../../tools/analysis/replay_pose_stages.cpp src/MotionHost.cpp src/MotionDriver.cpp)
 target_link_libraries(utpp_replay_pose_stages PRIVATE bcrypt)
 target_compile_options(utpp_replay_pose_stages PRIVATE ${UTPP_WARNINGS} /EHsc)
-target_compile_definitions(utpp_replay_pose_stages PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV)
+# TEST_FAULTS: the feed time seam used by --budget-trip-at (a forced cost budget trip in a replay)
+target_compile_definitions(utpp_replay_pose_stages PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE UTPP_MOTION_DRIVER_TEST_TRAV
+                           UTPP_MOTION_DRIVER_TEST_FAULTS)
 target_compile_features(utpp_replay_pose_stages PRIVATE cxx_std_20)
 # Reload contact stage of the pose hook replayed on recorded text pose recordings (tools/analysis/replay_reload_contacts.cpp; scored by
 # tools/analysis/reload_contacts_proof.py). Tool only, no ctest entry.
