@@ -220,12 +220,24 @@ struct FirmFeetConfig
     // hold fades over the swing instead of within the usual 0.15 s
     float releaseSpeed = 1.0f;
     float latchSpeed = 2.0f;   // m/s, a new latch needs a capsule at or below this (walking pace; running turns keep the soft slip)
+    // m/s, the latch capsule speed while an aimed strafe pivot plays (SetFirmStrafe; never below latchSpeed). Aimed strafe taps reverse
+    // the capsule at a jog (2.5 - 4 m/s): with latchSpeed the planted foot of the pivot kept the soft slip and slid 15 - 25 cm per
+    // tap at its 14 cm bound. 0 = latchSpeed.
+    float strafeLatchSpeed = 4.5f;
+    // m, largest held offset of a latch taken while an aimed strafe pivot plays (<= limit). With `limit` the taps held a foot up to
+    // 30 cm from its pose; 0.15 let the taps slide more again (Male rifle tap tail slide above the base), 0.2 kept the slide gain.
+    float strafeLimit = 0.20f;
+    // aimed strafing: a latched foot whose contact fades below onThreshold (a stop or pivot clip moving that foot to its next stance
+    // while the contact hysteresis still holds the lock) lowers its hold at releaseSpeed instead of holding up to `limit`. Without it the
+    // stops after aimed strafe taps held a stepping foot 18 - 23 cm from its pose with no slide gain. false = off.
+    bool strafeFade = true;
     static bool Valid(const FirmFeetConfig& c)
     {
         auto in = [](float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; };
         return in(c.limit, 0.01f, 0.35f) && in(c.driftMargin, 0.01f, 0.5f) && in(c.handBackSpeed, 0.01f, 10.0f) &&
                in(c.kneeMargin, 0.0f, 1.0f) && in(c.kneeFree, 0.0f, 3.1f) && in(c.releaseSpeed, 0.1f, 100.0f) &&
-               in(c.latchSpeed, 0.0f, 100.0f);
+               in(c.latchSpeed, 0.0f, 100.0f) && in(c.strafeLatchSpeed, 0.0f, 100.0f) &&
+               in(c.strafeLimit, 0.01f, 0.35f);
     }
 };
 
@@ -359,6 +371,8 @@ struct FootLockDiagnostics
     uint64_t firmUpdates = 0;                   // locked-foot updates with a latched hold
     uint64_t firmLegBounds = 0;                 // ... of them with the hold lowered by a leg limit
     uint64_t firmHandBacks = 0;                 // latches ended by the hand-back on a standing capsule
+    uint64_t firmStrafeLatches = 0;             // ... latched in an aimed strafe pivot (SetFirmStrafe: strafeLatchSpeed / strafeLimit)
+    uint64_t firmStrafeFades = 0;               // latches ended by the aimed strafing fade (SetFirmStrafeFade, strafeFade)
     // yaw lock (SetYawLock; zero while it is off)
     uint64_t yawLockUpdates = 0;                // locked-foot updates of the yaw lock
     uint64_t yawLockUnplants = 0;               // planted -> following (angle)
@@ -530,6 +544,11 @@ public:
     // Per update from the driver: a turn / pivot / reface / turn in place or stop clip plays on ground locomotion (an ordinary standing
     // stop, SetStandingStopSupport, latches as well).
     void SetFirmHold(bool aHold) { m_firmHold = aHold; }
+    // firm feet: an aimed strafe pivot plays this update (FirmFeetConfig::strafeLatchSpeed applies to a new latch)
+    void SetFirmStrafe(bool aOn) { m_firmStrafe = aOn; }
+    // firm feet: aimed strafing this update: a latched foot whose contact has fallen below onThreshold lowers its hold at releaseSpeed
+    // from the shown offset to the slip start and the latch ends there (FirmFeetConfig::strafeFade)
+    void SetFirmStrafeFade(bool aOn) { m_firmStrafeFade = aOn; }
     // False = invalid (FirmFeetConfig::Valid), previous kept. Applies from the next update.
     bool SetFirmFeetConfig(const FirmFeetConfig& aCfg)
     {
@@ -1436,10 +1455,13 @@ private:
                     // leg limits along this offset (see FirmFeetConfig).
                     float firmStart = 0.0f;
                     if (m_firmOn && !f.firm && m_firmHold && m_slipStart > 0.0f && aContact >= kStopFirmContact && !f.plantRef &&
-                        !f.crouchContact && m_capsuleSpeed <= m_fcfg.latchSpeed)
+                        !f.crouchContact &&
+                        m_capsuleSpeed <= (m_firmStrafe && m_fcfg.strafeLatchSpeed > 0.0f ? std::fmax(m_fcfg.latchSpeed, m_fcfg.strafeLatchSpeed)
+                                                                                           : m_fcfg.latchSpeed))
                     {
                         f.firm = true;
-                        f.firmHold = m_fcfg.limit;
+                        f.firmHold = m_firmStrafe ? std::fmin(m_fcfg.limit, m_fcfg.strafeLimit) : m_fcfg.limit;
+                        m_diag.firmStrafeLatches += m_firmStrafe ? 1u : 0u;
                         ++m_diag.firmLatches;
                     }
                     if (f.firm && !m_firmHold && m_capsuleSpeed < m_cfg.settleCapsuleSpeed)
@@ -1456,6 +1478,17 @@ private:
                         {
                             f.firm = false;
                             ++m_diag.firmHandBacks;
+                        }
+                    }
+                    // aimed strafing (SetFirmStrafeFade): a fading contact (below onThreshold, the lock kept by the hysteresis) lowers the
+                    // hold from the shown offset at releaseSpeed; the latch ends at the slip start
+                    if (f.firm && m_firmStrafeFade && m_fcfg.strafeFade && aContact < m_cfg.onThreshold)
+                    {
+                        f.firmHold = std::fmax(m_slipStart, std::fmin(f.firmHold, f.firmShown) - m_fcfg.releaseSpeed * aDt);
+                        if (!(f.firmHold > m_slipStart))
+                        {
+                            f.firm = false;
+                            ++m_diag.firmStrafeFades;
                         }
                     }
                     if (f.firm && !(m_slipStart > 0.0f))
@@ -1830,6 +1863,8 @@ private:
     bool m_stopFirmPlant = UTPP_FOOT_STOP_FIRM_PLANT != 0; // standing-stop firm plant (SetStopFirmPlant)
     bool m_firmOn = false;   // firm feet (SetFirmFeet)
     bool m_firmHold = false; // this update: turn / stop clip (SetFirmHold)
+    bool m_firmStrafe = false; // this update: an aimed strafe pivot plays (SetFirmStrafe)
+    bool m_firmStrafeFade = false; // this update: aimed strafing (SetFirmStrafeFade)
     FirmFeetConfig m_fcfg{};
     FootReplantConfig m_rcfg{};
     uint32_t m_nb = 0;
@@ -1879,6 +1914,8 @@ struct FootFeedPolicy
     bool classTurn = false;          // turn / pivot / reface / turn in place (FootSlipGroup 2)
     bool firmFeet = false;           // firm feet option (FootLocker::SetFirmFeet)
     bool firmGate = false;           // gate open, no hold, tpp (driver side)
+    bool aimStrafePivot = false;     // a pivot clip plays in aimed strafing (MotionSetFrame::aimStrafePivot)
+    bool aimStrafe = false;          // aimed strafing (MotionSetFrame::aimStrafe)
     bool yawLock = false;            // planted foot yaw lock option (FootLocker::SetYawLock)
     bool referencePlant = UTPP_FOOT_PLANT_REFERENCE != 0; // reference plant model for stand / sprint (FootPlantReferenceConfig)
     int32_t referencePlantStopsOnly = UTPP_FOOT_PLANT_STOPS_ONLY; // ... only while 1: `stops` (idle / stop databases), 2: classStop / classIdle
@@ -1941,5 +1978,7 @@ inline void ApplyFootFeedPolicy(FootLocker& aLocker, const FootFeedPolicy& p)
     aLocker.SetYawLock(p.yawLock);
     aLocker.SetFirmHold(p.firmFeet && p.firmGate && !p.airborne && k == 1.f && (p.stance == 1 || p.stance == 3) &&
                         (p.classTurn || p.classStop));
+    aLocker.SetFirmStrafe(p.aimStrafePivot && p.classTurn);
+    aLocker.SetFirmStrafeFade(p.aimStrafe);
 }
 } // namespace utpp::mm

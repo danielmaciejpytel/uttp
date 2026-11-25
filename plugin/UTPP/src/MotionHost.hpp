@@ -446,7 +446,7 @@ bool FirmFeet();
 // speed (m/s, 0.1..100) and latch capsule speed (m/s, 0..100); a negative value keeps the current one. False = invalid / NaN,
 // previous kept. C++ API (tools, tests).
 bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg = -1.0f, float aReleaseSpeed = -1.0f,
-                       float aLatchSpeed = -1.0f);
+                       float aLatchSpeed = -1.0f, float aStrafeLatchSpeed = -1.0f, float aStrafeLimit = -1.0f);
 // Foot locker counters of the firm feet since its last reset: locks latched, locked-foot updates with a hold, of them lowered by a leg
 // limit, latches ended by the hand-back (any pointer may be null).
 void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds, uint64_t* aHandBacks);
@@ -662,6 +662,8 @@ struct MotionSetFrame // UTPP-MOTION SEAM
     int startTurnDirection = 0; // current MOTION ordinary reface start, never legacy v1 state
     int cancelStartSupport = -1; // short cancelled-start support: -1 none, 0 left, 1 right
     uint8_t clipClass = 0; // actual current clip class; idle databases can also contain turns
+    bool aimStrafePivot = false; // a pivot clip plays in aimed strafing (ChooserState::aimStrafeRotation): firm feet latch at a jog
+    bool aimStrafe = false; // aimed strafing (ChooserState::aimStrafeRotation): firm feet fade a latch with a fading contact
     int8_t moveTurnSign = 0; // authored root turn of the playing moving turn / pivot clip: +1 left, -1 right, 0 none (ChooserMatcher::MoveTurnSign)
     bool stops = false; // UTPP-MOTION SEAM idle / stop database (replant Stops profile)
     bool travFrame = false;                  // UTPP-MOTION SEAM trav: traversal montage frame (root already

@@ -6538,6 +6538,8 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     aOut.pose = aOut.buf;
     aOut.numBones = n;
     aOut.clipClass = steer::kClassNone;
+    aOut.aimStrafePivot = false;
+    aOut.aimStrafe = b.matcher.AimStrafeRotation();
     if (g_trav.frame) // UTPP-MOTION SEAM trav: montage frame - root motion = warped plan root, no foot contacts / replant
     {
         aOut.rootVel[0] = g_trav.vel[0];
@@ -6621,6 +6623,7 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     {
         aOut.clipClass = steer::ClassifyClip(b.db.ClipName(static_cast<uint32_t>(r.clip)));
         aOut.moveTurnSign = static_cast<int8_t>(b.matcher.MoveTurnSign(r.clip));
+        aOut.aimStrafePivot = b.matcher.AimStrafeRotation() && steer::IsPivot(aOut.clipClass);
     }
     if (r.database >= 0 && static_cast<uint32_t>(r.database) < b.db.NumDatabases())
     {

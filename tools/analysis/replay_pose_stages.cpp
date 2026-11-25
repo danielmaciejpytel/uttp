@@ -74,7 +74,9 @@
 //                       lowered by a leg limit, hand-backs)
 //   --firm-limit L      hold limit (m), --firm-handback V hand-back speed (m/s), --firm-knee D knee fold margin (deg),
 //                       --firm-release V release speed (m/s) and --firm-latch-speed V latch capsule speed (m/s) of the firm feet
-//                       (motionhost::SetFirmFeetParams; not passed = build default)
+//                       (motionhost::SetFirmFeetParams; not passed = build default); --firm-strafe-latch-speed V the latch capsule
+//                       speed while an aimed strafe pivot plays (FirmFeetConfig::strafeLatchSpeed, 0 = the latch speed),
+//                       --firm-strafe-limit L the hold limit of such a latch (m, FirmFeetConfig::strafeLimit)
 //   --foot-yaw-lock 0|1 planted foot yaw lock off / on (motionhost::SetFootYawLock); adds one YAWLOCK line (yaw lock updates, unplants,
 //                       replants, updates held at the correction bound)
 //   --foot-yaw-twist R  twist reduction of the yaw lock (0..0.99), --foot-yaw-corr M its correction bound (m),
@@ -591,7 +593,7 @@ int main(int argc, char** argv)
     uint64_t yawTotal[4] = {}, yawLast[4] = {}; // --foot-yaw-lock: YAWLOCK counters (summed over the foot locker resets)
     uint64_t firmTotal[4] = {}, firmLast[4] = {}; // --firm-feet: FIRMFEET counters (summed over the foot locker resets)
     // < 0 = not passed (build defaults)
-    float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f;
+    float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f, firmStrafeLatch = -1.0f, firmStrafeLimit = -1.0f;
     int32_t turnRate = -1;                     // -1 = not passed
     float turnRateMax = -1.0f;                 // < 0 = not passed
     int32_t swivelPole = -1;                   // -1 = not passed
@@ -724,6 +726,10 @@ int main(int argc, char** argv)
             firmRelease = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-latch-speed") == 0)
             firmLatch = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-strafe-latch-speed") == 0)
+            firmStrafeLatch = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-strafe-limit") == 0)
+            firmStrafeLimit = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--turn-rate") == 0)
             turnRate = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--turn-rate-max") == 0)
@@ -980,10 +986,11 @@ int main(int argc, char** argv)
     if ((footYawTwist >= 0.0f || footYawCorr >= 0.0f || footYawUnplant >= 0.0f) &&
         !motionhost::SetFootYawLockParams(footYawTwist, footYawCorr, footYawUnplant >= 0.0f ? footYawUnplant * 0.017453293f : -1.0f))
         return 2;
-    if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f)
+    if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f || firmStrafeLatch >= 0.0f ||
+        firmStrafeLimit >= 0.0f)
     {
         // a value not passed keeps the build default (negative)
-        if (!motionhost::SetFirmFeetParams(firmLimit, firmHandBack, firmKnee, firmRelease, firmLatch))
+        if (!motionhost::SetFirmFeetParams(firmLimit, firmHandBack, firmKnee, firmRelease, firmLatch, firmStrafeLatch, firmStrafeLimit))
             return 2;
     }
     if (turnRate >= 0)

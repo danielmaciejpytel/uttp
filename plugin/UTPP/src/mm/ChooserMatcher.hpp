@@ -867,6 +867,8 @@ struct MatchResult
     // MatcherConfig::turnFootPhase on this update: 0 = not run, 1 = the re-rank kept the trajectory winner, 2 = the re-ranked row
     // replaced it, 3 = a different re-ranked row was refused (later entry / turn outside the steering look-ahead)
     uint8_t turnFootPhase = 0;
+    // MatcherConfig::strafePivotTravelEntry on this update: the selected jump is a committed strafe pivot moved to its travel reversal
+    bool strafeEntryShift = false;
 };
 
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -1238,7 +1240,9 @@ public:
         }
         // strafePivotTravelEntry: clip time of the authored travel reversal of a pivot clip with less than 45 deg of root yaw (the strafe
         // pivots): the first frame from which the root step, expressed in the clip's first frame, runs along the clip's final travel
-        // direction (mean of its last five steps) for three frames, after a step that did not. -1 = no such clip or no reversal.
+        // direction (mean of its last five steps) for three frames, after a step that did not (the root step into frame 0 is not a step
+        // and does not count). -1 = no such clip or no reversal.
+        const float revFps = aDb->Header().fps > 0.0f ? aDb->Header().fps : 30.0f;
         m_clipTravelRevS.assign(aDb->NumClips(), -1.0f);
         for (uint32_t c = 0; c < aDb->NumClips(); ++c)
         {
@@ -1264,10 +1268,10 @@ public:
             if (!(fl > 1e-5f))
                 continue;
             const auto along = [&](uint32_t f) { return (ax[f] * fx + ay[f] * fy) / fl; };
-            for (uint32_t f = 1; f + 3 <= cl.numFrames; ++f)
+            for (uint32_t f = 2; f + 3 <= cl.numFrames; ++f)
                 if (along(f - 1) <= 0.0f && along(f) > 0.0f && along(f + 1) > 0.0f && along(f + 2) > 0.0f)
                 {
-                    m_clipTravelRevS[c] = static_cast<float>(f) / aDb->Header().fps;
+                    m_clipTravelRevS[c] = static_cast<float>(f) / revFps;
                     break;
                 }
         }
@@ -1412,6 +1416,8 @@ public:
     void TestSetStrafePivotBlendS(float aS) { m_cfg.strafePivotBlendS = aS; }
 #endif
     uint64_t StrafeSectorHolds() const { return m_strafeSectorHolds; }
+    // ChooserState::aimStrafeRotation of the last update (false before the first one)
+    bool AimStrafeRotation() const { return m_haveLastState && m_lastState.aimStrafeRotation; }
     // strafePivotTravelEntry: picks moved to their travel reversal so far, and the authored travel reversal of a clip (s, -1 = none)
     uint64_t StrafeEntryShifts() const { return m_strafeEntryShifts; }
     float ClipTravelReversalS(uint32_t aClip) const { return aClip < m_clipTravelRevS.size() ? m_clipTravelRevS[aClip] : -1.0f; }
@@ -2324,37 +2330,69 @@ public:
         else if (bestDb >= 0)
         {
             const DatabaseRecord& D = db.Db(static_cast<uint32_t>(bestDb));
-            // strafePivotTravelEntry: a strafe pivot the turn commit will hold (the same conditions as strafePivot below) picked before its
-            // authored travel reversal plays from strafePivotEntryLeadS before that reversal (the first indexed row of its entry at or after
-            // that frame); before the guards and the play rate, which read bestRow (mutation 50: off; mutation 36, no strafe pivot commit, too)
-            if (UTPP_AND_NOT(JUMPPICK, 50) UTPP_AND_NOT(JUMPPICK, 36) !bestIsCont && m_cfg.strafePivotTravelEntry && m_cfg.turnCommit && m_cfg.strafePivotTailS > 0.0f && m_guardsOn &&
-                aState.aimStrafeRotation && aState.isPivoting && aState.movementMode == 0 && aState.movementState == 1 && aState.stance == 0)
+            // strafePivotTravelEntry: a strafe pivot the turn commit will hold (the same conditions as strafePivot / the turn commit below)
+            // picked before its authored travel reversal plays from its travel reversal instead: among the indexed rows of the picked
+            // entry from strafePivotEntryLeadS before the reversal to the reversal, the row whose pose channels best match the shown pose
+            // (SetShownPoseHistory; without one the pose history of the query) wins; excluded rows (MarkExcluded: recent picks, stance
+            // entries, no-reselect clips) and BLOCK rows are skipped; no such row = the pick is kept. A pick the turnFootPhase rule moved
+            // to the entry of the planted foot (turnFootPhase 2) is kept. bestCost is the normal query cost of the moved row, so the
+            // guards below compare the row that plays. Before the guards and the play rate, which read bestRow (mutation 50: off;
+            // mutations 36 / 32, no strafe pivot / turn commit, too)
+            bool entryShifted = false;
+            if (UTPP_AND_NOT(JUMPPICK, 50) UTPP_AND_NOT(JUMPPICK, 36) UTPP_AND_NOT(JUMPPICK, 32) !bestIsCont && !aForce && m_cfg.strafePivotTravelEntry &&
+                m_cfg.turnCommit && m_cfg.strafePivotTailS > 0.0f && m_guardsOn && aState.aimStrafeRotation && aState.isPivoting &&
+                aState.movementMode == 0 && aState.movementState == 1 && aState.stance == 0)
             {
+                const float rfps = fps > 0.0f ? fps : 30.0f;
+                const uint32_t d = static_cast<uint32_t>(bestDb);
                 const RowRecord& r0 = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
                 const EntryRecord& e0 = db.Entry(r0.entry);
-                const MotionClipRecord& c0 = db.Clip(e0.clip);
-                const float t0 = static_cast<float>(r0.frame - c0.firstFrame) / fps;
+                const float t0 = static_cast<float>(r0.frame - db.Clip(e0.clip).firstFrame) / rfps;
                 const float rev = m_clipTravelRevS[e0.clip];
                 const float at = rev - m_cfg.strafePivotEntryLeadS;
-                if (rev > 0.0f && m_clipTurnEndS[e0.clip] <= t0 && t0 < at && at - t0 <= m_cfg.strafePivotEntryMaxSkipS &&
+                if (rev > 0.0f && res.turnFootPhase != 2 && m_clipTurnEndS[e0.clip] <= t0 && t0 < at && at - t0 <= m_cfg.strafePivotEntryMaxSkipS &&
                     steer::IsPivot(steer::ClassifyClip(db.ClipName(e0.clip))))
                 {
-                    const uint32_t target = c0.firstFrame + static_cast<uint32_t>(at * fps + 0.5f);
-                    const uint32_t revFrame = c0.firstFrame + static_cast<uint32_t>(rev * fps + 0.5f);
-                    uint32_t lo = e0.firstRow, hi = e0.firstRow + e0.numRows;
-                    while (lo < hi)
+                    const uint32_t marked = MarkExcluded(d, startTurnDirection);
+                    const bool shown = m_shownHist && m_shownHist->numSamples >= 2;
+                    const PoseHistory* const callerHist = m_hist;
+                    if (shown)
+                        m_hist = m_shownHist;
+                    BuildQuery(d, true, allowLastPose);
+                    int32_t pick = -1;
+                    float pickCost = std::numeric_limits<float>::max();
+                    const MotionClipRecord& ec = db.Clip(e0.clip);
+                    const uint32_t target = ec.firstFrame + static_cast<uint32_t>(std::fmax(at, 0.0f) * rfps + 0.5f);
+                    const uint32_t revFrame = ec.firstFrame + static_cast<uint32_t>(rev * rfps + 0.5f);
+                    for (uint32_t row = e0.firstRow; row < e0.firstRow + e0.numRows; ++row)
                     {
-                        const uint32_t mid = (lo + hi) / 2;
-                        if (db.Row(mid).frame < target)
-                            lo = mid + 1;
-                        else
-                            hi = mid;
+                        const RowRecord& rr = db.Row(row);
+                        if (rr.frame < target)
+                            continue;
+                        if (rr.frame > revFrame)
+                            break;
+                        const uint32_t local = row - D.firstRow;
+                        if ((rr.flags & kRowBlock) || m_excluded[local])
+                            continue;
+                        const float c = DbRowCost(d, local) + rr.costAddend;
+                        if (c < pickCost)
+                        {
+                            pickCost = c;
+                            pick = static_cast<int32_t>(local);
+                        }
                     }
-                    if (lo < e0.firstRow + e0.numRows && db.Row(lo).frame <= revFrame)
+                    m_hist = callerHist;
+                    ClearExcluded(d, marked);
+                    if (pick >= 0)
                     {
-                        bestRow = static_cast<int32_t>(lo - D.firstRow);
-                        ++m_strafeEntryShifts;
-                        m_lastStrafeEntryFromS = t0;
+                        if (shown)
+                        {
+                            BuildQuery(d, true, allowLastPose);
+                            pickCost = DbRowCost(d, static_cast<uint32_t>(pick)) + db.Row(D.firstRow + static_cast<uint32_t>(pick)).costAddend;
+                        }
+                        bestRow = pick;
+                        bestCost = pickCost;
+                        entryShifted = true;
                     }
                 }
             }
@@ -2438,6 +2476,13 @@ public:
                 bestRow = contRow;
                 bestEntry = contEntry;
                 ++m_strafeSectorHolds;
+            }
+            // strafePivotTravelEntry: counted / reported only when the moved row is the one selected (a guard above may have kept the
+            // continuing clip instead)
+            if (entryShifted && jump)
+            {
+                ++m_strafeEntryShifts;
+                res.strafeEntryShift = true;
             }
             // Queries in the search loop are scratch per database. Rebuild the winner
             // while continuing candidates still refer to the previous player; the last
@@ -2536,9 +2581,11 @@ public:
                 res.blend.blendTime = (aState.stationaryShotTurn || stationaryAim) &&
                     steer::ClassifyClip(db.ClipName(en.clip)) == steer::kClassTurnInPlace ?
                     std::min(blendTime, tipCap) : blendTime;
-                // strafePivotBlendS: the fade into a committed strafe pivot (0 = the ordinary fade)
+                // strafePivotBlendS: the fade into a committed strafe pivot that plays from its travel reversal on (moved there by
+                // strafePivotTravelEntry, or picked there; 0 = the ordinary fade). A pivot still braking keeps the ordinary fade.
                 // mutation 51: the ordinary fade into a committed strafe pivot
-                if (UTPP_AND_NOT(JUMPPICK, 51) strafePivot && m_turnHoldClip >= 0 && m_cfg.strafePivotBlendS > 0.0f)
+                if (UTPP_AND_NOT(JUMPPICK, 51) strafePivot && m_turnHoldClip >= 0 && m_cfg.strafePivotBlendS > 0.0f &&
+                    (entryShifted || (m_clipTravelRevS[en.clip] > 0.0f && newTime >= m_clipTravelRevS[en.clip] - m_cfg.strafePivotEntryLeadS - 0.5f / (fps > 0.0f ? fps : 30.0f))))
                     res.blend.blendTime = std::fmin(res.blend.blendTime, m_cfg.strafePivotBlendS);
                 // fix3/jump (blendSlideFamily): FootOut <-> KneesOut inside a slide
                 // mutation 6: the family switch keeps the 0.2 s slide fade
@@ -3652,8 +3699,7 @@ private:
     float m_stopHoldStart = 0.0f;           // stopCommitMaxS: clip time of the held Stop clip at its selection
     std::vector<float> m_clipTurnEndS;      // turnCommit: clip index -> clip time where the authored root turn is done (-1 = not a turn clip)
     std::vector<float> m_clipTravelRevS;    // strafePivotTravelEntry: clip index -> clip time of the authored travel reversal (-1 = none)
-    uint64_t m_strafeEntryShifts = 0;       // strafePivotTravelEntry: picks moved to their travel reversal so far
-    float m_lastStrafeEntryFromS = 0.0f;    // strafePivotTravelEntry: clip time of the last moved pick's own row
+    uint64_t m_strafeEntryShifts = 0;       // strafePivotTravelEntry: selected picks moved to their travel reversal so far
     int32_t m_turnHoldClip = -1;            // turnCommit: the held turn clip (-1 = none)
     float m_turnTailS = 0.0f;               // turnCommitTailS: seconds the held turn clip has played past its turn end
     float m_turnHoldEndS = 0.0f;            // turnCommit: clip time of the held clip's turn end (the pick time for a strafe pivot)
