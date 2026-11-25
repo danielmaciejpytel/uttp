@@ -88,7 +88,11 @@ struct GameObstacle
     bool hasHands = false;
     V3 leftHand, rightHand; // grabPointEnd + 0.5 * (grabPointStart - grabPointEnd) per hand
     int kind = 0; // vehicle batch (TRAV-1 B): descResult.climbedEntity, 0 static geometry, 1 vehicle, 2 other entity
+    // Measured by the script's own downward ray just behind a vaulted obstacle: topPoint.z minus the first floor below
+    // (kNoFloorDepthM or more = nothing within the ray); < 0 = not measured. Read only with Config::dropVault.
+    double floorDepthM = -1.0;
 };
+inline constexpr double kNoFloorDepthM = 99.0;
 
 struct CapsuleState
 {
@@ -143,6 +147,23 @@ struct Config
     //  - lowHurdle: a drop of lowHurdleMinM .. 50 cm behind the edge (table: no row, CheckFailed) is evaluated as 50 cm -> the Hurdle rows.
     bool wideVault = false;
     bool lowHurdle = true;
+    //  - dropVault (menu option, off by default): the game's behindPoint is clamped to the feet height (VaultEvents landing
+    //    formula), so a drop behind the obstacle reads as a floor and picks a Hurdle that ends on thin air. With the key on and a
+    //    measured floor more than dropVaultMinFloorDepthM below the obstacle top (the reference traces its back floor from the
+    //    back ledge down to about 1.36 m below it; nothing found = no back floor), the table gets HasBackFloor = false, which is
+    //    its Vault row (the Vault_1_0 vault-and-fall montages). No window is added: after the last ledge window the clip runs on
+    //    until its root is dropVaultClearM past the back edge (the running / walking clips have only the FrontLedge window, which
+    //    ends with the body still in front of the obstacle), never past the frame back at the start height. The game's fall and
+    //    the air / landing selection take over from there (the game leaving its vault ends the montage earlier).
+    bool dropVault = false;
+    double dropVaultMinFloorDepthM = 1.40;
+    double dropVaultClearM = 0.35; // [P] root past the back edge at the hand-back (the standing clip's BackLedge end)
+    //    The game ends its vault by itself, which ends the montage: logged vaults before a drop lasted 0.35 s running and
+    //    standing, 0.43 s walking (all logged vaults 0.20..0.55 s at montage rate 1). At rate 1 the standing and walking clips
+    //    were cut with the root still in front of the obstacle, so a drop vault plays at the rate that reaches its end frame in
+    //    dropVaultGameS (never slower than the clip, at most dropVaultMaxRate; the root step gate applies at that rate).
+    double dropVaultGameS = 0.38;
+    double dropVaultMaxRate = 1.6;
     double lowHurdleMinM = 0.10;
     bool centreRootWithoutHands = true; // false = pre-review hand-less targets: every hand on topPoint (test mutation)
     // vehicle batch (TRAV-1 B): a vault over a vehicle (GameObstacle::kind 1) is Unsupported ("vehicle"): motion has no
@@ -477,6 +498,13 @@ inline uint8_t MontageLeadFoot(const std::string& aName)
     return ends("Lfoot") ? 1 : (ends("Rfoot") ? 2 : 0);
 }
 
+// A vault with no floor behind (Config::dropVault and a measured floor depth).
+inline bool IsDropBehind(const GameObstacle& aO, const Config& aCfg)
+{
+    return aCfg.dropVault && aO.action == GameAction::Vault && std::isfinite(aO.floorDepthM) &&
+           aO.floorDepthM > aCfg.dropVaultMinFloorDepthM;
+}
+
 // Chooser inputs (motion units) for a game climb / vault start.
 inline Inputs MakeGameInputs(const GameObstacle& aO, const CapsuleState& aC, const Config& aCfg, double& aHeightM,
                              double& aLandingZ)
@@ -487,7 +515,9 @@ inline Inputs MakeGameInputs(const GameObstacle& aO, const CapsuleState& aC, con
     if (aO.action == GameAction::Climb)
         return MakeInputsFromMetres(true, false, false, aHeightM, std::max(aO.topExtent, aCfg.climbMinMantleDepthM), 0.0,
                                     aC.speed, mode);
-    return MakeInputsFromMetres(true, true, true, aHeightM, aO.topExtent, aO.topPoint.z - aLandingZ, aC.speed, mode);
+    const bool drop = IsDropBehind(aO, aCfg); // aLandingZ stays the game's own landing formula (its capsule destination)
+    return MakeInputsFromMetres(true, true, !drop, aHeightM, aO.topExtent,
+                                drop ? aO.floorDepthM : aO.topPoint.z - aLandingZ, aC.speed, mode);
 }
 
 namespace motion_detail
@@ -522,6 +552,7 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
     }
 #endif
     std::vector<std::string> forced;
+    const bool drop = IsDropBehind(aO, aCfg);
     if (aCfg.forceMontage.empty())
     {
         Inputs tin = in;
@@ -534,14 +565,14 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
         if (aRow.speedCmS >= 0)
             tin.speed = aRow.speedCmS;
         // lowHurdle: 10..50 cm behind the edge has no row (BackLedgeHeight >= 50 -> Hurdle, <= 10 -> Mantle): evaluate it as 50 cm
-        if (aO.action == GameAction::Vault && aCfg.lowHurdle && in.backLedgeHeight >= aCfg.lowHurdleMinM * 100.0 &&
+        if (aO.action == GameAction::Vault && !drop && aCfg.lowHurdle && in.backLedgeHeight >= aCfg.lowHurdleMinM * 100.0 &&
             in.backLedgeHeight < 50.0)
         {
             tin.backLedgeHeight = 50.0;
         }
         p.decision = aTable.Evaluate(tin);
         bool wide = false;
-        if (aO.action == GameAction::Vault && aCfg.wideVault && p.decision.actionName == "Mantle" &&
+        if (aO.action == GameAction::Vault && !drop && aCfg.wideVault && p.decision.actionName == "Mantle" &&
             in.backLedgeHeight >= aCfg.lowHurdleMinM * 100.0)
         {
             // wide obstacle (table: Mantle): the table's Vault row (no back floor, depth under the 59 cm edge)
@@ -561,7 +592,7 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
             p.result = StartResult::CheckFailed;
             return p;
         }
-        const std::string want = aO.action == GameAction::Climb ? "Mantle" : (wide ? "Vault" : "Hurdle");
+        const std::string want = aO.action == GameAction::Climb ? "Mantle" : (wide || drop ? "Vault" : "Hurdle");
         if (p.decision.actionName != want)
         {
             p.result = StartResult::Unsupported;
@@ -746,7 +777,26 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
         bool floorWindow = false;
         for (const auto& w : m.windows)
             floorWindow = floorWindow || w.target == "BackFloor";
-        if (!floorWindow && aCfg.wideVault && frontEnd >= 0)
+        if (drop && frontWin >= 0)
+        {
+            const int last = std::max(p.endFrame, frontEnd);
+            const int land = VaultLandingFrame(m, last);
+            const TravWindow* front = nullptr;
+            for (const auto& w : m.windows)
+                if (!front && w.target == "FrontLedge")
+                    front = &w;
+            const RootKey& re = m.root[static_cast<size_t>(front->endFrame)];
+            const V3 contact = re.pos + RotZ(front->offset, re.yaw), fwd = Forward(re.yaw);
+            int end = last;
+            for (; end < land; ++end)
+            {
+                const V3 d = m.root[static_cast<size_t>(end)].pos - contact;
+                if (d.x * fwd.x + d.y * fwd.y >= aO.topExtent + aCfg.dropVaultClearM)
+                    break;
+            }
+            p.endFrame = end;
+        }
+        if (!floorWindow && aCfg.wideVault && !drop && frontEnd >= 0)
         {
             const int lastEnd = std::max(p.endFrame, frontEnd);
             const int land = VaultLandingFrame(m, lastEnd);
@@ -810,6 +860,9 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
         p.rate = std::clamp(r, aCfg.minRate, aCfg.maxRate);
         p.rateClamped = p.rate != r;
     }
+    else if (drop && aCfg.matchDuration && aCfg.dropVaultGameS > 0)
+        p.rate = std::clamp((p.endClipTime - static_cast<double>(p.startFrame) / m.fps) / aCfg.dropVaultGameS, 1.0,
+                            aCfg.dropVaultMaxRate);
     // solve on the clip from startFrame (start key re-based to the capsule), then pad the skipped frames
     const size_t s = static_cast<size_t>(p.startFrame);
     std::vector<RootKey> sub(m.root.begin() + static_cast<std::ptrdiff_t>(s), m.root.end());

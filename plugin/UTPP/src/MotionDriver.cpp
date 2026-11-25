@@ -3873,9 +3873,11 @@ bool OverlayArmsOf(const Bundle& b, const motionpose::FrameInfo& aInfo)
 // TRAV-1 D (vehicle batch): one always-on info line per traversal event (the plan is made once per event; a bundle swap that
 // re-plans the same event writes nothing), so a release recording tells owned / released / held apart without mm.trace:
 // "UTPP trav: action= h= ext= depth= back= v= kind= decision= result=<StartResult>(<reason>) montage=". depth = obstacleEnd -
-// topPoint along the facing (the TRAV-1 C rule), back = topPoint.z - landing z. Fixed buffer, host logger (info level).
+// topPoint along the facing (the TRAV-1 C rule), back = topPoint.z - landing z (a drop vault: the measured floor depth, the
+// table's input). Fixed buffer, host logger (info level).
 uint64_t g_travInfoEvent = 0; // g_travProbe.events of the last event that wrote its line
-void TravPlanInfoLocked(const motiontrav::GameObstacle& aO, const motiontrav::CapsuleState& aC, const motiontrav::Plan& aP, bool aTravOk)
+void TravPlanInfoLocked(const motiontrav::GameObstacle& aO, const motiontrav::CapsuleState& aC, const motiontrav::Plan& aP, bool aTravOk,
+                        bool aDrop, const float aFloorSample[2])
 {
     std::snprintf(g_travProbe.reason, sizeof g_travProbe.reason, "%s", aP.reason ? aP.reason : "");
     g_travProbe.kind = aO.kind;
@@ -3885,11 +3887,11 @@ void TravPlanInfoLocked(const motiontrav::GameObstacle& aO, const motiontrav::Ca
     const double fx = -aO.collisionNormal.x, fy = -aO.collisionNormal.y, fl = std::hypot(fx, fy);
     const double depth = fl > 1e-9 ? ((aO.obstacleEnd.x - aO.topPoint.x) * fx + (aO.obstacleEnd.y - aO.topPoint.y) * fy) / fl : 0.0;
     const char* decision = !aP.decision.actionName.empty() ? aP.decision.actionName.c_str() : "-";
-    char line[400];
+    char line[470];
     std::snprintf(line, sizeof line,
                   "UTPP trav: action=%d h=%.2f ext=%.2f depth=%.2f back=%.2f v=%.1f kind=%d decision=%s result=%s(%s) montage=%s%s",
                   aO.action == motiontrav::GameAction::Vault ? 9 : 8, aP.obstacleHeight, aO.topExtent, depth,
-                  aO.topPoint.z - aP.landingZ, aC.speed, aO.kind, decision, motiontrav::ToString(aP.result),
+                  aDrop ? aO.floorDepthM : aO.topPoint.z - aP.landingZ, aC.speed, aO.kind, decision, motiontrav::ToString(aP.result),
                   aP.reason && aP.reason[0] ? aP.reason : "-", aP.montage ? aP.montage->name.c_str() : "-",
                   aTravOk ? "" : " (no traversal data)");
     if (g_travStartWindowOn || g_travLeadFootOn) // start options on: start frame, event lead foot and the start's foot rank
@@ -3901,6 +3903,14 @@ void TravPlanInfoLocked(const motiontrav::GameObstacle& aO, const motiontrav::Ca
                       aP.montage ? motiontrav::StartFootRank(*aP.montage, aP.startFrame, aC.leadFoot) : -1);
     }
     ++g_travProbe.infoLines;
+    if (aO.action == motiontrav::GameAction::Vault)
+    {
+        // floor = measured floor below the top (-1 not measured, 99 none); bz = the game's raw behindPoint above the feet
+        const size_t used = std::strlen(line);
+        std::snprintf(line + used, sizeof line - used, " floor=%.2f rays=%.2f/%.2f bz=%.2f drop=%d", aO.floorDepthM,
+                      static_cast<double>(aFloorSample[0]), static_cast<double>(aFloorSample[1]), aO.behindPoint.z - aC.pos.z,
+                      aDrop ? 1 : 0);
+    }
     if (aP.alternative && aP.alternative[0]) // jump start / rejected fallback rows gave the plan
     {
         const size_t used = std::strlen(line);
@@ -3930,6 +3940,7 @@ void TravPlanLocked(Bundle& b)
     o.leftHand = TravV(e.leftHand);
     o.rightHand = TravV(e.rightHand);
     o.kind = e.obstacleKind; // TRAV-1 B (vehicle batch)
+    o.floorDepthM = e.floorDepth;
     motiontrav::CapsuleState c;
     c.pos = TravV(e.playerPos);
     c.yaw = std::atan2(-static_cast<double>(e.ownerForward[0]), static_cast<double>(e.ownerForward[1])); // forward = (-sin, cos)
@@ -3945,6 +3956,7 @@ void TravPlanLocked(Bundle& b)
     cfg.leadFootRow = g_travLeadFootOn;
     cfg.jumpStartAsGround = g_travJumpStartGroundOn;
     cfg.rejectedFallback = g_travRejectedFallbackOn;
+    cfg.dropVault = e.dropVault;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     cfg.forceMontage = g_testForceMontage;
     cfg.gate = g_testTravGate;
@@ -3995,7 +4007,7 @@ void TravPlanLocked(Bundle& b)
     const ptrdiff_t idx = p.montage ? p.montage - b.travPlay.montages.data() : -1;
     g_trav.planned = true;
     g_trav.planOk = p.result == motiontrav::StartResult::Ok && idx >= 0 && static_cast<size_t>(idx) < b.travPlayClip.size();
-    TravPlanInfoLocked(o, c, p, b.travOk);
+    TravPlanInfoLocked(o, c, p, b.travOk, motiontrav::IsDropBehind(o, cfg), e.floorSample);
     if (!g_trav.planOk)
     {
         ++g_travProbe.yields;

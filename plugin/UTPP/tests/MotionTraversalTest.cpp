@@ -901,6 +901,103 @@ static void RecordedStations(const DecisionTable& aT, const TraversalFile& aF, c
         }
 }
 
+// Config::dropVault: recorded starts before a 3.5 m drop behind a 1 m box (the game clamps its landing to the feet height, so
+// the old input read a floor 1.0 m below the top). Key off or a floor within reach = the recorded Hurdle plan unchanged; key on
+// with a deep floor = the table's Vault row (no back floor), ending at the last ledge window (no touchdown window), also with
+// wideVault on.
+static void DropVault(const DecisionTable& aT, const TraversalFile& aF, const char* aRig)
+{
+    static const Station kDrops[] = {
+        {"vault before a drop, running", false, {1581.096, 2211.750, 380.600}, 4.5, 3.9, 1.00, 1, 0.9, 0.21, 0.20, 1.00,
+         "AM_M_Neutral_Traversal_Vault_1_0_run_F", ""},
+        {"vault before a drop, standing", false, {1581.009, 2212.400, 380.600}, 2.2, 0.0, 1.00, 1, 0.5, 0.21, 0.20, 1.00,
+         "AM_M_Neutral_Traversal_Vault_1_0_stand_F", ""},
+        {"vault before a drop, walking", false, {1580.600, 2212.100, 380.600}, 4.5, 1.9, 1.00, 1, 0.6, 0.21, 0.20, 1.00,
+         "AM_M_Neutral_Traversal_Vault_1_0_walk_F", ""},
+    };
+    const std::string r(aRig);
+    for (const Station& st : kDrops)
+    {
+        Case k = MakeStation(st, false);
+        const std::string tag = r + " " + k.tag;
+        const Plan unmeasured = PlanTraversal(aT, aF, k.o, k.c, GameTweaks{}, Config{});
+        k.o.floorDepthM = 4.5;
+        const Plan off = PlanTraversal(aT, aF, k.o, k.c, GameTweaks{}, Config{});
+        Config on;
+        on.dropVault = true;
+        const Plan p = PlanTraversal(aT, aF, k.o, k.c, GameTweaks{}, on);
+        std::printf("%s drop [%s]: key off %s | on %s start %d end %d, planar %.3f warp-added %.3f / %.2f", aRig, k.tag.c_str(),
+                    Describe(off).c_str(), Describe(p).c_str(), p.startFrame, p.endFrame, p.gatePlanarStep, p.gateWarpAdded,
+                    p.gateStepLimit);
+        if (p.montage && !p.warped.empty())
+        {
+            const size_t e = static_cast<size_t>(std::clamp(p.endFrame, 0, static_cast<int>(p.warped.size()) - 1));
+            const V3 end = p.warped[e].pos;
+            const double ahead = end.y - k.o.topPoint.y;
+            double apex = -1e9;
+            for (size_t f = static_cast<size_t>(p.startFrame); f <= e; ++f)
+                apex = std::max(apex, p.warped[f].pos.z - k.c.pos.z);
+            std::printf(", root at hand-back %.2f m past the front edge, %.2f m above the feet (apex %.2f), clip %.2f s", ahead,
+                        end.z - k.c.pos.z, apex, (p.endFrame - p.startFrame) / p.montage->fps);
+        }
+        std::printf("\n");
+        if (p.montage && !p.warped.empty())
+        {
+            // the moment the game ended its own vault at these presses (recorded: running / standing 0.35 s, walking 0.43 s):
+            // the montage is cut there, so the root must by then be over the obstacle and high, not still in front of it
+            const double gameS = k.c.speed > 1.0 && k.c.speed < 2.5 ? 0.43 : 0.35;
+            const double frame = std::min(p.startFrame + gameS * p.rate * p.montage->fps, static_cast<double>(p.endFrame));
+            const V3 at = p.warped[static_cast<size_t>(std::clamp(static_cast<int>(frame), 0, static_cast<int>(p.warped.size()) - 1))].pos;
+            std::printf("%s drop [%s]: rate %.2f; at the game's vault end (%.2f s) root %.2f m past the front edge, %.2f m above the feet\n",
+                        aRig, k.tag.c_str(), p.rate, gameS, at.y - k.o.topPoint.y, at.z - k.c.pos.z);
+            Check(at.y - k.o.topPoint.y >= 0.0 && at.z - k.c.pos.z >= 0.6,
+                  tag + ": cut by the game's vault end while still in front of the obstacle");
+        }
+        Check(off.montage == unmeasured.montage && off.startFrame == unmeasured.startFrame && off.endFrame == unmeasured.endFrame &&
+                  off.result == unmeasured.result && off.montage && off.montage->action == "Hurdle",
+              tag + ": key off must keep the Hurdle plan whatever the measured floor, got " + Describe(off));
+        Check(p.result == StartResult::Ok && p.montage && p.montage->name.rfind(st.want, 0) == 0 && p.decision.actionName == "Vault",
+              tag + ": key on must take the " + st.want + " montage, got " + Describe(p));
+        if (p.montage)
+        {
+            Check(p.windows.size() == p.montage->windows.size() && p.endFrame >= p.windows.back().endFrame &&
+                      p.endFrame < motion_detail::VaultLandingFrame(*p.montage, p.windows.back().endFrame),
+                  tag + ": no added window; hand-back after the last ledge window and before the touchdown-height frame");
+            if (!p.warped.empty())
+            {
+                const V3 end = p.warped[static_cast<size_t>(std::clamp(p.endFrame, 0, static_cast<int>(p.warped.size()) - 1))].pos;
+                Check(end.y - k.o.topPoint.y >= k.o.topExtent && end.z >= k.c.pos.z + 0.5,
+                      tag + ": at the hand-back the root must be past the back edge and still high (no touchdown)");
+            }
+            Config both = on;
+            both.wideVault = true;
+            const Plan w = PlanTraversal(aT, aF, k.o, k.c, GameTweaks{}, both);
+            Check(w.montage == p.montage && w.endFrame == p.endFrame, tag + ": wideVault must not add a window to a drop vault");
+        }
+        if (p.result == StartResult::Ok)
+        {
+            Metrics m60;
+            const Expect e = GameExpect(k.o, k.c);
+            Run(p, e, 1.0 / 60.0, m60);
+            Check(m60.doneCount == 1 && m60.justTraversedOnDone, tag + ": hand-back not exactly once");
+            Check(m60.planarTick <= kStepMax && m60.warpAdded <= kStepMax, tag + ": root step above the limit");
+        }
+        Case flat = k;
+        flat.o.floorDepthM = 1.20; // a floor within reach behind the box
+        const Plan f = PlanTraversal(aT, aF, flat.o, flat.c, GameTweaks{}, on);
+        Check(f.montage == unmeasured.montage && f.endFrame == unmeasured.endFrame && f.result == unmeasured.result,
+              tag + ": a floor 1.2 m below the top must keep the Hurdle plan, got " + Describe(f));
+        Case none = k;
+        none.o.floorDepthM = kNoFloorDepthM;
+        const Plan n = PlanTraversal(aT, aF, none.o, none.c, GameTweaks{}, on);
+        Check(n.montage == p.montage && n.result == p.result, tag + ": no floor within the ray = drop");
+        Case veh = k;
+        veh.o.kind = 1;
+        const Plan v = PlanTraversal(aT, aF, veh.o, veh.c, GameTweaks{}, on);
+        Check(v.result == StartResult::Unsupported && std::string(v.reason) == "vehicle", tag + ": vehicle rule first");
+    }
+}
+
 static void LegacyIdentity(const DecisionTable& aT, const TraversalFile& aF, const char* aRig, int aRigIdx)
 {
     Config legacy;
@@ -1096,6 +1193,7 @@ int main(int argc, char** argv)
         LegacyIdentity(table, files[i], rigs[i], i);
         StartWindowAndFoot(table, files[i], rigs[i]);
         RecordedStations(table, files[i], rigs[i]);
+        DropVault(table, files[i], rigs[i]);
         const char* cn[6] = {"High", "Mid", "Low", "vault", "wide vault", "low hurdle"};
         for (int k = 0; k < 2; ++k)
             for (const auto& [alt, n] : (k == 0 ? tc : tv).alternatives)
