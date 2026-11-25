@@ -498,6 +498,53 @@ int main(int argc,char**argv){utpp::testdefaults::LegacyDriverDefaults();utpp::t
   foreignCase("follow-mode look-around, standing",integ::kLocoStand,false);
   foreignCase("follow-mode look-around, crouching",integ::kLocoCrouch,false);
  }
+ // Turning while blocking with fists. A standing block takes the whole body (the clip's planted legs), so the camera rotated V
+ // like a statue. Once the capsule turns, the legs go back to motion matching, which turns her in place as while aiming. A melee
+ // weapon outside the guard list (script guard flag off) keeps the planted full body.
+ for(bool fists:{true,false})for(float target:{110.f,-110.f}){
+  const std::string name=std::string(fists?"fists block":"other melee block")+(target>0?" turn left":" turn right");
+  seedVisualOffset(integ::kLocoStand,false);
+  motiondriver::SetCameraTarget(false,false,nullptr);
+  motiondriver::SetOverlayInputs(int32_t(ov::PoseOverlay::Game),1,false,false);
+  motionhost::SetUpperMask(true);motionhost::SetUpperMaskStates(7);
+  motionhost::SetMeleeFullBody(true);motionhost::SetMeleeFullBodySetting(true);
+  Check(motionhost::SetMeleeFullBodyStates(0x37FDE0),name+" accepts the fists state mask");
+  motionhost::SetMeleeGuard(fists);motionhost::SetMeleeGuardSetting(true);
+  const uint32_t block=integ::kPsmWeaponKnown|integ::kPsmWeaponDrawn|upperAim|4096u|(uint32_t(8+1)<<24)|64u|(uint32_t(2+1)<<16);
+  f.psmBlock=block;f.cameraYawDeg=f.playerYawDeg=0;
+  int plantedOwned=0;
+  for(int j=0;j<90;++j)plantedOwned+=rawFeed(true)?1:0;
+  const std::string planted=motiondriver::Status();
+  Check(plantedOwned<30&&StatusField(planted,"rel=")=="1",name+": a still standing block keeps the full-body legs");
+  int owned=0,tip=0,directed=0;float visual=0,authored=0,maxLag=0,lagAtTurnEnd=0;
+  for(int j=0;j<270;++j){
+   f.playerYawDeg=f.cameraYawDeg=target*std::min(1.f,(j+1)/45.f);
+   const bool o=rawFeed(true);owned+=o?1:0;
+   if(!o)continue;
+   authored+=capturedAnimationRate*f.dt/integ::kDegToRad;
+   visual=std::remainder(f.playerYawDeg+capturedRootYaw/integ::kDegToRad,360.f);
+   const float lag=std::fabs(std::remainder(f.playerYawDeg-visual,360.f));
+   maxLag=std::max(maxLag,lag);if(j==44)lagAtTurnEnd=lag;
+   const int clip=std::atoi(StatusField(motiondriver::Status(),"pick=clip:").c_str());
+   if(clip>=0&&uint32_t(clip)<db->NumClips()){const auto n=db->ClipName(uint32_t(clip));
+    if(steer::ClassifyClip(n)==steer::kClassTurnInPlace){++tip;directed+=n.ends_with(target>0?"_L":"_R")?1:0;}}
+  }
+  const float error=std::fabs(std::remainder(target-visual,360.f));
+  std::printf("block-turn %s owned=%d TIP=%d directed=%d visual=%.2f authored=%.2f error=%.2f maxLag=%.2f lagAtTurnEnd=%.2f\n",
+   name.c_str(),owned,tip,directed,visual,authored,error,maxLag,lagAtTurnEnd);
+  if(fists){
+   Check(owned>=240,name+": the legs go back to motion matching once the capsule turns");
+   Check(tip>0&&directed>0,name+": steps with an authored turn in place towards the camera side");
+   Check(maxLag>20.f&&error<=mm::motiontraj::kTurnInPlaceDeg+1.f,name+": the visible facing is held, then follows the camera");
+   // walking out of the block: the facing is released as before (movement unchanged)
+   const float yaw=f.cameraYawDeg*integ::kDegToRad;
+   f.move[1]=1;f.velWorld[0]=-std::sin(yaw)*2.3f;f.velWorld[1]=std::cos(yaw)*2.3f;
+   int moving=0;for(int j=0;j<90;++j)moving+=rawFeed(true)?1:0;
+   Check(moving>=85&&std::fabs(capturedRootYaw)<3.f*integ::kDegToRad,name+": walking in the block releases the held facing");
+   f.move[1]=f.velWorld[0]=f.velWorld[1]=0;
+  }else Check(owned<30&&tip==0,name+": the planted full body is unchanged");
+  motionhost::SetMeleeGuard(false);motionhost::SetMeleeFullBody(false);motionhost::SetUpperMask(false);
+ }
  std::printf("root release Default=%.5f rad PistolADS=%.5f rad NativeIdleUpper=%.5f rad\n",defaultAimRoot,pistolAimRoot,nativeIdleUpperRoot);
  std::printf("camera AO observed hipR=%.1f hipL=%.1f; %d PASS %d FAIL\n",hipRight,hipLeft,g_pass,g_fail);
  motionhost::SetMotionHooks(nullptr);motiondriver::Shutdown();motionhost::Shutdown();return g_fail?1:0;

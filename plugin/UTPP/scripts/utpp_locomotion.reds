@@ -31,6 +31,27 @@ public native func UTPPLocomotionRawAngle() -> Float
 // Heading for the game's dodge decision: the raw stick angle while the rewrite is active (Active and the stick moved), else gameHeading.
 public native func UTPPLocomotionDodgeHeading(gameHeading: Float) -> Float
 
+// Strikes in V's own direction. The melee script (utpp_melee.reds, optional) sets this while the weapon and the setting allow it
+// and no enemy is within striking range; without it the flag stays false and every melee state blocks Locomotion.
+@addField(PlayerPuppet) public let utppFreeStrikeEligible: Bool;
+
+// gamePSMMeleeWeapon states of a strike thrown without a held block: Parried 5, Hold 6, ChargedHold 7, ComboAttack 11 ..
+// StrongAttack 13, SafeAttack 14, SprintAttack 16 .. JumpAttack 18, EquipAttack 21. Not Block 8, Targeting 9, Deflect 10,
+// BlockAttack 15, ThrowAttack 19 and DeflectAttack 20: those keep V facing the camera.
+public func UTPPLocomotionStrikeState(melee: Int32) -> Bool {
+  return (melee >= 5 && melee <= 7) || (melee >= 11 && melee <= 14) || (melee >= 16 && melee <= 18) || melee == 21;
+}
+
+// A free strike drops the two reason bits the melee state itself raised (2048 attack, 4096 hold; 1983 = 8127 without them), so
+// Locomotion stays active: V keeps facing where she faces or runs instead of being turned onto the camera like a hip shot. A held
+// block (UpperBody Aim 6 or AimWalk 2) is not a free strike.
+public func UTPPLocomotionStrikeBits(bits: Int32, eligible: Bool, melee: Int32, upper: Int32, detailed: Int32) -> Int32 {
+  if eligible && upper != 6 && detailed != 2 && UTPPLocomotionStrikeState(melee) {
+    return bits & 1983;
+  }
+  return bits;
+}
+
 // Heartbeat bits (mirror of utpp::freemove::Reason 0..14). Keep the existing low-13 PSM guards except bit 64.
 // PSM bits 13+ are packed diagnostics, NOT Locomotion reasons: UpperBody=ForceEmptyHands encodes 0xC000,
 // which would otherwise become a false kHold (0x4000). Weapon and aim reasons are derived below.
@@ -41,6 +62,8 @@ public func UTPPLocomotionBlockBits(scriptInterface: ref<StateGameScriptInterfac
     let psm: ref<PlayerStateMachineDef> = GetAllBlackboardDefs().PlayerStateMachine;
     // gamePSMDetailedLocomotionStates: AimWalk 2, Climb 8, Vault 9, Ladder 10..13, Knockdown 29, Felled 31
     let detailed: Int32 = bb.GetInt(psm.LocomotionDetailed);
+    // before the traversal / aim terms below, which block whatever the melee state is
+    bits = UTPPLocomotionStrikeBits(bits, player.utppFreeStrikeEligible, bb.GetInt(psm.MeleeWeapon), bb.GetInt(psm.UpperBody), detailed);
     if detailed == 2 {
       bits = bits | 4096;
     }

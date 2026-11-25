@@ -6172,7 +6172,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
                               facingOverlay == ov::PoseOverlay::Pistol2H;
     const double facingCameraAge = RecoilClock() - g_cameraTargetTime;
     const bool facingEligible = rootWanted && aRaw.tppActive && !g_release && !g_trav.active &&
-        f.haveWeapon && (!f.weaponDrawn || facingWeapon) &&
+        f.haveWeapon && (!f.weaponDrawn || facingWeapon || aRaw.meleeGuardFacing) &&
         g_cameraTargetValid && facingCameraAge >= 0 && facingCameraAge <= .25;
     const float shotSpeed = std::hypot(f.velWorld[0], f.velWorld[1]);
     const float shotMappedSpeed = shotSpeed * 100.f * adapter::SpeedScaleFor(mc,

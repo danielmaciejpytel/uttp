@@ -87,6 +87,9 @@ struct FeedInput
     // fading; never together with meleeOwnsBody). MOTION keeps running and the lower body, applies the host's upper mask and fade
     // on its own bones, and keeps its head / orientation / lean layers quiet.
     bool meleeUpperMasked = false;
+    // Native host -> MOTION only: a fists block is held while V stands and the full-body layer does not own the body: the facing is
+    // held and V turns in place behind the camera, as while aiming a ranged weapon. Never set while she moves.
+    bool meleeGuardFacing = false;
     // Native host -> MOTION only: the game pose captured at a normal (non jump-out) vehicle exit whose hand-in was accepted on THIS feed
     // (MMDriver MotionStepLocked, null on every other feed / path). MOTION turns it into the PoseHistory of the first search after the
     // re-entry (ExitPoseHistory.hpp) instead of the database mean. Layout of the vehicle capture: local pose per database bone of

@@ -452,7 +452,7 @@ do -- registration: key, type, default, section, label; apply routes into SetWea
                  Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end }
   m.RegisterSettings(core)
   local d = regs[1]
-  xcheck("weaponTurn setting: key / type / default / section", #regs == 12 and d.key == "bodyturn.weaponTurn" and d.type == "bool"
+  xcheck("weaponTurn setting: key / type / default / section", #regs == 13 and d.key == "bodyturn.weaponTurn" and d.type == "bool"
     and d.default == true and d.section == "bodyturn" and sections[1][1] == "bodyturn", d and d.key)
   xcheck("smooth aim: production and registered defaults ON", UTPP.exec.aimSmooth == true and regs[10].key == "bodyturn.aimSmooth"
     and regs[10].default == true and m.exec.aimSmooth == true)
@@ -646,7 +646,7 @@ do
   local regs = {}
   local core = { RegisterSection = function() end, Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end }
   local _, _, calls, err = wired(newWiredWorld(), { core = core })
-  xcheck("wired: setting registered at onInit, default ON", err == nil and #regs == 12 and regs[1].key == "bodyturn.weaponTurn"
+  xcheck("wired: setting registered at onInit, default ON", err == nil and #regs == 13 and regs[1].key == "bodyturn.weaponTurn"
     and regs[1].default == true, tostring(err))
   xcheck("wired: bodyturn.guardFix registered, default on", regs[9] ~= nil and regs[9].key == "bodyturn.guardFix" and regs[9].default == true)
   xcheck("wired: fresh profile -> 0x5FBF sent once to the game after the executor was selected; onShutdown restores 0x7FBF",
@@ -1449,9 +1449,10 @@ do
     local core = { RegisterSection = function() end,
                    Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end }
     m.RegisterSettings(core)
-    local d = regs[12]
-    xcheck("B1 shooterMode: 12 registrations, aimSmooth stays #10, meleeStrikeTurn #11, bodyturn.shooterMode is the LAST one", #regs == 12
-      and regs[10].key == "bodyturn.aimSmooth" and regs[11].key == "bodyturn.meleeStrikeTurn" and d ~= nil and d.key == "bodyturn.shooterMode", d and d.key)
+    local d = regs[13]
+    xcheck("B1 shooterMode: 13 registrations, aimSmooth stays #10, meleeStrikeTurn #11, meleeFreeStrike #12, bodyturn.shooterMode is the LAST one", #regs == 13
+      and regs[10].key == "bodyturn.aimSmooth" and regs[11].key == "bodyturn.meleeStrikeTurn"
+      and regs[12].key == "bodyturn.meleeFreeStrike" and d ~= nil and d.key == "bodyturn.shooterMode", d and d.key)
     xcheck("B1 shooterMode: type bool, default false, section bodyturn, label exactly 'Shooter mode' (2026-10-23), English description (camera-relative)",
       d.type == "bool" and d.default == false and d.section == "bodyturn" and d.label == "Shooter mode"
       and d.desc ~= nil and d.desc:find("relative to the camera", 1, true) ~= nil
@@ -1469,7 +1470,7 @@ do
     local regs2 = {}
     m2.RegisterSettings({ RegisterSection = function() end,
                           Register = function(def) regs2[#regs2 + 1] = def; if def.apply then def.apply(def.default) end end })
-    xcheck("B1 shooterMode: native missing + setting off -> no log line at all", lines(m2, "Shooter") == 0 and #regs2 == 12
+    xcheck("B1 shooterMode: native missing + setting off -> no log line at all", lines(m2, "Shooter") == 0 and #regs2 == 13
       and m2.ShooterModeActive() == false)
   end
 
@@ -1981,8 +1982,8 @@ do
       return state, err, nativeCalls
     end
     local st, err, calls = wiredFn({ mods = { utpp_motion = { want = { enabled = true } } }, live = true })
-    xcheck("wired shooterMode: motion enabled + DLL live -> effective, setting is the 12th registration, native(true) sent",
-      err == nil and st ~= nil and st.eff == true and st.regs == 12 and calls[1] == true, tostring(err))
+    xcheck("wired shooterMode: motion enabled + DLL live -> effective, setting is the 13th registration, native(true) sent",
+      err == nil and st ~= nil and st.eff == true and st.regs == 13 and calls[1] == true, tostring(err))
     st, err = wiredFn({ mods = { utpp_motion = { want = { enabled = false } } }, live = true })
     xcheck("wired shooterMode: utpp_motion setting off -> inert", err == nil and st ~= nil and st.eff == false and st.v2 == false)
     st, err = wiredFn({ mods = {}, live = true })
@@ -2160,6 +2161,9 @@ do
     end
     m.SelectExecutor(w.api)
     m.SetStrikeTurn(o.on ~= false)
+    -- the cases below test the per-series cap, which applies with "punch in your own direction" off; the near-enemy cap has its
+    -- own case
+    m.exec.freeStrike = o.freeStrike == true
     return w
   end
   local function runStrike(m, w, n, dt)
@@ -2234,7 +2238,7 @@ do
     xcheck("strike turn: the cap holds with requests landing two frames late (no overshoot past 50)", okL, bodyL)
     local okD, bodyD = capCase(freshModule(true), { strike = 120, drop = true })
     xcheck("strike turn: the cap holds with every second request dropped", okD, bodyD)
-    local okMut = capCase(mutantStrike("local goal = E.strikeStart + math.max(-E.strikeMax, math.min(E.strikeMax, off))",
+    local okMut = capCase(mutantStrike("local goal = E.strikeStart + math.max(-cap, math.min(cap, off))",
       "local goal = E.strikeStart + off"))
     xcheck("strike turn: mutation [no cap] is caught", not okMut)
   end
@@ -2408,6 +2412,49 @@ do
     local onOk = m.exec.strikeTurn == true
     d.apply(false)
     xcheck("strike turn: the setting switches the turn on and off", onOk and m.exec.strikeTurn == false)
+  end
+  -- punch in your own direction (bodyturn.meleeFreeStrike, default on): the strike turn only sees blocked strikes near an enemy
+  -- then, and faces that enemy fully; the switch reaches utpp_melee.reds at once and is repeated for new sessions
+  do
+    local m = freshModule(true)
+    xcheck("free strike: default ON", m.exec.freeStrike == true)
+    local w = strikeWorld(m, { strike = 170, freeStrike = true })
+    local why = runStrike(m, w, 90)
+    xcheck("free strike: near an enemy the strike turn faces it fully (170 deg, not capped at 50)",
+      math.abs(norm(170 - w.body)) <= m.exec.strikeDeadband + 1e-6 and why == "strike aligned", w.body)
+  end
+  do
+    local m = freshModule(true)
+    local w = strikeWorld(m, { freeStrike = true })
+    w.reasons = 0
+    local sent, answer = {}, false
+    w.api.setMeleeFreeStrike = function(on) sent[#sent + 1] = on; return answer end
+    m.ExecStep(w.api, 1 / 60)
+    for _ = 1, 150 do m.ExecStep(w.api, 1 / 60) end
+    local retried = #sent
+    answer = true
+    for _ = 1, 150 do m.ExecStep(w.api, 1 / 60) end
+    xcheck("free strike: the switch is sent and repeated about every 2 s, also while no player answers",
+      retried >= 1 and retried <= 3 and #sent > retried and sent[1] == true, string.format("%d / %d", retried, #sent))
+    m.api = w.api
+    local before = #sent
+    m.SetFreeStrike(false)
+    xcheck("free strike: switched off, the script is told at once", m.exec.freeStrike == false and #sent == before + 1
+      and sent[#sent] == false)
+  end
+  do
+    local m = freshModule(true)
+    local regs = {}
+    m.RegisterSettings({ RegisterSection = function() end,
+                         Register = function(def) regs[#regs + 1] = def; if def.apply then def.apply(def.default) end end })
+    local d
+    for _, r in ipairs(regs) do if r.key == "bodyturn.meleeFreeStrike" then d = r end end
+    xcheck("free strike: registered, bool, default true, section bodyturn, says where the hit goes", d ~= nil and d.type == "bool"
+      and d.default == true and d.section == "bodyturn" and d.desc:find("camera", 1, true) ~= nil)
+    d.apply(false)
+    local off = m.exec.freeStrike == false
+    d.apply(true)
+    xcheck("free strike: the setting switches it off and on", off and m.exec.freeStrike == true)
   end
 end
 

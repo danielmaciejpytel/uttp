@@ -86,6 +86,10 @@ local E = {
   -- melee strike turn (setting bodyturn.meleeStrikeTurn, default on): while a fists strike runs and the game has a tracked target,
   -- V turns toward the direction the game's hit will take (api.meleeStrikeYaw, utpp_melee.reds UTPPMeleeStrikeYaw)
   strikeTurn = true,
+  -- setting bodyturn.meleeFreeStrike (default on): with no enemy near, a fists strike leaves Locomotion active (utpp_melee.reds /
+  -- utpp_locomotion.reds), so V is not turned onto the camera. With an enemy near the reasons block as before, and the strike turn
+  -- may then face that enemy fully (strikeMaxNear instead of strikeMax)
+  freeStrike = true, freeStrikeAt = 0, strikeMaxNear = 180,
   strikeMax = 50,       -- deg: V ends within this of the facing it had when the episode (a strike series) started; the rest stays with the tilt
   strikeRate = 540,     -- deg/s cap
   strikeGain = 20,      -- 1/s ease-out gain (time constant 0.05 s)
@@ -674,9 +678,10 @@ function M.StrikeTurnStep(api, dt)
   if E.strikeStart == nil then E.strikeStart = cur end
   E.prevBody, E.prevCam, E.prevStep = nil, nil, 0
   local off = norm(signal - E.strikeStart)
-  local goal = E.strikeStart + math.max(-E.strikeMax, math.min(E.strikeMax, off))
+  local cap = E.freeStrike and E.strikeMaxNear or E.strikeMax
+  local goal = E.strikeStart + math.max(-cap, math.min(cap, off))
   local err = norm(goal - cur)
-  local atLimit = math.abs(off) > E.strikeMax
+  local atLimit = math.abs(off) > cap
   E.strikeSum = math.abs(norm(cur - E.strikeStart))
   if E.strikeTurning then
     if math.abs(err) <= E.strikeDeadband then E.strikeTurning = false end
@@ -705,7 +710,7 @@ function M.StrikeTurnStep(api, dt)
     if not E.strikeLogged then
       E.strikeLogged = true
       M.log(string.format("[utpp_bodyturn] melee strike turn: hit direction %.0f deg from V's facing - turning V toward the tracked target (<= %d deg per series)",
-        norm(signal - cur), E.strikeMax))
+        norm(signal - cur), cap))
     end
     E.why = "strike turn"
   else
@@ -719,6 +724,21 @@ function M.SetStrikeTurn(on)
   E.strikeTurn = on == true
   strikeIdle(M.api or {}, true)
   return E.strikeTurn
+end
+
+-- Sends the free-strike switch to utpp_melee.reds (the player field starts "on" in a new session): at once on a change, then
+-- every 2 s; without a player or without the melee script the call changes nothing and is repeated.
+function M.ApplyFreeStrike(api)
+  api = api or M.api or {}
+  E.freeStrikeAt = E.clock + 2
+  local ok, accepted = try(api.setMeleeFreeStrike, E.freeStrike == true)
+  return ok and accepted == true
+end
+
+function M.SetFreeStrike(on)
+  E.freeStrike = on == true
+  M.ApplyFreeStrike(nil)
+  return E.freeStrike
 end
 
 -- Changing the policy releases its camera lock and starts a fresh admission/align episode.
@@ -783,9 +803,16 @@ function M.RegisterSettings(core)
   core.Register({ key = "bodyturn.meleeStrikeTurn", section = "bodyturn", type = "bool", default = true,
     label = "Fists: turn toward the target when striking",
     desc = "In third person the game's fist hit goes toward the target it tracks, while V's body keeps its own facing (the "
-      .. "upper-body tilt covers only 25 deg). With this on, V turns toward that target during a fists strike, eased, at most 50 deg "
-      .. "per series of strikes. Only with a tracked target; other weapons and first person are unchanged.",
+      .. "upper-body tilt covers only 25 deg). With this on, V turns toward that target during a fists strike, eased: all the way to "
+      .. "an enemy within reach when 'punch in your own direction' is on, otherwise at most 50 deg per series of strikes. Only "
+      .. "with a tracked target; other weapons and first person are unchanged.",
     apply = function(v) M.SetStrikeTurn(v == true) end })
+  core.Register({ key = "bodyturn.meleeFreeStrike", section = "bodyturn", type = "bool", default = true,
+    label = "Fists: punch in your own direction",
+    desc = "With no enemy within about 3 m in view, punching does not turn V toward the camera: she keeps facing where she faces "
+      .. "or runs. Near an enemy she turns toward them. Holding block works as before. The game's hit still goes where the camera "
+      .. "looks. Fists and Gorilla Arms only. Off = every punch turns V toward the camera.",
+    apply = function(v) M.SetFreeStrike(v == true) end })
   -- registered LAST (the apply of the stored value runs at once and sends UTPPSetMotionShooterMode(v), even false: the DLL state is
   -- unknown after a CET reload and the native is idempotent)
   core.Register({ key = "bodyturn.shooterMode", section = "bodyturn", type = "bool", default = false, label = "Shooter mode",
@@ -956,6 +983,7 @@ function M.ExecStep(api, dt)
     end
   end
   if W.dirty and E.clock >= W.retryAt then M.ApplyBlockMask(api) end
+  if E.clock >= E.freeStrikeAt then M.ApplyFreeStrike(api) end
   local okSignals, aimSignals = try(api.aimSignals)
   local okReasons, headingReasons = try(api.locomotionReasons)
   local hipFire = M.HipFireStep(E.aimAlign and okSignals and aimSignals or nil,
@@ -1333,6 +1361,7 @@ if type(registerForEvent) == "function" then
       command = function(cur) return Game.UTPPMMBodyYawCommand(cur, cur) end,
       -- melee strike turn: world yaw of the game's fist hit direction (1000 = none; utpp_melee.reds UTPPMeleeStrikeYaw)
       meleeStrikeYaw = function() return Game.UTPPMeleeStrikeYaw() end,
+      setMeleeFreeStrike = function(on) return Game.UTPPSetMeleeFreeStrike(on) end,
       bodyYaw = function()
         local p = Game.GetPlayer()
         if p == nil then return nil end
@@ -1469,6 +1498,7 @@ if type(registerForEvent) == "function" then
         E.hipLeaseSent = nil -- new session: the lease flag is re-synced (false) by the first ExecStep with a player
         E.prevBody, E.prevCam, E.prevStep = nil, nil, 0
         E.strikeStart, E.strikeIdleSpeed = nil, nil -- no strike episode across a load (a held lock is released by the next ExecStep)
+        E.freeStrikeAt = 0 -- new session: the free-strike switch is sent again with the first player
         W.dirty, W.sent = true, nil -- new session: the mask is sent again once the player exists
         return
       end

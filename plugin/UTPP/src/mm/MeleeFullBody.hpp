@@ -113,6 +113,7 @@ enum Why : uint8_t
     kWhyAir,     // ungrounded >= kAirSeconds (air feed) or, without an air feed, |vz| >= maxVertical
     kWhySpeed,   // stick held (same feed) or sustained capsule speed
     kWhyState,   // PSM.MeleeWeapon state without third-person clips (not in the allowed-state mask)
+    kWhyTurn,    // block held and the capsule turned while V stands: the legs go back to motion matching (turn-in-place steps)
 };
 
 inline const char* WhyName(Why aWhy)
@@ -128,6 +129,7 @@ inline const char* WhyName(Why aWhy)
     case kWhyAir: return "air";
     case kWhySpeed: return "speed";
     case kWhyState: return "state";
+    case kWhyTurn: return "turn";
     }
     return "?";
 }
@@ -149,6 +151,49 @@ struct Input
     float maxVertical = 1.0f; // m/s (GateDebounceConfig::maxVertical, the mask's own limit)
     float planarSpeed = 0.0f; // m/s capsule
     float dt = 0.0f;          // s since the previous feed (timers; capped at kMaxStepDt)
+    bool guardTurned = false; // GuardTurn::Latched() on a held-block state (GuardTurnReleases): the planted block legs let go
+};
+
+// ------------------------------------------------------------------------------------------------ turning while blocking
+
+// A standing block takes the whole body, so a capsule turned by the camera would rotate V with her feet planted. Once the capsule
+// has turned kGuardTurnDeg (signed, so mouse jitter cancels out) while the block is held and V stands, the full body lets the
+// legs go for the rest of that standing block: motion matching then holds the visible facing and steps round in place, as it
+// does while aiming a ranged weapon. Releasing the block or moving clears it (the next standing block starts planted again).
+inline constexpr float kGuardTurnDeg = 10.0f;
+// Held-block states the release applies to; attacks thrown out of the block keep the full body.
+inline constexpr bool GuardTurnReleases(int32_t aState)
+{
+    return aState == kMwIdle || aState == kMwParried || aState == kMwBlock || aState == kMwDeflect;
+}
+class GuardTurn
+{
+public:
+    void Reset()
+    {
+        m_turnRad = 0.0f;
+        m_latched = false;
+    }
+    // aBlockHeld = fists guard weapon drawn, UpperBody Aim; aMoving = stick held or sustained capsule speed;
+    // aYawStepRad = capsule yaw change since the previous feed (wrapped).
+    bool Update(bool aBlockHeld, bool aMoving, float aYawStepRad)
+    {
+        if (!aBlockHeld || aMoving)
+        {
+            Reset();
+            return false;
+        }
+        if (std::isfinite(aYawStepRad))
+            m_turnRad += aYawStepRad;
+        if (std::fabs(m_turnRad) >= kGuardTurnDeg * 0.017453292f)
+            m_latched = true;
+        return m_latched;
+    }
+    bool Latched() const { return m_latched; }
+
+private:
+    float m_turnRad = 0.0f;
+    bool m_latched = false;
 };
 
 // LocomotionDetailed values that still count as standing: not reported (-1), NotInBaseLocomotion 0, Stand 1 (also walking /
@@ -223,11 +268,12 @@ public:
                 : !StandingDetail(aIn.psmDetail) ? kWhyDetail
                 : air                            ? kWhyAir
                 : aIn.stickHeld || m_fastOff     ? kWhySpeed
+                : aIn.guardTurned                ? kWhyTurn
                                                  : kWhyOn;
         // the same decision without the ownership term: whether the full body would take the body if the base pose owned it
         // (the motion driver yields on this, so the full-body layer can start while the driver runs)
         m_onWithoutOwner = aIn.flag && (aIn.meleeMask || aIn.guard) && stateOk && aIn.stance == kStanceStand &&
-                           StandingDetail(aIn.psmDetail) && !air && !(aIn.stickHeld || m_fastOff);
+                           StandingDetail(aIn.psmDetail) && !air && !(aIn.stickHeld || m_fastOff) && !aIn.guardTurned;
         return m_why == kWhyOn;
     }
     bool OnWithoutOwner() const { return m_onWithoutOwner; }

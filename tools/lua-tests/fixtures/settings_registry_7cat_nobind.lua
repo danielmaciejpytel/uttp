@@ -17,6 +17,7 @@ return {
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
     ["bodyturn.guardFix"] = "true",
+    ["bodyturn.meleeFreeStrike"] = "true",
     ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "false",
     ["bodyturn.turnRate"] = "true",
@@ -278,6 +279,7 @@ return {
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
     "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
+    "apply bodyturn.meleeFreeStrike(true,\"ok\")",
     "native UTPPSetMotionShooterMode(false)",
     "apply bodyturn.shooterMode(false,\"ok\")",
     "apply mm.motionDriver(true,\"ok\")",
@@ -536,6 +538,7 @@ return {
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
     "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
+    "apply bodyturn.meleeFreeStrike(true,\"ok\")",
     "native UTPPSetMotionShooterMode(true)",
     "apply bodyturn.shooterMode(true,\"ok\")",
     "apply mm.motionDriver(false,\"ok\")",
@@ -810,6 +813,14 @@ return {
       ["type"] = "bool"
     },
     ["bodyturn.guardFix"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "bodyturn",
+      ["type"] = "bool"
+    },
+    ["bodyturn.meleeFreeStrike"] = {
       ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
@@ -2496,6 +2507,7 @@ return {
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
     ["bodyturn.guardFix"] = "true",
+    ["bodyturn.meleeFreeStrike"] = "true",
     ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "false",
     ["bodyturn.turnRate"] = "true",
@@ -2776,6 +2788,7 @@ return {
     "bodyturn.guardFix",
     "bodyturn.aimSmooth",
     "bodyturn.meleeStrikeTurn",
+    "bodyturn.meleeFreeStrike",
     "bodyturn.shooterMode",
     "body.impl",
     "body.hideFpp",
@@ -2982,6 +2995,7 @@ return {
     "bodyturn.guardFix",
     "bodyturn.aimSmooth",
     "bodyturn.meleeStrikeTurn",
+    "bodyturn.meleeFreeStrike",
     "bodyturn.shooterMode",
     "body.impl",
     "body.hideFpp",
@@ -3185,6 +3199,7 @@ return {
     "apply bodyturn.guardFix(true,\"ok\")",
     "apply bodyturn.aimSmooth(true,\"ok\")",
     "apply bodyturn.meleeStrikeTurn(true,\"ok\")",
+    "apply bodyturn.meleeFreeStrike(true,\"ok\")",
     "apply bodyturn.shooterMode(false,\"ok\")",
     "apply mm.motionDriver(true,\"ok\")",
     "glue SetPistolOneHand(true)",
@@ -3384,6 +3399,7 @@ bodyturn.aimJogSpeed=3.85\r\
 bodyturn.guardFix=true\r\
 bodyturn.aimSmooth=true\r\
 bodyturn.meleeStrikeTurn=true\r\
+bodyturn.meleeFreeStrike=true\r\
 bodyturn.shooterMode=false\r\
 body.impl=true\r\
 body.hideFpp=true\r\
@@ -3605,6 +3621,7 @@ vehicle.jumpOutSidePush=true\r\
       "bodyturn.guardFix",
       "bodyturn.aimSmooth",
       "bodyturn.meleeStrikeTurn",
+      "bodyturn.meleeFreeStrike",
       "bodyturn.shooterMode"
     },
     ["camera"] = {
@@ -3801,6 +3818,7 @@ vehicle.jumpOutSidePush=true\r\
     ["bodyturn.aimStrafe"] = "true",
     ["bodyturn.aimStrafeUnarmed"] = "true",
     ["bodyturn.guardFix"] = "true",
+    ["bodyturn.meleeFreeStrike"] = "true",
     ["bodyturn.meleeStrikeTurn"] = "true",
     ["bodyturn.shooterMode"] = "true",
     ["bodyturn.turnRate"] = "true",
@@ -4050,6 +4068,7 @@ bodyturn.aimJogSpeed=3.85\r\
 bodyturn.guardFix=true\r\
 bodyturn.aimSmooth=true\r\
 bodyturn.meleeStrikeTurn=true\r\
+bodyturn.meleeFreeStrike=true\r\
 bodyturn.shooterMode=true\r\
 body.impl=true\r\
 body.hideFpp=true\r\
@@ -4271,6 +4290,7 @@ other.module=42\r\
     "/utpp/bodyturn|switch|bodyturn.guardFix",
     "/utpp/bodyturn|switch|bodyturn.aimSmooth",
     "/utpp/bodyturn|switch|bodyturn.meleeStrikeTurn",
+    "/utpp/bodyturn|switch|bodyturn.meleeFreeStrike",
     "/utpp/bodyturn|switch|bodyturn.shooterMode",
     "/utpp/body|switch|body.impl",
     "/utpp/body|switch|body.hideFpp",

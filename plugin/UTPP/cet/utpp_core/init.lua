@@ -620,7 +620,7 @@ local LAYOUT = {
   -- melee clips cover, scripts\utpp_melee.reds)
   { "player", "combat", { "perspective.aiming", "perspective.aimingScoped", "perspective.combat", "perspective.weaponDrawn",
                           "mm.shinobiBonusReload", "crosshair.impl", "crosshair.color", "mm.aimAtCrosshair",
-                          "melee.fullBody", "melee.aimTilt" } },
+                          "melee.fullBody", "melee.aimTilt", "bodyturn.meleeFreeStrike" } },
   { "advanced", "combat", { "perspective.shortScopeFpp", "camera.aim.enabled", "camera.aim.distance", "camera.aim.side",
                             "camera.aim.zoomFov", "camera.aim.fov", "camera.aim.autoSwap", "camera.aimReturn",
                             "camera.aimReturnBlend", "perspective.combatCut", "perspective.combatExit",
