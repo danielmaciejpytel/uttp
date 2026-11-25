@@ -258,8 +258,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "20")
   @runtimeProperty("ModSettings.displayName", "Firm pivot foot in turns on the spot")
-  @runtimeProperty("ModSettings.description", "While V turns on the spot, the foot she pivots on stays fixed on the ground instead of sliding with the animation; her knee may bend a little more to keep it there. Needs Firm feet in turns and stops on. Off (default) = the pivot foot may slide a few centimetres with the animation. No effect with the Game Animations pack.")
-  public let mm_turnFootPin: Bool = false;
+  @runtimeProperty("ModSettings.description", "While V turns on the spot, the foot she pivots on stays fixed on the ground instead of sliding with the animation; her knee may bend a little more to keep it there. Needs Firm feet in turns and stops on. On (default); off = the pivot foot may slide a few centimetres with the animation. No effect with the Game Animations pack.")
+  public let mm_turnFootPin: Bool = true;
 
   // mm.leanScale
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")

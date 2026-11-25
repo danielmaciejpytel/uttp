@@ -258,8 +258,8 @@ do
     and yl.label == "Planted feet keep their direction" and type(yl.desc) == "string"
     and yl.desc:find("does not twist", 1, true) ~= nil)
   local tp = defs["mm.turnFootPin"]
-  check("registered mm.turnFootPin: bool, off by default, animation section, label 'Firm pivot foot in turns on the spot'",
-    tp ~= nil and tp.type == "bool" and tp.default == false and tp.section == "animation"
+  check("registered mm.turnFootPin: bool, on by default, animation section, label 'Firm pivot foot in turns on the spot'",
+    tp ~= nil and tp.type == "bool" and tp.default == true and tp.section == "animation"
     and tp.label == "Firm pivot foot in turns on the spot" and type(tp.desc) == "string"
     and tp.desc:find("stays fixed", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
@@ -751,15 +751,15 @@ do
   check("rejected footYawLock retries", #t.yawLock == 4 and t.yawLock[4] == true and v.rt.optionsApplied.footYawLock == true)
 end
 
--- mm.turnFootPin (one of M.OPTIONS; DLL default off): off is sent once when motion comes on, then only on a change
+-- mm.turnFootPin (one of M.OPTIONS; DLL default off, menu default on): on is sent once when motion comes on, then only on a change
 do
   local v, t = fresh(), mock()
-  check("turnFootPin starts off", v.want.turnFootPin == false)
+  check("turnFootPin starts on", v.want.turnFootPin == true)
   v.SetEnabled(true)
-  check("turnFootPin off is sent when motion comes on",
-    v.Sync(t.api) == "enabled" and #t.turnPin == 1 and t.turnPin[1] == false and v.rt.optionsApplied.turnFootPin == false)
-  v.SetOption("turnFootPin", true, t.api)
-  check("turnFootPin switched on is sent once", #t.turnPin == 2 and t.turnPin[2] == true and v.rt.optionsApplied.turnFootPin == true)
+  check("turnFootPin on is sent when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.turnPin == 1 and t.turnPin[1] == true and v.rt.optionsApplied.turnFootPin == true)
+  v.SetOption("turnFootPin", false, t.api)
+  check("turnFootPin switched off is sent once", #t.turnPin == 2 and t.turnPin[2] == false and v.rt.optionsApplied.turnFootPin == false)
 end
 
 -- turn steering is one fixed behaviour of the DLL: no option is registered, and the stored keys of the earlier choice

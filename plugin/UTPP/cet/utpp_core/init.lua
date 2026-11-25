@@ -589,7 +589,7 @@ local LAYOUT = {
   -- stops" (mm.firmFeet, utpp_motion: planted feet held through turns and stops, default on), then "Feet on uneven ground"
   -- (mm.groundFeet, utpp_motion: the feet stand on the traced ground, default on), then "Planted feet keep their direction"
   -- (mm.footYawLock, utpp_motion: a planted foot keeps its direction while the body turns, default on), then "Firm pivot foot
-  -- in turns on the spot" (mm.turnFootPin, utpp_motion: the pivot foot of a turn in place stays fixed, default off), then "Body
+  -- in turns on the spot" (mm.turnFootPin, utpp_motion: the pivot foot of a turn in place stays fixed, default on), then "Body
   -- lean" and "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here

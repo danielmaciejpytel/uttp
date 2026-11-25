@@ -66,7 +66,7 @@
 --                  M.OPTIONS) - a planted foot keeps the direction it points in while the body turns over it (turned about its toe)
 --                  instead of twisting on the ground with the animation; after a large turn it follows the animation through a spring
 --                  and plants again (native UTPPSetMMFootYawLock).
---   mm.turnFootPin bool, default false ("Firm pivot foot in turns on the spot"; DLL default off, the value is sent with the other
+--   mm.turnFootPin bool, default true ("Firm pivot foot in turns on the spot"; DLL default off, the value is sent with the other
 --                  M.OPTIONS) - with the firm feet on, the foot V pivots on while she turns on the spot stays fixed on the ground
 --                  instead of sliding with the animation; the knee may bend up to 10 deg more (native UTPPSetMMTurnFootPin).
 --   mm.aimAtCrosshair bool, default true (DLL default on; in game: muzzle slot +Y = weapon entity +Y, barrel vs shot
@@ -112,7 +112,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "standard",
-  strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, turnFootPin = false }
+  strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, turnFootPin = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -1069,10 +1069,10 @@ function M.RegisterSettings(core)
       .. "ground; after a large turn it follows the animation again and plants anew. On (default); off = planted feet turn "
       .. "with the animations.",
     apply = function(v) M.SetOption("footYawLock", v == true) end })
-  core.Register({ key = "mm.turnFootPin", section = "animation", type = "bool", default = false,
+  core.Register({ key = "mm.turnFootPin", section = "animation", type = "bool", default = true,
     label = "Firm pivot foot in turns on the spot",
     desc = "While V turns on the spot, the foot she pivots on stays fixed on the ground instead of sliding with the animation; "
-      .. "her knee may bend a little more to keep it there. Needs Firm feet in turns and stops on. Off (default) = the "
+      .. "her knee may bend a little more to keep it there. Needs Firm feet in turns and stops on. On (default); off = the "
       .. "pivot foot may slide a few centimetres with the animation.",
     apply = function(v) M.SetOption("turnFootPin", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",

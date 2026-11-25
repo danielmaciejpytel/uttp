@@ -44,7 +44,7 @@ SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # pinned for the same reason (--shooter-mode on is the override that lets the neutral aim grid act).
 LOCO_VALUES = (('mm.walkToggleSpeed', 1.9), ('mm.minAnalogWalkSpeed', 0.82), ('mm.stickSpeed', 'fixed'), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.2),
                ('mm.leanHeadScale', 0.2), ('mm.leanCoverage', 'standard'), ('mm.orientWarp', True), ('mm.strideWarp', True),
-               ('mm.footReplant', 'crouch'), ('mm.firmFeet', True), ('mm.footYawLock', True), ('mm.turnFootPin', False),
+               ('mm.footReplant', 'crouch'), ('mm.firmFeet', True), ('mm.footYawLock', True), ('mm.turnFootPin', True),
                ('mm.bodyHeightSmooth', True), ('mm.neutralAim', True), ('mm.aimWorldSmooth', True), ('bodyturn.aimJog', True),
                ('bodyturn.aimJogSpeed', 3.85), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False),
                ('mm.overlayInertialSwitch', True))
