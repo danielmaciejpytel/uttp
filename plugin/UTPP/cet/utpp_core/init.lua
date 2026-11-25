@@ -104,7 +104,8 @@ M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
   "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale", "mm.fastTurnExit", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim", "traversal.jumpStartGround",
-  "traversal.rejectedFallback", "traversal.obstacleReach", "traversal.dropVault", "mm.steadyAirPicks" }) do
+  "traversal.rejectedFallback", "traversal.finishClip", "traversal.obstacleContact", "traversal.obstacleReach", "traversal.dropVault",
+  "mm.steadyAirPicks" }) do
   M.PACK_DEPENDENT[k] = true
 end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
@@ -597,7 +598,9 @@ local LAYOUT = {
   --   Advanced camera options: "Camera rise over obstacles (m)" (camera.vaultRise, utpp_camera, default 0.6; 0 = off). The
   -- advanced interaction options end with "Climbing straight after a jump" and "Try other climb animations"
   -- (traversal.jumpStartGround / traversal.rejectedFallback, utpp_motion, both default on), then "Vault and climb from
-  -- farther away" and "Vault into a drop" (traversal.obstacleReach / traversal.dropVault, utpp_motion, both default on)
+  -- farther away" and "Vault into a drop" (traversal.obstacleReach / traversal.dropVault, utpp_motion, both default on),
+  -- then "Finish vault and climb animations" (traversal.finishClip, utpp_motion, default on) and "Hands and body stay on
+  -- obstacles" (traversal.obstacleContact, utpp_motion, default on)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
@@ -632,7 +635,8 @@ local LAYOUT = {
                            "lootView.radius", "perspective.sceneTier", "perspective.sceneExit", "perspective.interaction",
                            "perspective.interactionExit", "perspective.workspot", "perspective.traversal",
                            "perspective.scanner", "traversal.jumpStartGround", "traversal.rejectedFallback",
-                           "traversal.obstacleReach", "traversal.dropVault" } },
+                           "traversal.obstacleReach", "traversal.dropVault", "traversal.finishClip",
+                           "traversal.obstacleContact" } },
   -- Vehicles (vehicle.safeTeleportExit: registered by utpp_vehiclecam)
   --   Release scope: the ragdoll after a car hit is not part of the release (no ragdoll archives are shipped), so
   -- ragdoll.enabled is developer level (not in Mod Settings) and defaults to off

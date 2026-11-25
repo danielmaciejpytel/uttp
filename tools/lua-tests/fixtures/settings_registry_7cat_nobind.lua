@@ -192,7 +192,9 @@ return {
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
     ["traversal.dropVault"] = "true",
+    ["traversal.finishClip"] = "true",
     ["traversal.jumpStartGround"] = "true",
+    ["traversal.obstacleContact"] = "true",
     ["traversal.obstacleReach"] = "true",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
@@ -317,6 +319,8 @@ return {
     "native UTPPSetMMFastTurnExit(true)",
     "native UTPPSetMMTraversalJumpStartGround(true)",
     "native UTPPSetMMTraversalRejectedFallback(true)",
+    "native UTPPSetMMTraversalFinishClip(true)",
+    "native UTPPSetMMTraversalObstacleContact(true)",
     "native UTPPSetObstacleReach(true)",
     "native UTPPSetDropVault(true)",
     "native UTPPSetMMSteadyAirPicks(true)",
@@ -341,6 +345,8 @@ return {
     "apply mm.steadyAirPicks(true,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
+    "apply traversal.finishClip(true,\"ok\")",
+    "apply traversal.obstacleContact(true,\"ok\")",
     "apply traversal.obstacleReach(true,\"ok\")",
     "apply traversal.dropVault(true,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
@@ -556,6 +562,8 @@ return {
     "apply mm.steadyAirPicks(true,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
+    "apply traversal.finishClip(true,\"ok\")",
+    "apply traversal.obstacleContact(true,\"ok\")",
     "apply traversal.obstacleReach(true,\"ok\")",
     "apply traversal.dropVault(true,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
@@ -2355,7 +2363,23 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["traversal.finishClip"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["traversal.jumpStartGround"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
+    ["traversal.obstacleContact"] = {
       ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
@@ -2636,7 +2660,9 @@ return {
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
     ["traversal.dropVault"] = "true",
+    ["traversal.finishClip"] = "true",
     ["traversal.jumpStartGround"] = "true",
+    ["traversal.obstacleContact"] = "true",
     ["traversal.obstacleReach"] = "true",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
@@ -2773,6 +2799,8 @@ return {
     "mm.steadyAirPicks",
     "traversal.jumpStartGround",
     "traversal.rejectedFallback",
+    "traversal.finishClip",
+    "traversal.obstacleContact",
     "traversal.obstacleReach",
     "traversal.dropVault",
     "mm.aimWorldSmooth",
@@ -2976,6 +3004,8 @@ return {
     "mm.steadyAirPicks",
     "traversal.jumpStartGround",
     "traversal.rejectedFallback",
+    "traversal.finishClip",
+    "traversal.obstacleContact",
     "traversal.obstacleReach",
     "traversal.dropVault",
     "mm.aimWorldSmooth",
@@ -3169,6 +3199,8 @@ return {
     "apply mm.steadyAirPicks(true,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
+    "apply traversal.finishClip(true,\"ok\")",
+    "apply traversal.obstacleContact(true,\"ok\")",
     "apply traversal.obstacleReach(true,\"ok\")",
     "apply traversal.dropVault(true,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
@@ -3372,6 +3404,8 @@ mm.fastTurnExit=true\r\
 mm.steadyAirPicks=true\r\
 traversal.jumpStartGround=true\r\
 traversal.rejectedFallback=true\r\
+traversal.finishClip=true\r\
+traversal.obstacleContact=true\r\
 traversal.obstacleReach=true\r\
 traversal.dropVault=true\r\
 mm.aimWorldSmooth=true\r\
@@ -3528,6 +3562,8 @@ vehicle.jumpOutSidePush=true\r\
       "mm.steadyAirPicks",
       "traversal.jumpStartGround",
       "traversal.rejectedFallback",
+      "traversal.finishClip",
+      "traversal.obstacleContact",
       "traversal.obstacleReach",
       "traversal.dropVault"
     },
@@ -3923,7 +3959,9 @@ vehicle.jumpOutSidePush=true\r\
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
     ["traversal.dropVault"] = "true",
+    ["traversal.finishClip"] = "true",
     ["traversal.jumpStartGround"] = "true",
+    ["traversal.obstacleContact"] = "true",
     ["traversal.obstacleReach"] = "true",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
@@ -4029,6 +4067,8 @@ mm.fastTurnExit=true\r\
 mm.steadyAirPicks=true\r\
 traversal.jumpStartGround=true\r\
 traversal.rejectedFallback=true\r\
+traversal.finishClip=true\r\
+traversal.obstacleContact=true\r\
 traversal.obstacleReach=true\r\
 traversal.dropVault=true\r\
 mm.aimWorldSmooth=true\r\
@@ -4199,6 +4239,8 @@ other.module=42\r\
     "/utpp/animation|switch|mm.steadyAirPicks",
     "/utpp/animation|switch|traversal.jumpStartGround",
     "/utpp/animation|switch|traversal.rejectedFallback",
+    "/utpp/animation|switch|traversal.finishClip",
+    "/utpp/animation|switch|traversal.obstacleContact",
     "/utpp/animation|switch|traversal.obstacleReach",
     "/utpp/animation|switch|traversal.dropVault",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",

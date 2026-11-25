@@ -137,6 +137,13 @@ public native func UTPPSetMMFastTurnExit(on: Bool) -> Bool
 // game's own animation plays. Always true. Keep in sync with MotionDriverNatives.cpp.
 public native func UTPPSetMMTraversalJumpStartGround(on: Bool) -> Bool
 public native func UTPPSetMMTraversalRejectedFallback(on: Bool) -> Bool
+// Finish traversal animations (DLL default on; CET setting traversal.finishClip): when the game's vault or climb ends before the
+// animation has landed, it plays on while V keeps moving, and a climb started from a jump begins at the matching height. Always
+// true. Keep in sync with MotionDriverNatives.cpp.
+public native func UTPPSetMMTraversalFinishClip(on: Bool) -> Bool
+// Obstacle contact of traversal animations (DLL default on; CET setting traversal.obstacleContact): the supporting hand is placed
+// on the obstacle's edge and V's body is kept out of the obstacle. Always true. Keep in sync with MotionDriverNatives.cpp.
+public native func UTPPSetMMTraversalObstacleContact(on: Bool) -> Bool
 // Steady picks in jumps, landings and traversal exits (DLL default off; CET setting mm.steadyAirPicks): no landing on a ledge-edge
 // graze, no new take-off clip while falling, one landing clip per landing and a held traversal exit. Always true. Keep in sync with
 // MotionDriverNatives.cpp.

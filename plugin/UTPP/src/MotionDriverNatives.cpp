@@ -179,6 +179,29 @@ void Native_SetMMTraversalRejectedFallback(RED4ext::IScriptable*, RED4ext::CStac
     if (aOut)
         *aOut = true;
 }
+// CET utpp_motion traversal.finishClip (default on)
+void Native_SetMMTraversalFinishClip(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    motiondriver::SetTraversalFinishClip(on);
+    pluginlog::LogInfo("UTPPSetMMTraversalFinishClip(%d) -> 1", on ? 1 : 0);
+    if (aOut)
+        *aOut = true;
+}
+
+// CET utpp_motion traversal.obstacleContact (default on)
+void Native_SetMMTraversalObstacleContact(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    motiondriver::SetTraversalObstacleContact(on);
+    pluginlog::LogInfo("UTPPSetMMTraversalObstacleContact(%d) -> 1", on ? 1 : 0);
+    if (aOut)
+        *aOut = true;
+}
 
 // UTPPFeedTraversalBackFloor(nearM: Float, farM: Float, dropVault: Bool) -> Void (scripts/utpp_traversal.reds, right before
 // UTPPFeedTraversal of a vault): TraversalEvent::floorSample / floorDepth (the shallower sample) / dropVault of that event.
@@ -1026,6 +1049,12 @@ void RegisterNatives()
     auto* f9 = RED4ext::CGlobalFunction::Create("UTPPSetMMTraversalRejectedFallback", "UTPPSetMMTraversalRejectedFallback",
                                                 &Native_SetMMTraversalRejectedFallback);
     f9->flags = flags; f9->AddParam("Bool", "on"); f9->SetReturnType("Bool"); rtti->RegisterFunction(f9);
+    auto* f10 = RED4ext::CGlobalFunction::Create("UTPPSetMMTraversalFinishClip", "UTPPSetMMTraversalFinishClip",
+                                                 &Native_SetMMTraversalFinishClip);
+    f10->flags = flags; f10->AddParam("Bool", "on"); f10->SetReturnType("Bool"); rtti->RegisterFunction(f10);
+    auto* f11 = RED4ext::CGlobalFunction::Create("UTPPSetMMTraversalObstacleContact", "UTPPSetMMTraversalObstacleContact",
+                                                 &Native_SetMMTraversalObstacleContact);
+    f11->flags = flags; f11->AddParam("Bool", "on"); f11->SetReturnType("Bool"); rtti->RegisterFunction(f11);
 
     // ragdoll R0 probe
     auto* r1 = RED4ext::CGlobalFunction::Create("UTPPRagdollGetUpProbe", "UTPPRagdollGetUpProbe", &Native_RagdollGetUpProbe);

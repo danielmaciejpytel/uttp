@@ -680,6 +680,8 @@ struct MotionSetFrame // UTPP-MOTION SEAM
     bool aimStrafe = false; // aimed strafing (ChooserState::aimStrafeRotation): firm feet fade a latch with a fading contact
     int8_t moveTurnSign = 0; // authored root turn of the playing moving turn / pivot clip: +1 left, -1 right, 0 none (ChooserMatcher::MoveTurnSign)
     bool stops = false; // UTPP-MOTION SEAM idle / stop database (replant Stops profile)
+    bool liftedRoot = false;                 // the visual root is still above / below the capsule after a traversal
+                                             // hand-back (fading offset): no ground / pelvis / body height stage
     bool travFrame = false;                  // UTPP-MOTION SEAM trav: traversal montage frame (root already
                                              // warped onto the capsule: offset root gets animVel = capVel)
     bool dodgeClip = false; // a ground dodge clip is shown (mm/Dodge.hpp): the body turn holds the capsule yaw (BodyYawCommand)

@@ -1934,7 +1934,7 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
                 g_pelvisTeleports = tp;
                 g_footLock.ResetPelvis();
             }
-            g_footLock.SetPelvisAllowed(aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && g_motionFrame.travFrame));
+            g_footLock.SetPelvisAllowed(aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && (g_motionFrame.travFrame || g_motionFrame.liftedRoot)));
         }
         // 2026-11-06 start slip: a start clip may let the planted toe drift further (g_slipStartStart) before the soft lock slides
         // (measured offline: planted toe speed of the Start classes -13..-31 % on both bodies, tests/FeedReplayMotion.cpp --footlock).
@@ -1968,7 +1968,7 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
     {
         // body height smoothing gate: ground locomotion (gate open, no hold, grounded, stand / crouch / sprint, small vz), not a traversal
         // frame, third person; an offset-root teleport restarts the tracker
-        g_bodyHeightAllowed = aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && g_motionFrame.travFrame) && aIn.tppActive;
+        g_bodyHeightAllowed = aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && (g_motionFrame.travFrame || g_motionFrame.liftedRoot)) && aIn.tppActive;
         const uint64_t tp = g_offsetRoot.Diagnostics().teleports;
         if (tp != g_bodyHeightTeleports)
         {
@@ -1979,7 +1979,7 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
     if (g_groundFeetOn)
     {
         // ground feet gate: the body height gate (ground locomotion, no traversal frame, third person)
-        g_groundFeetAllowed = aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && g_motionFrame.travFrame) && aIn.tppActive;
+        g_groundFeetAllowed = aCtx.placementAllowed && !aCtx.airborne && !(aCtx.v2 && (g_motionFrame.travFrame || g_motionFrame.liftedRoot)) && aIn.tppActive;
         const uint64_t tp = g_offsetRoot.Diagnostics().teleports;
         if (tp != g_groundFeetTeleports)
         {
