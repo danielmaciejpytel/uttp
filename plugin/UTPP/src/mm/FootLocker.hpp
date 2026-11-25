@@ -209,6 +209,15 @@ struct FootPlantReferenceConfig
 // latch ends once the foot is back there. Defaults from the offline replay of the recorded sessions (both bodies): limit 0.30 (0.35 put
 // the correction past 35 cm), hand-back 0.03 m/s (0.12 doubled the idle slide), latch at <= 2 m/s (keeps the knee skin at its off
 // values). Off = the previous paths bit for bit.
+// Turn in place pin: a latch that runs while a turn-in-place clip plays (SetFirmTurnInPlace; the standing turn clips put the whole
+// turn into the root yaw and carry no root translation, so their planted foot sweeps around the root by up to ~30 cm in the drawn
+// pose) may fold the knee up to `turnKneeMargin` above the animated flexion instead of `kneeMargin`, so the pivot foot stays where it
+// planted while the other foot steps. The reach limit is unchanged. The larger margin stays with that latch while the capsule stands
+// after the clip (a hold carried into the idle is handed back at handBackSpeed, not dropped at the clip end); a capsule that starts to
+// move ends it. turnKneeMargin <= kneeMargin = the previous paths bit for bit.
+#ifndef UTPP_FIRM_TURN_KNEE_MARGIN
+#define UTPP_FIRM_TURN_KNEE_MARGIN 0.17453293f // 10 deg (offline replay sweep 5-30 deg: 10 is the smallest that pins every recorded aimed turn on both bodies)
+#endif
 struct FirmFeetConfig
 {
     float limit = 0.30f;         // m, largest held offset of a latched foot (<= 0.35)
@@ -216,6 +225,7 @@ struct FirmFeetConfig
     float handBackSpeed = 0.03f; // m/s, how fast a latched foot on a standing capsule outside the turn / stop clips lowers its hold
     float kneeMargin = 0.0052360f; // rad, knee fold bound: added flexion above the animated one (stridewarp::kKneeMargin)
     float kneeFree = 1.0472f;      // rad, knee fold bound: flexion up to which the hold is not limited (stridewarp::kKneeFreeFlexion)
+    float turnKneeMargin = UTPP_FIRM_TURN_KNEE_MARGIN; // rad, knee fold margin of a latch in a turn-in-place clip (turn in place pin)
     // m/s, release of a latched foot: its blend-out takes at least the shown offset / this (never shorter than blendOutTime), so a large
     // hold fades over the swing instead of within the usual 0.15 s
     float releaseSpeed = 1.0f;
@@ -225,7 +235,7 @@ struct FirmFeetConfig
         auto in = [](float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; };
         return in(c.limit, 0.01f, 0.35f) && in(c.driftMargin, 0.01f, 0.5f) && in(c.handBackSpeed, 0.01f, 10.0f) &&
                in(c.kneeMargin, 0.0f, 1.0f) && in(c.kneeFree, 0.0f, 3.1f) && in(c.releaseSpeed, 0.1f, 100.0f) &&
-               in(c.latchSpeed, 0.0f, 100.0f);
+               in(c.latchSpeed, 0.0f, 100.0f) && in(c.turnKneeMargin, 0.0f, 1.0f);
     }
 };
 
@@ -530,6 +540,8 @@ public:
     // Per update from the driver: a turn / pivot / reface / turn in place or stop clip plays on ground locomotion (an ordinary standing
     // stop, SetStandingStopSupport, latches as well).
     void SetFirmHold(bool aHold) { m_firmHold = aHold; }
+    // Per update from the driver: the firm hold of this update comes from a turn-in-place clip (turn in place pin, see FirmFeetConfig).
+    void SetFirmTurnInPlace(bool aOn) { m_firmTurn = aOn; }
     // False = invalid (FirmFeetConfig::Valid), previous kept. Applies from the next update.
     bool SetFirmFeetConfig(const FirmFeetConfig& aCfg)
     {
@@ -743,6 +755,7 @@ private:
         bool firm = false;        // firm feet: this lock is latched (until its contact ends)
         float firmHold = 0.0f;    // m, its latched hold (FirmFeetConfig::limit, lowered by the hand-back)
         float firmShown = 0.0f;   // m, shown offset of the latched foot in its last locked update
+        bool firmTurn = false;    // the latch ran in a turn-in-place clip: knee fold bound at turnKneeMargin until the latch ends
         float releaseTime = 0.0f; // s, blend-out time of a released latched foot (0 = FootLockConfig::blendOutTime)
         // reference plant model (only while locked in it)
         bool plantRef = false;    // this lock runs in the reference plant model
@@ -1361,6 +1374,7 @@ private:
                                        (wPrev > 0.0f ? f.ylShown * relockRelease / (1.0f - m_ycfg.twistReduction) : 0.0f));
             f.ylX = f.ylV = f.ylApply = 0.0f;
             f.firm = false; // firm feet: latched in the locked update below
+            f.firmTurn = false;
             f.firmHold = f.firmShown = f.releaseTime = 0.0f;
         }
         f.ylApply = 0.0f; // yaw lock: set by the soft-slip path below
@@ -1460,10 +1474,18 @@ private:
                     }
                     if (f.firm && !(m_slipStart > 0.0f))
                         f.firm = false; // the soft slip was switched off: a plain lock again
+                    // turn in place pin: held with the turn knee margin while the turn clip plays and, after it, for the rest of this
+                    // latch while the capsule stands (a capsule that starts to move ends it: the moving clips keep the usual bound)
+                    if (f.firm && m_firmHold && m_firmTurn)
+                        f.firmTurn = true;
+                    else if (!f.firm || !(m_capsuleSpeed < m_cfg.settleCapsuleSpeed))
+                        f.firmTurn = false;
                     if (f.firm)
                     {
                         const float lo = Len(off);
-                        const float leg = lo > 1e-5f ? FirmLegLimit(ga, gb, gc, math::Vec3{off.x / lo, off.y / lo, 0.0f}) : f.firmHold;
+                        const float kneeMargin = f.firmTurn ? std::fmax(m_fcfg.kneeMargin, m_fcfg.turnKneeMargin) : m_fcfg.kneeMargin;
+                        const float leg = lo > 1e-5f ? FirmLegLimit(ga, gb, gc, math::Vec3{off.x / lo, off.y / lo, 0.0f}, kneeMargin)
+                                                     : f.firmHold;
                         const float hold = std::fmin(f.firmHold, leg);
                         firmStart = std::fmax(m_slipStart, hold);
                         d.firmHold = hold;
@@ -1645,7 +1667,7 @@ private:
     // Firm feet leg limits (FirmFeetConfig): the largest planar offset along aDir (unit, z = 0) from the animated ankle gc that keeps the
     // ankle target within max(animated hip-ankle distance, softExtension x leg length) of the hip ga and the knee flexion at or below
     // max(animated flexion + kneeMargin, kneeFree). Degenerate legs return 0 (no hold beyond the slip start).
-    float FirmLegLimit(const BoneTransform& ga, const BoneTransform& gb, const BoneTransform& gc, math::Vec3 aDir) const
+    float FirmLegLimit(const BoneTransform& ga, const BoneTransform& gb, const BoneTransform& gc, math::Vec3 aDir, float aKneeMargin) const
     {
         const float thigh = Len(gb.p - ga.p), shin = Len(gc.p - gb.p);
         const math::Vec3 v = gc.p - ga.p;
@@ -1658,7 +1680,7 @@ private:
         const float dMax = std::fmax(d0, (thigh + shin) * m_cfg.softExtension);
         float s = -b + std::sqrt(std::fmax(0.0f, b * b - (vv - dMax * dMax)));
         // knee fold: |v + s dir| >= dMin; moving towards the hip (b < 0) the distance first reaches dMin at the smaller root
-        const float flexMax = std::fmax(stridewarp::KneeFlexion(d0, thigh, shin) + m_fcfg.kneeMargin, m_fcfg.kneeFree);
+        const float flexMax = std::fmax(stridewarp::KneeFlexion(d0, thigh, shin) + aKneeMargin, m_fcfg.kneeFree);
         if (flexMax < 3.14159265f)
         {
             const float dMin2 = std::fmax(0.0f, thigh * thigh + shin * shin + 2.0f * thigh * shin * std::cos(flexMax));
@@ -1830,6 +1852,7 @@ private:
     bool m_stopFirmPlant = UTPP_FOOT_STOP_FIRM_PLANT != 0; // standing-stop firm plant (SetStopFirmPlant)
     bool m_firmOn = false;   // firm feet (SetFirmFeet)
     bool m_firmHold = false; // this update: turn / stop clip (SetFirmHold)
+    bool m_firmTurn = false; // this update: the firm hold comes from a turn-in-place clip (SetFirmTurnInPlace)
     FirmFeetConfig m_fcfg{};
     FootReplantConfig m_rcfg{};
     uint32_t m_nb = 0;
@@ -1877,6 +1900,7 @@ struct FootFeedPolicy
     bool standingStopGate = false;   // gate open, no hold, tpp, stick <= 0.15 (driver side)
     bool classStop = false, classIdle = false;
     bool classTurn = false;          // turn / pivot / reface / turn in place (FootSlipGroup 2)
+    bool classTurnInPlace = false;   // turn in place (steer::kClassTurnInPlace): firm latches pinned (FirmFeetConfig::turnKneeMargin)
     bool firmFeet = false;           // firm feet option (FootLocker::SetFirmFeet)
     bool firmGate = false;           // gate open, no hold, tpp (driver side)
     bool yawLock = false;            // planted foot yaw lock option (FootLocker::SetYawLock)
@@ -1939,7 +1963,9 @@ inline void ApplyFootFeedPolicy(FootLocker& aLocker, const FootFeedPolicy& p)
     // firm feet: stand / sprint on the ground in a turn or stop clip (crouch keeps its replant / contact policy)
     aLocker.SetFirmFeet(p.firmFeet);
     aLocker.SetYawLock(p.yawLock);
-    aLocker.SetFirmHold(p.firmFeet && p.firmGate && !p.airborne && k == 1.f && (p.stance == 1 || p.stance == 3) &&
-                        (p.classTurn || p.classStop));
+    const bool firmHold = p.firmFeet && p.firmGate && !p.airborne && k == 1.f && (p.stance == 1 || p.stance == 3) &&
+                          (p.classTurn || p.classStop);
+    aLocker.SetFirmHold(firmHold);
+    aLocker.SetFirmTurnInPlace(firmHold && p.classTurnInPlace);
 }
 } // namespace utpp::mm

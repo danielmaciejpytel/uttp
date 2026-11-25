@@ -11,7 +11,7 @@ local function fresh()
 end
 local function mock()
   local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    stride = {}, firm = {}, yawLock = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
+    stride = {}, firm = {}, yawLock = {}, turnPin = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -98,6 +98,10 @@ local function mock()
     setFootYawLock = function(on)
       t.yawLock[#t.yawLock + 1] = on
       return not t.yawLockReject
+    end,
+    setTurnFootPin = function(on)
+      t.turnPin[#t.turnPin + 1] = on
+      return true
     end,
     setWalkSpeed = function(ms)
       t.walk[#t.walk + 1] = ms
@@ -253,6 +257,11 @@ do
     yl ~= nil and yl.type == "bool" and yl.default == true and yl.section == "animation"
     and yl.label == "Planted feet keep their direction" and type(yl.desc) == "string"
     and yl.desc:find("does not twist", 1, true) ~= nil)
+  local tp = defs["mm.turnFootPin"]
+  check("registered mm.turnFootPin: bool, off by default, animation section, label 'Firm pivot foot in turns on the spot'",
+    tp ~= nil and tp.type == "bool" and tp.default == false and tp.section == "animation"
+    and tp.label == "Firm pivot foot in turns on the spot" and type(tp.desc) == "string"
+    and tp.desc:find("stays fixed", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
@@ -740,6 +749,17 @@ do
   t.yawLockReject = false
   v.Sync(t.api)
   check("rejected footYawLock retries", #t.yawLock == 4 and t.yawLock[4] == true and v.rt.optionsApplied.footYawLock == true)
+end
+
+-- mm.turnFootPin (one of M.OPTIONS; DLL default off): off is sent once when motion comes on, then only on a change
+do
+  local v, t = fresh(), mock()
+  check("turnFootPin starts off", v.want.turnFootPin == false)
+  v.SetEnabled(true)
+  check("turnFootPin off is sent when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.turnPin == 1 and t.turnPin[1] == false and v.rt.optionsApplied.turnFootPin == false)
+  v.SetOption("turnFootPin", true, t.api)
+  check("turnFootPin switched on is sent once", #t.turnPin == 2 and t.turnPin[2] == true and v.rt.optionsApplied.turnFootPin == true)
 end
 
 -- turn steering is one fixed behaviour of the DLL: no option is registered, and the stored keys of the earlier choice

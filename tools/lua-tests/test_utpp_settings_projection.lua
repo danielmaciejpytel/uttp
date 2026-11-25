@@ -667,20 +667,21 @@ if not WRITE then
     -- 2026-11-13: Run pelvis yaw trim, Body yaw offset and Minimum walk speed are hidden in 0.1.0 (level "hidden", layout place kept)
     -- 2026-11-18: Body yaw offset is one option per body (female V, male V, both hidden); Stride matching (player level) after
     -- Minimum walk speed; 2026-11-21: Firm feet in turns and stops (player level) after Stride matching; 2026-11-23: Body lean and
-    -- Head lean (player level) after Firm feet; 2026-11-24: Feet on uneven ground (player level) between Firm feet and Body lean; Planted feet keep their direction (player level) after it
-    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Firm feet in turns and stops, Feet on uneven ground, Planted feet keep their direction, Body lean, Head lean, Shoulder width, Feminine figure, then the advanced camera options",
+    -- Head lean (player level) after Firm feet; 2026-11-24: Feet on uneven ground (player level) between Firm feet and Body lean; Planted feet keep their direction (player level) after it;
+    -- 2026-11-25: Firm pivot foot in turns on the spot (player level) after Planted feet keep their direction
+    check("layout: Camera = (hidden: Run pelvis yaw trim, Body yaw offset female / male, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Firm feet in turns and stops, Feet on uneven ground, Planted feet keep their direction, Firm pivot foot in turns on the spot, Body lean, Head lean, Shoulder width, Feminine figure, then the advanced camera options",
       placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.bodyYawOffsetFemale") == "hidden/frame/60"
       and placeOf("mm.bodyYawOffsetMale") == "hidden/frame/70" and placeOf("mm.headLead") == "hidden/frame/80"
       and placeOf("mm.walkToggleSpeed") == "player/frame/90" and placeOf("mm.minAnalogWalkSpeed") == "hidden/frame/100"
       and placeOf("mm.strideWarp") == "player/frame/110" and placeOf("mm.firmFeet") == "player/frame/120"
       and placeOf("mm.groundFeet") == "player/frame/130"
-      and placeOf("mm.footYawLock") == "player/frame/140"
-      and placeOf("mm.leanScale") == "player/frame/150" and placeOf("mm.leanHeadScale") == "player/frame/160"
-      and placeOf("mm.shoulderWidth") == "player/frame/170" and placeOf("mm.feminineFigure") == "player/frame/180"
-      and placeOf("camera.idleOrbit") == "advanced/frame/190",
+      and placeOf("mm.footYawLock") == "player/frame/140" and placeOf("mm.turnFootPin") == "player/frame/150"
+      and placeOf("mm.leanScale") == "player/frame/160" and placeOf("mm.leanHeadScale") == "player/frame/170"
+      and placeOf("mm.shoulderWidth") == "player/frame/180" and placeOf("mm.feminineFigure") == "player/frame/190"
+      and placeOf("camera.idleOrbit") == "advanced/frame/200",
       placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.bodyYawOffsetFemale") .. " " .. placeOf("mm.bodyYawOffsetMale") .. " "
         .. placeOf("mm.walkToggleSpeed") .. " " .. placeOf("mm.minAnalogWalkSpeed") .. " " .. placeOf("mm.strideWarp") .. " " .. placeOf("mm.firmFeet") .. " "
-        .. placeOf("mm.groundFeet") .. " " .. placeOf("mm.footYawLock") .. " " .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
+        .. placeOf("mm.groundFeet") .. " " .. placeOf("mm.footYawLock") .. " " .. placeOf("mm.turnFootPin") .. " " .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
     -- 2026-10-30 aim pitch plan: "Weapon aims at crosshair point" (mm.aimAtCrosshair, utpp_motion) after the crosshair colour, player level
     -- 2026-11-09: Melee full body / Melee aim tilt (player level) after Weapon aims at crosshair point
     check("layout: Combat = crosshair colour, then Weapon aims at crosshair point, Melee full body, Melee aim tilt, then the advanced combat options",

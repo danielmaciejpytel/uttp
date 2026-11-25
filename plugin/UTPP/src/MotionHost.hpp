@@ -443,10 +443,17 @@ int32_t FootReplantMask();
 bool SetFirmFeet(bool aOn);
 bool FirmFeet();
 // Hold limit (m, 0.01..0.35), hand-back speed (m/s, 0.01..10), knee fold margin (deg above the animated flexion, 0..57), release
-// speed (m/s, 0.1..100) and latch capsule speed (m/s, 0..100); a negative value keeps the current one. False = invalid / NaN,
-// previous kept. C++ API (tools, tests).
+// speed (m/s, 0.1..100), latch capsule speed (m/s, 0..100) and the knee fold margin of a latch in a turn-in-place clip (deg, 0..57;
+// at or below the knee fold margin = no turn in place pin); a negative value keeps the current one. False = invalid / NaN, previous
+// kept. C++ API (tools, tests).
 bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg = -1.0f, float aReleaseSpeed = -1.0f,
-                       float aLatchSpeed = -1.0f);
+                       float aLatchSpeed = -1.0f, float aTurnKneeMarginDeg = -1.0f);
+// Firm pivot foot in turns in place (CET mm.turnFootPin, default off; acts with the firm feet on): while a turn-in-place clip plays, a
+// firm latch may fold the knee up to the turn-in-place knee margin (FirmFeetConfig::turnKneeMargin) above the animated flexion instead
+// of the firm knee margin, so the pivot foot stays pinned while the animated toe sweeps; the larger margin stays with the latch while
+// the capsule stands after the clip. Off = the firm feet bit for bit. Always true.
+bool SetTurnFootPin(bool aOn);
+bool TurnFootPin();
 // Foot locker counters of the firm feet since its last reset: locks latched, locked-foot updates with a hold, of them lowered by a leg
 // limit, latches ended by the hand-back (any pointer may be null).
 void FirmFeetStats(uint64_t* aLatches, uint64_t* aUpdates, uint64_t* aLegBounds, uint64_t* aHandBacks);

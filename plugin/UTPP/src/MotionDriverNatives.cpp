@@ -615,6 +615,18 @@ void Native_SetMMFirmFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, b
     if (aOut)
         *aOut = ok;
 }
+// firm pivot foot in turns in place (CET utpp_motion mm.turnFootPin; DLL default off). Logged in the setting-call form the offline
+// replay applies.
+void Native_SetMMTurnFootPin(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = motionhost::SetTurnFootPin(on);
+    pluginlog::LogInfo("UTPPSetMMTurnFootPin(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // planted foot yaw lock (CET utpp_motion mm.footYawLock; DLL default on). Logged in the setting-call form the offline replay applies.
 void Native_SetMMFootYawLock(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -1011,6 +1023,8 @@ void RegisterNatives()
     o11->flags = flags; o11->AddParam("Bool", "on"); o11->SetReturnType("Bool"); rtti->RegisterFunction(o11);
     auto* o12 = RED4ext::CGlobalFunction::Create("UTPPSetMMFootYawLock", "UTPPSetMMFootYawLock", &Native_SetMMFootYawLock);
     o12->flags = flags; o12->AddParam("Bool", "on"); o12->SetReturnType("Bool"); rtti->RegisterFunction(o12);
+    auto* o13 = RED4ext::CGlobalFunction::Create("UTPPSetMMTurnFootPin", "UTPPSetMMTurnFootPin", &Native_SetMMTurnFootPin);
+    o13->flags = flags; o13->AddParam("Bool", "on"); o13->SetReturnType("Bool"); rtti->RegisterFunction(o13);
     // feet on uneven ground + ground recorder
     auto* gf1 = RED4ext::CGlobalFunction::Create("UTPPSetMMGroundFeet", "UTPPSetMMGroundFeet", &Native_SetMMGroundFeet);
     gf1->flags = flags; gf1->AddParam("Bool", "on"); rtti->RegisterFunction(gf1);

@@ -1761,7 +1761,9 @@ static void SectionPlantReference(const Database& db)
 //         (max(animated, softExtension)) and its knee fold limit (max(animated + margin, free flexion)); overall the leg reaches past
 //         max(off, animated, softExtension) only by the soft slip lag behind a lowered hold (0.005), never past maxExtension;
 //   (ff4) release: a contact end fades the held offset at no more than releaseSpeed (smoothstep slope 1.5) and finishes in its release
-//         time; (ff5) hand-back: outside the clips on a standing capsule the foot returns at no more than handBackSpeed and the latch ends.
+//         time; (ff5) hand-back: outside the clips on a standing capsule the foot returns at no more than handBackSpeed and the latch ends;
+//   (ff8) turn in place pin (SetFirmTurnInPlace): turning in place, the latched foot still does not move in the world below its hold,
+//         holds at least as far as without the pin, and its knee stays within the turn-in-place knee margin.
 namespace firm
 {
 struct Leg
@@ -1812,8 +1814,9 @@ struct Result
 // mode: 0 = firm feet never set, 1 = set off (with a hold and another config), 2 = on without a hold, 3 = on with the hold.
 // motion: 0 / 1 = capsule sideways -x / +x at 0.25 m/s, 2 = turning in place at 60 deg/s. end: 0 = release (contact L ends), 1 = hand-back.
 static Result Run(const Database& db, std::span<const BoneTransform> aPose, int aMode, int aMotion, int aEnd, float aDt,
-                  const FirmFeetConfig& aCfg)
+                  const FirmFeetConfig& aCfg, bool aTurnPin = false)
 {
+    const double kneeMargin = aTurnPin ? std::max(double(aCfg.kneeMargin), double(aCfg.turnKneeMargin)) : double(aCfg.kneeMargin);
     Result r;
     FootLocker fl;
     if (!fl.Init(db))
@@ -1856,7 +1859,10 @@ static Result Run(const Database& db, std::span<const BoneTransform> aPose, int 
         cy += vy * aDt;
         const bool hold = aMode == 3 && !(end && aEnd == 1);
         if (aMode >= 2)
+        {
             fl.SetFirmHold(hold);
+            fl.SetFirmTurnInPlace(hold && aTurnPin);
+        }
         const float cl = end && aEnd == 0 ? 0.0f : 1.0f;
         fl.Update(aDt, vx, vy, yaw, cl, 1.0f, aPose);
         const auto out = fl.Output();
@@ -1895,7 +1901,7 @@ static Result Run(const Database& db, std::span<const BoneTransform> aPose, int 
                 ++r.legChecked;
                 r.legExcess = std::max(r.legExcess, o.ext - std::max(anim[s].ext, 0.97));
                 r.kneeExcess =
-                    std::max(r.kneeExcess, o.flex - std::max(anim[s].flex + double(aCfg.kneeMargin), double(aCfg.kneeFree)));
+                    std::max(r.kneeExcess, o.flex - std::max(anim[s].flex + kneeMargin, double(aCfg.kneeFree)));
             }
             if (end && aEnd == 1 && i > nSettle + nMove)
             {
@@ -2129,6 +2135,15 @@ static void SectionFirmFeet(const Database& db)
                                on.handStepMax <= on.handStepBound && on.handEnded && on.handBacks >= 1,
                                Fmt("max world step %.2f mm (bound %.2f), hand-backs %.0f, offset at the end %.1f cm", on.handStepMax * 1000.0,
                                    on.handStepBound * 1000.0, double(on.handBacks), on.handEndOffset * 100.0));
+                    if (motion == 2)
+                    {
+                        const firm::Result pin = firm::Run(db, pose, 3, motion, endMode, dt, cfg, true);
+                        Expect(("(ff8) turn in place pin: held foot still in the world, holds as far, knee within the turn margin" + tag).c_str(),
+                               pin.finite && pin.latches >= 2 && pin.driftUnlocks == 0 && (pin.heldUpdates == 0 || pin.heldMove <= 0.001) &&
+                                   pin.heldMax >= on.heldMax - 0.001 && (pin.legChecked == 0 || (pin.legExcess <= 0.002 && pin.kneeExcess <= 0.004)),
+                               Fmt("held up to %.1f cm (without the pin %.1f), max world step %.2f mm, knee excess %.2f deg", pin.heldMax * 100.0,
+                                   on.heldMax * 100.0, pin.heldMove * 1000.0, pin.kneeExcess * kRad2Deg));
+                    }
                     // the option holds more than the soft slip without it (bent legs, sideways: the leg reach is not the limit)
                     if (pz == 0 && motion < 2 && endMode == 0)
                         Expect(("(ff2) holds past the slip start" + tag).c_str(), on.heldMax >= 0.12 && on.heldMax > base.shownMax + 0.03,
