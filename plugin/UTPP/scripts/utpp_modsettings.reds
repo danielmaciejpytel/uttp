@@ -763,11 +763,29 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.description", "When there is no floor behind a low obstacle, V vaults over it into a fall. On by default. No effect with the Game Animations pack.")
   public let traversal_dropVault: Bool = true;
 
+  // traversal.finishClip
+  @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
+  @runtimeProperty("ModSettings.category", "Interactions")
+  @runtimeProperty("ModSettings.category.order", "4")
+  @runtimeProperty("ModSettings.order", "72")
+  @runtimeProperty("ModSettings.displayName", "Finish vault and climb animations")
+  @runtimeProperty("ModSettings.description", "The whole vault or climb animation plays until V has landed, also when the game ends the move early; jumping, turning away or using a weapon still ends it at once (default). A climb straight after a jump starts at the height V has reached. Off = the animation stops when the game's move ends. No effect with the Game Animations pack.")
+  public let traversal_finishClip: Bool = true;
+
+  // traversal.obstacleContact
+  @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
+  @runtimeProperty("ModSettings.category", "Interactions")
+  @runtimeProperty("ModSettings.category.order", "4")
+  @runtimeProperty("ModSettings.order", "73")
+  @runtimeProperty("ModSettings.displayName", "Hands and body stay on obstacles")
+  @runtimeProperty("ModSettings.description", "While V vaults or climbs, the supporting hand rests on the obstacle's edge and V's legs and body are kept out of the obstacle (default). Off = the vault or climb animation plays without these corrections. No effect with the Game Animations pack.")
+  public let traversal_obstacleContact: Bool = true;
+
   // perspective.vehicleKeepTpp
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "72")
+  @runtimeProperty("ModSettings.order", "74")
   @runtimeProperty("ModSettings.displayName", "Third person on vehicle enter / exit")
   @runtimeProperty("ModSettings.description", "Entering from third person stays in third person until seated (then the vehicle camera); leaving a seat returns to third person as the exit starts. Off: the game camera for the whole transition.")
   public let perspective_vehicleKeepTpp: Bool = true;
@@ -776,7 +794,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "73")
+  @runtimeProperty("ModSettings.order", "75")
   @runtimeProperty("ModSettings.displayName", "Start vehicle rides in third person")
   @runtimeProperty("ModSettings.description", "Every vehicle entry starts in a third-person vehicle camera. The vehicle camera key still switches it during the ride, and that choice is not kept after leaving the vehicle.")
   public let vehicle_forceTppOnEnter: Bool = true;
@@ -785,7 +803,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "74")
+  @runtimeProperty("ModSettings.order", "76")
   @runtimeProperty("ModSettings.displayName", "Walk to the car door before getting in")
   @runtimeProperty("ModSettings.description", "When you enter a car, the character first walks to the spot where the enter animation starts, instead of being pulled there in a fraction of a second. Pressing the interact key again, moving the stick against the walk, taking damage or a moving car cancels it. Off = the game's own quick slide. No effect with the Game Animations pack.")
   public let vehicle_approachWalk: Bool = true;
@@ -794,7 +812,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "75")
+  @runtimeProperty("ModSettings.order", "77")
   @runtimeProperty("ModSettings.displayName", "Clear the car when jumping out")
   @runtimeProperty("ModSettings.description", "When you jump out of a standing car (double press of the exit key), the character gets a small push away from the car body, so she does not touch the fender on the way down. Off = the game's own jump-out.")
   public let vehicle_jumpOutSidePush: Bool = true;
@@ -803,7 +821,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "76")
+  @runtimeProperty("ModSettings.order", "78")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: steps")
   @runtimeProperty("ModSettings.description", "Third-person zoom steps (aim = step 1, wheel up / down while aiming).")
   @runtimeProperty("ModSettings.min", "1")
@@ -815,7 +833,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "77")
+  @runtimeProperty("ModSettings.order", "79")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: first distance (m)")
   @runtimeProperty("ModSettings.min", "0.6")
   @runtimeProperty("ModSettings.max", "2.0")
@@ -826,7 +844,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "78")
+  @runtimeProperty("ModSettings.order", "80")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: last distance (m)")
   @runtimeProperty("ModSettings.min", "0.6")
   @runtimeProperty("ModSettings.max", "2.0")
@@ -837,7 +855,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "79")
+  @runtimeProperty("ModSettings.order", "81")
   @runtimeProperty("ModSettings.displayName", "Gamepad stick speed")
   @runtimeProperty("ModSettings.description", "Walk or run (default): pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the animations. Follows the stick: her speed changes smoothly with how far the stick is pushed, as in the base game. Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.")
   @runtimeProperty("ModSettings.displayValues.WalkOrRun", "Walk or run")
@@ -848,7 +866,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "80")
+  @runtimeProperty("ModSettings.order", "82")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: FPP past last step")
   @runtimeProperty("ModSettings.description", "On: past the last step the view goes to first person and the game's own (Kiroshi) zoom takes over. Off: the wheel stops at the last third-person step.")
   public let camera_zoomUnarmed_fppHandoff: Bool = false;
@@ -926,6 +944,8 @@ public class UTPPModSettings extends IScriptable {
     s += "traversal_rejectedFallback=" + UTPPMSBool(this.traversal_rejectedFallback) + "\n";
     s += "traversal_obstacleReach=" + UTPPMSBool(this.traversal_obstacleReach) + "\n";
     s += "traversal_dropVault=" + UTPPMSBool(this.traversal_dropVault) + "\n";
+    s += "traversal_finishClip=" + UTPPMSBool(this.traversal_finishClip) + "\n";
+    s += "traversal_obstacleContact=" + UTPPMSBool(this.traversal_obstacleContact) + "\n";
     s += "perspective_vehicleKeepTpp=" + UTPPMSBool(this.perspective_vehicleKeepTpp) + "\n";
     s += "vehicle_forceTppOnEnter=" + UTPPMSBool(this.vehicle_forceTppOnEnter) + "\n";
     s += "vehicle_approachWalk=" + UTPPMSBool(this.vehicle_approachWalk) + "\n";

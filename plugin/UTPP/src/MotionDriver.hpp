@@ -639,6 +639,13 @@ void SetTraversalStartOptions(bool aStartWindow, bool aLeadFoot);
 // rejection other montages / neighbouring rows are tried). TraversalProbe::startOptions has bit 4 / 8 set while one is off.
 void SetTraversalJumpStartGround(bool aOn);
 void SetTraversalRejectedFallback(bool aOn);
+// Finish traversal animations (default on): a montage the game's vault / climb leaves early plays on to its landing
+// (motiontrav::ReleaseTail), the visual root offset left at a hand-back fades out instead of snapping, and a climb started
+// from a jump begins at the matching height (motiontrav::Config::jumpStartByHeight). Off: the previous behaviour.
+void SetTraversalFinishClip(bool aOn);
+// Obstacle contact of traversal montages (mm/TraversalContact.hpp, default on): supporting hand on the obstacle top, body
+// kept out of the obstacle.
+void SetTraversalObstacleContact(bool aOn);
 // UTPP-MOTION SEAM trav (task A, agreed with the runtime session): true while v2 owns the current Climb 8 / Vault 9
 // episode, i.e. it accepted a traversal plan for it. Lock-free (one std::atomic<bool> load, no v2 mutex): the v1 gate
 // ('travRelease', runtime side) calls it inside MMDriver Feed under the v1 g_mutex, before v2's Step of that feed.
@@ -668,6 +675,15 @@ bool VehicleVaultWeapon() noexcept;
 struct TraversalProbe // tests / status
 {
     uint64_t events = 0, plans = 0, accepted = 0, yields = 0, frames = 0, handbacks = 0;
+    uint64_t tails = 0;      // release tails started (finish traversal animations)
+    bool tail = false;       // the montage plays on after the game left its vault / climb
+    char tailEnd[16] = {};   // why the last tail ended ("landed", "turn", "movement", ...), "" while it runs
+    float carry[3] = {};     // world offset still fading out on the MM frame of the last Step
+    // obstacle contact track of the running montage: largest planned root / ankle move (m), which hands have a planted span,
+    // and the hand weights applied on the last montage frame
+    float contactRootM = 0.0f, contactLegM = 0.0f;
+    bool contactPlant[2] = {};
+    float contactHandW[2] = {};
     int32_t lastResult = -1; // traversal::v2::StartResult of the last plan
     bool active = false, yielding = false;
     int32_t clip = -1;       // database clip played (-1: montage played from the .utpptrav version 2 poses)

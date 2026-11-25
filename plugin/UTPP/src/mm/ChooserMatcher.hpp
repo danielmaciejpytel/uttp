@@ -152,6 +152,10 @@ struct ChooserState
     // fix5/jump: the game PSM of this feed is a jump detail 18-21 (integ::PsmIsJumpDetail: take-off, double jump, ...; a walk-off a ledge
     // has none). Written by adapter::MapToChooser; a hand-built state leaves it false (MatcherConfig::jumpRiseNoOff then never acts).
     bool psmJump = false;
+    // A flight that starts just after a vault or climb without a jump (a step off what V has just climbed or vaulted): no take-off
+    // clip (their first frames crouch and push off), only the run-off / fall clips. Written by the driver; hand-built states
+    // leave it false.
+    bool fallAfterTraversal = false;
     // fix/jumpout-cam: the flight of a vehicle jump-out (double F while driving: MMDriver exit window + JumpOutLatch / the exit edge). Written by
     // adapter::MapToChooser from MapContext::jumpOutFlight; a hand-built state leaves it false (MatcherConfig::jumpOutNoBack /
     // jumpOutFallHandover then never act). Every other flight is untouched.
@@ -2049,6 +2053,7 @@ public:
                        aState.speed2dCmS < m_cfg.standingJumpMaxSpeedCmS; // mutation 8: decided again on every update (stick touch in the air)
         m_standJumpBack = standing && m_cfg.standingJumpExcludeBack;
         m_airFootLock = aState.movementMode == 1 && m_flightActive && !m_flightJump && m_flightFoot != 0 && m_flightAge < m_cfg.airKeepLeadFootS;
+        m_travFallBlock = aState.movementMode == 1 && aState.fallAfterTraversal; // ChooserState::fallAfterTraversal
         UTPP_IF_MUT(JUMPPICK, 1)
             m_standJumpBack = false; // mutation 1: B / LL / RL Start rows stay selectable
         m_standJumpTakeoff = standing && aState.timeToLand < m_cfg.standingJumpLandBlockS;
@@ -3435,7 +3440,9 @@ private:
                     }
             }
         }
-        if (m_standJumpBack || m_standJumpTakeoff || m_standJumpOff || m_jumpRiseOff || m_jumpOutBack || m_jumpOutFall || m_airFootLock)
+        const bool travFall = m_travFallBlock;
+        if (m_standJumpBack || m_standJumpTakeoff || m_standJumpOff || m_jumpRiseOff || m_jumpOutBack || m_jumpOutFall || m_airFootLock ||
+            travFall)
         {
             // fix3/jump: a standing jump takes no B / LL / RL Start row, no F Off row on the take-off and, near touchdown, no take-off-phase row;
             // fix5/jump: a jump in motion no F Off row from its first airborne update to the apex
@@ -3457,7 +3464,8 @@ private:
                 }
                 // fix/jumpout-cam: a jump-out flight takes no B / LL / RL Start row; past its apex no Start / Off row at all (the fall loop of this
                 // database is the only jump clip left)
-                if ((kind == 1 && (m_standJumpBack || m_jumpOutBack)) || (m_jumpOutFall && (m_dbHasFall[d] || m_jumpOutFallMask)))
+                if ((kind == 1 && (m_standJumpBack || m_jumpOutBack)) || ((kind == 1 || kind == 2) && travFall) ||
+                    (m_jumpOutFall && (m_dbHasFall[d] || m_jumpOutFallMask)))
                 {
                     std::memset(m_excluded.data() + r0, 1, en.numRows);
                     n += en.numRows;
@@ -3890,6 +3898,7 @@ private:
     std::vector<uint8_t> m_clipJumpKind; // fix3/jump: clip index -> 1 B / LL / RL Start, 2 F Start, 3 F Off, 0 other (by name)
     std::vector<uint8_t> m_clipJumpFoot; // clip index -> lead foot of a jump clip (m_clipJumpKind != 0): 1 Lfoot, 2 Rfoot, 0 none
     uint8_t m_flightFoot = 0;            // airKeepLeadFootS: lead foot of the jump clip this flight started on (0 = not yet known)
+    bool m_travFallBlock = false;        // this update is a step off after a traversal: no F / B / LL / RL Start row
     bool m_airFootLock = false;          // airKeepLeadFootS: this update excludes the other lead foot's jump rows
     bool m_standJumpBack = false;        // fix3/jump: this update is a standing jump: no B / LL / RL Start row
     bool m_standJumpTakeoff = false;     // fix3/jump: ... and near touchdown: no take-off-phase row either

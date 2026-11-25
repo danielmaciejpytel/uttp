@@ -201,6 +201,13 @@ struct Config
     // traversal back to the game. The same gate applies, so the accepted set can only grow; when nothing passes, the first
     // rejection is returned. Neither this nor the jump start applies to a climb onto a vehicle.
     bool rejectedFallback = true;
+    // Jump start by height (climbs): the distance alignment alone starts the clip standing on the ground while the capsule is
+    // already in the air, so the shown pose waits at the clip's take-off. With a known take-off height the start frame moves on
+    // (not past the FrontLedge window end minus jumpStartMinWindowFrames) to the first frame whose root has risen as far as the
+    // capsule has. A start the gate rejects is planned again without this.
+    bool jumpStartByHeight = true;
+    double jumpStartMinRiseM = 0.15;
+    int jumpStartMinWindowFrames = 3;
     // trav tests only: non-empty = skip the decision table / action mapping and plan this montage of the file
     // (still needs solvable windows and a FrontLedge window); empty (default) = the table decides
     std::string forceMontage;
@@ -261,6 +268,8 @@ struct Plan
     double gatePlanarStep = 0;        // max horizontal root step per clip frame and per gateDt tick
     double gateWarpAdded = 0;         // max (warped - animated) root step per clip frame
     V3 gameDestination;               // HorizontalDestination (climb) / Destination (vault)
+    bool dropBehind = false;          // vault with no floor behind (Config::dropVault): the game's fall takes over, no release tail
+    int heightStartFrames = 0;        // jump start: frames the start moved on by the root height (Config::jumpStartByHeight)
 };
 
 struct Frame
@@ -553,6 +562,7 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
 #endif
     std::vector<std::string> forced;
     const bool drop = IsDropBehind(aO, aCfg);
+    p.dropBehind = drop;
     if (aCfg.forceMontage.empty())
     {
         Inputs tin = in;
@@ -851,6 +861,22 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
             }
         }
     }
+    if (aCfg.jumpStartByHeight && aCfg.alignStart && frontWin >= 0 && aO.action == GameAction::Climb && aC.airborne &&
+        aC.haveTakeoff && std::isfinite(aC.verticalSpeed) && aC.verticalSpeed > aCfg.jumpRisingMinMs)
+    {
+        const double rise = aC.pos.z - aC.takeoffZ;
+        if (std::isfinite(rise) && rise >= aCfg.jumpStartMinRiseM && rise <= aCfg.jumpTakeoffMaxRiseM)
+        {
+            const int latest = std::min(p.windows[static_cast<size_t>(frontWin)].endFrame - aCfg.jumpStartMinWindowFrames,
+                                        p.endFrame - 1);
+            const double z0 = m.root.front().pos.z;
+            int f = p.startFrame;
+            while (f < latest && m.root[static_cast<size_t>(f)].pos.z - z0 < rise)
+                ++f;
+            p.heightStartFrames = f - p.startFrame;
+            p.startFrame = f;
+        }
+    }
     p.endClipTime = static_cast<double>(p.endFrame) / m.fps;
     p.rate = 1.0;
     if (p.gameDuration > 0 && aCfg.matchDuration)
@@ -912,6 +938,12 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
         {
             p.result = StartResult::Rejected;
             p.reason = p.rejectReason; // the "UTPP trav:" line prints result=Rejected(<reason>)
+            if (p.heightStartFrames > 0) // the start moved on by height does not pass: the distance-aligned start
+            {
+                Config byDistance = aCfg;
+                byDistance.jumpStartByHeight = false;
+                return PlanOnce(aTable, aFile, aO, aC, aT, byDistance, aRow);
+            }
         }
     }
     return p;
@@ -1075,6 +1107,157 @@ private:
     double m_time = 0;
     bool m_done = false;
 };
+
+// ---- release: the game ends its vault before the clip has landed ----
+//
+// The game's vault only covers the stretch over the obstacle: its capsule stays at the floor height, so the whole height of
+// the jump is the visual root offset of the montage. When the game releases first, the montage keeps playing to its end frame
+// (touchdown / arrival) as a "tail" whose visual root is referenced to the LIVE capsule, which the player keeps steering:
+//  - height: the clip's remaining height above its end frame, plus the difference present at the release, faded over the tail;
+//  - horizontal: the offset present at the release, faded to zero.
+// Whatever offset is left when the montage is handed back (end of the tail, abort, a drop vault, a climb that arrived before
+// the game released) fades out on the following frames (OffsetCarry) instead of being dropped in one frame.
+struct ReleaseConfig
+{
+    double maxTailS = 0.9;        // [P] longest tail after the game's release
+    double minTailS = 0.02;       // less montage time left than this: hand back at once
+    double turnDeg = 60.0;        // [P] capsule velocity this far off the clip's end heading: V turned away
+    double turnMinSpeedMs = 1.5;  // [P] slower than this no turn is judged
+    double fallM = 0.45;          // [P] capsule this far below its release height: a real fall
+    double fadeMinS = 0.30;       // [P] horizontal offset fade: at least this long ...
+    double fadePerM = 0.40;       // [P] ... and this long per metre of offset
+    double heightFadeMinS = 0.25; // [P] height left at a hand-back: fade at least this long ...
+    double heightFadePerM = 0.32; // [P] ... and this long per metre
+};
+
+inline double SmoothStep01(double u)
+{
+    u = std::clamp(u, 0.0, 1.0);
+    return u * u * (3.0 - 2.0 * u);
+}
+
+// A world offset of the visual root that fades to zero (horizontal and height separately; smoothstep, no rate step at the ends).
+struct OffsetCarry
+{
+    V3 from;
+    double hS = 1, zS = 1, t = 0;
+    bool active = false;
+    void Reset() { *this = OffsetCarry{}; }
+    void Start(const V3& aFrom, double aHorizontalS, double aHeightS)
+    {
+        from = aFrom;
+        hS = std::max(aHorizontalS, 1e-3);
+        zS = std::max(aHeightS, 1e-3);
+        t = 0;
+        active = std::isfinite(aFrom.x + aFrom.y + aFrom.z) && Len(aFrom) > 1e-4;
+        if (!active)
+            from = {};
+    }
+    void Start(const V3& aFrom, const ReleaseConfig& aCfg, double aHorizontalS = 0.0)
+    {
+        Start(aFrom, std::max({aCfg.fadeMinS, aCfg.fadePerM * std::hypot(aFrom.x, aFrom.y), aHorizontalS}),
+              std::max(aCfg.heightFadeMinS, aCfg.heightFadePerM * std::fabs(aFrom.z)));
+    }
+    V3 Value() const
+    {
+        if (!active)
+            return {};
+        const double h = 1.0 - SmoothStep01(t / hS), z = 1.0 - SmoothStep01(t / zS);
+        return {from.x * h, from.y * h, from.z * z};
+    }
+    V3 Step(double aDt) // the value aDt after the last one
+    {
+        if (!active)
+            return {};
+        t += std::max(aDt, 0.0);
+        const V3 v = Value();
+        if (t >= hS && t >= zS)
+            active = false;
+        return v;
+    }
+};
+
+// Visual root offset (visual root - live capsule) while the tail plays.
+class ReleaseTail
+{
+public:
+    // aOffset / aPoseTime: visual root - capsule and montage time of the last frame before the release.
+    void Begin(const Plan& aPlan, const V3& aOffset, double aPoseTime, const ReleaseConfig& aCfg)
+    {
+        m_off = aOffset;
+        m_t0 = aPoseTime;
+        m_t1 = std::max(aPlan.endClipTime, aPoseTime + 1e-3);
+        m_fps = aPlan.montage ? aPlan.montage->fps : 30.0;
+        m_zEnd = motion_detail::Sample(aPlan.warped, m_t1 * m_fps).pos.z;
+        m_zRel = aOffset.z - (motion_detail::Sample(aPlan.warped, m_t0 * m_fps).pos.z - m_zEnd);
+        const double remaining = (m_t1 - m_t0) / std::max(aPlan.rate, 1e-3);
+        m_hS = std::max({aCfg.fadeMinS, aCfg.fadePerM * std::hypot(aOffset.x, aOffset.y), remaining});
+        m_elapsed = 0;
+    }
+    // aDt = time since the last frame, aPoseTime = montage time shown now.
+    V3 Step(const Plan& aPlan, double aDt, double aPoseTime)
+    {
+        m_elapsed += std::max(aDt, 0.0);
+        const double h = 1.0 - SmoothStep01(m_elapsed / m_hS);
+        const double u = (aPoseTime - m_t0) / (m_t1 - m_t0);
+        const double clipZ = motion_detail::Sample(aPlan.warped, aPoseTime * m_fps).pos.z - m_zEnd;
+        double z = clipZ + m_zRel * (1.0 - SmoothStep01(u));
+        z = std::max(z, std::min(0.0, m_off.z) * (1.0 - SmoothStep01(u))); // never sinks below where the release had it
+        return {m_off.x * h, m_off.y * h, z};
+    }
+    double Elapsed() const { return m_elapsed; }
+    double HorizontalLeftS() const { return std::max(m_hS - m_elapsed, 0.0); }
+
+private:
+    V3 m_off;
+    double m_t0 = 0, m_t1 = 0, m_fps = 30, m_zEnd = 0, m_zRel = 0, m_hS = 0.3, m_elapsed = 0;
+};
+
+// Wall time a tail would still play at the release (0 = no tail: nothing left, no plan, or a drop whose fall the game owns).
+inline double TailTimeLeftS(const Plan& aPlan, double aPoseTime)
+{
+    if (aPlan.result != StartResult::Ok || !aPlan.montage || aPlan.dropBehind)
+        return 0.0;
+    return std::max(aPlan.endClipTime - aPoseTime, 0.0) / std::max(aPlan.rate, 1e-3);
+}
+
+// What ends a running tail early. Velocity and height are those of the live capsule.
+struct TailInputs
+{
+    bool groundOrFall = true;  // PSM detail is a ground / fall / landing state (no jump, slide, dodge, ladder, traversal, ...)
+    bool weaponBusy = false;   // aiming, shooting, reloading, another weapon action
+    bool crouch = false;
+    bool newTraversal = false; // another traversal event is waiting
+    double velX = 0, velY = 0; // world, m/s
+    double heading = 0;        // yaw of the clip at its end frame, rad (forward = (-sin, cos))
+    double capsuleDropM = 0;   // capsule height at the release - capsule height now
+    double elapsedS = 0;
+};
+
+// "" = the tail goes on, otherwise the reason it ends.
+inline const char* TailAbortReason(const TailInputs& aIn, const ReleaseConfig& aCfg)
+{
+    if (aIn.newTraversal)
+        return "traversal";
+    if (!aIn.groundOrFall)
+        return "movement";
+    if (aIn.weaponBusy)
+        return "weapon";
+    if (aIn.crouch)
+        return "crouch";
+    if (aIn.capsuleDropM > aCfg.fallM)
+        return "fall";
+    const double speed = std::hypot(aIn.velX, aIn.velY);
+    if (std::isfinite(speed) && speed > aCfg.turnMinSpeedMs)
+    {
+        const double along = (-std::sin(aIn.heading) * aIn.velX + std::cos(aIn.heading) * aIn.velY) / speed;
+        if (along < std::cos(aCfg.turnDeg * 3.14159265358979323846 / 180.0))
+            return "turn";
+    }
+    if (aIn.elapsedS > aCfg.maxTailS)
+        return "time";
+    return "";
+}
 
 // World warp point of window i of the plan at its end frame minus its target (ignoreZ respected), metres.
 inline double WindowContactError(const Plan& aP, size_t aI)

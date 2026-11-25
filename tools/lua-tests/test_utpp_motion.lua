@@ -96,6 +96,16 @@ local function mock()
       t.travFallback[#t.travFallback + 1] = on
       return true
     end,
+    setTravFinishClip = function(on)
+      t.travFinish = t.travFinish or {}
+      t.travFinish[#t.travFinish + 1] = on
+      return true
+    end,
+    setTravObstacleContact = function(on)
+      t.travContact = t.travContact or {}
+      t.travContact[#t.travContact + 1] = on
+      return true
+    end,
     setTravObstacleReach = function(on)
       t.travReach = t.travReach or {}
       t.travReach[#t.travReach + 1] = on
@@ -720,6 +730,16 @@ do
   v.SetOption("travRejectedFallback", false, t.api)
   check("traversal rejected fallback switched off is sent once",
     #t.travFallback == 2 and t.travFallback[2] == false and v.Sync(t.api) == "same" and #t.travFallback == 2 and #t.travJump == 2)
+  check("finishing traversal animations starts on and is sent when motion comes on",
+    v.want.travFinishClip == true and #t.travFinish == 1 and t.travFinish[1] == true)
+  v.SetOption("travFinishClip", false, t.api)
+  check("finishing traversal animations switched off is sent once",
+    #t.travFinish == 2 and t.travFinish[2] == false and v.Sync(t.api) == "same" and #t.travFinish == 2 and #t.travFallback == 2)
+  check("obstacle contact starts on and is sent when motion comes on",
+    v.want.travObstacleContact == true and #t.travContact == 1 and t.travContact[1] == true)
+  v.SetOption("travObstacleContact", false, t.api)
+  check("obstacle contact switched off is sent once",
+    #t.travContact == 2 and t.travContact[2] == false and v.Sync(t.api) == "same" and #t.travContact == 2 and #t.travFinish == 2)
 end
 
 -- traversal.obstacleReach / traversal.dropVault (script switches) and mm.steadyAirPicks (M.OPTIONS, all default on): refused

@@ -1846,6 +1846,144 @@ int main(int argc, char** argv)
         Check(handback && ownedSteps == steps && poseSteps == steps,
               "8g task A: true on every Step of the episode (montage + MM after the handback, detail 8)", d);
         Check(!afterEnd, "8g task A episode end: false once the detail leaves 8", d);
+        // (a2) finish traversal animations: the game leaves the climb while the montage still runs. On: the montage plays on as
+        // a tail and the visual root offset never steps (tail, hand-back fade); a jump / slide / new event ends it. Off: the old
+        // immediate hand-back, nothing carried.
+        {
+            struct Run
+            {
+                int tailSteps = 0;
+                uint64_t tails = 0, handbacks = 0;
+                std::string end;
+                uint64_t accepted = 0, framesAfterNew = 0;
+                double maxStep = 0.0, atRelease = 0.0, left = 0.0;
+                bool ownedInTail = false;
+            };
+            auto run = [&](bool aOn, int aReleaseDetail, int aNewEventAt, int aAbortAt, int aAbortDetail) {
+                for (int i = 0; i < 80; ++i)
+                    (void)TravStep(-1);
+                motiondriver::SetTraversalFinishClip(aOn);
+                motiondriver::TestForceTraversal(mantle, false);
+                (void)motiondriver::FeedTraversal(ClimbEvent(0.6f, 1.0f));
+                const motiondriver::TraversalProbe s0 = motiondriver::ProbeTraversal();
+                Run r;
+                double prev[3] = {0, 0, 0};
+                uint64_t frames = s0.frames;
+                auto step = [&](int aDetail, bool aMeasure) {
+                    (void)TravStep(aDetail);
+                    const motiondriver::TraversalProbe q = motiondriver::ProbeTraversal();
+                    double now[3];
+                    for (int k = 0; k < 3; ++k)
+                        now[k] = q.frames > frames ? q.offset[k] : q.carry[k];
+                    frames = q.frames;
+                    const double m = std::sqrt((now[0] - prev[0]) * (now[0] - prev[0]) + (now[1] - prev[1]) * (now[1] - prev[1]) +
+                                               (now[2] - prev[2]) * (now[2] - prev[2]));
+                    if (aMeasure)
+                        r.maxStep = std::max(r.maxStep, m);
+                    std::copy(now, now + 3, prev);
+                    if (q.tail)
+                    {
+                        ++r.tailSteps;
+                        r.ownedInTail = r.ownedInTail || motiondriver::OwnsTraversal();
+                    }
+                };
+                for (int i = 0; i < 9; ++i)
+                    step(8, false);
+                r.atRelease = std::sqrt(prev[0] * prev[0] + prev[1] * prev[1] + prev[2] * prev[2]);
+                uint64_t framesAtNew = 0;
+                for (int i = 0; i < 90; ++i)
+                {
+                    if (i == aNewEventAt)
+                    {
+                        framesAtNew = motiondriver::ProbeTraversal().frames;
+                        (void)motiondriver::FeedTraversal(ClimbEvent(0.6f, 1.0f));
+                    }
+                    int detail = aAbortAt >= 0 && i >= aAbortAt ? aAbortDetail : aReleaseDetail;
+                    if (aNewEventAt >= 0 && i >= aNewEventAt && i < aNewEventAt + 12)
+                        detail = 8; // the game's second climb follows at once
+                    step(detail, true);
+                }
+                const motiondriver::TraversalProbe s1 = motiondriver::ProbeTraversal();
+                r.tails = s1.tails - s0.tails;
+                r.accepted = s1.accepted - s0.accepted + 1; // + the first event (accepted before s0 was read)
+                r.framesAfterNew = aNewEventAt >= 0 ? s1.frames - framesAtNew : 0;
+                r.handbacks = s1.handbacks - s0.handbacks;
+                r.end = s1.tailEnd;
+                r.left = std::sqrt(prev[0] * prev[0] + prev[1] * prev[1] + prev[2] * prev[2]);
+                return r;
+            };
+            auto text = [](const Run& r) {
+                char t[220];
+                std::snprintf(t, sizeof t, "tails %llu steps %d end '%s' handbacks %llu offset at release %.3f max step %.3f left %.4f",
+                              static_cast<unsigned long long>(r.tails), r.tailSteps, r.end.c_str(),
+                              static_cast<unsigned long long>(r.handbacks), r.atRelease, r.maxStep, r.left);
+                return std::string(t);
+            };
+            const Run on = run(true, 1, -1, -1, 0);
+            Check(on.tails == 1 && on.tailSteps > 3 && on.end == "landed" && on.handbacks == 1 && !on.ownedInTail &&
+                      on.atRelease > 0.1 && on.maxStep < 0.05 && on.left < 1e-4,
+                  "8g finish clip: released climb plays on as a tail to the end, one hand-back, offset continuous and gone", text(on));
+            const Run off = run(false, 1, -1, -1, 0);
+            Check(off.tails == 0 && off.tailSteps == 0 && off.handbacks == 1 && off.maxStep > 0.1 && std::fabs(off.maxStep - off.atRelease) < 1e-6 && off.left < 1e-4,
+                  "8g finish clip off: hand-back at the release, nothing carried (the offset steps in one feed)", text(off));
+            const Run jump = run(true, 18, -1, -1, 0);
+            Check(jump.tails == 0 && jump.handbacks == 1 && jump.maxStep < 0.12 && jump.left < 1e-4,
+                  "8g finish clip: released into a jump -> no tail, the offset fades", text(jump));
+            const Run slide = run(true, 1, -1, 3, 5);
+            Check(slide.tails == 1 && slide.end == "movement" && slide.handbacks == 1 && slide.maxStep < 0.12 && slide.left < 1e-4,
+                  "8g finish clip: a slide during the tail ends it, the offset fades", text(slide));
+            const Run again = run(true, 1, 3, -1, 0);
+            Check(again.accepted == 2 && again.framesAfterNew >= 12 && again.tails >= 1 && again.maxStep < 0.12 && again.left < 1e-4,
+                  "8g finish clip: back-to-back obstacle: the second event ends the tail, is accepted and plays, offset continuous",
+                  text(again) + " accepted " + std::to_string(again.accepted) + " frames after " + std::to_string(again.framesAfterNew));
+            motiondriver::SetTraversalFinishClip(true);
+            for (int i = 0; i < 80; ++i)
+                (void)TravStep(-1);
+            motiondriver::TestForceTraversal(mantle, false);
+        }
+        // (a3) obstacle contact: the montage builds a track with a planted hand and puts it on the obstacle (the weight
+        // rises on some frames and never jumps); off: no track, no weight
+        {
+            auto contactRun = [&](bool aOn, float& aMaxW, float& aMaxStep, bool& aPlant) {
+                for (int i = 0; i < 80; ++i)
+                    (void)TravStep(-1);
+                motiondriver::SetTraversalObstacleContact(aOn);
+                motiondriver::TestForceTraversal(mantle, false);
+                (void)motiondriver::FeedTraversal(ClimbEvent(0.6f, 1.0f));
+                aMaxW = aMaxStep = 0.0f;
+                aPlant = false;
+                float prev[2] = {0.0f, 0.0f};
+                for (int i = 0; i < 110; ++i)
+                {
+                    (void)TravStep(8);
+                    const motiondriver::TraversalProbe q = motiondriver::ProbeTraversal();
+                    aPlant = aPlant || q.contactPlant[0] || q.contactPlant[1];
+                    for (int s = 0; s < 2; ++s)
+                    {
+                        const float w = q.active ? q.contactHandW[s] : 0.0f;
+                        aMaxW = std::max(aMaxW, w);
+                        if (q.active)
+                            aMaxStep = std::max(aMaxStep, std::fabs(w - prev[s]));
+                        prev[s] = w;
+                    }
+                }
+                (void)TravStep(-1);
+            };
+            float w = 0.0f, step = 0.0f;
+            bool plant = false;
+            contactRun(true, w, step, plant);
+            char dc[160];
+            std::snprintf(dc, sizeof dc, "plant %d, max hand weight %.2f, max weight step %.3f", plant ? 1 : 0, w, step);
+            Check(plant && w > 0.5f && step > 0.0f && step <= 0.82f,
+                  "8g obstacle contact: a planted hand is found and moved onto the obstacle, the weight eases", dc);
+            contactRun(false, w, step, plant);
+            std::snprintf(dc, sizeof dc, "plant %d, max hand weight %.2f", plant ? 1 : 0, w);
+            Check(!plant && w == 0.0f, "8g obstacle contact off: no track, the montage pose is left as it is", dc);
+            motiondriver::SetTraversalObstacleContact(true);
+            for (int i = 0; i < 80; ++i)
+                (void)TravStep(-1);
+            motiondriver::TestForceTraversal(mantle, false);
+        }
         // (b) reject (gate on, ledge 4 m away: the warp would teleport) -> false at the event and on the detail-8 Steps
         motiondriver::TestForceTraversal(mantle, true);
         (void)motiondriver::FeedTraversal(ClimbEvent(4.0f, 1.0f));

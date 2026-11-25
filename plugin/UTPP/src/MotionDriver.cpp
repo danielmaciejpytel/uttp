@@ -56,6 +56,7 @@
 #include "mm/Strafe.hpp" // neutral aim offset blend
 #include "mm/TraversalFile.hpp"
 #include "mm/MotionTraversal.hpp" // UTPP-MOTION SEAM trav
+#include "mm/TraversalContact.hpp"
 #include "mm/Dodge.hpp"           // ground dodge clips (sectors, clip clock, loader checks)
 #include "mm/RefaceStart.hpp"
 
@@ -98,6 +99,9 @@ struct Bundle
     std::vector<int32_t> travPlayClip;
     std::vector<int32_t> travPoseMap;
     std::vector<BoneTransform> travRaw;
+    // obstacle contact (mm/TraversalContact.hpp): body points of this rig and the pose scratch the track is built in
+    traversal::contact::Rig contactRig;
+    std::vector<BoneTransform> contactPose;
     uint32_t travFromPoses = 0;
     bool travFileOk = false, travTableOk = false, travPosesOk = false;
     // native get-up (ragdoll/GetUpPlayer.hpp): utpp_getup_<body>.utpptrav (version 2 poses, 4 montages GetUp_B/F/L/R); getupOk false = missing or
@@ -986,8 +990,30 @@ struct TravRun
     float verticalSpeed = 0.0f; // m/s, 0 = unknown
     bool haveTakeoff = false;
     float takeoffZ = 0.0f;
+    // finish traversal animations (MotionTraversal.hpp ReleaseTail / OffsetCarry): the game left its vault / climb while the
+    // montage still ran -> the montage plays on as a tail; whatever visual root offset is left at a hand-back fades out.
+    bool tail = false;
+    motiontrav::ReleaseTail releaseTail;
+    motiontrav::OffsetCarry carry;  // world offset of the visual root from the capsule, fading
+    traversal::V3 lastOffset;      // world offset published by the last montage frame
+    float tailCarryHS = 0.0f;       // horizontal fade time a tail that ended still had left
+    double tailCapZ = 0.0, tailHeading = 0.0;
+    // obstacle contact: the planned event's geometry, the track built at the episode start, the applied hand weights and the
+    // world root displacement of the last montage frame (a hand-back carries it out with the offset)
+    motiontrav::GameObstacle obstacle;
+    double feetZ = 0.0;
+    traversal::contact::Track contact;
+    traversal::contact::HandState hands;
+    traversal::V3 lastContact;
 };
 TravRun g_trav;
+bool g_travObstacleContactOn = true; // SetTraversalObstacleContact: supporting hand on the obstacle, body kept outside it
+const motiontrav::ReleaseConfig kTravRelease{};
+// A flight beginning this long after a traversal hand-back without a jump is a step off it (ChooserState::fallAfterTraversal).
+constexpr float kTravFallWindowS = 0.8f;
+constexpr double kLiftedRootM = 0.04; // height left of a hand-back offset above which the ground stages stay off
+float g_travFallWindowLeft = 0.0f;
+bool g_travFallFlight = false;
 // capsule height of the last grounded feed and the vertical velocity of the last feed (feeds with the air and capsule fields only)
 struct TravAirTrack
 {
@@ -1020,12 +1046,14 @@ void TravAirTrackLocked(const motionhost::FeedInput& aRaw, float aDt)
 #define UTPP_TRAV_START_WINDOW_DEFAULT 0
 #endif
 #ifndef UTPP_TRAV_LEAD_FOOT_DEFAULT
-#define UTPP_TRAV_LEAD_FOOT_DEFAULT 0
+#define UTPP_TRAV_LEAD_FOOT_DEFAULT 1
 #endif
 bool g_travStartWindowOn = UTPP_TRAV_START_WINDOW_DEFAULT != 0; // SetTraversalStartOptions (motiontrav::Config::clampStartWindow)
-bool g_travLeadFootOn = UTPP_TRAV_LEAD_FOOT_DEFAULT != 0;       // SetTraversalStartOptions (motiontrav::Config::leadFootRow)
+// SetTraversalStartOptions (motiontrav::Config::leadFootRow); default on: the row montage whose planted foot matches the shown pose
+bool g_travLeadFootOn = UTPP_TRAV_LEAD_FOOT_DEFAULT != 0;
 bool g_travJumpStartGroundOn = true;  // SetTraversalJumpStartGround (motiontrav::Config::jumpStartAsGround)
 bool g_travRejectedFallbackOn = true; // SetTraversalRejectedFallback (motiontrav::Config::rejectedFallback)
+bool g_travFinishClipOn = true;       // SetTraversalFinishClip: release tail, offset fade, jump start by height
 TraversalProbe g_travProbe;
 uint64_t g_skipTrav = 0;
 int g_stepDetail = -1; // PSM detail of the last enabled Step (Skip: a yield on the event's detail ends the ownership)
@@ -1283,6 +1311,8 @@ void TravResetLocked(bool aDropPending)
     g_trav.planned = g_trav.planOk = g_trav.episode = false;
     g_trav.active = g_trav.yielding = g_trav.first = g_trav.handbackNext = g_trav.frame = false;
     g_trav.noContactLeft = 0.0f;
+    g_trav.tail = false;
+    g_travProbe.tail = false;
     g_dodgeSt.player.Reset(); // a dodge clip never outlives a disable / body switch / bundle swap
     g_dodgeSt.held = false;
     g_dodgeSt.releaseClip = -1;
@@ -1294,6 +1324,7 @@ void TravResetLocked(bool aDropPending)
     {
         g_trav.havePending = false;
         g_trav.yawBackT = -1.0f; // dropped (disable / body switch / bundle): no handback turn pending
+        g_trav.carry.Reset();    // ... and no offset fading out
     }
     g_travProbe.active = g_travProbe.yielding = false;
     SetVehVaultEvt(false); // vault torso limiter: the episode is over (a re-planned event sets it again)
@@ -1514,7 +1545,12 @@ std::unique_ptr<Bundle> LoadBundle(Body aBody, const Paths& aPaths)
                 b->travPosesOk = b->travPoseMap[i] >= 0;
             }
             if (b->travPosesOk)
+            {
                 b->travRaw.assign(n, BoneTransform{});
+                b->contactPose.assign(n, BoneTransform{});
+                b->contactRig = traversal::contact::FindRig(static_cast<int>(n), b->dbParents.data(), static_cast<int>(kFirstBone),
+                                                            [&](int aBone) { return b->db.BoneName(static_cast<uint32_t>(aBone)); });
+            }
         }
         std::unordered_map<std::string_view, int32_t> clips;
         for (uint32_t c = 0; c < b->db.Header().numClips; ++c)
@@ -2002,6 +2038,10 @@ void Skip(uint64_t& aCounter, const char* aWhy)
     {
         g_trav.active = g_trav.episode = g_trav.planned = g_trav.planOk = false;
         g_trav.player.reset();
+        g_trav.tail = false;
+        g_travProbe.tail = false;
+        g_trav.carry.Reset();
+        g_trav.lastOffset = {};
         g_trav.yielding = true;
         g_travProbe.active = false;
         g_travProbe.yielding = true;
@@ -3981,11 +4021,14 @@ void TravPlanLocked(Bundle& b)
     c.verticalSpeed = g_trav.verticalSpeed;
     c.haveTakeoff = g_trav.haveTakeoff;
     c.takeoffZ = g_trav.takeoffZ;
+    g_trav.obstacle = o;
+    g_trav.feetZ = g_trav.haveTakeoff && c.airborne ? std::min<double>(c.pos.z, g_trav.takeoffZ) : c.pos.z;
     motiontrav::Config cfg;
     cfg.clampStartWindow = g_travStartWindowOn;
     cfg.leadFootRow = g_travLeadFootOn;
     cfg.jumpStartAsGround = g_travJumpStartGroundOn;
     cfg.rejectedFallback = g_travRejectedFallbackOn;
+    cfg.jumpStartByHeight = g_travFinishClipOn;
     cfg.dropVault = e.dropVault;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     cfg.forceMontage = g_testForceMontage;
@@ -4073,7 +4116,9 @@ void TravPlanLocked(Bundle& b)
 }
 
 // First Step with the event's PSM detail: an Ok plan starts the montage (episode), any other plan yields the episode.
-void TravStartLocked()
+void TravContactBuildLocked(Bundle& b);
+
+void TravStartLocked(Bundle& b)
 {
     g_trav.planned = false;
     if (!g_trav.planOk)
@@ -4086,10 +4131,76 @@ void TravStartLocked()
     g_trav.planOk = false;
     g_trav.player.emplace(g_trav.plan);
     g_trav.active = g_trav.first = g_trav.episode = true;
+    g_trav.tail = false;
+    g_trav.lastOffset = {};
+    g_trav.tailCarryHS = 0.0f;
     g_trav.action = g_trav.ev.action;
     std::memcpy(g_trav.cap, g_trav.ev.playerPos, sizeof g_trav.cap);
     g_travProbe.active = true;
     g_travProbe.yielding = false;
+    TravContactBuildLocked(b);
+}
+
+// Montage pose from the .utpptrav version 2 P lines, defined below.
+void SampleTravPose(const Bundle& b, const traversal::TravMontage& m, double aTime, BoneTransform* aOut);
+
+// The obstacle contact track of the montage that starts now (once per traversal). No track (the pass does nothing) with the
+// option off, without the montage's poses in the traversal file or without the rig's bones.
+void TravContactBuildLocked(Bundle& b)
+{
+    g_trav.contact = traversal::contact::Track{};
+    g_trav.hands = traversal::contact::HandState{};
+    g_trav.lastContact = {};
+    g_travProbe.contactRootM = g_travProbe.contactLegM = 0.0f;
+    g_travProbe.contactPlant[0] = g_travProbe.contactPlant[1] = false;
+    g_travProbe.contactHandW[0] = g_travProbe.contactHandW[1] = 0.0f;
+    if (!g_travObstacleContactOn || !b.contactRig.ok || !b.travPosesOk || !g_trav.plan.montage || !g_trav.plan.montage->HasPose())
+        return;
+    const traversal::TravMontage& m = *g_trav.plan.montage;
+    g_trav.contact = traversal::contact::Build(g_trav.plan, g_trav.obstacle, g_trav.feetZ, b.contactRig, b.contactPose.data(),
+                                               [&](int aFrame, BoneTransform* aOut) { SampleTravPose(b, m, aFrame / m.fps, aOut); });
+    const traversal::contact::Track& t = g_trav.contact;
+    if (!t.valid)
+        return;
+    for (int side = 0; side < 2; ++side)
+        g_travProbe.contactPlant[side] = t.hand[side].valid;
+    double rootMax = 0, legMax = 0;
+    for (const traversal::V3& v : t.root)
+        rootMax = std::max(rootMax, traversal::Len(v));
+    for (int side = 0; side < 2; ++side)
+        for (const traversal::V3& v : t.leg[side])
+            legMax = std::max(legMax, traversal::Len(v));
+    g_travProbe.contactRootM = static_cast<float>(rootMax);
+    g_travProbe.contactLegM = static_cast<float>(legMax);
+    if (g_log)
+    {
+        // the game's grab points relative to the top edge point (past the edge / along it / above it) and each hand's own target
+        const motiontrav::GameObstacle& o = g_trav.obstacle;
+        auto rel = [&](const traversal::V3& aP, double (&aOut)[3]) {
+            const traversal::V3 d = aP - t.box.top;
+            aOut[0] = d.x * t.box.facing.x + d.y * t.box.facing.y;
+            aOut[1] = d.x * t.box.facing.y - d.y * t.box.facing.x;
+            aOut[2] = d.z;
+        };
+        double grab[2][3], aim[2][3];
+        rel(o.leftHand, grab[0]);
+        rel(o.rightHand, grab[1]);
+        for (int side = 0; side < 2; ++side)
+        {
+            aim[side][0] = aim[side][1] = aim[side][2] = 0.0;
+            if (t.hand[side].valid)
+                rel(t.hand[side].target, aim[side]);
+        }
+        char line[460];
+        std::snprintf(line, sizeof line,
+                      "UTPP trav contact: depth=%.2f handL=%d-%d handR=%d-%d root=%.2f leg=%.2f gameHands=%d grabL=%.2f,%.2f,%.2f "
+                      "grabR=%.2f,%.2f,%.2f aimL=%.2f,%.2f,%.2f aimR=%.2f,%.2f,%.2f",
+                      t.box.depth, t.hand[0].valid ? t.hand[0].first : -1, t.hand[0].valid ? t.hand[0].last : -1,
+                      t.hand[1].valid ? t.hand[1].first : -1, t.hand[1].valid ? t.hand[1].last : -1, rootMax, legMax, o.hasHands ? 1 : 0,
+                      grab[0][0], grab[0][1], grab[0][2], grab[1][0], grab[1][1], grab[1][2], aim[0][0], aim[0][1], aim[0][2],
+                      aim[1][0], aim[1][1], aim[1][2]);
+        g_log(line);
+    }
 }
 
 // Montage pose from the .utpptrav version 2 P lines (db bone order through travPoseMap), sampled like adapter::SamplePose:
@@ -4148,6 +4259,109 @@ void TravYawBackLocked(Bundle& b, float aDt)
             b.pose[i].q = math::QuatNormalize(math::QuatMul(q, b.pose[i].q));
         }
 #endif
+}
+
+// Root children of the published pose moved by a world offset of the visual root (character frame: entity yaw).
+void TravOffsetRootLocked(Bundle& b, const traversal::V3& aWorld, double aEntityYaw)
+{
+    const traversal::V3 loc = traversal::RotZ(aWorld, -aEntityYaw);
+    for (uint32_t i = kFirstBone; i < b.pose.size(); ++i)
+        if (b.dbParents[i] >= 0 && b.dbParents[i] < static_cast<int32_t>(kFirstBone))
+        {
+            b.pose[i].p.x += static_cast<float>(loc.x);
+            b.pose[i].p.y += static_cast<float>(loc.y);
+            b.pose[i].p.z += static_cast<float>(loc.z);
+        }
+}
+
+// After a hand-back: the offset the last montage frame had from the capsule fades out on the MM frames.
+void TravCarryLocked(Bundle& b, const motionhost::FeedInput& aRaw, float aDt)
+{
+    g_travProbe.carry[0] = g_travProbe.carry[1] = g_travProbe.carry[2] = 0.0f;
+    if (!g_trav.carry.active || g_trav.frame)
+        return;
+    const traversal::V3 v = g_trav.carry.Step(aDt);
+    const double yaw = (std::isfinite(aRaw.playerYawDeg) ? aRaw.playerYawDeg : 0.0f) * static_cast<double>(integ::kDegToRad);
+    TravOffsetRootLocked(b, v, yaw);
+    g_travProbe.carry[0] = static_cast<float>(v.x);
+    g_travProbe.carry[1] = static_cast<float>(v.y);
+    g_travProbe.carry[2] = static_cast<float>(v.z);
+}
+
+void TravTailLogLocked(const char* aWhat, const char* aWhy)
+{
+    if (!g_log)
+        return;
+    char line[256];
+    std::snprintf(line, sizeof line, "UTPP trav tail: %s%s%s pose=%.2f end=%.2f off=%.2f,%.2f,%.2f montage=%s", aWhat,
+                  aWhy[0] ? " reason=" : "", aWhy, static_cast<double>(g_travProbe.poseTime), g_trav.plan.endClipTime,
+                  g_trav.lastOffset.x, g_trav.lastOffset.y, g_trav.lastOffset.z, g_travProbe.montage);
+    g_log(line);
+}
+
+// PSM details a release tail goes on in: the ground states, falling (a short step down) and landing; -1 / 0 = none reported.
+bool TravTailDetail(int aDetail)
+{
+    return aDetail <= 0 || adapter::PsmGround(aDetail) || aDetail == adapter::kPsmFall || adapter::PsmLand(aDetail);
+}
+
+motiontrav::TailInputs TravTailInputsLocked(const motionhost::FeedInput& aRaw, int aDetail)
+{
+    motiontrav::TailInputs in;
+    in.groundOrFall = TravTailDetail(aDetail);
+    in.weaponBusy = g_weaponAction != 0 || adapter::AimingFromFeed(aRaw.psmBlock);
+    in.crouch = adapter::PsmCrouchStance(aDetail);
+    in.newTraversal = g_trav.havePending;
+    in.velX = std::isfinite(aRaw.velWorld[0]) ? aRaw.velWorld[0] : 0.0f;
+    in.velY = std::isfinite(aRaw.velWorld[1]) ? aRaw.velWorld[1] : 0.0f;
+    in.heading = g_trav.tailHeading;
+    const double capZ = aRaw.haveExtra && std::isfinite(aRaw.capsulePos[2]) ? aRaw.capsulePos[2] : g_trav.cap[2];
+    in.capsuleDropM = g_trav.tailCapZ - capZ;
+    in.elapsedS = g_trav.releaseTail.Elapsed();
+    return in;
+}
+
+// The running tail ends before the clip does: the hand-back of this Step fades the offset from here.
+void TravTailEndLocked(const char* aWhy)
+{
+    g_trav.tail = false;
+    g_travProbe.tail = false;
+    g_trav.tailCarryHS = static_cast<float>(g_trav.releaseTail.HorizontalLeftS());
+    std::snprintf(g_travProbe.tailEnd, sizeof g_travProbe.tailEnd, "%s", aWhy);
+    TravTailLogLocked("end", aWhy);
+}
+
+// The game has left its vault / climb (detail no longer 8 / 9). Starts, keeps or ends the release tail of the montage; true =
+// the montage goes on as a tail (this Step is a montage frame), false = the usual hand-back / episode end.
+bool TravReleaseStepLocked(const motionhost::FeedInput& aRaw, int aDetail)
+{
+    const bool travDetail = aDetail == static_cast<int>(motiontrav::GameAction::Climb) ||
+                            aDetail == static_cast<int>(motiontrav::GameAction::Vault);
+    if (!g_trav.tail)
+    {
+        if (!g_travFinishClipOn || travDetail || !g_trav.active || !g_trav.player ||
+            motiontrav::TailTimeLeftS(g_trav.plan, g_travProbe.poseTime) <= kTravRelease.minTailS)
+            return false;
+        const motiontrav::Plan& p = g_trav.plan;
+        g_trav.releaseTail.Begin(p, g_trav.lastOffset, g_travProbe.poseTime, kTravRelease);
+        g_trav.tailCapZ = g_trav.cap[2]; // capsule of the last montage frame
+        g_trav.tailHeading = p.warped[static_cast<size_t>(std::clamp(p.endFrame, 0, static_cast<int>(p.warped.size()) - 1))].yaw;
+        const motiontrav::TailInputs in = TravTailInputsLocked(aRaw, aDetail);
+        if (motiontrav::TailAbortReason(in, kTravRelease)[0])
+            return false; // released into a jump, a slide, a turn, a weapon action ...: hand back (the offset fades)
+        g_trav.tail = true;
+        g_travProbe.tail = true;
+        ++g_travProbe.tails;
+        g_travProbe.tailEnd[0] = 0;
+        TravOwnLocked(g_trav.havePending && TravCanPlanLaterLocked()); // the game's episode is over
+        TravTailLogLocked("start", "");
+        return true;
+    }
+    const char* why = travDetail ? "traversal" : motiontrav::TailAbortReason(TravTailInputsLocked(aRaw, aDetail), kTravRelease);
+    if (!why[0])
+        return true;
+    TravTailEndLocked(why);
+    return false;
 }
 
 // UTPP-MOTION SEAM motionfix (item 4): "UTPP MOTION" trace line through the host logger (g_log = Main.cpp MMTraceLog, the same
@@ -4524,7 +4738,12 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
         for (int k = 0; k < 3; ++k)
             g_trav.cap[k] += (std::isfinite(aRaw.velWorld[k]) ? aRaw.velWorld[k] : 0.0f) * dt;
     const double yaw = (std::isfinite(aRaw.playerYawDeg) ? aRaw.playerYawDeg : 0.0f) * static_cast<double>(integ::kDegToRad);
-    const traversal::V3 off = fr.root.pos - TravV(g_trav.cap);
+    // visual root - capsule: the plan root; during a release tail referenced to the live capsule; plus what an earlier
+    // hand-back still fades out
+    traversal::V3 off = g_trav.tail ? g_trav.releaseTail.Step(g_trav.plan, dt, fr.poseTime) : fr.root.pos - TravV(g_trav.cap);
+    if (!g_trav.tail && g_trav.carry.active)
+        off = off + g_trav.carry.Step(dt);
+    g_trav.lastOffset = off;
     const traversal::V3 loc = traversal::RotZ(off, -yaw); // world -> character frame (entity yaw)
     // review major 2: the warped plan root also turns (owner yaw -> faceYaw = -collisionNormal over the warp windows, plus
     // the clip's own root turn); the montage pose is root-relative, so the root children rotate about the root by
@@ -4550,6 +4769,22 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
             b.pose[i].p.y += static_cast<float>(loc.y);
             b.pose[i].p.z += static_cast<float>(loc.z);
         }
+    // obstacle contact, on the final montage pose in the character frame (world = capsule + RotZ(model, entity yaw)): the
+    // supporting hand rests on the obstacle top and the body stays outside it. A drawn weapon keeps its hand(s).
+    g_trav.lastContact = {};
+    g_travProbe.contactHandW[0] = g_travProbe.contactHandW[1] = 0.0f;
+    if (g_trav.contact.valid && g_travObstacleContactOn)
+    {
+        const ov::PoseOverlay held = b.eval.Machine().overlay;
+        const bool unarmed = held == ov::PoseOverlay::Default || held == ov::PoseOverlay::Injured;
+        const bool allow[2] = {unarmed || held == ov::PoseOverlay::Pistol1H, unarmed};
+        const traversal::contact::Applied applied =
+            traversal::contact::Apply(g_trav.contact, b.contactRig, b.pose.data(), traversal::contact::Space{TravV(g_trav.cap), yaw},
+                                      mr.clipTime, allow, g_trav.hands, dt);
+        g_trav.lastContact = applied.root;
+        for (int side = 0; side < 2; ++side)
+            g_travProbe.contactHandW[side] = static_cast<float>(applied.arm[side].weight);
+    }
     // root motion handed to the v1 tail = the capsule velocity (character frame): the warp above already places the root
     // relative to the capsule, so v1's offset root (animation root motion - capsule motion, sprung back) must not add its
     // own drift on top (montage delta here put the published hips / hand 0.2-0.3 m off the plan root: integ 8f / 8g)
@@ -4571,6 +4806,8 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
     TraceLocked(b, cs, mr, info, f, dt); // UTPP-MOTION SEAM motionfix (item 4): MOTION trace line (montage frame)
     if (fr.done)
     {
+        if (g_trav.tail)
+            TravTailEndLocked("landed");
         g_trav.active = false;
         g_trav.player.reset();
         g_trav.handbackNext = true;
@@ -5700,6 +5937,10 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         // above, hand-in from the published pose): never resumed on re-entry. Mutation 8: kept (stale turn).
         g_trav.yawBackT = -1.0f;
 #endif
+        g_trav.carry.Reset(); // likewise an offset still fading out
+        g_trav.lastOffset = {};
+        g_trav.lastContact = {};
+        g_trav.tailCarryHS = 0.0f;
     }
     // air: AirFeed from SetAirFeed (valid only on the Step it was sent for). Not probed (-2): the last hit, dead-reckoned
     // with the feed vz while airborne; a miss (-1) or landing clears it.
@@ -5716,7 +5957,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     // UTPP-MOTION SEAM trav: traversal state for this PSM detail (Climb 8 / Vault 9)
     const bool travDetail = detail == static_cast<int>(motiontrav::GameAction::Climb) || detail == static_cast<int>(motiontrav::GameAction::Vault);
     bool travHandback = false;
-    if (!travDetail && (g_trav.active || g_trav.yielding || g_trav.handbackNext || g_trav.episode))
+    const bool tailWas = g_trav.tail;
+    const bool travTail = TravReleaseStepLocked(aRaw, detail); // the montage outlives the game's vault / climb
+    if (!travTail && (!travDetail || tailWas) && (g_trav.active || g_trav.yielding || g_trav.handbackNext || g_trav.episode))
     {
         travHandback = g_trav.active || g_trav.handbackNext; // detail left 8 / 9 (montage cut short or just ended)
         TravResetLocked(false); // episode end: OwnsTraversal false
@@ -5724,10 +5967,19 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         TravOwnLocked(true); // mutation 6: ownership outlives the episode
 #endif
     }
-    else if (g_trav.handbackNext)
+    else if (!travTail && g_trav.handbackNext)
     {
         travHandback = true; // montage ended while the detail is still 8 / 9 (v2 MM keeps the episode: still owned)
         g_trav.handbackNext = false;
+    }
+    // the visual root does not snap back onto the capsule; the obstacle root displacement fades out also with the tail off
+    if (travHandback && !reentry && (g_travFinishClipOn || traversal::Len(g_trav.lastContact) > 1e-4))
+    {
+        g_trav.carry.Start(g_travFinishClipOn ? g_trav.lastOffset + g_trav.lastContact : g_trav.lastContact, kTravRelease,
+                           g_trav.tailCarryHS);
+        g_trav.tailCarryHS = 0.0f;
+        g_trav.lastOffset = {};
+        g_trav.lastContact = {};
     }
     if (g_guHandOffEntry)
     {
@@ -5749,10 +6001,10 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         else
         {
             s_mut5Late = false;
-            TravStartLocked();
+            TravStartLocked(b);
         }
 #else
-        TravStartLocked(); // Ok plan -> montage episode, else yielding
+        TravStartLocked(b); // Ok plan -> montage episode, else yielding
 #endif
     }
     if (travDetail && g_trav.yielding)
@@ -6006,6 +6258,29 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     TestApplyMapOverrides(mc);
 #endif
     motion::ChooserState cs = adapter::MapToChooser(f, mc, b.map, ctx); // UTPP-MOTION SEAM trav: not const (JustTraversed)
+    {
+        // finish traversal animations: a flight that starts shortly after a hand-back without a jump plays no take-off clip
+        if (cs.movementMode != 1)
+            g_travFallFlight = false;
+        else if (g_travFallWindowLeft > 0.0f)
+            g_travFallFlight = true;
+        if (cs.psmJump)
+        {
+            g_travFallFlight = false;
+            g_travFallWindowLeft = 0.0f;
+        }
+        cs.fallAfterTraversal = g_travFinishClipOn && g_travFallFlight;
+        if (g_travFallWindowLeft > 0.0f && std::isfinite(dt))
+            g_travFallWindowLeft = std::fmax(0.0f, g_travFallWindowLeft - dt);
+        if (travHandback)
+            g_travFallWindowLeft = kTravFallWindowS;
+        if (reentry || g_trav.active)
+        {
+            g_travFallFlight = false;
+            if (reentry && !travHandback)
+                g_travFallWindowLeft = 0.0f;
+        }
+    }
     g_shooterFrames += b.map.shooterModeActive ? 1u : 0u;
     g_h2Frames += b.map.h2Active ? 1u : 0u;
     g_lastBtSwitch = aRaw.nativeBodyTurnSwitch;
@@ -6031,7 +6306,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         ++g_slideFrames;
     if (AirMut() == 5)
         cs.justLandedLight = cs.justLandedHeavy = false; // mutation 5: landing flags not forwarded
-    if (travDetail && g_trav.active) // UTPP-MOTION SEAM trav: the montage owns this feed (MapToChooser still tracks PSM)
+    if ((travDetail || g_trav.tail) && g_trav.active) // UTPP-MOTION SEAM trav: the montage owns this feed (MapToChooser still tracks PSM)
     {
         b.startTurn.Reset();
         b.root.Reset(aRaw.playerYawDeg * integ::kDegToRad);
@@ -6189,7 +6464,11 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             r.blend.blendTime = kTravBlendOut;
         }
         ++g_travProbe.handbacks;
-        g_trav.noContactLeft = kTravBlendOut; // [P] the leg tail must not lock feet of a pose still blending out
+        // [P] the leg tail must not lock feet of a pose still blending out (nor of one the fading offset still moves)
+        g_trav.noContactLeft = g_trav.carry.active
+                                   ? std::fmax(kTravBlendOut, static_cast<float>(std::fabs(g_trav.carry.from.z) > 0.05
+                                                                                     ? g_trav.carry.zS : 0.0))
+                                   : kTravBlendOut;
         g_trav.yawBack = g_trav.lastYaw; // verifier round 2: the montage's last root-children yaw, turned back after Evaluate
 #if UTPP_MOTION_DRIVER_TRAV_MUTATION == 9
         (void)reentry;
@@ -6636,6 +6915,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     }
 #endif
     TravYawBackLocked(b, dt); // UTPP-MOTION SEAM trav: verifier round 2, handback turn of the last montage root yaw
+    TravCarryLocked(b, aRaw, dt);
     g_airDiag.landBypassArmed = bypassArmed;
     g_airDiag.landBypassConsumed = bypassArmed && !b.eval.IgnoreDeficitArmed();
     g_airDiag.landBypasses += g_airDiag.landBypassConsumed ? 1u : 0u;
@@ -6747,6 +7027,8 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     aOut.clipClass = steer::kClassNone;
     aOut.aimStrafePivot = false;
     aOut.aimStrafe = b.matcher.AimStrafeRotation();
+    // a hand-back offset still lifting (or sinking) the visual root: the ground stages must not pull the feet to the floor
+    aOut.liftedRoot = !g_trav.frame && g_trav.carry.active && std::fabs(g_trav.carry.Value().z) > kLiftedRootM;
     if (g_trav.frame) // UTPP-MOTION SEAM trav: montage frame - root motion = warped plan root, no foot contacts / replant
     {
         aOut.rootVel[0] = g_trav.vel[0];
@@ -7424,6 +7706,18 @@ void SetTraversalRejectedFallback(bool aOn)
 {
     std::lock_guard lock(g_m);
     g_travRejectedFallbackOn = aOn;
+}
+
+void SetTraversalObstacleContact(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_travObstacleContactOn = aOn;
+}
+
+void SetTraversalFinishClip(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_travFinishClipOn = aOn;
 }
 
 // UTPP-MOTION SEAM trav

@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "../src/mm/MotionTraversal.hpp"
+#include "../src/mm/TraversalContact.hpp"
 
 using namespace utpp::mm::traversal;
 using namespace utpp::mm::traversal::v2;
@@ -878,6 +879,17 @@ static void RecordedStations(const DecisionTable& aT, const TraversalFile& aF, c
             }
             if (st.climb)
             {
+                // jump start by height: the start moves on towards the height the capsule already has (never earlier than the
+                // distance-aligned start, never past the FrontLedge window)
+                Config byDistance;
+                byDistance.jumpStartByHeight = false;
+                const Plan d = PlanTraversal(aT, aF, k.o, k.c, GameTweaks{}, byDistance);
+                Check(d.result == StartResult::Ok && d.montage == p.montage && d.heightStartFrames == 0 &&
+                          p.startFrame >= d.startFrame && p.startFrame - d.startFrame == p.heightStartFrames,
+                      tag + ": jump start by height " + std::to_string(p.startFrame) + " vs by distance " + std::to_string(d.startFrame));
+                std::printf("%s station [%s]: start frame by distance %d, by height %d (rise %.2f m), warp-added %.3f -> %.3f\n",
+                            aRig, k.tag.c_str(), d.startFrame, p.startFrame, k.c.pos.z - k.c.takeoffZ, d.gateWarpAdded,
+                            p.gateWarpAdded);
                 Check(m60.durErr <= 1.0 / 60.0 + 1e-9, tag + ": hand-back time differs from the game climb time");
                 Check(m60.destErr <= kDestMax, tag + ": does not end on the game destination");
                 // a capsule that is not rising (falling / unknown) keeps the airborne catch row as the direct evaluation
@@ -996,6 +1008,87 @@ static void DropVault(const DecisionTable& aT, const TraversalFile& aF, const ch
         const Plan v = PlanTraversal(aT, aF, veh.o, veh.c, GameTweaks{}, on);
         Check(v.result == StartResult::Unsupported && std::string(v.reason) == "vehicle", tag + ": vehicle rule first");
     }
+}
+
+// Release tail and offset fade (finish traversal animations) on a running vault and a drop vault.
+static void ReleaseRules(const DecisionTable& aT, const TraversalFile& aF, const char* aRig)
+{
+    const std::string r(aRig);
+    const ReleaseConfig rc;
+    const Case k = MakeVault(1.0, 0.3, 0.0, 3.9, 0.8, 0.0);
+    const Plan p = PlanTraversal(aT, aF, k.o, k.c, GameTweaks{}, Config{});
+    Check(p.result == StartResult::Ok && p.montage && !p.dropBehind, r + " release: running vault plan");
+    if (p.result == StartResult::Ok && p.montage)
+    {
+        // the game releases 0.1 s before the end, the capsule 0.2 m behind and 0.4 m under the plan root
+        const double fps = p.montage->fps, t0 = p.endClipTime - 0.1;
+        const V3 atRelease{0.05, -0.2, motion_detail::Sample(p.warped, t0 * fps).pos.z -
+                                           motion_detail::Sample(p.warped, p.endClipTime * fps).pos.z + 0.1};
+        Check(TailTimeLeftS(p, t0) > rc.minTailS && TailTimeLeftS(p, p.endClipTime) < 1e-6, r + " release: tail time left");
+        ReleaseTail tail;
+        tail.Begin(p, atRelease, t0, rc);
+        const V3 first = tail.Step(p, 0.0, t0);
+        Check(Len(first - atRelease) < 1e-6, r + " release: the tail starts on the offset of the release");
+        V3 prev = first, last = first;
+        double maxStep = 0, elapsed = 0;
+        for (int i = 1; i <= 12; ++i)
+        {
+            last = tail.Step(p, 1.0 / 60.0, std::min(t0 + i / 60.0, p.endClipTime));
+            maxStep = std::max(maxStep, Len(last - prev));
+            prev = last;
+            elapsed += 1.0 / 60.0;
+        }
+        Check(std::fabs(last.z) < 1e-6 && maxStep < 0.2, r + " release: the height reaches 0 at the end without a step, max " +
+                                                             std::to_string(maxStep));
+        OffsetCarry carry;
+        carry.Start(last, rc, tail.HorizontalLeftS());
+        for (int i = 0; i < 90 && carry.active; ++i)
+        {
+            const V3 v = carry.Step(1.0 / 60.0);
+            maxStep = std::max(maxStep, Len(v - prev));
+            prev = v;
+        }
+        Check(!carry.active && Len(prev) < 1e-6 && maxStep < 0.2, r + " release: the rest fades to zero without a step");
+        std::printf("%s release: offset at release %.3f m, tail + fade max step %.3f m per 1/60 s\n", aRig, Len(atRelease), maxStep);
+    }
+    OffsetCarry big;
+    big.Start({0.0, 0.0, 1.1}, rc);
+    Check(big.active && std::fabs(big.zS - rc.heightFadePerM * 1.1) < 1e-9 && std::fabs(big.Value().z - 1.1) < 1e-9,
+          r + " release: a 1.1 m height left (drop vault) starts unchanged and fades over its length-based time");
+    Plan drop = p;
+    drop.dropBehind = true;
+    Check(TailTimeLeftS(drop, 0.2) == 0.0, r + " release: a drop vault has no tail");
+    TailInputs in;
+    in.velY = 3.9;
+    Check(!TailAbortReason(in, rc)[0], r + " release: running on keeps the tail");
+    auto why = [&](TailInputs x) { return std::string(TailAbortReason(x, rc)); };
+    TailInputs x = in;
+    x.velY = 0.0;
+    x.velX = 3.9;
+    Check(why(x) == "turn", r + " release: a 90 degree turn ends the tail");
+    x = in;
+    x.velY = 0.0;
+    Check(why(x).empty(), r + " release: standing still keeps the tail");
+    x = in;
+    x.groundOrFall = false;
+    Check(why(x) == "movement", r + " release: a jump / slide ends the tail");
+    x = in;
+    x.weaponBusy = true;
+    Check(why(x) == "weapon", r + " release: a weapon action ends the tail");
+    x = in;
+    x.crouch = true;
+    Check(why(x) == "crouch", r + " release: crouching ends the tail");
+    x = in;
+    x.newTraversal = true;
+    Check(why(x) == "traversal", r + " release: a new traversal ends the tail");
+    x = in;
+    x.capsuleDropM = 0.2;
+    Check(why(x).empty(), r + " release: a 0.2 m step down keeps the tail");
+    x.capsuleDropM = 0.6;
+    Check(why(x) == "fall", r + " release: a 0.6 m fall ends the tail");
+    x = in;
+    x.elapsedS = rc.maxTailS + 0.01;
+    Check(why(x) == "time", r + " release: the tail is bounded in time");
 }
 
 static void LegacyIdentity(const DecisionTable& aT, const TraversalFile& aF, const char* aRig, int aRigIdx)
@@ -1137,6 +1230,93 @@ static void Mutations(const DecisionTable& aT, const TraversalFile& aF)
     }
 }
 
+// Obstacle contact (TraversalContact.hpp) on synthetic input: the box model, the way out of it, the curve smoothing and the
+// limits of the two-bone solve.
+static void ObstacleContactRules()
+{
+    namespace tc = utpp::mm::traversal::contact;
+    namespace um = utpp::mm::math;
+    GameObstacle o;
+    o.action = GameAction::Vault;
+    o.topPoint = {0, 1, 1};
+    o.collisionNormal = {0, -1, 0};
+    o.topExtent = 0.2;
+    o.obstacleEnd = {0, 1.5, 1};
+    const tc::Box vault = tc::MakeBox(o, 0.0);
+    o.action = GameAction::Climb;
+    o.obstacleEnd = {0, 9, 1};
+    o.topExtent = 2.0;
+    const tc::Box climb = tc::MakeBox(o, 0.0);
+    Check(vault.valid && std::fabs(vault.depth - 0.5) < 1e-9 && std::fabs(climb.depth - 2.0) < 1e-9 && vault.bottomZ <= 0.0,
+          "contact box: a vault reaches the obstacle end, a climb its top extent");
+    Check(tc::Penetration(vault, {0, 1.1, 1.2}, 0.1) == 0.0 && tc::Penetration(vault, {3, 0.7, 0.9}, 0.1) == 0.0 &&
+              tc::Penetration(vault, {0, 1.1, 0.95}, 0.05) > 0.09 && tc::Penetration(vault, {0, 0.95, 0.9}, 0.1) > 0.049,
+          "contact penetration: outside above and in front 0, inside and touching the face positive");
+    bool cleared = true;
+    for (int iy = 0; iy < 80; ++iy)
+        for (int iz = 0; iz < 45; ++iz)
+        {
+            const double y = 0.85 + 0.01 * iy, z = 0.7 + 0.01 * iz;
+            const V3 p{0, y, z};
+            if (tc::Penetration(vault, p, 0.1) <= 0)
+                continue;
+            const tc::WayOut w = tc::Clearance(vault, p, 0.1);
+            cleared = cleared && tc::Penetration(vault, {0, y, z + w.up}, 0.1) < 1e-6;
+            if (w.back >= 0)
+                cleared = cleared && tc::Penetration(vault, {0, y - w.back, z}, 0.1) < 1e-6;
+        }
+    Check(cleared, "contact clearance: both ways out leave the box");
+    {
+        std::vector<double> raw(30, 0.0);
+        raw[12] = 0.2;
+        raw[13] = 0.18;
+        std::vector<double> v = raw;
+        tc::detail::Smooth(v, tc::kSmoothFrames);
+        bool above = true;
+        double step = 0;
+        for (size_t i = 0; i < v.size(); ++i)
+        {
+            above = above && v[i] >= raw[i] - 1e-9;
+            if (i > 0)
+                step = std::max(step, std::fabs(v[i] - v[i - 1]));
+        }
+        Check(above && step < 0.2 / (2 * tc::kSmoothFrames + 1) + 1e-9 && v[0] == 0.0 && v.back() == 0.0,
+              "contact smoothing: never below the need, no step larger than one window share");
+    }
+    // two-bone limits on a bent chain: root(0,1) -> parent(2) -> upper(3) -> lower(4) -> end(5)
+    const int32_t parents[6] = {-1, 0, 1, 2, 3, 4};
+    tc::Rig rig;
+    rig.n = 6;
+    rig.parents = parents;
+    rig.firstBone = 2;
+    rig.ok = true;
+    const um::Quat id{0, 0, 0, 1};
+    const std::vector<utpp::mm::BoneTransform> base = {{{0, 0, 0}, id},      {{0, 0, 0}, id},         {{0, 0, 1.4f}, id},
+                                                       {{0.2f, 0, 0}, id},   {{0.1f, 0.05f, -0.3f}, id}, {{-0.1f, 0.15f, -0.25f}, id}};
+    const um::Vec3 end0 = tc::ModelOf(rig, base.data(), 5).p;
+    auto inner = [&](const std::vector<utpp::mm::BoneTransform>& aPose) {
+        const um::Vec3 a = tc::ModelOf(rig, aPose.data(), 3).p, b = tc::ModelOf(rig, aPose.data(), 4).p,
+                       c = tc::ModelOf(rig, aPose.data(), 5).p;
+        return tc::AngleDeg(a - b, c - b);
+    };
+    std::vector<utpp::mm::BoneTransform> pose = base;
+    (void)tc::SolveLimb(rig, pose.data(), 3, 4, 5, end0, 1.0, 55.0, 30.0, 0.995f, 0.96f);
+    Check(utpp::mm::legik::Len(tc::ModelOf(rig, pose.data(), 5).p - end0) < 2e-3f, "contact solve: the clip target leaves the limb");
+    pose = base;
+    const um::Vec3 reach = end0 + um::Vec3{0.05f, 0.08f, 0.06f};
+    const tc::LimbResult near1 = tc::SolveLimb(rig, pose.data(), 3, 4, 5, reach, 1.0, 55.0, 30.0, 0.995f, 0.96f);
+    Check(near1.applied && near1.errorM < 0.01 && near1.swingDeg < 55.5, "contact solve: a near target is reached");
+    for (const um::Vec3 far : {um::Vec3{-0.6f, -0.6f, 1.9f}, um::Vec3{0.2f, 0.0f, 1.39f}, um::Vec3{1.5f, 1.0f, 1.0f}})
+    {
+        pose = base;
+        const tc::LimbResult r = tc::SolveLimb(rig, pose.data(), 3, 4, 5, far, 1.0, 55.0, 30.0, 0.995f, 0.96f);
+        const bool lengths = std::fabs(utpp::mm::legik::Len(pose[4].p) - utpp::mm::legik::Len(base[4].p)) < 1e-6f &&
+                             std::fabs(utpp::mm::legik::Len(pose[5].p) - utpp::mm::legik::Len(base[5].p)) < 1e-6f;
+        Check(lengths && (!r.applied || r.swingDeg <= 63.5) && inner(pose) >= std::min(inner(base), 30.0) - 1.5,
+              "contact solve: segment swing and inner angle stay within the limits, bone lengths unchanged");
+    }
+}
+
 int main(int argc, char** argv)
 {
     bool badArg = argc < 4;
@@ -1193,6 +1373,7 @@ int main(int argc, char** argv)
         LegacyIdentity(table, files[i], rigs[i], i);
         StartWindowAndFoot(table, files[i], rigs[i]);
         RecordedStations(table, files[i], rigs[i]);
+        ReleaseRules(table, files[i], rigs[i]);
         DropVault(table, files[i], rigs[i]);
         const char* cn[6] = {"High", "Mid", "Low", "vault", "wide vault", "low hurdle"};
         for (int k = 0; k < 2; ++k)
@@ -1224,6 +1405,7 @@ int main(int argc, char** argv)
                     "%.4f m)\n",
                     rigs[i], tc.noHands, tc.lateral, tv.noHands, tv.lateral, tv.landErr);
     }
+    ObstacleContactRules();
     Mutations(table, files[0]);
     // M6: gate off -> the criteria above must catch the plans the gate rejects (the gate is load-bearing)
     {

@@ -73,6 +73,11 @@
 --   traversal.rejectedFallback bool, default true ("Try other climb animations"; DLL default on, sent with the other
 --                  M.OPTIONS) - when the chosen traversal animation does not fit the obstacle, other ones are tried before the
 --                  game's own animation plays (native UTPPSetMMTraversalRejectedFallback).
+--   traversal.finishClip bool, default true ("Finish vault and climb animations"; DLL default on, sent with the other
+--                  M.OPTIONS) - a vault or climb animation the game ends early plays on until V has landed
+--                  (native UTPPSetMMTraversalFinishClip).
+--   traversal.obstacleContact bool, default true ("Hands and body stay on obstacles") - the supporting hand of a vault or
+--                  climb rests on the obstacle's edge, legs and body are kept outside it (native UTPPSetMMTraversalObstacleContact).
 --   traversal.obstacleReach bool, default true ("Vault and climb from farther away") - a jump press just short of a low obstacle
 --                  waits up to 0.4 s so the game's own vault or climb check can pass (script Game.UTPPSetObstacleReach).
 --   traversal.dropVault bool, default true ("Vault into a drop") - without a floor behind a low obstacle V vaults over it into
@@ -134,7 +139,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, stairSteps = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "wide",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, turnFootPin = true,
   aimRootAccumulate = true, fastTurnExit = true, travJumpStartGround = true, travRejectedFallback = true,
-  travObstacleReach = true, travDropVault = true, steadyAirPicks = true }
+  travFinishClip = true, travObstacleContact = true, travObstacleReach = true, travDropVault = true, steadyAirPicks = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -917,6 +922,8 @@ M.OPTIONS = {
   { want = "fastTurnExit", field = "setFastTurnExit", native = "UTPPSetMMFastTurnExit" },
   { want = "travJumpStartGround", field = "setTravJumpStartGround", native = "UTPPSetMMTraversalJumpStartGround" },
   { want = "travRejectedFallback", field = "setTravRejectedFallback", native = "UTPPSetMMTraversalRejectedFallback" },
+  { want = "travFinishClip", field = "setTravFinishClip", native = "UTPPSetMMTraversalFinishClip" },
+  { want = "travObstacleContact", field = "setTravObstacleContact", native = "UTPPSetMMTraversalObstacleContact" },
   -- script = held by the game scripts, not by the DLL: they act without the motion driver, so they are switched off with it
   { want = "travObstacleReach", field = "setTravObstacleReach", native = "UTPPSetObstacleReach", script = true },
   { want = "travDropVault", field = "setTravDropVault", native = "UTPPSetDropVault", script = true },
@@ -1114,6 +1121,17 @@ function M.RegisterSettings(core)
     desc = "When the chosen climb or vault animation does not fit an obstacle, other ones are tried before the game's own "
       .. "animation plays (default). Off = the game's own animation plays at once.",
     apply = function(v) M.SetOption("travRejectedFallback", v ~= false) end })
+  core.Register({ key = "traversal.finishClip", section = "animation", type = "bool", default = true,
+    label = "Finish vault and climb animations",
+    desc = "The whole vault or climb animation plays until V has landed, also when the game ends the move early; jumping, "
+      .. "turning away or using a weapon still ends it at once (default). A climb straight after a jump starts at the height "
+      .. "V has reached. Off = the animation stops when the game's move ends.",
+    apply = function(v) M.SetOption("travFinishClip", v ~= false) end })
+  core.Register({ key = "traversal.obstacleContact", section = "animation", type = "bool", default = true,
+    label = "Hands and body stay on obstacles",
+    desc = "While V vaults or climbs, the supporting hand rests on the obstacle's edge and V's legs and body are kept out "
+      .. "of the obstacle (default). Off = the vault or climb animation plays without these corrections.",
+    apply = function(v) M.SetOption("travObstacleContact", v ~= false) end })
   core.Register({ key = "traversal.obstacleReach", section = "animation", type = "bool", default = true,
     label = "Vault and climb from farther away",
     desc = "If you press jump while running at a low obstacle that is still a little too far, the jump waits up to 0.4 s so "
