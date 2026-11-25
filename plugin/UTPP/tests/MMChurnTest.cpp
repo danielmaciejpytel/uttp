@@ -46,9 +46,14 @@
 //   churn_aim_strafe_taps_handgun.feed / churn_aim_strafe_taps_rifle.feed (Female 2026-11-24 18:02, weapon aim_moves / aim_strafe_taps;
 //   also run with the Male body): left / right taps 0.35 s apart while aiming at the jog gait; the game counted 15 and 19 changes in 2.8 s
 //   (each tap reversal met the 0.5 s aim pivot gate of the previous pivot: a one-feed loop, then the pivot). Budget 10 = 3.75 per second
-//   (9 / 10 / 10 / 10 with MapConfig::aimPivotRegateDeg and MatcherConfig::strafePivotTailS; no margin left on three of them). The slices
+//   (8 / 8 / 8 / 8 with MapConfig::aimPivotRegateDeg, MatcherConfig::strafePivotTailS and strafePivotTravelEntry; 9 / 10 / 10 / 10 without the travel entry). The slices
 //   set the aim jog answer on every feed (Slice::aimJog, an approximation of the per-feed query of the game script); with the vanilla aim
 //   walk instead the walk pivots hand to a loop before the next tap (13 - 14 changes).
+//   N (MatcherConfig::strafePivotTravelEntry / strafePivotBlendS; the four aimed strafe tap windows): no strafe pivot is picked in its
+//   braking phase (up to 0.4 s before its authored travel reversal, the root still running the old way against the reversed capsule), and the
+//   longest world path of an animated toe while its pick holds that foot's contact stays below 40 cm (Male rifle 60 cm). The picks used to
+//   enter 0.2 s before the reversal and the 0.5 s fade kept the outgoing clip dragging the planted foot: 62 / 65 / 62 / 126 cm with the
+//   ordinary fade (mutation 51), 29 / 29 / 28 / 54 cm with the 0.1 s fade.
 //   L (FootLockConfig::maxSlipOffset): the replay foot lock correction stays below 15.0 cm (the in-game limit) in the keyboard strafe taps (both
 //   bodies), the unarmed walk start, the Male sprint flick and the footlock_*.feed windows (run starts from standing, a start over a capsule that
 //   does not move, a walk-to-run transition: 15.2 - 17.7 cm without the bound; the soft slip lagged a toe running away at 3 - 8 m/s while the lock
@@ -66,6 +71,8 @@
 // 27 no gait return hold, 28 no start upshift hold, 29 reface starts held 0.35 s (check C), 30 no start restart / stalled dwell
 // (check D), 31 the gait return hold's rise test per feed instead of per second (check F), 32 no turn commit (check G and the flick budgets),
 // 33 no heading catch-up (check K), 36 no strafe pivot commit (MatcherConfig::strafePivotTailS; the aimed strafe taps windows 11 - 15 > 10),
+// 50 no strafe pivot travel entry (check N: picks in the braking phase), 51 the ordinary fade into a committed strafe pivot (check N: Male
+// rifle 126 > 60 cm),
 // 34 no turn commit tail (the strafe tap windows; not registered), 37 no downshift defer (not registered),
 // 38 no swept heading step (check M; not registered), 39 no dip hold (sprint_dash dash_back 4 > 3; not registered), 44 no blocked
 // capsule idle (flick_180_sprint cruise (Male, wall) 10 > 6), 45 no loop dwell against a shuffle of the same database (sprint_dash
@@ -94,7 +101,92 @@ struct Window
     bool turnHeld = false; // check G applies: a turn clip picked on the reversal plays through its authored root turn
     int edgeMax = -1;      // check K applies: at most this many clip changes after each digital heading step (-1 = not checked)
     float footPeakCm = -1.0f; // check L applies: the replay foot lock correction stays below this in [t0, t1) (cm, -1 = not checked)
+    float plantSlideCm = -1.0f; // check N applies: the longest planted toe world path stays below this in [t0, t1) (cm, -1 = not checked)
+    bool strafeEntry = false;   // check N applies: no strafe pivot is picked in the braking phase before its travel reversal
 };
+
+// check N (MatcherConfig::strafePivotTravelEntry / strafePivotBlendS): the clip time of the authored travel reversal of a pivot clip with less than
+// 45 deg of root yaw (the strafe pivots), computed here from the database the way the matcher does: the first frame from which the root
+// step, in the clip's first frame, runs along the clip's final travel direction (mean of its last five steps) for three frames. -1 = none.
+float TravelReversalS(const mm::motion::MotionDatabase& aDb, uint32_t aClip)
+{
+    const auto& cl = aDb.Clip(aClip);
+    if (!mm::steer::IsPivot(mm::steer::ClassifyClip(aDb.ClipName(aClip))) || cl.numFrames < 8)
+        return -1.0f;
+    std::vector<double> ax(cl.numFrames), ay(cl.numFrames);
+    double yaw = 0.0;
+    for (uint32_t f = 0; f < cl.numFrames; ++f)
+    {
+        const auto& r = aDb.Root(cl.firstFrame + f);
+        ax[f] = std::cos(yaw) * r.dx - std::sin(yaw) * r.dy;
+        ay[f] = std::sin(yaw) * r.dx + std::cos(yaw) * r.dy;
+        yaw += r.dyaw;
+    }
+    if (!(std::fabs(yaw) < 3.14159265358979 / 4.0))
+        return -1.0f;
+    double fx = 0.0, fy = 0.0;
+    for (uint32_t f = cl.numFrames - 5; f < cl.numFrames; ++f)
+        fx += ax[f], fy += ay[f];
+    const auto along = [&](uint32_t f) { return ax[f] * fx + ay[f] * fy; };
+    for (uint32_t f = 1; f + 3 <= cl.numFrames; ++f)
+        if (along(f - 1) <= 0.0 && along(f) > 0.0 && along(f + 1) > 0.0 && along(f + 2) > 0.0)
+            return static_cast<float>(f) / aDb.Header().fps;
+    return -1.0f;
+}
+// strafe pivot picks in [aT0, aT1) and those that start in the braking phase: up to 0.4 s before the reversal and more than one 30 Hz frame plus
+// the status resolution before the matcher's entry (the reversal - 0.03 s)
+struct StrafeEntries
+{
+    int picks = 0, early = 0;
+    std::string first; // the first early pick: "clip ct (reversal)"
+};
+StrafeEntries FindStrafeEntries(const mm::motion::MotionDatabase& aDb, const FeedFile& aFeed, const std::vector<FrameOut>& aRun, float aT0, float aT1)
+{
+    StrafeEntries r;
+    int32_t clip = -1;
+    for (size_t i = 0; i < aRun.size() && i < aFeed.fr.size(); ++i)
+    {
+        if (!aRun[i].stepped || aRun[i].clip < 0)
+            continue;
+        const float t = aFeed.fr[i].t;
+        if (aRun[i].clip != clip && t >= aT0 && t < aT1)
+        {
+            const float rev = TravelReversalS(aDb, static_cast<uint32_t>(aRun[i].clip));
+            const float ct = aRun[i].clipTime;
+            if (rev > 0.0f && ct < rev + 0.5f)
+            {
+                ++r.picks;
+                if (ct < rev - 0.03f - 1.0f / 30.0f - 0.01f && rev - ct <= 0.4f && !r.early++)
+                    r.first = std::string(aDb.ClipName(static_cast<uint32_t>(aRun[i].clip))) + " ct " + std::to_string(ct) + " (reversal " +
+                              std::to_string(rev) + ")";
+            }
+        }
+        clip = aRun[i].clip;
+    }
+    return r;
+}
+// check N: the longest world path of an animated toe over consecutive frames whose pick holds that foot's contact (>= 0.5; FrameOut::slide of
+// the MetricCtx run), in cm, over the frames in [aT0, aT1)
+float LongestPlantPathCm(const FeedFile& aFeed, const std::vector<FrameOut>& aRun, float aT0, float aT1)
+{
+    float best = 0.0f;
+    for (int side = 0; side < 2; ++side)
+    {
+        float path = 0.0f;
+        for (size_t i = 0; i < aRun.size() && i < aFeed.fr.size(); ++i)
+        {
+            const float t = aFeed.fr[i].t;
+            if (t < aT0 || t >= aT1 || aRun[i].slide[side] < 0.0f)
+            {
+                path = 0.0f;
+                continue;
+            }
+            path += aRun[i].slide[side] * 100.0f;
+            best = std::fmax(best, path);
+        }
+    }
+    return best;
+}
 
 // check G (MatcherConfig::turnCommit): pivot / moving-turn clips (steer::IsPivot / IsMoveTurn) picked in [aT0, aT1) that were replaced before their authored
 // root turn was done (more than 1 deg of root yaw left); aPicks = how many such clips were picked
@@ -467,6 +559,21 @@ int main(int argc, char** argv)
     }
     motiondriver::SetPathsOverride(1, pm);
     motionhost::SetMotionHooks(&kHooks);
+    // check N: the toe world path of the published pose while the pick holds that foot's contact (MetricCtx of the integration test)
+    MetricCtx slideCtx[2];
+    for (int b = 0; b < 2; ++b)
+    {
+        const mm::motion::MotionDatabase& bdb = b ? *dbM : *db;
+        slideCtx[b].rig = b ? &rigM : &rig;
+        slideCtx[b].db = &bdb;
+        for (uint32_t bn = 0; bn < bdb.NumBones(); ++bn)
+        {
+            if (bdb.BoneName(bn) == "LeftToeBase")
+                slideCtx[b].toe[0] = static_cast<int32_t>(bn);
+            if (bdb.BoneName(bn) == "RightToeBase")
+                slideCtx[b].toe[1] = static_cast<int32_t>(bn);
+        }
+    }
 
     const std::vector<Slice> slices = {
         {"churn_slalom.feed", {{"slalom", 118.203f, 126.203f, 16}}},
@@ -521,10 +628,10 @@ int main(int argc, char** argv)
                                             {"kbd_strafe_weave strafe_taps key edges (Male)", 95.75f, 98.65f, 99, false, false, false, 1}}, true},
         // aimed keyboard left / right taps (Female 2026-11-24 18:02, weapon aim_moves / aim_strafe_taps, handgun and rifle; the same feeds once
         // more with the Male body): the game counted 15 and 19 changes in 2.8 s; budget 10 = 3.75 per second
-        {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun)", 265.86f, 268.66f, 10}}, false, true, false, false, -1, true},
-        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle)", 400.81f, 403.61f, 10}}, false, true, false, false, -1, true},
-        {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun, Male body)", 265.86f, 268.66f, 10}}, true, true, false, false, -1, true},
-        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle, Male body)", 400.81f, 403.61f, 10}}, true, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun)", 265.86f, 268.66f, 10, false, false, false, -1, -1.0f, 40.0f, true}}, false, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle)", 400.81f, 403.61f, 10, false, false, false, -1, -1.0f, 40.0f, true}}, false, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun, Male body)", 265.86f, 268.66f, 10, false, false, false, -1, -1.0f, 40.0f, true}}, true, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle, Male body)", 400.81f, 403.61f, 10, false, false, false, -1, -1.0f, 60.0f, true}}, true, true, false, false, -1, true},
         // Female 2026-11-14 06:48 run flick (game 8 changes in 2.5 s)
         {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 5}}},
         // Female 2026-11-14 12:47 and 11:35, sprint_dash from its settle: the stick swings 90 deg at a run in 0.11 s (at most 32 deg per feed,
@@ -573,7 +680,12 @@ int main(int argc, char** argv)
         dodgeFacingPinned = dodgeFacingPinned || s.dodgeFacingOff;
         const mm::motion::MotionDatabase& sdb = s.man ? *dbM : *db;
         motiondriver::SetAimJogOff(!s.aimJog);
+        bool plantSlide = false;
+        for (const Window& w : s.windows)
+            plantSlide = plantSlide || w.plantSlideCm > 0.0f;
+        g_metrics = plantSlide ? &slideCtx[s.man ? 1 : 0] : nullptr;
         const std::vector<FrameOut> run = RunDriver(s.man ? rigM : rig, f);
+        g_metrics = nullptr;
         motiondriver::SetAimJogOff(true); // the driver's start value
         if (trace)
             for (const Window& w : s.windows)
@@ -689,6 +801,21 @@ int main(int argc, char** argv)
                 std::snprintf(fp, sizeof(fp), "foot lock correction peak %.1f cm over %zu frames (limit %.1f cm)", static_cast<double>(peak), frames,
                               static_cast<double>(w.footPeakCm));
                 Check(frames > 0 && peak < w.footPeakCm, std::string("foot lock peak ") + w.name, fp);
+            }
+            if (w.plantSlideCm > 0.0f)
+            {
+                const float path = LongestPlantPathCm(f, run, w.t0, w.t1);
+                char ps[120];
+                std::snprintf(ps, sizeof(ps), "longest planted toe world path %.1f cm (limit %.1f cm)", static_cast<double>(path),
+                              static_cast<double>(w.plantSlideCm));
+                Check(path > 0.0f && path < w.plantSlideCm, std::string("planted foot slide ") + w.name, ps);
+            }
+            if (w.strafeEntry)
+            {
+                const StrafeEntries se = FindStrafeEntries(sdb, f, run, w.t0, w.t1);
+                const std::string sed = std::to_string(se.picks) + " strafe pivot picks, " + std::to_string(se.early) + " in the braking phase" +
+                                        (se.first.empty() ? std::string() : " (" + se.first + ")");
+                Check(se.picks >= 1 && se.early == 0, std::string("strafe pivot entry ") + w.name, sed);
             }
             if (w.restarts)
             {
