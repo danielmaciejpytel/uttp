@@ -523,6 +523,89 @@ void RealData(const char* aDbPath, const char* aOvPath, const char* aStylePath)
         else
             Check(false, "J: evaluator init");
     }
+    // K) the support hand stays on a two-handed pistol through the clavicle bounds (recording 2026-11-25 01:33:16: aimed slide, hands
+    // 28 - 32 cm apart instead of about 7): crouch idle loop with Pistol2H aim for 2 s, then the feet-out slide clip with the aim kept. The
+    // slide (into, 1.5 s of the loop, out to the crouch idle) engages the clavicle bounds; the left hand joint stays within 2 cm of its
+    // settled crouch-aim distance to the right hand.
+    {
+        const int idle = FindClip(*db, "M_Neutral_Crouch_Idle_Loop");
+        const int seq[3] = {FindClip(*db, "M_Neutral_Slide_FootOut_Into_Lfoot"), FindClip(*db, "M_Neutral_Slide_FootOut_Loop"),
+                            FindClip(*db, "M_Neutral_Slide_FootOut_Out_Idle_Crouch")};
+        const int slide = std::min({seq[0], seq[1], seq[2]});
+        Check(idle >= 0 && slide >= 0, "K: crouch idle loop and feet-out slide clips found");
+        int lh = -1, rh = -1;
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            lh = db->BoneName(i) == "LeftHand" ? static_cast<int>(i) : lh;
+            rh = db->BoneName(i) == "RightHand" ? static_cast<int>(i) : rh;
+        }
+        auto ev = std::make_unique<motionpose::PoseEvaluator>();
+        if (idle >= 0 && slide >= 0 && lh >= 0 && rh >= 0 && ev->Init(db.get(), ovf.get(), &style, 2, err))
+        {
+            const auto model = [&](const std::vector<BoneTransform>& aPose, int aBone) {
+                Vec3 p = aPose[static_cast<size_t>(aBone)].p; // in the parent's frame
+                for (int b = db->BoneParent(static_cast<uint32_t>(aBone)); b >= 0; b = db->BoneParent(static_cast<uint32_t>(b)))
+                    p = math::QuatRotate(math::QuatNormalize(aPose[static_cast<size_t>(b)].q), p) + aPose[static_cast<size_t>(b)].p;
+                return p;
+            };
+            motionpose::OverlayFrameInputs in;
+            in.machine.overlay = PoseOverlay::Pistol2H;
+            in.machine.style = Style::Feminine;
+            in.machine.crouch = true;
+            in.machine.wantsReady = true;
+            in.machine.wantsToAim = true;
+            in.bodyWoman = true;
+            std::vector<BoneTransform> out(n);
+            const float fps = db->Header().fps > 0.0f ? db->Header().fps : 30.0f;
+            const float idleLen = static_cast<float>(db->Clip(static_cast<uint32_t>(idle)).numFrames - 1) / fps;
+            float segLen[3];
+            int segEnd[3];
+            for (int s = 0, end = 120; s < 3; ++s)
+            {
+                segLen[s] = static_cast<float>(db->Clip(static_cast<uint32_t>(seq[s])).numFrames - 1) / fps;
+                end += s == 1 ? 90 : std::max(1, static_cast<int>(segLen[s] * 60.0f));
+                segEnd[s] = end;
+            }
+            const int slideFrames = segEnd[2] - 120;
+            motion::MatchResult m;
+            float settledMax = 0.0f, slideMax = 0.0f, keepErr = 0.0f;
+            int boundFrames = 0, keptFrames = 0;
+            for (int f = 0; f < segEnd[2]; ++f)
+            {
+                const bool sliding = f >= 120;
+                const int s = f < segEnd[0] ? 0 : (f < segEnd[1] ? 1 : 2);
+                const int segStart = s == 0 ? 120 : segEnd[s - 1];
+                const float ts = static_cast<float>(f - segStart) / 60.0f;
+                m.clip = sliding ? seq[s] : idle;
+                m.clipTime = sliding ? (s == 1 ? std::fmod(ts, std::max(segLen[1], 0.1f)) : std::min(segLen[s], ts))
+                                     : std::fmod(static_cast<float>(f) / 60.0f, std::max(idleLen, 0.1f));
+                m.jumped = f == segStart;
+                motionpose::FrameInfo info;
+                ev->Evaluate(1.0f / 60.0f, m, in, out.data(), n, &info);
+                const Vec3 dv = model(out, lh) - model(out, rh);
+                const float d = std::sqrt(math::Dot(dv, dv)) * 100.0f;
+                if (!sliding && f >= 90)
+                    settledMax = std::max(settledMax, d);
+                if (sliding && (info.clavicleLimit.applied || info.clavicleTransient.applied))
+                {
+                    ++boundFrames;
+                    slideMax = std::max(slideMax, d);
+                    keptFrames += info.supportKeep.applied ? 1 : 0;
+                    keepErr = std::max(keepErr, info.supportKeep.handErr * 100.0f);
+                }
+            }
+            std::printf("K: aimed Pistol2H slide: clavicle bounds on %d of %d slide frames, support hand re-solved on %d, hand joints %.1f cm apart"
+                        " (settled crouch aim %.1f cm), re-solve error max %.2f cm\n",
+                        boundFrames, slideFrames, keptFrames, static_cast<double>(slideMax), static_cast<double>(settledMax),
+                        static_cast<double>(keepErr));
+            Check(boundFrames > 0, F("K: the aimed slide engages the clavicle bounds (%d frames)", boundFrames));
+            Check(boundFrames > 0 && slideMax <= settledMax + 2.0f,
+                  F("K: the support hand stays on the pistol through the bounds: hand joints %.1f cm apart (settled aim %.1f cm, + 2 cm allowed)",
+                    static_cast<double>(slideMax), static_cast<double>(settledMax)));
+        }
+        else
+            Check(false, "K: evaluator init / hand bones");
+    }
 }
 
 #ifdef UTPP_CLAVLIMIT_SURVEY

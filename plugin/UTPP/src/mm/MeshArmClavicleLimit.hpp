@@ -511,7 +511,7 @@ inline GirdleResult BoundGirdleWidth(const Skeleton& aSk, const Pose& aOwn, cons
 // put the hands 28 - 32 cm apart instead of 7, the left arm hanging next to the gun.
 // What: CaptureSupportHand stores the left hand in the frame of the right hand before the bounds; KeepSupportHand re-solves the left arm
 // (two-bone IK below the bounded clavicle) so that the left hand is again at that place relative to the right hand, blended by aWeight
-// (the two-handed share of the weapon poses). The right arm, the weapon and the clavicles stay as bounded. A left hand that moved less
+// (MotionPose: the share of the Pistol2H poses x SupportHandOnPistol; rifle poses keep their handguard route). The right arm, the weapon and the clavicles stay as bounded. A left hand that moved less
 // than kSupportKeepMinDriftM relative to the right hand is left bitwise untouched.
 // Mutation UTPP_CLAVLIMIT_MUTATION 8 = never re-solved.
 inline constexpr float kSupportKeepMinDriftM = 0.001f;
@@ -544,6 +544,19 @@ inline SupportHandAnchor CaptureSupportHand(const Skeleton& aSk, const Pose& aPo
     a.relPos = math::QuatRotate(inv, pL - pR);
     a.valid = std::isfinite(a.relRot.x + a.relRot.y + a.relRot.z + a.relRot.w) && std::isfinite(a.relPos.x + a.relPos.y + a.relPos.z);
     return a;
+}
+
+// A support hand holding a pistol sits next to the right hand (aimed / ready poses: hand joints 5 - 12 cm apart); the relaxed pistol carry
+// swings the free left arm 40 - 55 cm away. 1 within kSupportOnPistolFullM, 0 beyond kSupportOnPistolNoneM, linear between.
+inline constexpr float kSupportOnPistolFullM = 0.15f;
+inline constexpr float kSupportOnPistolNoneM = 0.25f;
+
+inline float SupportHandOnPistol(const SupportHandAnchor& aAnchor)
+{
+    if (!aAnchor.valid)
+        return 0.0f;
+    const float d = gik::Len(aAnchor.relPos);
+    return Clamp01((kSupportOnPistolNoneM - d) / (kSupportOnPistolNoneM - kSupportOnPistolFullM));
 }
 
 inline SupportHandKeepResult KeepSupportHand(const Skeleton& aSk, const gik::Rig& aRig, const SupportHandAnchor& aAnchor, float aWeight,

@@ -1,6 +1,6 @@
-﻿# ---- mesh-space arm clavicle limit (src/mm/MeshArmClavicleLimit.hpp): unit + synthetic ComposeLayers + real woman data (PoseEvaluator).
+# ---- mesh-space arm clavicle limit (src/mm/MeshArmClavicleLimit.hpp): unit + synthetic ComposeLayers + real woman data (PoseEvaluator).
 # Included from plugin/UTPP/CMakeLists.txt after motion_pose.cmake (uses its _utpp_pmotion_* paths). Mutation builds MUST print a "FAIL " line:
-# 1 = no limit, 2 = children of the clavicle not compensated, 3 = no shortest-arc (hemisphere) fix, 4 = the transient bound never engages (section I), 6 = the girdle width bound never acts (section J).
+# 1 = no limit, 2 = children of the clavicle not compensated, 3 = no shortest-arc (hemisphere) fix, 4 = the transient bound never engages (section I), 6 = the girdle width bound never acts (section J), 8 = the support hand is not re-solved onto the pistol (section K).
 if(DEFINED _utpp_pmotion_wov AND DEFINED _utpp_pmotion_wdb AND DEFINED _utpp_pmotion_wovdir)
     set(_utpp_clavlimit_args "${_utpp_pmotion_wdb}" "${_utpp_pmotion_wov}" "${_utpp_pmotion_wovdir}/utpp_style_weights_woman.txt")
 else()
@@ -10,7 +10,7 @@ add_executable(utpp_clavicle_limit_test tests/ClavicleLimitTest.cpp src/mm/MeshA
 target_compile_options(utpp_clavicle_limit_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 target_compile_features(utpp_clavicle_limit_test PRIVATE cxx_std_20)
 add_test(NAME utpp_clavicle_limit_test COMMAND utpp_clavicle_limit_test ${_utpp_clavlimit_args})
-foreach(_m 1 2 3 4 6)
+foreach(_m 1 2 3 4 6 8)
     add_executable(utpp_clavicle_limit_mut${_m} tests/ClavicleLimitTest.cpp src/mm/MeshArmClavicleLimit.hpp src/mm/MotionPose.hpp)
     target_compile_options(utpp_clavicle_limit_mut${_m} PRIVATE ${UTPP_WARNINGS} /EHsc)
     target_compile_features(utpp_clavicle_limit_mut${_m} PRIVATE cxx_std_20)

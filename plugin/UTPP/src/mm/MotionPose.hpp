@@ -850,18 +850,20 @@ private:
                 info.clavicleTransient = m_clavTransient.Apply(sk, *m_scratch, m_shootClavL, m_shootClavR, stopFade, aDt, *m_lay);
                 // a bounded clavicle carries its hand with the shoulder joint; in a two-handed weapon pose the left arm is re-solved so
                 // the support hand stays where it was relative to the right hand (aimed slide: 28 - 32 cm apart instead of 7);
-                // weight = share of the two-handed weapon poses (Pistol2H / Rifle, standing or moving)
+                // weight = share of the Pistol2H poses while the support hand is on the pistol before the bounds (the relaxed pistol
+                // carry swings the free left arm, ov::SupportHandOnPistol). Rifle poses stay as before: their support hand goes to the
+                // handguard through the support grip route below (replay of a recorded run: mostly closer, a few pivot frames 2-3 cm off)
                 if (support.valid && (info.clavicleLimit.applied || info.clavicleTransient.applied))
                 {
+                    const float onPistol = ov::SupportHandOnPistol(support);
                     float wAll = 0.0f, w2H = 0.0f;
                     for (int i = 0; i < m_machine.poses.count; ++i)
                     {
                         if (!(m_machine.poses.w[i] > 0.0f))
                             continue;
                         wAll += m_machine.poses.w[i];
-                        const int o = m_machine.poses.key[i] / 12;
-                        if (o == static_cast<int>(ov::PoseOverlay::Pistol2H) || o == static_cast<int>(ov::PoseOverlay::Rifle))
-                            w2H += m_machine.poses.w[i];
+                        if (m_machine.poses.key[i] / 12 == static_cast<int>(ov::PoseOverlay::Pistol2H))
+                            w2H += m_machine.poses.w[i] * onPistol;
                     }
                     info.supportKeep = ov::KeepSupportHand(sk, m_rig, support, wAll > 0.0f ? w2H / wAll : 0.0f, gik::Params{}, *m_lay);
                 }
