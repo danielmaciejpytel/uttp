@@ -537,6 +537,17 @@ CM.DEFAULTS = {
   -- The orbit never goes below vaultRisePitchFloor deg (no rise when the player already looks down that far). Shown pose only:
   -- the look state (res.pitch, the game look write) is unchanged; the collision rays follow the raised boom.
   vaultRise = 0, vaultRiseIn = 0.18, vaultRiseOut = 0.35, vaultRiseHold = 0.75, vaultRisePitchFloor = -50,
+  -- vault into a drop (CM.vaultDropStep): the rise gets vaultDropExtra x vaultRise more, and the episode goes on while V falls,
+  -- when during the vault the floor vaultDropProbes m ahead lies vaultDropDepth m or more under V's start level, or when after
+  -- dropping vaultDropSeen m the view of V's hips (vaultDropHips m over her origin) is blocked from the camera. 0 = off.
+  vaultDropExtra = 1.0, vaultDropDepth = 1.0, vaultDropProbes = { 2.2, 3.2 }, vaultDropSeen = 0.4, vaultDropHips = 0.8,
+  -- side relief (CM.sideReliefStep, on foot, not aiming): when a surface on the shoulder side would shorten the boom below
+  -- sideReliefArm m (or below sideReliefShare of its length), the shoulder offset moves toward the centre first (the factors
+  -- sideReliefSteps, first one with room) and the boom is shortened only for what is left. The room is also checked where the boom
+  -- will be sideReliefAhead s later (V running past a corner). sideReliefIn / Out: smooth times (s); the offset goes back after
+  -- the wider view has been free for sideReliefClear s.
+  sideRelief = true, sideReliefArm = 1.8, sideReliefShare = 0.75, sideReliefSteps = { 0.55, 0.25, 0.0 }, sideReliefAhead = 0.25,
+  sideReliefIn = 0.12, sideReliefOut = 0.35, sideReliefClear = 0.3, sideReliefGain = 0.4,
   -- vehicle (internal constants, not registered settings): own pitch (vehicle hold, traversal, ownPitchHold s
   -- after the game look write turned off) and its glide cap (deg/s); the vehicle release pitch target range (deg);
   -- framing band after the unmount (V's pivot = player + vehFrameHeight m inside [vehFrameLow, vehFrameHigh] of the
@@ -2483,6 +2494,7 @@ function CM.vaultRiseStep(S, cfg, dt, want)
   end
   if want then st.hold = cfg.vaultRiseHold or 0
   else st.hold = math.max(0, st.hold - math.max(dt, 0)) end
+  if st.drop then height = height * (1 + clamp(tonumber(cfg.vaultDropExtra) or 0, 0, 1.5)) end
   local target = (want or st.hold > 0) and height or 0
   local smooth = target > st.x and (cfg.vaultRiseIn or 0.18) or (cfg.vaultRiseOut or 0.35)
   st.x, st.v = CM.smoothDamp(st.x, target, st.v, smooth, dt)
@@ -2491,6 +2503,112 @@ function CM.vaultRiseStep(S, cfg, dt, want)
     return 0
   end
   return math.max(0, st.x)
+end
+
+-- vault into a drop (cfg vaultDrop*): runs before CM.vaultRiseStep. vault = V is in a vault, air = V is in the air,
+-- vel = V's horizontal velocity (m/s, nil = unknown), ray = inp.raycast. Returns want for CM.vaultRiseStep: the vault itself,
+-- and for an episode into a drop also the fall that follows. The finding is latched until the episode ends.
+function CM.vaultDropStep(S, cfg, pos, vel, vault, air, ray)
+  local st = S.vr
+  if (tonumber(cfg.vaultDropExtra) or 0) <= 0 or (tonumber(cfg.vaultRise) or 0) <= 0 then return vault end
+  if st == nil then return vault end -- the episode starts with this frame's CM.vaultRiseStep; probed from the next frame on
+  if st.z0 == nil then st.z0 = pos.z end
+  if not st.drop and ray ~= nil then
+    local speed = vel and math.sqrt(vel.x * vel.x + vel.y * vel.y) or 0
+    if vault and speed > 0.5 then
+      local dx, dy = vel.x / speed, vel.y / speed
+      local high = st.z0 + 1.6
+      local depth = cfg.vaultDropDepth or 1.0
+      for _, d in ipairs(cfg.vaultDropProbes or {}) do
+        local over = v3(pos.x + dx * d, pos.y + dy * d, high)
+        -- the way out to the probe point must be free (a probe starting inside a tall wall sees no floor)
+        if ray(v3(pos.x, pos.y, high), over) == nil
+          and ray(over, v3(over.x, over.y, st.z0 - depth)) == nil then
+          st.drop = "ahead"
+          break
+        end
+      end
+    end
+    if not st.drop and S.lastWorld ~= nil and st.z0 - pos.z >= (cfg.vaultDropSeen or 0.4) then
+      local hips = v3(pos.x, pos.y, pos.z + (cfg.vaultDropHips or 0.8))
+      local d = ray(S.lastWorld, hips)
+      if d ~= nil and d < CM.dist(S.lastWorld, hips) - 0.15 then st.drop = "hidden" end
+    end
+  end
+  -- a fall after a vault into a drop keeps the episode up until the landing (then the hold runs)
+  return vault or (st.drop ~= nil and air == true)
+end
+
+-- room (m) the boom with shoulder offset `side` has from `pivot`: its length, or the first hit minus the margin; and the length.
+-- Two rays: the centre one and the edge ray on the shoulder side (cfg.radius out, as in CM.collisionRays)
+local function sideRoom(cfg, ray, pivot, oyaw, boomPitch, side, dist, height, outward)
+  local off = CM.boomOffset(oyaw, boomPitch, side, dist, height)
+  local len = CM.len(off)
+  local room = len
+  local edge = CM.scale(CM.qrot(CM.qFromYawPitch(oyaw, boomPitch), v3(1, 0, 0)), outward * (cfg.radius or 0))
+  local d = ray(pivot, CM.add(pivot, off))
+  if d ~= nil then room = math.min(room, d - cfg.margin) end
+  d = ray(CM.add(pivot, edge), CM.add(CM.add(pivot, off), edge))
+  if d ~= nil then room = math.min(room, d - cfg.margin) end
+  return math.max(0, room), len
+end
+
+-- side relief (cfg sideRelief*): the factor 0 .. 1 of the shoulder offset for this frame. on = false (aiming, vehicle, ragdoll,
+-- no collision) eases it back to 1. S.sr = { k, v, want, clear } while the offset is not the full one, nil otherwise.
+function CM.sideReliefStep(S, cfg, dt, on, ray, pivot, vel, oyaw, boomPitch, side, dist, height)
+  local st = S.sr
+  local want = 1
+  -- idle (full offset, no collision hit within fullHold s): the room is only checked every fullEvery frames, as the collision's
+  -- edge rays (each ray here is one cast per collision group in the game)
+  if st == nil and S.col.clock - S.col.lastHit >= (cfg.fullHold or 0) then
+    S.srTick = (S.srTick or 0) + 1
+    if S.srTick % math.max(1, cfg.fullEvery or 1) ~= 0 then return 1 end
+  end
+  if on and ray ~= nil and math.abs(side) > 0.15 then
+    local ahead = nil
+    local t = cfg.sideReliefAhead or 0
+    if t > 0 and vel ~= nil and vel.x * vel.x + vel.y * vel.y > 1 then
+      local q = v3(pivot.x + vel.x * t, pivot.y + vel.y * t, pivot.z)
+      if ray(pivot, q) == nil then ahead = q end
+    end
+    local outward = side >= 0 and 1 or -1
+    local function score(k)
+      local room, len = sideRoom(cfg, ray, pivot, oyaw, boomPitch, side * k, dist, height, outward)
+      local needK = math.min(cfg.sideReliefArm or 1.8, (cfg.sideReliefShare or 0.75) * len)
+      if ahead ~= nil and room >= needK then -- the look-ahead rays only for a boom that has room now (it can only lower it)
+        room = math.min(room, (sideRoom(cfg, ray, ahead, oyaw, boomPitch, side * k, dist, height, outward)))
+      end
+      return room, needK
+    end
+    local full, need = score(1)
+    if full < need then
+      local free, best, bestRoom = nil, nil, full + (cfg.sideReliefGain or 0.4)
+      for _, k in ipairs(cfg.sideReliefSteps or {}) do
+        local room, needK = score(k)
+        if room >= needK then free = k; break end
+        if room > bestRoom then best, bestRoom = k, room end
+      end
+      want = free or best or 1 -- no offset helps (a wall behind V): the full offset and the shortened boom
+    end
+  end
+  if st == nil then
+    if want >= 1 then return 1 end
+    st = { k = 1, v = 0, want = 1, clear = 0 }
+    S.sr = st
+  end
+  -- toward the centre at once; back out only after the wider view has been free for sideReliefClear s
+  if want <= st.want then st.want, st.clear = want, 0
+  else
+    st.clear = st.clear + math.max(dt, 0)
+    if not on or st.clear >= (cfg.sideReliefClear or 0) then st.want, st.clear = want, 0 end
+  end
+  local smooth = st.want < st.k and (cfg.sideReliefIn or 0.12) or (cfg.sideReliefOut or 0.35)
+  st.k, st.v = CM.smoothDamp(st.k, st.want, st.v, smooth, dt)
+  if st.want >= 1 and st.k > 0.995 and abs(st.v) < 5e-2 then
+    S.sr = nil
+    return 1
+  end
+  return clamp(st.k, 0, 1)
 end
 
 -- S = CM.newSolver(cfg); in = { dt, playerPos, playerQ, bodyYaw, eyeZ, fppPitch, dyaw, dpitch, freeHeld, moving,
@@ -2507,7 +2625,8 @@ end
 --   of this frame is utpp_bodyturn's adjustTransform override, CM.lookStep env.adjustPending), zoomShare (0..1: share of the
 --   unarmed zoom in the aim pose shown, ZU.w / (A.w + ZU.w); the boom lag of both rule sets blended by it; nil = zoomOnly),
 --   jumpOut (bool: the vehicle exit hold is on, the pivot base follows V with the jump-out landing mode, CM.jumpOutStep; raycast is its
---   ground probe), vault (V is in a vault: the camera rise over obstacles, CM.vaultRiseStep) }
+--   ground probe), vault (V is in a vault: the camera rise over obstacles, CM.vaultRiseStep), sideRelief (true = V is on
+--   foot: CM.sideReliefStep may run) }
 -- returns { world = pos, q = quat, localPos, localQ, fov, yaw, pitch, arm, full, hits, pivot, flip (event|nil), teleport }
 function CM.newSolver(cfg)
   return { cfg = cfg or CM.config(), look = CM.newLook(), pivot = CM.newPivot(), col = CM.newCollision(), fov = nil }
@@ -2637,17 +2756,38 @@ function CM.solve(S, inp)
       if boomPitch > pmax then boomPitch = boomPitch + (pmax - boomPitch) * lw end
     end
   end
+  -- V's horizontal velocity of this frame (vault drop probe, side relief)
+  local vel = nil
+  if prevPos ~= nil and not teleport and dt > 1e-4 then
+    vel = v3((inp.playerPos.x - prevPos.x) / dt, (inp.playerPos.y - prevPos.y) / dt, 0)
+  end
   -- camera rise over obstacles (CM.vaultRiseStep): faded out by the transition, the aim pose and a ragdoll episode; the boom and the
   -- shown pitch turn down together (the pivot keeps its place on screen), res.pitch stays the look pitch
-  if teleport then S.vr = nil end
-  local rise, riseTilt = CM.vaultRiseStep(S, cfg, dt, inp.vault == true and ragPhase == nil and not teleport), 0
+  if teleport then S.vr, S.sr, S.lastWorld = nil, nil, nil end
+  local live = ragPhase == nil and not teleport
+  local wantRise = CM.vaultDropStep(S, cfg, inp.playerPos, vel, inp.vault == true and live, inp.air == true and live,
+    cfg.collision and inp.raycast or nil)
+  local rise, riseTilt = CM.vaultRiseStep(S, cfg, dt, wantRise), 0
   rise = rise * ew * (1 - aw) * (1 - ragW)
   if rise > 0 then
     riseTilt = math.min(deg(rise / math.max(dist * ewB, 0.5)), math.max(0, boomPitch - (cfg.vaultRisePitchFloor or -50)))
     boomPitch = boomPitch - riseTilt
     shownPitch = shownPitch - riseTilt
   end
-  local off = CM.boomOffset(oyaw, boomPitch, p.side * (inp.side or 1) * ewB, dist * ewB, p.height * ewB)
+  -- side relief: a surface on the shoulder side moves the offset toward the centre before the boom is shortened
+  local shoulder = p.side * (inp.side or 1) * ewB
+  local reliefK = 1
+  if cfg.sideRelief and cfg.collision and inp.raycast then
+    local on = inp.sideRelief == true and aw <= 0 and ew >= 0.999 and ragPhase == nil and not teleport and not inp.followSnap
+      and inp.colInRate == nil
+    if on or S.sr ~= nil then
+      reliefK = CM.sideReliefStep(S, cfg, dt, on, inp.raycast, pivot, vel, oyaw, boomPitch, shoulder, dist * ewB, p.height * ewB)
+      reliefK = 1 - (1 - reliefK) * (1 - aw) * (1 - ragW)
+    end
+  else
+    S.sr = nil
+  end
+  local off = CM.boomOffset(oyaw, boomPitch, shoulder * reliefK, dist * ewB, p.height * ewB)
   -- ragdoll framing constraint: V's head / pelvis stay inside the safe band of this frame's camera (pivot shift only, see CM.ragdollFrame)
   if ragPhase ~= nil and cfg.ragFrame ~= false and ew >= 0.999 and S.rag ~= nil and S.rag.pelvisW ~= nil then
     local sh = CM.ragdollFrame(cfg, pivot, off, CM.qFromYawPitch(oyaw, shownPitch), S.fov or p.fov, S.rag.pelvisW) or v3(0, 0, 0)
@@ -2697,6 +2837,7 @@ function CM.solve(S, inp)
   -- blend); insideWall = a surface shortened it (arm below the boom of this frame), not only the blend. utpp_camera restores the
   -- vanilla near-camera head hide while inside (on foot)
   local inside = arm < CM.clearance(cfg) - 1e-9
+  S.lastWorld = world
   -- the shown pivot and its velocity (CM.ragdollPivot starts the spring from them)
   do
     local lpv = S.lastPivot
@@ -2713,6 +2854,8 @@ function CM.solve(S, inp)
            shownPitch = shownPitch, -- the pitch of res.q / res.localQ (opitch + the ragdoll boom bias + joPitch); res.pitch stays the look pitch
            joPitch = joPitch, -- the jump-out landing framing tilt included in shownPitch (deg, 0 = none)
            vaultRise = rise, vaultTilt = riseTilt, -- camera rise over obstacles of this frame (m) and its tilt (deg, in shownPitch)
+           vaultDrop = S.vr and S.vr.drop or nil, -- "ahead" | "hidden" while the running rise is the one into a drop
+           sideRelief = reliefK, -- factor of the shoulder offset (1 = the full offset)
            mountShift = mshEv, inside = inside, insideWall = inside and arm < fullLen - 1e-9,
            ragdoll = (ragPhase ~= nil or ragEv ~= nil or ragW > 0) and { phase = ragPhase, ev = ragEv, w = ragW, target = ragTarget } or nil }
 end

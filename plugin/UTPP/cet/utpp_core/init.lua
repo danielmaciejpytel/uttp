@@ -595,7 +595,8 @@ local LAYOUT = {
   -- "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns), then "Quick
   -- straighten after turns" (mm.fastTurnExit, utpp_motion: V runs straight as soon as a turn ends, default on), then
   -- "Steadier jump and landing animations" (mm.steadyAirPicks, utpp_motion, default on)
-  --   Advanced camera options: "Camera rise over obstacles (m)" (camera.vaultRise, utpp_camera, default 0.6; 0 = off). The
+  --   Advanced camera options: "Camera rise over obstacles (m)" (camera.vaultRise, utpp_camera, default 0.6; 0 = off), after
+  -- "Camera collision" the option "Camera moves toward the centre near walls" (camera.sideRelief, default on). The
   -- advanced interaction options end with "Climbing straight after a jump" and "Try other climb animations"
   -- (traversal.jumpStartGround / traversal.rejectedFallback, utpp_motion, both default on), then "Vault and climb from
   -- farther away" and "Vault into a drop" (traversal.obstacleReach / traversal.dropVault, utpp_motion, both default on),
@@ -607,7 +608,8 @@ local LAYOUT = {
                          "mm.headLead", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
                          "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale",
                          "mm.fastTurnExit", "mm.steadyAirPicks", "mm.shoulderWidth", "mm.feminineFigure" } },
-  { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.vaultRise", "camera.collision", "perspective.animate",
+  { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.vaultRise", "camera.collision", "camera.sideRelief",
+                           "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
   { "developer", "frame", { "body.impl", "headGuard.impl" } },
   --   Combat: "Reload animation during Shinobi bonus" (mm.shinobiBonusReload, default off) after the weapon
