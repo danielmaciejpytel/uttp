@@ -2993,6 +2993,7 @@ int main(int argc, char** argv)
 {
     const bool firmFeetAtStart = motionhost::FirmFeet(); // the DLL default, read before the baseline switches it off
     const bool footYawLockAtStart = motionhost::FootYawLock(); // likewise
+    const bool turnFootPinAtStart = motionhost::TurnFootPin(); // likewise
     DriverOptionBaseline();
     utpp::testdefaults::LegacyDriverDefaults(); // scenarios below were tuned with the earlier DLL startup values
     utpp::testdefaults::LegacyHostDefaults();
@@ -3037,6 +3038,7 @@ int main(int argc, char** argv)
     {
         Check(firmFeetAtStart, "firm feet in turns and stops is on at DLL start (menu default mm.firmFeet = true)");
         Check(footYawLockAtStart, "planted foot yaw lock is on at DLL start (menu default mm.footYawLock = true)");
+        Check(!turnFootPinAtStart, "firm pivot foot in turns in place is off at DLL start (menu default mm.turnFootPin = false)");
     }
     int tailUnit = 0; // the tail units are numbered in their original order; unit u belongs to shard u % n
     auto mineTail = [&](int aUnit) { return aUnit % shardCnt == shardIdx; };

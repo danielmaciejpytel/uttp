@@ -130,6 +130,9 @@ public native func UTPPSetMMFirmFeet(on: Bool) -> Bool
 // turns over it, turned about its toe, and follows the animation again only after a large turn. Always true. Keep in sync with
 // MotionDriverNatives.cpp.
 public native func UTPPSetMMFootYawLock(on: Bool) -> Bool
+// Firm pivot foot in turns in place (DLL default off; CET setting mm.turnFootPin): with the firm feet on, the foot V pivots on during a
+// turn in place stays fixed on the ground (the knee may bend a little more). Always true. Keep in sync with MotionDriverNatives.cpp.
+public native func UTPPSetMMTurnFootPin(on: Bool) -> Bool
 // Inertialized weapon pose switch (DLL default off; CET setting mm.overlayInertialSwitch): drawing, holstering or changing the weapon
 // class swaps the weapon pose at once and blends the body without overshoot (arms and hands relative to the chest over 0.2 s; legs,
 // pelvis and root over 0.4 s). Always true. Keep in sync with

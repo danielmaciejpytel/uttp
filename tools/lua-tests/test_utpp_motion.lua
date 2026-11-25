@@ -11,7 +11,7 @@ local function fresh()
 end
 local function mock()
   local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    stride = {}, firm = {}, yawLock = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
+    stride = {}, firm = {}, yawLock = {}, turnPin = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -98,6 +98,10 @@ local function mock()
     setFootYawLock = function(on)
       t.yawLock[#t.yawLock + 1] = on
       return not t.yawLockReject
+    end,
+    setTurnFootPin = function(on)
+      t.turnPin[#t.turnPin + 1] = on
+      return true
     end,
     setWalkSpeed = function(ms)
       t.walk[#t.walk + 1] = ms
@@ -258,6 +262,11 @@ do
     st ~= nil and st.type == "bool" and st.default == false and st.section == "motion" and st.label == "Fit steps to stairs"
     and type(st.desc) == "string" and st.desc:find("speed stays the same", 1, true) ~= nil and v.want.stairSteps == false
     and (function() for _, o in ipairs(v.OPTIONS) do if o.want == "stairSteps" then return o.native == "UTPPSetMMStairSteps" end end return false end)())
+  local tp = defs["mm.turnFootPin"]
+  check("registered mm.turnFootPin: bool, on by default, animation section, label 'Firm pivot foot in turns on the spot'",
+    tp ~= nil and tp.type == "bool" and tp.default == true and tp.section == "animation"
+    and tp.label == "Firm pivot foot in turns on the spot" and type(tp.desc) == "string"
+    and tp.desc:find("stays fixed", 1, true) ~= nil)
   check("registered mm.orientWarp on by default, bool, animation section",
     defs["mm.orientWarp"] ~= nil and defs["mm.orientWarp"].default == true and defs["mm.orientWarp"].type == "bool"
     and defs["mm.orientWarp"].section == "animation")
@@ -745,6 +754,17 @@ do
   t.yawLockReject = false
   v.Sync(t.api)
   check("rejected footYawLock retries", #t.yawLock == 4 and t.yawLock[4] == true and v.rt.optionsApplied.footYawLock == true)
+end
+
+-- mm.turnFootPin (one of M.OPTIONS; DLL default off, menu default on): on is sent once when motion comes on, then only on a change
+do
+  local v, t = fresh(), mock()
+  check("turnFootPin starts on", v.want.turnFootPin == true)
+  v.SetEnabled(true)
+  check("turnFootPin on is sent when motion comes on",
+    v.Sync(t.api) == "enabled" and #t.turnPin == 1 and t.turnPin[1] == true and v.rt.optionsApplied.turnFootPin == true)
+  v.SetOption("turnFootPin", false, t.api)
+  check("turnFootPin switched off is sent once", #t.turnPin == 2 and t.turnPin[2] == false and v.rt.optionsApplied.turnFootPin == false)
 end
 
 -- turn steering is one fixed behaviour of the DLL: no option is registered, and the stored keys of the earlier choice

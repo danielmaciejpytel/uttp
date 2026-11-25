@@ -1531,6 +1531,7 @@ bool g_pelvisPlacementOn = false; // pelvis stage of the foot locker (false = th
 uint64_t g_pelvisTeleports = 0;  // offset-root teleports seen by the pelvis stage
 bool g_firmFeetOn = true;        // firm feet in turns and stops (CET mm.firmFeet, default on; mm/FootLocker.hpp FirmFeetConfig)
 FirmFeetConfig g_firmFeetCfg;    // its limits (SetFirmFeetParams; applied to the foot locker every feed while it is on)
+bool g_turnFootPinOn = false;    // firm pivot foot in turns in place (CET mm.turnFootPin, default off; FirmFeetConfig::turnKneeMargin)
 bool g_footYawLockOn = true;     // planted foot yaw lock (CET mm.footYawLock, default on; mm/FootLocker.hpp FootYawLockConfig)
 // Body height smoothing (mm/BodyHeightRuntime.hpp; option, default on): the stage runs on the animation thread with the drawn height;
 // the feed only publishes its gate (ground locomotion of this feed) and a reset request (teleport, hand-back).
@@ -1902,6 +1903,7 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
         pol.classStop = aCtx.clipClass == steer::kClassStop;
         pol.classIdle = aCtx.clipClass == steer::kClassIdle;
         pol.classTurn = FootSlipGroup(aCtx.clipClass) == 2;
+        pol.classTurnInPlace = g_turnFootPinOn && aCtx.clipClass == steer::kClassTurnInPlace;
         pol.firmFeet = g_firmFeetOn;
         pol.firmGate = g_effGate == 0 && !g_holdActive && aIn.tppActive;
         pol.yawLock = g_footYawLockOn;
@@ -7476,7 +7478,21 @@ bool FirmFeet()
     return g_firmFeetOn;
 }
 
-bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg, float aReleaseSpeed, float aLatchSpeed)
+bool SetTurnFootPin(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    g_turnFootPinOn = aOn; // read at the next feed (switched off: a pinned latch goes back to the firm knee margin there)
+    return true;
+}
+
+bool TurnFootPin()
+{
+    std::lock_guard lock(g_mutex);
+    return g_turnFootPinOn;
+}
+
+bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg, float aReleaseSpeed, float aLatchSpeed,
+                       float aTurnKneeMarginDeg)
 {
     FirmFeetConfig c = g_firmFeetCfg;
     if (!(aLimit < 0.0f)) // a negative value keeps the current one
@@ -7489,6 +7505,8 @@ bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg,
         c.releaseSpeed = aReleaseSpeed;
     if (!(aLatchSpeed < 0.0f))
         c.latchSpeed = aLatchSpeed;
+    if (!(aTurnKneeMarginDeg < 0.0f))
+        c.turnKneeMargin = aTurnKneeMarginDeg * 0.017453293f;
     if (!FirmFeetConfig::Valid(c))
         return false;
     std::lock_guard lock(g_mutex);

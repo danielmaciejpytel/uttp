@@ -154,6 +154,7 @@ return {
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "false",
+    ["mm.turnFootPin"] = "true",
     ["mm.walkToggleSpeed"] = "1.8999999999999999",
     ["mm.weaponUpper"] = "false",
     ["perspective.aiming"] = "\"tpp\"",
@@ -307,10 +308,12 @@ return {
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
     "native UTPPSetMMFootYawLock(true)",
+    "native UTPPSetMMTurnFootPin(true)",
     "native UTPPSetMMOverlayInertialSwitch(true)",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
+    "apply mm.turnFootPin(true,\"ok\")",
     "native UTPPSetStickSpeedMode(1)",
     "native UTPPSetMotionStickSpeedMode(1)",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
@@ -525,6 +528,7 @@ return {
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
+    "apply mm.turnFootPin(true,\"ok\")",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -1996,6 +2000,14 @@ return {
       ["section"] = "animation",
       ["type"] = "bool"
     },
+    ["mm.turnFootPin"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["mm.walkToggleSpeed"] = {
       ["default"] = "1.8999999999999999",
       ["hasApply"] = true,
@@ -2517,6 +2529,7 @@ return {
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "false",
+    ["mm.turnFootPin"] = "true",
     ["mm.walkToggleSpeed"] = "1.8999999999999999",
     ["mm.weaponUpper"] = "false",
     ["perspective.aiming"] = "\"tpp\"",
@@ -2675,6 +2688,7 @@ return {
     "mm.strideWarp",
     "mm.firmFeet",
     "mm.footYawLock",
+    "mm.turnFootPin",
     "mm.stickSpeed",
     "mm.aimAtCrosshair",
     "mm.lean",
@@ -2871,6 +2885,7 @@ return {
     "mm.strideWarp",
     "mm.firmFeet",
     "mm.footYawLock",
+    "mm.turnFootPin",
     "mm.stickSpeed",
     "mm.aimAtCrosshair",
     "mm.lean",
@@ -3057,6 +3072,7 @@ return {
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
+    "apply mm.turnFootPin(true,\"ok\")",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -3253,6 +3269,7 @@ mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
 mm.footYawLock=true\r\
+mm.turnFootPin=true\r\
 mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
@@ -3406,6 +3423,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.strideWarp",
       "mm.firmFeet",
       "mm.footYawLock",
+      "mm.turnFootPin",
       "mm.stickSpeed",
       "mm.aimAtCrosshair"
     },
@@ -3762,6 +3780,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
     ["mm.trace"] = "true",
+    ["mm.turnFootPin"] = "true",
     ["mm.walkToggleSpeed"] = "1.8999999999999999",
     ["mm.weaponUpper"] = "false",
     ["perspective.aiming"] = "\"fpp\"",
@@ -3889,6 +3908,7 @@ mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
 mm.footYawLock=true\r\
+mm.turnFootPin=true\r\
 mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
@@ -4055,6 +4075,7 @@ other.module=42\r\
     "/utpp/animation|switch|mm.strideWarp",
     "/utpp/animation|switch|mm.firmFeet",
     "/utpp/animation|switch|mm.footYawLock",
+    "/utpp/animation|switch|mm.turnFootPin",
     "/utpp/animation|selector|mm.stickSpeed",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",
     "/utpp/bodyturn|switch|bodyturn.aimStrafe",

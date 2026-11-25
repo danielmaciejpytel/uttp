@@ -39,12 +39,13 @@ SETTINGS_MODES = (SETTINGS_AUTHOR, SETTINGS_SHIPPED)
 # Stride matching changes the step length (and so the measured foot slide) of every walk and run: it is pinned so a run always
 # measures the shipped configuration, whatever the player chose in the menu. The stick speed model changes the capsule speed of every
 # partial stick the virtual pad gives: pinned for the same reason (a comparison with a run recorded on the analog model passes
-# mm.stickSpeed = 'analog' as an override). Firm feet, the planted foot yaw lock, body height smoothing, the neutral aim grid and
-# the world aim smoothing change foot placement, the drawn body height and the head / upper body of every walk: pinned for the same
-# reason (--shooter-mode on is the override that lets the neutral aim grid act).
+# mm.stickSpeed = 'analog' as an override). Firm feet, the planted foot yaw lock, the pivot foot pin, body height smoothing, the
+# neutral aim grid and the world aim smoothing change foot placement, the drawn body height and the head / upper body of every walk:
+# pinned for the same reason (--shooter-mode on is the override that lets the neutral aim grid act).
 LOCO_VALUES = (('mm.walkToggleSpeed', 1.9), ('mm.minAnalogWalkSpeed', 0.82), ('mm.stickSpeed', 'fixed'), ('mm.lean', True), ('mm.leanHead', True), ('mm.leanScale', 0.2),
                ('mm.leanHeadScale', 0.2), ('mm.leanCoverage', 'wide'), ('mm.orientWarp', True), ('mm.strideWarp', True),
-               ('mm.footReplant', 'crouch'), ('mm.firmFeet', True), ('mm.footYawLock', True), ('mm.bodyHeightSmooth', True),
+               ('mm.footReplant', 'crouch'), ('mm.firmFeet', True), ('mm.footYawLock', True), ('mm.turnFootPin', True),
+               ('mm.bodyHeightSmooth', True),
                ('mm.neutralAim', True), ('mm.aimWorldSmooth', True), ('bodyturn.aimJog', True),
                ('bodyturn.aimJogSpeed', 3.85), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False),
                ('mm.overlayInertialSwitch', True))

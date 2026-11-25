@@ -73,8 +73,12 @@
 //                       the settings log call MMFirmFeet is applied as well); adds one FIRMFEET line (latches, held updates, of them
 //                       lowered by a leg limit, hand-backs)
 //   --firm-limit L      hold limit (m), --firm-handback V hand-back speed (m/s), --firm-knee D knee fold margin (deg),
-//                       --firm-release V release speed (m/s) and --firm-latch-speed V latch capsule speed (m/s) of the firm feet
+//                       --firm-release V release speed (m/s), --firm-latch-speed V latch capsule speed (m/s) and --firm-turn-knee D
+//                       knee fold margin of a latch in a turn-in-place clip (deg) of the firm feet
 //                       (motionhost::SetFirmFeetParams; not passed = build default)
+//   --foot-lock 0|1     foot locker off / on after --settings-log (motionhost::SetFootLock; off = the animated feet, for inspection)
+//   --turn-foot-pin 0|1 firm pivot foot in turns in place off / on after --settings-log (motionhost::SetTurnFootPin, the
+//                       mm.turnFootPin setting; the settings log call MMTurnFootPin is applied as well)
 //   --foot-yaw-lock 0|1 planted foot yaw lock off / on (motionhost::SetFootYawLock); adds one YAWLOCK line (yaw lock updates, unplants,
 //                       replants, updates held at the correction bound)
 //   --foot-yaw-twist R  twist reduction of the yaw lock (0..0.99), --foot-yaw-corr M its correction bound (m),
@@ -356,6 +360,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
         else if (name == "MMFirmFeet") motionhost::SetFirmFeet(flag(0));
         else if (name == "MMFootYawLock") motionhost::SetFootYawLock(flag(0));
+        else if (name == "MMTurnFootPin") motionhost::SetTurnFootPin(flag(0));
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
@@ -389,6 +394,7 @@ void ApplyLogBaseline()
     motionhost::SetMeleeGuardSetting(false);
     motionhost::SetFirmFeet(false);
     motionhost::SetFootYawLock(false);
+    motionhost::SetTurnFootPin(false);
     motiondriver::SetOverlayInertialSwitch(false);
 }
 // --motion-log: driver trace lines -> file, stamped with the feed time of the feed being stepped
@@ -585,12 +591,14 @@ int main(int argc, char** argv)
     bool capsuleStats = false, airFeed = false, qpcFeed = false, motionLog = false;
     int32_t neutralAim = -1, shooterMode = -1, strideWarp = -1, stickSpeed = -1; // -1 = not passed (the settings log / build default)
     int32_t firmFeet = -1;                     // -1 = not passed
+    int32_t footLock = -1;                     // -1 = not passed
     int32_t footYawLock = -1;                  // -1 = not passed
+    int32_t turnFootPin = -1;                  // -1 = not passed
     float footYawTwist = -1.0f, footYawCorr = -1.0f, footYawUnplant = -1.0f; // < 0 = not passed (build defaults)
     uint64_t yawTotal[4] = {}, yawLast[4] = {}; // --foot-yaw-lock: YAWLOCK counters (summed over the foot locker resets)
     uint64_t firmTotal[4] = {}, firmLast[4] = {}; // --firm-feet: FIRMFEET counters (summed over the foot locker resets)
     // < 0 = not passed (build defaults)
-    float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f;
+    float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f, firmTurnKnee = -1.0f;
     int32_t turnRate = -1;                     // -1 = not passed
     float turnRateMax = -1.0f;                 // < 0 = not passed
     int32_t swivelPole = -1;                   // -1 = not passed
@@ -703,8 +711,12 @@ int main(int argc, char** argv)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--firm-feet") == 0)
             firmFeet = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--foot-lock") == 0)
+            footLock = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--foot-yaw-lock") == 0)
             footYawLock = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--turn-foot-pin") == 0)
+            turnFootPin = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--foot-yaw-twist") == 0)
             footYawTwist = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--foot-yaw-corr") == 0)
@@ -717,6 +729,8 @@ int main(int argc, char** argv)
             firmHandBack = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-knee") == 0)
             firmKnee = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-turn-knee") == 0)
+            firmTurnKnee = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-release") == 0)
             firmRelease = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-latch-speed") == 0)
@@ -963,15 +977,19 @@ int main(int argc, char** argv)
         motiondriver::SetStickSpeedMode(stickSpeed);
     if (firmFeet >= 0)
         motionhost::SetFirmFeet(firmFeet != 0);
+    if (footLock >= 0)
+        motionhost::SetFootLock(footLock != 0);
     if (footYawLock >= 0)
         motionhost::SetFootYawLock(footYawLock != 0);
+    if (turnFootPin >= 0)
+        motionhost::SetTurnFootPin(turnFootPin != 0);
     if ((footYawTwist >= 0.0f || footYawCorr >= 0.0f || footYawUnplant >= 0.0f) &&
         !motionhost::SetFootYawLockParams(footYawTwist, footYawCorr, footYawUnplant >= 0.0f ? footYawUnplant * 0.017453293f : -1.0f))
         return 2;
-    if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f)
+    if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f || firmTurnKnee >= 0.0f)
     {
         // a value not passed keeps the build default (negative)
-        if (!motionhost::SetFirmFeetParams(firmLimit, firmHandBack, firmKnee, firmRelease, firmLatch))
+        if (!motionhost::SetFirmFeetParams(firmLimit, firmHandBack, firmKnee, firmRelease, firmLatch, firmTurnKnee))
             return 2;
     }
     if (turnRate >= 0)
