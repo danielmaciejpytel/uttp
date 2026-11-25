@@ -154,6 +154,29 @@ void Native_FeedTraversalObstacleKind(RED4ext::IScriptable*, RED4ext::CStackFram
                                 std::memory_order_relaxed);
 }
 
+// traversal route options (CET utpp_motion traversal.jumpStartGround / traversal.rejectedFallback; both default on). Logged in
+// the setting-call form.
+void Native_SetMMTraversalJumpStartGround(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    motiondriver::SetTraversalJumpStartGround(on);
+    pluginlog::LogInfo("UTPPSetMMTraversalJumpStartGround(%d) -> 1", on ? 1 : 0);
+    if (aOut)
+        *aOut = true;
+}
+void Native_SetMMTraversalRejectedFallback(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    motiondriver::SetTraversalRejectedFallback(on);
+    pluginlog::LogInfo("UTPPSetMMTraversalRejectedFallback(%d) -> 1", on ? 1 : 0);
+    if (aOut)
+        *aOut = true;
+}
+
 // UTPP-MOTION SEAM trav: UTPPFeedTraversal (scripts/utpp_motion.reds ClimbEvents / VaultEvents OnEnter wraps). Parameter order =
 // the redscript declaration; read in order like the other natives (GetParameter per parameter, then ParamEnd).
 void Native_FeedTraversal(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
@@ -948,6 +971,13 @@ void RegisterNatives()
     f6->flags = flags;
     f6->AddParam("Int32", "kind");
     rtti->RegisterFunction(f6);
+
+    auto* f7 = RED4ext::CGlobalFunction::Create("UTPPSetMMTraversalJumpStartGround", "UTPPSetMMTraversalJumpStartGround",
+                                                &Native_SetMMTraversalJumpStartGround);
+    f7->flags = flags; f7->AddParam("Bool", "on"); f7->SetReturnType("Bool"); rtti->RegisterFunction(f7);
+    auto* f8 = RED4ext::CGlobalFunction::Create("UTPPSetMMTraversalRejectedFallback", "UTPPSetMMTraversalRejectedFallback",
+                                                &Native_SetMMTraversalRejectedFallback);
+    f8->flags = flags; f8->AddParam("Bool", "on"); f8->SetReturnType("Bool"); rtti->RegisterFunction(f8);
 
     // ragdoll R0 probe
     auto* r1 = RED4ext::CGlobalFunction::Create("UTPPRagdollGetUpProbe", "UTPPRagdollGetUpProbe", &Native_RagdollGetUpProbe);

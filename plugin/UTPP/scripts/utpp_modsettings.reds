@@ -351,11 +351,23 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.description", "When V's body turns more than 120 deg within 0.3 s without the mouse, the camera keeps its direction for 0.6 s. No effect with the Game Animations pack.")
   public let camera_followHoldOnFlip: Bool = true;
 
-  // perspective.animate
+  // camera.vaultRise
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Camera")
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "30")
+  @runtimeProperty("ModSettings.displayName", "Camera rise over obstacles (m)")
+  @runtimeProperty("ModSettings.description", "While V jumps over an obstacle at a run or a walk, the camera rises by about this much and keeps looking at her, so the obstacle hides less of her; it comes back down shortly after she lands. Walls and ceilings still stop it. 0 (default) = the camera does not move up. About 0.6 is a good first try.")
+  @runtimeProperty("ModSettings.min", "0.0")
+  @runtimeProperty("ModSettings.max", "1.2")
+  @runtimeProperty("ModSettings.step", "0.1")
+  public let camera_vaultRise: Float = 0.0;
+
+  // perspective.animate
+  @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
+  @runtimeProperty("ModSettings.category", "Camera")
+  @runtimeProperty("ModSettings.category.order", "2")
+  @runtimeProperty("ModSettings.order", "31")
   @runtimeProperty("ModSettings.displayName", "Animated transitions")
   @runtimeProperty("ModSettings.description", "Off: every switch is an instant cut.")
   public let perspective_animate: Bool = true;
@@ -364,7 +376,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Camera")
   @runtimeProperty("ModSettings.category.order", "2")
-  @runtimeProperty("ModSettings.order", "31")
+  @runtimeProperty("ModSettings.order", "32")
   @runtimeProperty("ModSettings.displayName", "Audio listener at the camera")
   @runtimeProperty("ModSettings.description", "The active camera also moves the audio listener.")
   public let camera_audio: Bool = true;
@@ -373,7 +385,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "32")
+  @runtimeProperty("ModSettings.order", "33")
   @runtimeProperty("ModSettings.displayName", "Perspective while aiming")
   @runtimeProperty("ModSettings.description", "Aiming a weapon, throwing a grenade or using arm cyberware. Third person (default): over-the-shoulder aiming. First person: the game's first-person aiming.")
   @runtimeProperty("ModSettings.displayValues.FirstPerson", "First person")
@@ -384,7 +396,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "33")
+  @runtimeProperty("ModSettings.order", "34")
   @runtimeProperty("ModSettings.displayName", "Perspective while aiming with a scope")
   @runtimeProperty("ModSettings.description", "Applies to ranged weapons with a scope installed and to sniper / precision rifles, instead of 'Perspective while aiming'. First person: the scope view cannot be shown over the shoulder. Third person: the scope picture is not rendered. Default: first person.")
   @runtimeProperty("ModSettings.displayValues.FirstPerson", "First person")
@@ -395,7 +407,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "34")
+  @runtimeProperty("ModSettings.order", "35")
   @runtimeProperty("ModSettings.displayName", "Perspective in combat")
   @runtimeProperty("ModSettings.description", "Third person: combat stays in third person (default). First person: combat cuts to first person. Weapons are set separately below.")
   @runtimeProperty("ModSettings.displayValues.ThirdPerson", "Third person")
@@ -406,7 +418,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "35")
+  @runtimeProperty("ModSettings.order", "36")
   @runtimeProperty("ModSettings.displayName", "Perspective with a weapon drawn")
   @runtimeProperty("ModSettings.description", "Third person: a weapon in hand stays in third person (default). First person: first person whenever a weapon is in hand.")
   @runtimeProperty("ModSettings.displayValues.ThirdPerson", "Third person")
@@ -417,7 +429,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "36")
+  @runtimeProperty("ModSettings.order", "37")
   @runtimeProperty("ModSettings.displayName", "Reload animation during Shinobi bonus")
   @runtimeProperty("ModSettings.description", "Short left-hand move to the magazine when a slide or air dash refills the magazine (Shinobi bonus). On by default. No effect with the Game Animations pack.")
   public let mm_shinobiBonusReload: Bool = true;
@@ -426,7 +438,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "37")
+  @runtimeProperty("ModSettings.order", "38")
   @runtimeProperty("ModSettings.displayName", "Use UTPP crosshair")
   @runtimeProperty("ModSettings.description", "Replaces the game's crosshair for ordinary guns with a dot, a spread ring and a black hit / kill marker. Smart weapons, charge weapons, power weapons with their own crosshair and scopes keep the game's crosshair.")
   public let crosshair_impl: Bool = true;
@@ -435,7 +447,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "38")
+  @runtimeProperty("ModSettings.order", "39")
   @runtimeProperty("ModSettings.displayName", "Crosshair colour")
   @runtimeProperty("ModSettings.description", "Colour of the UTPP crosshair's dot and ring. Standard (default): the game's crosshair colour, which also changes over enemies and friends like the game's own crosshair. White, Red, Green, Black: a fixed colour. With Black the shadow and the hit / kill marker turn white so they stay visible.")
   @runtimeProperty("ModSettings.displayValues.Standard", "Standard")
@@ -449,7 +461,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "39")
+  @runtimeProperty("ModSettings.order", "40")
   @runtimeProperty("ModSettings.displayName", "Melee full body")
   @runtimeProperty("ModSettings.description", "Fists only: standing punches, holds and blocks use the whole melee animation, legs included (not arm cyberware). Throws, other melee weapons and arm cyberware keep the game's animation and the locomotion legs. Moving, crouching or in the air the legs keep the locomotion. Off: the legs always keep the locomotion during melee. No effect with the Game Animations pack.")
   public let melee_fullBody: Bool = true;
@@ -458,7 +470,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "40")
+  @runtimeProperty("ModSettings.order", "41")
   @runtimeProperty("ModSettings.displayName", "Melee aim tilt")
   @runtimeProperty("ModSettings.description", "Melee attacks and blocks (fists and the other melee weapons) lean V's upper body toward where you aim (up to 20 degrees up, 35 down, within natural limits), like the body and rifle while aiming a gun. Off: the melee animations play unchanged. No effect with the Game Animations pack.")
   public let melee_aimTilt: Bool = true;
@@ -467,7 +479,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "41")
+  @runtimeProperty("ModSettings.order", "42")
   @runtimeProperty("ModSettings.displayName", "Short scopes count as scoped (FPP)")
   @runtimeProperty("ModSettings.description", "Off (default): a short scope (red dot / 1.5x, e.g. on the Overture revolver) keeps over-the-shoulder aiming; only long, tech and power sniper scopes and sniper rifles use 'Perspective while aiming with a scope'. On: short scopes use that setting too.")
   public let perspective_shortScopeFpp: Bool = false;
@@ -476,7 +488,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "42")
+  @runtimeProperty("ModSettings.order", "43")
   @runtimeProperty("ModSettings.displayName", "Over-the-shoulder aiming")
   @runtimeProperty("ModSettings.description", "When 'Perspective while aiming' is third person: aiming a ranged weapon moves the camera close over the shoulder, V faces the camera direction and the view centre is where the shot goes.")
   public let camera_aim_enabled: Bool = true;
@@ -485,7 +497,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "43")
+  @runtimeProperty("ModSettings.order", "44")
   @runtimeProperty("ModSettings.displayName", "Aim distance (m)")
   @runtimeProperty("ModSettings.min", "0.6")
   @runtimeProperty("ModSettings.max", "2.0")
@@ -496,7 +508,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "44")
+  @runtimeProperty("ModSettings.order", "45")
   @runtimeProperty("ModSettings.displayName", "Aim shoulder offset (m)")
   @runtimeProperty("ModSettings.min", "0.0")
   @runtimeProperty("ModSettings.max", "1.0")
@@ -507,7 +519,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "45")
+  @runtimeProperty("ModSettings.order", "46")
   @runtimeProperty("ModSettings.displayName", "Aim: zoom the FOV")
   @runtimeProperty("ModSettings.description", "On: aiming without a scope narrows the FOV to the weapon's aim FOV. Off (default): the camera only moves over the shoulder.")
   public let camera_aim_zoomFov: Bool = false;
@@ -516,7 +528,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "46")
+  @runtimeProperty("ModSettings.order", "47")
   @runtimeProperty("ModSettings.displayName", "Aim FOV")
   @runtimeProperty("ModSettings.description", "Used when the weapon's own aim FOV (stat AimFOV) cannot be read.")
   @runtimeProperty("ModSettings.min", "30.0")
@@ -528,7 +540,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "47")
+  @runtimeProperty("ModSettings.order", "48")
   @runtimeProperty("ModSettings.displayName", "Aim: swap shoulder at walls")
   @runtimeProperty("ModSettings.description", "A wall within 0.5 m on the shoulder side for 0.3 s moves the aim camera to the other shoulder.")
   public let camera_aim_autoSwap: Bool = true;
@@ -537,7 +549,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "48")
+  @runtimeProperty("ModSettings.order", "49")
   @runtimeProperty("ModSettings.displayName", "Fast return after aiming")
   @runtimeProperty("ModSettings.description", "After aiming (first person) the camera returns over the aim return time and lands behind V's back.")
   public let camera_aimReturn: Bool = true;
@@ -546,7 +558,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "49")
+  @runtimeProperty("ModSettings.order", "50")
   @runtimeProperty("ModSettings.displayName", "Aim return time (s)")
   @runtimeProperty("ModSettings.min", "0.0")
   @runtimeProperty("ModSettings.max", "2.0")
@@ -557,7 +569,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "50")
+  @runtimeProperty("ModSettings.order", "51")
   @runtimeProperty("ModSettings.displayName", "Instant switch for combat / weapons")
   @runtimeProperty("ModSettings.description", "Combat and weapons switch instantly instead of the animated transition.")
   public let perspective_combatCut: Bool = false;
@@ -566,7 +578,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "51")
+  @runtimeProperty("ModSettings.order", "52")
   @runtimeProperty("ModSettings.displayName", "Return delay after combat (s)")
   @runtimeProperty("ModSettings.description", "Time without combat / weapon before third person returns.")
   @runtimeProperty("ModSettings.min", "0.0")
@@ -578,7 +590,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "52")
+  @runtimeProperty("ModSettings.order", "53")
   @runtimeProperty("ModSettings.displayName", "Third person when blocking (melee)")
   @runtimeProperty("ModSettings.description", "Holding aim with a melee weapon or fists is a block, not aiming: the view stays in third person even when 'Perspective while aiming' is First person (that setting then applies to ranged weapons only). Off: blocking counts as aiming.")
   public let perspective_meleeBlockTpp: Bool = true;
@@ -587,7 +599,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Combat")
   @runtimeProperty("ModSettings.category.order", "3")
-  @runtimeProperty("ModSettings.order", "53")
+  @runtimeProperty("ModSettings.order", "54")
   @runtimeProperty("ModSettings.displayName", "First person for takedowns")
   @runtimeProperty("ModSettings.description", "Grapples, takedowns and carrying bodies.")
   public let perspective_takedown: Bool = false;
@@ -596,7 +608,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "54")
+  @runtimeProperty("ModSettings.order", "55")
   @runtimeProperty("ModSettings.displayName", "First person in scenes and dialogues")
   @runtimeProperty("ModSettings.description", "Scenes from the selected tier upwards use the game's first-person view; afterwards the view returns. Off by default: scenes and dialogues stay in third person.")
   public let perspective_scene: Bool = false;
@@ -605,7 +617,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "55")
+  @runtimeProperty("ModSettings.order", "56")
   @runtimeProperty("ModSettings.displayName", "Use UTPP loot view")
   @runtimeProperty("ModSettings.description", "Near lootable items in front of the camera the third-person camera moves closer, which makes them easier to target.")
   public let lootView_impl: Bool = true;
@@ -614,7 +626,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "56")
+  @runtimeProperty("ModSettings.order", "57")
   @runtimeProperty("ModSettings.displayName", "Use UTPP interaction reach")
   @runtimeProperty("ModSettings.description", "In third person, vehicle doors and seats offer their prompt when V stands next to them, and doors, terminals and conversations react to the screen centre instead of an exact look-at line. Reach around V is unchanged; first person is unaffected.")
   public let interactRange_impl: Bool = true;
@@ -623,7 +635,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "57")
+  @runtimeProperty("ModSettings.order", "58")
   @runtimeProperty("ModSettings.displayName", "Use UTPP head look")
   @runtimeProperty("ModSettings.description", "V turns her head (and a little of the chest) towards what the camera looks at while standing or walking in third person.")
   public let headLook_impl: Bool = true;
@@ -632,7 +644,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "58")
+  @runtimeProperty("ModSettings.order", "59")
   @runtimeProperty("ModSettings.displayName", "Look at the camera")
   @runtimeProperty("ModSettings.description", "When the camera is in front of V and looks at her, she looks into the camera.")
   public let headLook_faceCamera: Bool = true;
@@ -641,7 +653,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "59")
+  @runtimeProperty("ModSettings.order", "60")
   @runtimeProperty("ModSettings.displayName", "Use UTPP loot range")
   @runtimeProperty("ModSettings.description", "In third person the loot prompt of containers and bodies follows the camera (screen-centre window, as for dropped items). Reach around V is unchanged.")
   public let lootRange_impl: Bool = true;
@@ -650,7 +662,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "60")
+  @runtimeProperty("ModSettings.order", "61")
   @runtimeProperty("ModSettings.displayName", "Return delay after scenes (s)")
   @runtimeProperty("ModSettings.description", "Time after a scene before third person returns.")
   @runtimeProperty("ModSettings.min", "0.0")
@@ -662,7 +674,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "61")
+  @runtimeProperty("ModSettings.order", "62")
   @runtimeProperty("ModSettings.displayName", "First person at terminals and devices")
   @runtimeProperty("ModSettings.description", "Device zoom, terminals in use, elevators, forcing doors, personal link and breach.")
   public let perspective_interaction: Bool = false;
@@ -671,7 +683,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "62")
+  @runtimeProperty("ModSettings.order", "63")
   @runtimeProperty("ModSettings.displayName", "Return delay after interactions (s)")
   @runtimeProperty("ModSettings.description", "Time after the interaction before third person returns.")
   @runtimeProperty("ModSettings.min", "0.0")
@@ -683,7 +695,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "63")
+  @runtimeProperty("ModSettings.order", "64")
   @runtimeProperty("ModSettings.displayName", "First person in workspots")
   @runtimeProperty("ModSettings.description", "Sitting, leaning and other workspots (released after 5 minutes if the state gets stuck).")
   public let perspective_workspot: Bool = false;
@@ -692,7 +704,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "64")
+  @runtimeProperty("ModSettings.order", "65")
   @runtimeProperty("ModSettings.displayName", "First person on ladders and swimming")
   @runtimeProperty("ModSettings.description", "Off: ladders and swimming stay in third person.")
   public let perspective_traversal: Bool = false;
@@ -701,16 +713,34 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Interactions")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.order", "65")
+  @runtimeProperty("ModSettings.order", "66")
   @runtimeProperty("ModSettings.displayName", "First person while scanning")
   @runtimeProperty("ModSettings.description", "Instant first person while the scanner is open.")
   public let perspective_scanner: Bool = false;
+
+  // traversal.jumpStartGround
+  @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
+  @runtimeProperty("ModSettings.category", "Interactions")
+  @runtimeProperty("ModSettings.category.order", "4")
+  @runtimeProperty("ModSettings.order", "67")
+  @runtimeProperty("ModSettings.displayName", "Climbing straight after a jump")
+  @runtimeProperty("ModSettings.description", "A climb or vault that starts just after a jump uses the same traversal animations as one started from the ground (default). Off = only the animations made for the air, so the game's own climb may play there more often. No effect with the Game Animations pack.")
+  public let traversal_jumpStartGround: Bool = true;
+
+  // traversal.rejectedFallback
+  @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
+  @runtimeProperty("ModSettings.category", "Interactions")
+  @runtimeProperty("ModSettings.category.order", "4")
+  @runtimeProperty("ModSettings.order", "68")
+  @runtimeProperty("ModSettings.displayName", "Try other climb animations")
+  @runtimeProperty("ModSettings.description", "When the chosen climb or vault animation does not fit an obstacle, other ones are tried before the game's own animation plays (default). Off = the game's own animation plays at once. No effect with the Game Animations pack.")
+  public let traversal_rejectedFallback: Bool = true;
 
   // perspective.vehicleKeepTpp
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "66")
+  @runtimeProperty("ModSettings.order", "69")
   @runtimeProperty("ModSettings.displayName", "Third person on vehicle enter / exit")
   @runtimeProperty("ModSettings.description", "Entering from third person stays in third person until seated (then the vehicle camera); leaving a seat returns to third person as the exit starts. Off: the game camera for the whole transition.")
   public let perspective_vehicleKeepTpp: Bool = true;
@@ -719,7 +749,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "67")
+  @runtimeProperty("ModSettings.order", "70")
   @runtimeProperty("ModSettings.displayName", "Start vehicle rides in third person")
   @runtimeProperty("ModSettings.description", "Every vehicle entry starts in a third-person vehicle camera. The vehicle camera key still switches it during the ride, and that choice is not kept after leaving the vehicle.")
   public let vehicle_forceTppOnEnter: Bool = true;
@@ -728,7 +758,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "68")
+  @runtimeProperty("ModSettings.order", "71")
   @runtimeProperty("ModSettings.displayName", "Walk to the car door before getting in")
   @runtimeProperty("ModSettings.description", "When you enter a car, the character first walks to the spot where the enter animation starts, instead of being pulled there in a fraction of a second. Pressing the interact key again, moving the stick against the walk, taking damage or a moving car cancels it. Off = the game's own quick slide. No effect with the Game Animations pack.")
   public let vehicle_approachWalk: Bool = true;
@@ -737,7 +767,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Vehicles")
   @runtimeProperty("ModSettings.category.order", "5")
-  @runtimeProperty("ModSettings.order", "69")
+  @runtimeProperty("ModSettings.order", "72")
   @runtimeProperty("ModSettings.displayName", "Clear the car when jumping out")
   @runtimeProperty("ModSettings.description", "When you jump out of a standing car (double press of the exit key), the character gets a small push away from the car body, so she does not touch the fender on the way down. Off = the game's own jump-out.")
   public let vehicle_jumpOutSidePush: Bool = true;
@@ -746,7 +776,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "70")
+  @runtimeProperty("ModSettings.order", "73")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: steps")
   @runtimeProperty("ModSettings.description", "Third-person zoom steps (aim = step 1, wheel up / down while aiming).")
   @runtimeProperty("ModSettings.min", "1")
@@ -758,7 +788,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "71")
+  @runtimeProperty("ModSettings.order", "74")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: first distance (m)")
   @runtimeProperty("ModSettings.min", "0.6")
   @runtimeProperty("ModSettings.max", "2.0")
@@ -769,7 +799,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "72")
+  @runtimeProperty("ModSettings.order", "75")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: last distance (m)")
   @runtimeProperty("ModSettings.min", "0.6")
   @runtimeProperty("ModSettings.max", "2.0")
@@ -780,7 +810,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "73")
+  @runtimeProperty("ModSettings.order", "76")
   @runtimeProperty("ModSettings.displayName", "Gamepad stick speed")
   @runtimeProperty("ModSettings.description", "Walk or run (default): pushing the stick less than about two thirds of the way makes V walk at a steady walking pace, pushing it further makes her run at full speed, and crouching always uses the full crouch speed, so her feet match the animations. Follows the stick: her speed changes smoothly with how far the stick is pushed, as in the base game. Only on foot in third person; sprinting, aiming, the walk toggle and slowed scenes are unchanged.")
   @runtimeProperty("ModSettings.displayValues.WalkOrRun", "Walk or run")
@@ -791,7 +821,7 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
   @runtimeProperty("ModSettings.category", "Advanced")
   @runtimeProperty("ModSettings.category.order", "6")
-  @runtimeProperty("ModSettings.order", "74")
+  @runtimeProperty("ModSettings.order", "77")
   @runtimeProperty("ModSettings.displayName", "Empty-hands zoom: FPP past last step")
   @runtimeProperty("ModSettings.description", "On: past the last step the view goes to first person and the game's own (Kiroshi) zoom takes over. Off: the wheel stops at the last third-person step.")
   public let camera_zoomUnarmed_fppHandoff: Bool = false;
@@ -827,6 +857,7 @@ public class UTPPModSettings extends IScriptable {
     s += "mm_feminineFigure=" + UTPPMSBool(this.mm_feminineFigure) + "\n";
     s += "camera_idleOrbit=" + UTPPMSBool(this.camera_idleOrbit) + "\n";
     s += "camera_followHoldOnFlip=" + UTPPMSBool(this.camera_followHoldOnFlip) + "\n";
+    s += "camera_vaultRise=" + UTPPMSFloat(this.camera_vaultRise) + "\n";
     s += "perspective_animate=" + UTPPMSBool(this.perspective_animate) + "\n";
     s += "camera_audio=" + UTPPMSBool(this.camera_audio) + "\n";
     s += "perspective_aiming=" + IntToString(EnumInt(this.perspective_aiming)) + "\n";
@@ -863,6 +894,8 @@ public class UTPPModSettings extends IScriptable {
     s += "perspective_workspot=" + UTPPMSBool(this.perspective_workspot) + "\n";
     s += "perspective_traversal=" + UTPPMSBool(this.perspective_traversal) + "\n";
     s += "perspective_scanner=" + UTPPMSBool(this.perspective_scanner) + "\n";
+    s += "traversal_jumpStartGround=" + UTPPMSBool(this.traversal_jumpStartGround) + "\n";
+    s += "traversal_rejectedFallback=" + UTPPMSBool(this.traversal_rejectedFallback) + "\n";
     s += "perspective_vehicleKeepTpp=" + UTPPMSBool(this.perspective_vehicleKeepTpp) + "\n";
     s += "vehicle_forceTppOnEnter=" + UTPPMSBool(this.vehicle_forceTppOnEnter) + "\n";
     s += "vehicle_approachWalk=" + UTPPMSBool(this.vehicle_approachWalk) + "\n";

@@ -624,6 +624,11 @@ bool FeedTraversal(const TraversalEvent& aEv); // false = invalid action / non-f
 // UTPP_TRAV_START_WINDOW_DEFAULT / UTPP_TRAV_LEAD_FOOT_DEFAULT). The lead foot is the foot the shown pose has planted when the event
 // is fed (one contact >= 0.5, the other below; else unknown).
 void SetTraversalStartOptions(bool aStartWindow, bool aLeadFoot);
+// Traversal route options for the next plans, both default on (CET traversal.jumpStartGround / traversal.rejectedFallback):
+// motiontrav::Config::jumpStartAsGround (a climb / vault right after a jump uses the ground rows) and rejectedFallback (after a gate
+// rejection other montages / neighbouring rows are tried). TraversalProbe::startOptions has bit 4 / 8 set while one is off.
+void SetTraversalJumpStartGround(bool aOn);
+void SetTraversalRejectedFallback(bool aOn);
 // UTPP-MOTION SEAM trav (task A, agreed with the runtime session): true while v2 owns the current Climb 8 / Vault 9
 // episode, i.e. it accepted a traversal plan for it. Lock-free (one std::atomic<bool> load, no v2 mutex): the v1 gate
 // ('travRelease', runtime side) calls it inside MMDriver Feed under the v1 g_mutex, before v2's Step of that feed.

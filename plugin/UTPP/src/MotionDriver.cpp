@@ -1012,6 +1012,8 @@ void TravAirTrackLocked(const motionhost::FeedInput& aRaw, float aDt)
 #endif
 bool g_travStartWindowOn = UTPP_TRAV_START_WINDOW_DEFAULT != 0; // SetTraversalStartOptions (motiontrav::Config::clampStartWindow)
 bool g_travLeadFootOn = UTPP_TRAV_LEAD_FOOT_DEFAULT != 0;       // SetTraversalStartOptions (motiontrav::Config::leadFootRow)
+bool g_travJumpStartGroundOn = true;  // SetTraversalJumpStartGround (motiontrav::Config::jumpStartAsGround)
+bool g_travRejectedFallbackOn = true; // SetTraversalRejectedFallback (motiontrav::Config::rejectedFallback)
 TraversalProbe g_travProbe;
 uint64_t g_skipTrav = 0;
 int g_stepDetail = -1; // PSM detail of the last enabled Step (Skip: a yield on the event's detail ends the ownership)
@@ -3941,6 +3943,8 @@ void TravPlanLocked(Bundle& b)
     motiontrav::Config cfg;
     cfg.clampStartWindow = g_travStartWindowOn;
     cfg.leadFootRow = g_travLeadFootOn;
+    cfg.jumpStartAsGround = g_travJumpStartGroundOn;
+    cfg.rejectedFallback = g_travRejectedFallbackOn;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     cfg.forceMontage = g_testForceMontage;
     cfg.gate = g_testTravGate;
@@ -3977,7 +3981,8 @@ void TravPlanLocked(Bundle& b)
     SetVehVaultEvt(o.action == motiontrav::GameAction::Vault && o.kind == 1 && p.result != motiontrav::StartResult::Ok); // vault torso limiter
     g_travProbe.startFrame = p.startFrame;
     g_travProbe.endFrame = p.endFrame;
-    g_travProbe.startOptions = (cfg.clampStartWindow ? 1 : 0) | (cfg.leadFootRow ? 2 : 0);
+    g_travProbe.startOptions = (cfg.clampStartWindow ? 1 : 0) | (cfg.leadFootRow ? 2 : 0) | (cfg.jumpStartAsGround ? 0 : 4) |
+                               (cfg.rejectedFallback ? 0 : 8);
     g_travProbe.leadFoot = c.leadFoot;
     g_travProbe.footRank = p.montage ? motiontrav::StartFootRank(*p.montage, p.startFrame, c.leadFoot) : -1;
     g_travProbe.maxPlanStep = static_cast<float>(p.gatePlanarStep);
@@ -7317,6 +7322,18 @@ void SetTraversalStartOptions(bool aStartWindow, bool aLeadFoot)
     std::lock_guard lock(g_m);
     g_travStartWindowOn = aStartWindow;
     g_travLeadFootOn = aLeadFoot;
+}
+
+void SetTraversalJumpStartGround(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_travJumpStartGroundOn = aOn;
+}
+
+void SetTraversalRejectedFallback(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_travRejectedFallbackOn = aOn;
 }
 
 // UTPP-MOTION SEAM trav

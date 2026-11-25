@@ -86,6 +86,16 @@ local function mock()
       if t.strideError then error("stride warp native failure") end
       return not t.strideReject
     end,
+    setTravJumpStartGround = function(on)
+      t.travJump = t.travJump or {}
+      t.travJump[#t.travJump + 1] = on
+      return true
+    end,
+    setTravRejectedFallback = function(on)
+      t.travFallback = t.travFallback or {}
+      t.travFallback[#t.travFallback + 1] = on
+      return true
+    end,
     setFastTurnExit = function(on)
       t.turnExit[#t.turnExit + 1] = on
       return not t.turnExitReject
@@ -679,6 +689,22 @@ do
     v.want.fastTurnExit == false and v.Sync(t.api) == "enabled" and #t.turnExit == 1 and t.turnExit[1] == false)
   v.SetOption("fastTurnExit", true, t.api)
   check("fastTurnExit switched on is sent once", #t.turnExit == 2 and t.turnExit[2] == true and v.Sync(t.api) == "same" and #t.turnExit == 2)
+end
+
+-- traversal.jumpStartGround / traversal.rejectedFallback (M.OPTIONS; DLL default on): on is sent once when motion comes on,
+-- switching one off is sent once and does not resend the other
+do
+  local v, t = fresh(), mock()
+  v.SetEnabled(true)
+  check("traversal route options start on and are sent when motion comes on",
+    v.want.travJumpStartGround == true and v.want.travRejectedFallback == true and v.Sync(t.api) == "enabled"
+    and #t.travJump == 1 and t.travJump[1] == true and #t.travFallback == 1 and t.travFallback[1] == true)
+  v.SetOption("travJumpStartGround", false, t.api)
+  check("traversal jump start switched off is sent once",
+    #t.travJump == 2 and t.travJump[2] == false and #t.travFallback == 1 and v.Sync(t.api) == "same" and #t.travJump == 2)
+  v.SetOption("travRejectedFallback", false, t.api)
+  check("traversal rejected fallback switched off is sent once",
+    #t.travFallback == 2 and t.travFallback[2] == false and v.Sync(t.api) == "same" and #t.travFallback == 2 and #t.travJump == 2)
 end
 
 -- mm.firmFeet (one of M.OPTIONS; DLL default on): on is sent once when motion comes on, then only on a change

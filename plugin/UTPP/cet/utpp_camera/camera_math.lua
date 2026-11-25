@@ -531,6 +531,12 @@ CM.DEFAULTS = {
   zoomUnarmedEnabled = true, zoomUnarmedSteps = 4, zoomUnarmedDistance = 0.9, zoomUnarmedLastDistance = 0.6,
   zoomUnarmedFov = 45, zoomUnarmedLastFov = 28, zoomUnarmedSide = 0.45, zoomUnarmedBlend = 0.15,
   zoomUnarmedEnterDelay = 0.1, zoomUnarmedFppHandoff = false,
+  -- camera rise over obstacles (setting camera.vaultRise, m; 0 = off, CM.vaultRiseStep): while V vaults, and for vaultRiseHold s
+  -- after it (the landing behind the obstacle; chained vaults stay up), the camera moves up its orbit around the pivot by about
+  -- vaultRise m and keeps looking at the pivot, so V keeps her place in the frame. In / out: critically damped (smooth times, s).
+  -- The orbit never goes below vaultRisePitchFloor deg (no rise when the player already looks down that far). Shown pose only:
+  -- the look state (res.pitch, the game look write) is unchanged; the collision rays follow the raised boom.
+  vaultRise = 0, vaultRiseIn = 0.18, vaultRiseOut = 0.35, vaultRiseHold = 0.75, vaultRisePitchFloor = -50,
   -- vehicle (internal constants, not registered settings): own pitch (vehicle hold, traversal, ownPitchHold s
   -- after the game look write turned off) and its glide cap (deg/s); the vehicle release pitch target range (deg);
   -- framing band after the unmount (V's pivot = player + vehFrameHeight m inside [vehFrameLow, vehFrameHigh] of the
@@ -2465,6 +2471,28 @@ function CM.ragdollRecenter(S, cfg, bodyYaw, dyaw, dpitch)
 end
 
 -- ================================================================ solver (one frame)
+-- camera rise over obstacles: the rise of this frame (m, 0 = none). S.vr = { x = rise, v = velocity, hold = s left } while a rise
+-- is running, nil otherwise (feature off and no vault: nothing is kept and nothing changes). want = V is in a vault this frame.
+function CM.vaultRiseStep(S, cfg, dt, want)
+  local height = clamp(tonumber(cfg.vaultRise) or 0, 0, 1.2)
+  local st = S.vr
+  if st == nil then
+    if not (want and height > 0) then return 0 end
+    st = { x = 0, v = 0, hold = 0 }
+    S.vr = st
+  end
+  if want then st.hold = cfg.vaultRiseHold or 0
+  else st.hold = math.max(0, st.hold - math.max(dt, 0)) end
+  local target = (want or st.hold > 0) and height or 0
+  local smooth = target > st.x and (cfg.vaultRiseIn or 0.18) or (cfg.vaultRiseOut or 0.35)
+  st.x, st.v = CM.smoothDamp(st.x, target, st.v, smooth, dt)
+  if target == 0 and st.x < 1e-3 and abs(st.v) < 1e-2 then
+    S.vr = nil
+    return 0
+  end
+  return math.max(0, st.x)
+end
+
 -- S = CM.newSolver(cfg); in = { dt, playerPos, playerQ, bodyYaw, eyeZ, fppPitch, dyaw, dpitch, freeHeld, moving,
 --   profile (blended), side (shoulder s), w (transition weight), zoom (m), raycast(from, to) -> distance|nil,
 --   crouch (PSM crouch state after CM.stanceFilterStep, pivotSource "capsule"), stanceFast (the last change was a clean in-place
@@ -2479,7 +2507,7 @@ end
 --   of this frame is utpp_bodyturn's adjustTransform override, CM.lookStep env.adjustPending), zoomShare (0..1: share of the
 --   unarmed zoom in the aim pose shown, ZU.w / (A.w + ZU.w); the boom lag of both rule sets blended by it; nil = zoomOnly),
 --   jumpOut (bool: the vehicle exit hold is on, the pivot base follows V with the jump-out landing mode, CM.jumpOutStep; raycast is its
---   ground probe) }
+--   ground probe), vault (V is in a vault: the camera rise over obstacles, CM.vaultRiseStep) }
 -- returns { world = pos, q = quat, localPos, localQ, fov, yaw, pitch, arm, full, hits, pivot, flip (event|nil), teleport }
 function CM.newSolver(cfg)
   return { cfg = cfg or CM.config(), look = CM.newLook(), pivot = CM.newPivot(), col = CM.newCollision(), fov = nil }
@@ -2609,6 +2637,16 @@ function CM.solve(S, inp)
       if boomPitch > pmax then boomPitch = boomPitch + (pmax - boomPitch) * lw end
     end
   end
+  -- camera rise over obstacles (CM.vaultRiseStep): faded out by the transition, the aim pose and a ragdoll episode; the boom and the
+  -- shown pitch turn down together (the pivot keeps its place on screen), res.pitch stays the look pitch
+  if teleport then S.vr = nil end
+  local rise, riseTilt = CM.vaultRiseStep(S, cfg, dt, inp.vault == true and ragPhase == nil and not teleport), 0
+  rise = rise * ew * (1 - aw) * (1 - ragW)
+  if rise > 0 then
+    riseTilt = math.min(deg(rise / math.max(dist * ewB, 0.5)), math.max(0, boomPitch - (cfg.vaultRisePitchFloor or -50)))
+    boomPitch = boomPitch - riseTilt
+    shownPitch = shownPitch - riseTilt
+  end
   local off = CM.boomOffset(oyaw, boomPitch, p.side * (inp.side or 1) * ewB, dist * ewB, p.height * ewB)
   -- ragdoll framing constraint: V's head / pelvis stay inside the safe band of this frame's camera (pivot shift only, see CM.ragdollFrame)
   if ragPhase ~= nil and cfg.ragFrame ~= false and ew >= 0.999 and S.rag ~= nil and S.rag.pelvisW ~= nil then
@@ -2674,6 +2712,7 @@ function CM.solve(S, inp)
            fullLen = fullLen, full = full, hits = hits, pivot = pivot, flip = flip, teleport = teleport, boomPitch = boomPitch,
            shownPitch = shownPitch, -- the pitch of res.q / res.localQ (opitch + the ragdoll boom bias + joPitch); res.pitch stays the look pitch
            joPitch = joPitch, -- the jump-out landing framing tilt included in shownPitch (deg, 0 = none)
+           vaultRise = rise, vaultTilt = riseTilt, -- camera rise over obstacles of this frame (m) and its tilt (deg, in shownPitch)
            mountShift = mshEv, inside = inside, insideWall = inside and arm < fullLen - 1e-9,
            ragdoll = (ragPhase ~= nil or ragEv ~= nil or ragW > 0) and { phase = ragPhase, ev = ragEv, w = ragW, target = ragTarget } or nil }
 end

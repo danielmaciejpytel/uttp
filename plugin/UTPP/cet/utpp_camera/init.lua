@@ -1277,6 +1277,31 @@ local RAG_KNOCK_DETAILED = { [29] = true, [31] = true }
 -- drops so a flicker at the cabin's start / stop does not switch the fast-fall rule. A missing native = no platform (logged once; retried
 -- every 5 s like the ragdoll natives, not every frame: a failing pcall builds an error string).
 local PLATFORM_HOLD = 0.3
+-- Log of the camera rise over obstacles (res.vaultRise / vaultTilt, CM.vaultRiseStep): the line to write this frame or nil.
+-- G.vaultEp = the running episode { peak, tilt, arm = the shortest boom as a share of its full length, vaults }
+function M.VaultRiseLog(G, res, vaultIn, det)
+  local rise = res and res.vaultRise or 0
+  local ep = G.vaultEp
+  if rise <= 0 then
+    if ep == nil then return nil end
+    G.vaultEp = nil
+    return string.format("camera vault rise OFF (vaults %d, peak %.2f m, tilt %.1f deg, shortest boom %.2f of full)",
+      ep.vaults, ep.peak, ep.tilt, ep.arm)
+  end
+  local line = nil
+  if ep == nil then
+    ep = { peak = 0, tilt = 0, arm = 1, vaults = 0 }
+    G.vaultEp = ep
+    line = string.format("camera vault rise ON (LocomotionDetailed %s, pitch %.1f)", tostring(det), res.pitch or 0)
+  end
+  if vaultIn and not ep.inVault then ep.vaults = ep.vaults + 1 end
+  ep.inVault = vaultIn == true
+  ep.peak = math.max(ep.peak, rise)
+  ep.tilt = math.max(ep.tilt, res.vaultTilt or 0)
+  if (res.fullLen or 0) > 1e-3 then ep.arm = math.min(ep.arm, (res.arm or res.fullLen) / res.fullLen) end
+  return line
+end
+
 function M.PlatformRead(G)
   if G.platNaAt ~= nil and (G.clock or 0) < G.platNaAt then return false end
   local ok, on = pcall(function() return Game.UTPPMMOnMovingPlatform() end)
@@ -2067,6 +2092,12 @@ function M.RegisterSettings(core)
       .. "Off: the wheel stops at the last third-person step.", apply = function(v) M.cfg.zoomUnarmedFppHandoff = v end })
   R({ key = "camera.collision", section = "camera", type = "bool", default = true, label = "Camera collision",
     apply = function(v) M.cfg.collision = v end })
+  R({ key = "camera.vaultRise", section = "camera", type = "float", default = 0, min = 0, max = 1.2, step = 0.1,
+    label = "Camera rise over obstacles (m)", format = "%.1f",
+    desc = "While V jumps over an obstacle at a run or a walk, the camera rises by about this much and keeps looking at her, so the "
+      .. "obstacle hides less of her; it comes back down shortly after she lands. Walls and ceilings still stop it. "
+      .. "0 (default) = the camera does not move up. About 0.6 is a good first try.",
+    apply = function(v) M.cfg.vaultRise = v end })
   R({ key = "camera.enterTime", section = "camera", type = "float", default = 0.45, min = 0, max = 2, step = 0.05,
     label = "Enter time (s)", apply = function(v) M.cfg.enterTime = v end })
   R({ key = "camera.exitTime", section = "camera", type = "float", default = 0.35, min = 0, max = 2, step = 0.05,
@@ -4199,6 +4230,10 @@ if type(registerForEvent) == "function" then
         -- the player is in the air (on foot only; nil during a vehicle hold, a climb / vault / ladder and on a moving platform: see air below)
         local platIn = not vh.held and M.PlatformRead(G)
         local airIn, jumpIn = CM.pivotAirInput(det, vh.held, platIn)
+        -- camera rise over obstacles (CM.vaultRiseStep): a running rise is dropped after frames without a solve (first person, menu)
+        if G.vrN ~= (G.updN or 0) - 1 then M.S.vr, G.vaultEp = nil, nil end
+        G.vrN = G.updN
+        local vaultIn = LOCK_GAME_DETAILED[det] == "vault" and not vh.held and not platIn
         res = CM.solve(M.S, {
           ragdoll = ragIn,
           dt = dt, playerPos = ppos, playerQ = playerQ, bodyYaw = bodyYaw,
@@ -4236,6 +4271,7 @@ if type(registerForEvent) == "function" then
           zoomShare = (ZU.w or 0) / math.max((A.w or 0) + (ZU.w or 0), 1e-6),
           mountArm = mshArm, mountKeep = mshKeep, -- mount pivot continuity
           jumpOut = vh.held and vh.exitHold == true, -- jump-out landing: the exit hold arms the pivot's jump-out mode (CM.jumpOutStep)
+          vault = vaultIn, -- camera rise over obstacles (CM.vaultRiseStep)
           -- a hold that still shows the orbit (vehicle mount, before the pull-out override / release): the boom's
           -- pull-in by a car body is rate limited (cfg.vehHoldColRate m/s, 0 = instant)
           -- capped at vehHoldColMountRate on both gate paths (the immediate one ran at 12 m/s while V was still moving), lengthening at vehHoldColLift
@@ -4255,6 +4291,10 @@ if type(registerForEvent) == "function" then
             and (M.cfg.vehHoldColMin or 0) or nil,
         })
         G.last = res
+        do -- one line when the camera starts to rise over an obstacle and one when it is back down (chained vaults = one episode)
+          local line = M.VaultRiseLog(G, res, vaultIn, det)
+          if line then M.Log(line) end
+        end
         G.lastSolve = { n = G.updN or 0, t = G.clock, x = ppos.x, y = ppos.y, z = ppos.z or 0 } -- V's position / clock / update of this solve (mount camera watch)
         do -- pivot speed (xy) and camera turn rate (yaw / pitch) of the solve, for the quiet test above; a running mount pivot blend counts as moving
           local pp, pv = G.pivPrev, res.pivot

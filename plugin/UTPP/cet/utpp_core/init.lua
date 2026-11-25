@@ -103,7 +103,8 @@ M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
   "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale", "mm.fastTurnExit", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
-  "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim" }) do M.PACK_DEPENDENT[k] = true end
+  "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim", "traversal.jumpStartGround",
+  "traversal.rejectedFallback" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
 M.pack = { requested = "utpp", applied = "utpp", pending = false, sent = nil, sentAt = -1e9, safeFor = 0, inSession = false,
@@ -590,13 +591,16 @@ local LAYOUT = {
   -- while aiming on the move" (mm.aimRootAccumulate, utpp_motion: the lower body turns with its steps while aiming, default on), then "Body lean" and
   -- "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns), then "Quick
   -- straighten after turns" (mm.fastTurnExit, utpp_motion: V runs straight as soon as a turn ends, default off)
+  --   Advanced camera options: "Camera rise over obstacles (m)" (camera.vaultRise, utpp_camera, default 0 = off). The
+  -- advanced interaction options end with "Climbing straight after a jump" and "Try other climb animations"
+  -- (traversal.jumpStartGround / traversal.rejectedFallback, utpp_motion, both default on)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
                          "mm.headLead", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
                          "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale",
                          "mm.fastTurnExit", "mm.shoulderWidth", "mm.feminineFigure" } },
-  { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",
+  { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.vaultRise", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
   { "developer", "frame", { "body.impl", "headGuard.impl" } },
   --   Combat: "Reload animation during Shinobi bonus" (mm.shinobiBonusReload, default off) after the weapon
@@ -623,7 +627,7 @@ local LAYOUT = {
                            "headLook.chest", "interactRange.scale", "lootRange.impl", "lootRange.scale", "lootView.zoom",
                            "lootView.radius", "perspective.sceneTier", "perspective.sceneExit", "perspective.interaction",
                            "perspective.interactionExit", "perspective.workspot", "perspective.traversal",
-                           "perspective.scanner" } },
+                           "perspective.scanner", "traversal.jumpStartGround", "traversal.rejectedFallback" } },
   -- Vehicles (vehicle.safeTeleportExit: registered by utpp_vehiclecam)
   --   Release scope: the ragdoll after a car hit is not part of the release (no ragdoll archives are shipped), so
   -- ragdoll.enabled is developer level (not in Mod Settings) and defaults to off
