@@ -1521,6 +1521,8 @@ struct LegContext
     int32_t clip = -1;               // playing clip after the matcher update (-1 none)
     uint8_t clipClass = 0;           // its driver class (g_clipClasses)
     bool stops = false;              // clip class idle / stop (replant Stops profile, loco C1b)
+    bool aimStrafePivot = false;     // a pivot clip plays in aimed strafing (v2 frame, MotionSetFrame::aimStrafePivot)
+    bool aimStrafe = false;          // aimed strafing (v2 frame, MotionSetFrame::aimStrafe)
     float capsuleSpeed = 0.0f;       // m/s, planar capsule speed (after the 0.5.8 query clamp)
     float vz = 0.0f;                 // m/s, capsule vertical velocity
     bool v2 = false; // UTPP-MOTION SEAM the frame is v2-owned (MotionLegContextLocked); always false with v2 off
@@ -1778,6 +1780,8 @@ LegContext MotionLegContextLocked(const MotionSetFrame& aF, const FeedInput& aIn
     c.clip = -1; // UTPP-MOTION SEAM v1 clip / class do not apply
     c.clipClass = aF.clipClass; // actual v2 class, never the frozen v1 clip
     c.stops = aF.stops; // UTPP-MOTION SEAM
+    c.aimStrafePivot = aF.aimStrafePivot;
+    c.aimStrafe = aF.aimStrafe;
     c.v2 = true; // UTPP-MOTION SEAM
     c.cancelStartSupport = aF.cancelStartSupport;
     return c; // UTPP-MOTION SEAM
@@ -1906,6 +1910,8 @@ void ApplyLegPipelineLocked(std::span<const BoneTransform> aPose, const LegConte
         pol.classTurnInPlace = g_turnFootPinOn && aCtx.clipClass == steer::kClassTurnInPlace;
         pol.firmFeet = g_firmFeetOn;
         pol.firmGate = g_effGate == 0 && !g_holdActive && aIn.tppActive;
+        pol.aimStrafePivot = aCtx.aimStrafePivot;
+        pol.aimStrafe = aCtx.aimStrafe;
         pol.yawLock = g_footYawLockOn;
         if (g_firmFeetOn)
             g_footLock.SetFirmFeetConfig(g_firmFeetCfg);
@@ -7492,7 +7498,7 @@ bool TurnFootPin()
 }
 
 bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg, float aReleaseSpeed, float aLatchSpeed,
-                       float aTurnKneeMarginDeg)
+                       float aTurnKneeMarginDeg, float aStrafeLatchSpeed, float aStrafeLimit)
 {
     FirmFeetConfig c = g_firmFeetCfg;
     if (!(aLimit < 0.0f)) // a negative value keeps the current one
@@ -7507,6 +7513,10 @@ bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg,
         c.latchSpeed = aLatchSpeed;
     if (!(aTurnKneeMarginDeg < 0.0f))
         c.turnKneeMargin = aTurnKneeMarginDeg * 0.017453293f;
+    if (!(aStrafeLatchSpeed < 0.0f))
+        c.strafeLatchSpeed = aStrafeLatchSpeed;
+    if (!(aStrafeLimit < 0.0f))
+        c.strafeLimit = aStrafeLimit;
     if (!FirmFeetConfig::Valid(c))
         return false;
     std::lock_guard lock(g_mutex);

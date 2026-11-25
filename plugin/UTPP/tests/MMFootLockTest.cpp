@@ -2091,6 +2091,45 @@ static void SectionFirmFeet(const Database& db)
         Expect(fast ? "(ff6) no latch on a capsule above latchSpeed" : "(ff6) latch on a capsule below latchSpeed", fast ? n == 0 : n >= 1,
                Fmt("capsule %.1f m/s, latchSpeed %.1f, latches %.0f", double(speed), double(cfg.latchSpeed), double(n)));
     }
+    // (ff8) aimed strafing (SetFirmStrafe / SetFirmStrafeFade): an aimed strafe pivot latches on a capsule above latchSpeed up to
+    // strafeLatchSpeed with its own hold limit; a latched foot whose contact fades below onThreshold (the lock still held) ends its latch
+    // with the strafe fade, and keeps it without
+    for (int strafe = 0; strafe < 2; ++strafe)
+    {
+        FootLocker fl;
+        fl.Init(db);
+        fl.SetReplantConfig(g_rcTest);
+        fl.SetSlip(0.05f, 0.02f);
+        fl.SetFirmFeet(true);
+        fl.SetFirmHold(true);
+        fl.SetFirmStrafe(strafe == 1);
+        const float speed = cfg.latchSpeed + 0.5f;
+        for (int i = 0; i < 20; ++i)
+            fl.Update(kDt, speed, 0.0f, 0.0f, 1.0f, 1.0f, bent);
+        const uint64_t n = fl.Diagnostics().firmLatches, ns = fl.Diagnostics().firmStrafeLatches;
+        Expect(strafe ? "(ff8) aimed strafe pivot latches above latchSpeed with the strafe limit" : "(ff8) no latch above latchSpeed outside one",
+               strafe ? (n >= 1 && ns == n && speed <= cfg.strafeLatchSpeed && cfg.strafeLimit < cfg.limit) : (n == 0 && ns == 0),
+               Fmt("capsule %.1f m/s, latches %.0f, strafe latches %.0f, strafe limit %.2f m", double(speed), double(n), double(ns),
+                   double(cfg.strafeLimit)));
+    }
+    for (int fade = 0; fade < 2; ++fade)
+    {
+        FootLocker fl;
+        fl.Init(db);
+        fl.SetReplantConfig(g_rcTest);
+        fl.SetSlip(0.05f, 0.02f);
+        fl.SetFirmFeet(true);
+        fl.SetFirmHold(true);
+        fl.SetFirmStrafeFade(fade == 1);
+        for (int i = 0; i < 20; ++i)
+            fl.Update(kDt, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f, bent);
+        const uint64_t latched = fl.Diagnostics().firmLatches;
+        for (int i = 0; i < 30; ++i)
+            fl.Update(kDt, 0.5f, 0.0f, 0.0f, 0.4f, 0.4f, bent);
+        const uint64_t fades = fl.Diagnostics().firmStrafeFades;
+        Expect(fade ? "(ff8) a fading contact ends the latch with the strafe fade" : "(ff8) a fading contact keeps the latch without it",
+               latched >= 1 && (fade ? fades >= 1 : fades == 0), Fmt("latches %.0f, strafe fades %.0f", double(latched), double(fades)));
+    }
     for (const float dt : {1.0f / 30.0f, 1.0f / 60.0f, 1.0f / 144.0f})
     {
         const std::string rate = " (dt 1/" + std::to_string(static_cast<int>(std::lround(1.0 / double(dt)))) + ")";

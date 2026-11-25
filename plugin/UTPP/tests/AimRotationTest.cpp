@@ -5,7 +5,10 @@
 // movement (within 2 deg) that threshold 0 reports as a pivot; the velocity floor; the gate holds a new pivot while a pivot / start
 // pick is young and releases it after, a gate of 0 holds nothing; the default is on; MapToChooser off and on without aiming give the strafe IsPivoting and the same
 // chooser state, bit for bit; on while aiming follows the reported turn angle at the configured threshold; the gate reaches
-// MapToChooser through MapContext (currentDbPivots / currentDbStarts / currentPickAgeS).
+// MapToChooser through MapContext (currentDbPivots / currentDbStarts / currentPickAgeS); a new reversal (MapConfig::aimPivotRegateDeg,
+// motiontraj::AimPivotNewReversal: the wanted direction relative to the camera turned by at least 150 deg since the gate began) skips
+// the gate, a smaller stick change or a camera turn under a held stick does not, 0 = the gate as before; ChooserState::aimStrafeRotation
+// is set only while aiming in the aim rotation sub-mode (not in Shooter mode without aiming).
 #include "../src/mm/MotionAdapter.hpp"
 #include <cmath>
 #include <cstdio>
@@ -48,6 +51,17 @@ Frame Run(const adapter::MapConfig& aC, bool aAim, float aStickDeg, const adapte
     for (int i = 0; i < 40; ++i)
         r.cs = adapter::MapToChooser(Feed(aAim, 0.0f), aC, r.state, {});
     r.cs = adapter::MapToChooser(Feed(aAim, aStickDeg), aC, r.state, aCtx);
+    return r;
+}
+// 40 forward frames (camera 0), then one frame with the stick at aStickDeg and the camera turned to aCameraDeg
+Frame RunCamera(const adapter::MapConfig& aC, float aStickDeg, float aCameraDeg, const adapter::MapContext& aCtx)
+{
+    Frame r;
+    for (int i = 0; i < 40; ++i)
+        r.cs = adapter::MapToChooser(Feed(true, 0.0f), aC, r.state, {});
+    adapter::MotionFeed f = Feed(true, aStickDeg);
+    f.cameraYawDeg = aCameraDeg;
+    r.cs = adapter::MapToChooser(f, aC, r.state, aCtx);
     return r;
 }
 bool SameChooser(const motion::ChooserState& a, const motion::ChooserState& b)
@@ -155,6 +169,47 @@ int main()
               "on, aiming: a 90 deg turn during a young pivot / start pick does not pivot");
         Check(Run(on, true, 90.0f, old).cs.isPivoting, "on, aiming: the same turn after 0.5 s pivots");
         Check(Run(off, true, 90.0f, young).cs.isPivoting, "off: the context gate has no effect (strafe IsPivoting)");
+        // a new reversal skips the gate (keyboard strafe taps 0.35 s apart)
+        Check(on.aimPivotRegateDeg == 150.0f && motiontraj::kPivotAimRegateDeg == 150.0f, "default new-reversal angle 150 deg");
+        Check(Run(on, true, 180.0f, young).cs.isPivoting && Run(on, true, 180.0f, youngStart).cs.isPivoting,
+              "on, aiming: a 180 deg reversal during a young pivot / start pick pivots (new reversal)");
+        adapter::MapConfig noRegate = on;
+        noRegate.aimPivotRegateDeg = 0.0f;
+        Check(!Run(noRegate, true, 180.0f, young).cs.isPivoting, "regate 0: the same reversal is held as before");
+        Check(!Run(on, true, 120.0f, young).cs.isPivoting, "on, aiming: a 120 deg stick change during a young pick stays held");
+        Check(!RunCamera(on, 0.0f, 180.0f, young).cs.isPivoting && RunCamera(on, 0.0f, 180.0f, old).cs.isPivoting,
+              "on, aiming: a camera turn of 180 deg under a held stick stays held while young (released when old)");
+    }
+    // ChooserState::aimStrafeRotation (MatcherConfig::strafePivotTailS): only the aimed strafe rotation, not Shooter mode without aiming
+    {
+        adapter::MapConfig shooterOn = on, shooterOff = off;
+        shooterOn.shooterMode = shooterOff.shooterMode = true;
+        Check(Run(on, true, 0.0f).cs.aimStrafeRotation, "aimStrafeRotation: on while aiming");
+        Check(!Run(off, true, 0.0f).cs.aimStrafeRotation, "aimStrafeRotation: off with the aim rotation off");
+        Check(!Run(on, false, 0.0f).cs.aimStrafeRotation && !Run(shooterOn, false, 0.0f).cs.aimStrafeRotation,
+              "aimStrafeRotation: off without aiming, Shooter mode included");
+        Check(Run(shooterOn, true, 0.0f).cs.aimStrafeRotation && !Run(shooterOff, true, 0.0f).cs.aimStrafeRotation,
+              "aimStrafeRotation: Shooter mode while aiming follows the aim rotation setting");
+    }
+    // AimPivotNewReversal alone
+    {
+        float ref = 0.0f;
+        bool valid = false;
+        Check(!motiontraj::AimPivotNewReversal(true, true, 10.0f, 150.0f, ref, valid) && !valid, "reversal: no stored direction, no skip");
+        Check(!motiontraj::AimPivotNewReversal(false, true, 10.0f, 150.0f, ref, valid) && valid && ref == 10.0f,
+              "reversal: not gated, the direction is stored");
+        Check(!motiontraj::AimPivotNewReversal(true, true, 100.0f, 150.0f, ref, valid) && ref == 10.0f,
+              "reversal: gated, a 90 deg change does not skip and keeps the stored direction");
+        Check(!motiontraj::AimPivotNewReversal(true, false, -170.0f, 150.0f, ref, valid) && ref == 10.0f,
+              "reversal: no input direction changes nothing");
+        Check(motiontraj::AimPivotNewReversal(true, true, -170.0f, 150.0f, ref, valid) && ref == -170.0f,
+              "reversal: gated, a 180 deg change skips and stores the new direction");
+        Check(!motiontraj::AimPivotNewReversal(true, true, -165.0f, 150.0f, ref, valid), "reversal: the same direction next feed stays gated");
+        float ref0 = 5.0f;
+        bool valid0 = true;
+        Check(!motiontraj::AimPivotNewReversal(true, true, -175.0f, 0.0f, ref0, valid0) && ref0 == 5.0f &&
+                  !motiontraj::AimPivotNewReversal(false, true, 90.0f, 0.0f, ref0, valid0) && ref0 == 5.0f,
+              "reversal: 0 = off, nothing stored");
     }
     std::printf("%d passed, %d failed\n", pass, fail);
     return fail == 0 ? 0 : 1;

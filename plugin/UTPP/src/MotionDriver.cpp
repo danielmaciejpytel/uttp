@@ -2691,6 +2691,7 @@ struct TestMapOverrides
     float turnInPlaceDeg = std::numeric_limits<float>::quiet_NaN();
     int32_t stepDownReach = -1;
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
+    float aimPivotRegateDeg = std::numeric_limits<float>::quiet_NaN(); // MapConfig::aimPivotRegateDeg
     int32_t capsuleSpeedRate = -1, capsuleRateScope = -1; // MapConfig::capsuleSpeedRate (CapsuleRateMode 0-3), capsuleRateScope (0-2)
     int32_t capsuleRateGuards = -1; // MapConfig::capsuleRateGuards (caprate bits)
     float capsuleRateBlendS = std::numeric_limits<float>::quiet_NaN(); // MapConfig::capsuleRateBlendS
@@ -2701,7 +2702,7 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
     std::lock_guard lock(g_m);
     g_testMapOverrides = TestMapOverrides{aCapsuleSpeedQuery, aVelocityPredicates, aTurnInPlaceDeg, g_testMapOverrides.stepDownReach,
                                           g_testMapOverrides.aimPivotDeg, g_testMapOverrides.aimPivotGateS,
-                                          g_testMapOverrides.capsuleSpeedRate, g_testMapOverrides.capsuleRateScope,
+                                          g_testMapOverrides.aimPivotRegateDeg, g_testMapOverrides.capsuleSpeedRate, g_testMapOverrides.capsuleRateScope,
                                           g_testMapOverrides.capsuleRateGuards, g_testMapOverrides.capsuleRateBlendS};
 }
 void TestSetMapAimPivot(float aPivotDeg, float aGateS)
@@ -2709,6 +2710,11 @@ void TestSetMapAimPivot(float aPivotDeg, float aGateS)
     std::lock_guard lock(g_m);
     g_testMapOverrides.aimPivotDeg = aPivotDeg;
     g_testMapOverrides.aimPivotGateS = aGateS;
+}
+void TestSetMapAimPivotRegate(float aRegateDeg)
+{
+    std::lock_guard lock(g_m);
+    g_testMapOverrides.aimPivotRegateDeg = aRegateDeg;
 }
 void TestAimOptionFeeds(uint64_t& aNeutralAo, uint64_t& aAimSmooth)
 {
@@ -2767,6 +2773,37 @@ void TestSetDodgeFacingHold(float aS)
     std::lock_guard lock(g_m);
     g_testDodgeFacingHoldS = aS >= 0.0f ? aS : ProductionMatcherConfig().dodgeFacingHoldS;
 }
+// MatcherConfig::strafePivotTailS of the running matcher from the next update on (0 = off, < 0 = back to the production value);
+// -1 until the first call = never touched
+float g_testStrafePivotTailS = -1.0f;
+void TestSetStrafePivotTail(float aS)
+{
+    std::lock_guard lock(g_m);
+    g_testStrafePivotTailS = aS >= 0.0f ? aS : ProductionMatcherConfig().strafePivotTailS;
+}
+// MatcherConfig::strafePivotTravelEntry of the running matcher from the next update on (0 = off, 1 = on, < 0 = back to the production
+// value); -1 until the first call = never touched
+int g_testStrafePivotEntry = -1;
+float g_testStrafePivotBlendS = -1.0f;
+void TestSetStrafePivotBlend(float aS)
+{
+    std::lock_guard lock(g_m);
+    g_testStrafePivotBlendS = aS >= 0.0f ? aS : ProductionMatcherConfig().strafePivotBlendS;
+}
+void TestSetStrafePivotEntry(int aOn)
+{
+    std::lock_guard lock(g_m);
+    g_testStrafePivotEntry = aOn >= 0 ? (aOn != 0 ? 1 : 0) : (ProductionMatcherConfig().strafePivotTravelEntry ? 1 : 0);
+}
+// MatcherConfig::aimTipSettleS / aimTipSettleContact of the running matcher from the next update on (aS 0 = off, < 0 = back to the
+// production values); -1 until the first call = never touched
+float g_testAimTipSettleS = -1.0f, g_testAimTipSettleContact = -1.0f;
+void TestSetAimTipSettle(float aS, float aContact)
+{
+    std::lock_guard lock(g_m);
+    g_testAimTipSettleS = aS >= 0.0f ? aS : ProductionMatcherConfig().aimTipSettleS;
+    g_testAimTipSettleContact = aS >= 0.0f && aContact > 0.0f ? aContact : ProductionMatcherConfig().aimTipSettleContact;
+}
 void TestApplyMapOverrides(adapter::MapConfig& aMc)
 {
     if (g_testSpeedConverter >= 0)
@@ -2795,6 +2832,8 @@ void TestApplyMapOverrides(adapter::MapConfig& aMc)
         aMc.aimPivotDeg = g_testMapOverrides.aimPivotDeg;
     if (std::isfinite(g_testMapOverrides.aimPivotGateS))
         aMc.aimPivotGateS = g_testMapOverrides.aimPivotGateS;
+    if (std::isfinite(g_testMapOverrides.aimPivotRegateDeg))
+        aMc.aimPivotRegateDeg = g_testMapOverrides.aimPivotRegateDeg;
 }
 #endif
 
@@ -6010,6 +6049,14 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     if (g_testDodgeFacingHoldS >= 0.0f)
         b.matcher.TestSetDodgeFacingHoldS(g_testDodgeFacingHoldS);
+    if (g_testStrafePivotTailS >= 0.0f)
+        b.matcher.TestSetStrafePivotTailS(g_testStrafePivotTailS);
+    if (g_testAimTipSettleS >= 0.0f)
+        b.matcher.TestSetAimTipSettle(g_testAimTipSettleS, g_testAimTipSettleContact);
+    if (g_testStrafePivotEntry >= 0)
+        b.matcher.TestSetStrafePivotTravelEntry(g_testStrafePivotEntry != 0);
+    if (g_testStrafePivotBlendS >= 0.0f)
+        b.matcher.TestSetStrafePivotBlendS(g_testStrafePivotBlendS);
 #endif
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
@@ -6022,6 +6069,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     }
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_strafeProbe.strafeSectorHolds = b.matcher.StrafeSectorHolds();
+    g_strafeProbe.strafeEntryShifts = b.matcher.StrafeEntryShifts();
 #endif
     ++g_turnFootOutcome[r.turnFootPhase & 3];
     BudgetStageRecordLocked(r);
@@ -6587,6 +6635,8 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     aOut.pose = aOut.buf;
     aOut.numBones = n;
     aOut.clipClass = steer::kClassNone;
+    aOut.aimStrafePivot = false;
+    aOut.aimStrafe = b.matcher.AimStrafeRotation();
     if (g_trav.frame) // UTPP-MOTION SEAM trav: montage frame - root motion = warped plan root, no foot contacts / replant
     {
         aOut.rootVel[0] = g_trav.vel[0];
@@ -6670,6 +6720,7 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
     {
         aOut.clipClass = steer::ClassifyClip(b.db.ClipName(static_cast<uint32_t>(r.clip)));
         aOut.moveTurnSign = static_cast<int8_t>(b.matcher.MoveTurnSign(r.clip));
+        aOut.aimStrafePivot = b.matcher.AimStrafeRotation() && steer::IsPivot(aOut.clipClass);
     }
     if (r.database >= 0 && static_cast<uint32_t>(r.database) < b.db.NumDatabases())
     {

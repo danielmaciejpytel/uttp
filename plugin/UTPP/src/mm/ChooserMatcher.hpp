@@ -176,6 +176,10 @@ struct ChooserState
     // Shooter mode drives the strafe rotation mode on the ground (the facing is held on the camera, the travel direction turns against
     // it). Written by adapter::MapToChooser; a hand-built state leaves it false (MatcherConfig::strafeSectorDelayS then never acts).
     bool shooterStrafe = false;
+    // The aim rotation sub-mode on the ground (MapConfig::aimRotation while aiming in the strafe rotation mode: the facing is held on the
+    // camera, the travel turns against it). Not Shooter mode without aiming. Written by adapter::MapToChooser; a hand-built state leaves
+    // it false (MatcherConfig::strafePivotTailS then never acts).
+    bool aimStrafeRotation = false;
 };
 
 inline cancelstart::State CancellationState(const ChooserState& state)
@@ -415,6 +419,14 @@ struct MatcherConfig
     // still rising: its Hips are more than tipRiseGapM below the Hips of the turn-in-place row (the lying -> crouching change then ran in 0.1 s).
     float blendTipAfterSlide = kBlendTipAfterSlideS;
     float tipRiseGapM = kTipRiseGapM;
+    // aimTipSettleS / aimTipSettleContact (off by default): a stationary aim turn-in-place clip whose goal moved on to the same side (the
+    // view kept turning) keeps playing until its footwork has settled: both foot contacts of the playing frame at least
+    // aimTipSettleContact for aimTipSettleS seconds (counted from the pick). A chained aimed turn (Turn_045 -> Turn_090 / 135) is
+    // re-picked at clip time ~0.72 while the stepping foot of the 45 deg turn is still landing; 0.1 defers that to ~0.87, but the
+    // planted-foot slide of the chained turn comes from the next clip's own swing (replay: rifle turn_090_r 14.3 -> 15.1 cm) and the
+    // 180 deg turns corrected more, so it stays off. Not for rest turns or shot turns. 0 = off (the re-pick as before).
+    float aimTipSettleS = 0.0f;
+    float aimTipSettleContact = 0.98f;
     // blendSlideFamily: cross-fade of a FootOut <-> KneesOut switch inside a slide (the leg pose differs by ~90 deg).
     float blendSlideFamily = kBlendSlideFamilyS;
 
@@ -741,6 +753,27 @@ struct MatcherConfig
     // otherwise handed the finished turn to a loop one to seven feeds before the next tap picked the next turn (two changes for one
     // tap). 0 = the commit ends at the turn end.
     float turnCommitTailS = 0.2f;
+    // strafePivotTailS: in the aim rotation sub-mode (ChooserState::aimStrafeRotation) a pivot clip entered where its authored root turn is
+    // already done (the strafe pivots: Run_Pivot_LL_RL ..., the body keeps its facing and only the travel reverses) is committed the same
+    // way, with its turn treated as done at the pick and this tail in place of turnCommitTailS. Not in the orient mode: there such a
+    // clip is a facing-keeping pick the heading catch-up hands on as the facing turns (headingCatchUpS). Aimed keyboard strafe taps
+    // 0.35 s apart handed every other such pivot to a loop ~0.2 s after the pick (the freshEvent bias ended), the next tap picked the
+    // next pivot: two changes for one tap. 0.3 keeps the taps under the clip change limit with the smallest foot lock correction of the
+    // tails tried (0.2 / 0.25 / 0.3 / 0.35). 0 = such pivots are not committed.
+    float strafePivotTailS = 0.3f;
+    // strafePivotTravelEntry: such a strafe pivot (committed by strafePivotTailS) picked before its authored travel reversal starts at
+    // strafePivotEntryLeadS before that reversal instead of at the picked row, when the reversal is at most strafePivotEntryMaxSkipS ahead.
+    // In aimed strafe taps the capsule reverses within about one frame, while the pivots were picked 0.2 s before their own reversal: the
+    // committed clip played only its braking phase, its root running the old way at 2 - 4 m/s against the capsule with a foot planted, and
+    // that foot slid 50 - 70 cm through the world (the foot lock bounded its correction and then released it). From the reversal on the
+    // root moves with the capsule. Rows of another clip, unindexed target frames and every other pick are untouched. false = off.
+    bool strafePivotTravelEntry = true;
+    float strafePivotEntryLeadS = 0.03f;
+    float strafePivotEntryMaxSkipS = 0.4f;
+    // strafePivotBlendS: the fade into such a committed strafe pivot lasts at most this long (seconds; the ground fade is 0.5 s). During the
+    // ordinary fade the outgoing clip, still running the old way with that foot planted, kept dragging the shown foot along: the Male rifle
+    // taps slid 44 cm with the travel entry alone, 17 cm with 0.1 (24 without both); 0.15 / 0.2 left 35 / 47 cm. 0 = the ordinary fade.
+    float strafePivotBlendS = 0.1f;
     // turnFootPhase: a jump into a moving turn / pivot clip (steer::IsPivot / IsMoveTurn with an authored root turn, MoveTurnSign) on a
     // reversal while moving on the stand ground is re-ranked inside the winner's database among the rows of the same turn direction, with
     // the pose channels of the query read from the shown pose (SetShownPoseHistory) instead of the database mean. Without it the pick on a
@@ -849,6 +882,8 @@ struct MatchResult
     // MatcherConfig::turnFootPhase on this update: 0 = not run, 1 = the re-rank kept the trajectory winner, 2 = the re-ranked row
     // replaced it, 3 = a different re-ranked row was refused (later entry / turn outside the steering look-ahead)
     uint8_t turnFootPhase = 0;
+    // MatcherConfig::strafePivotTravelEntry on this update: the selected jump is a committed strafe pivot moved to its travel reversal
+    bool strafeEntryShift = false;
 };
 
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
@@ -1236,6 +1271,43 @@ public:
                 }
             }
         }
+        // strafePivotTravelEntry: clip time of the authored travel reversal of a pivot clip with less than 45 deg of root yaw (the strafe
+        // pivots): the first frame from which the root step, expressed in the clip's first frame, runs along the clip's final travel
+        // direction (mean of its last five steps) for three frames, after a step that did not (the root step into frame 0 is not a step
+        // and does not count). -1 = no such clip or no reversal.
+        const float revFps = aDb->Header().fps > 0.0f ? aDb->Header().fps : 30.0f;
+        m_clipTravelRevS.assign(aDb->NumClips(), -1.0f);
+        for (uint32_t c = 0; c < aDb->NumClips(); ++c)
+        {
+            const MotionClipRecord& cl = aDb->Clip(c);
+            if (!steer::IsPivot(steer::ClassifyClip(aDb->ClipName(c))) || (cl.flags & kClipLoop) || cl.numFrames < 8)
+                continue;
+            std::vector<float> ax(cl.numFrames), ay(cl.numFrames);
+            double yaw = 0.0;
+            for (uint32_t f = 0; f < cl.numFrames; ++f)
+            {
+                const auto& r = aDb->Root(cl.firstFrame + f);
+                const double cy = std::cos(yaw), sy = std::sin(yaw);
+                ax[f] = static_cast<float>(cy * r.dx - sy * r.dy);
+                ay[f] = static_cast<float>(sy * r.dx + cy * r.dy);
+                yaw += r.dyaw;
+            }
+            if (!(std::fabs(yaw) < math::kPi / 4.0))
+                continue;
+            float fx = 0.0f, fy = 0.0f;
+            for (uint32_t f = cl.numFrames - 5; f < cl.numFrames; ++f)
+                fx += ax[f], fy += ay[f];
+            const float fl = std::hypot(fx, fy);
+            if (!(fl > 1e-5f))
+                continue;
+            const auto along = [&](uint32_t f) { return (ax[f] * fx + ay[f] * fy) / fl; };
+            for (uint32_t f = 2; f + 3 <= cl.numFrames; ++f)
+                if (along(f - 1) <= 0.0f && along(f) > 0.0f && along(f + 1) > 0.0f && along(f + 2) > 0.0f)
+                {
+                    m_clipTravelRevS[c] = static_cast<float>(f) / revFps;
+                    break;
+                }
+        }
         // headingCatchUpS: clips made for a body that keeps its facing - pattern and side-step shuffle clips, pivots / turns with less than 45 deg of authored
         // root yaw, and loops that run in any direction but forward (forward = Loop_F and the curved Loop_F_L_* / Loop_F_R_*)
         m_clipKeepsFacing.assign(aDb->NumClips(), 0);
@@ -1364,8 +1436,24 @@ public:
 #if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     // tests only: MatcherConfig::dodgeFacingHoldS of a running matcher (motiondriver::TestSetDodgeFacingHold; 0 = guard 3b off)
     void TestSetDodgeFacingHoldS(float aS) { m_cfg.dodgeFacingHoldS = aS; }
+    // tests only: MatcherConfig::strafePivotTailS of a running matcher (motiondriver::TestSetStrafePivotTail; 0 = off)
+    void TestSetStrafePivotTailS(float aS) { m_cfg.strafePivotTailS = aS; }
+    // tests only: MatcherConfig::aimTipSettleS / aimTipSettleContact of a running matcher (motiondriver::TestSetAimTipSettle; 0 = off)
+    void TestSetAimTipSettle(float aS, float aContact)
+    {
+        m_cfg.aimTipSettleS = aS;
+        m_cfg.aimTipSettleContact = aContact;
+    }
+    // tests only: MatcherConfig::strafePivotTravelEntry of a running matcher (motiondriver::TestSetStrafePivotEntry)
+    void TestSetStrafePivotTravelEntry(bool aOn) { m_cfg.strafePivotTravelEntry = aOn; }
+    void TestSetStrafePivotBlendS(float aS) { m_cfg.strafePivotBlendS = aS; }
 #endif
     uint64_t StrafeSectorHolds() const { return m_strafeSectorHolds; }
+    // ChooserState::aimStrafeRotation of the last update (false before the first one)
+    bool AimStrafeRotation() const { return m_haveLastState && m_lastState.aimStrafeRotation; }
+    // strafePivotTravelEntry: picks moved to their travel reversal so far, and the authored travel reversal of a clip (s, -1 = none)
+    uint64_t StrafeEntryShifts() const { return m_strafeEntryShifts; }
+    float ClipTravelReversalS(uint32_t aClip) const { return aClip < m_clipTravelRevS.size() ? m_clipTravelRevS[aClip] : -1.0f; }
     // Authored ROOT, not a name suffix or the already steered blended root rate.
     // Zero means an invalid clip, a non-reface, or no meaningful authored turn.
     int StartTurnDirection(int32_t aClip) const
@@ -1398,6 +1486,7 @@ public:
         m_headingRestArmed = false;
         m_slideExitAge = 1.0e9f;
         m_sinceJumpS = 1.0e9f;
+        m_tipPlantedS = 0.0f;
         m_refaceSwapAgeS = 1.0e9f;
         m_sinceDodgeS = 1.0e9f;
         m_sinceDodgeFacingS = 1.0e9f;
@@ -1716,10 +1805,10 @@ public:
             if (!aState.isPivoting)
                 m_turnHoldPivotDropped = true;
             // turnCommitTailS: past the turn end the hold lasts a little longer unless a heading step came after the pick
-            const bool turnDone = m_cur.valid && m_cur.clip == m_turnHoldClip && m_cur.clipTime >= m_clipTurnEndS[static_cast<uint32_t>(m_cur.clip)];
+            const bool turnDone = m_cur.valid && m_cur.clip == m_turnHoldClip && m_cur.clipTime >= m_turnHoldEndS;
             m_turnTailS = turnDone ? m_turnTailS + aDt : 0.0f;
             const bool inTurn = !turnDone ||
-                (UTPP_AND_NOT(JUMPPICK, 34) m_guardsOn && m_turnTailS <= m_cfg.turnCommitTailS && aState.headingStepAgeS + 0.05f >= m_sinceJumpS);
+                (UTPP_AND_NOT(JUMPPICK, 34) m_guardsOn && m_turnTailS <= m_turnHoldTailS && aState.headingStepAgeS + 0.05f >= m_sinceJumpS);
             const bool keep = m_cfg.turnCommit && contValid && m_cur.valid && m_cur.clip == m_turnHoldClip && !aForce &&
                               aState.movementMode == 0 && aState.stance == m_turnHoldStance && !aState.justLandedLight &&
                               !aState.justLandedHeavy && !aState.justTraversed && !(aState.isPivoting && m_turnHoldPivotDropped) &&
@@ -2066,6 +2155,19 @@ public:
             continueAimTurn = steer::ClassifyClip(name) == steer::kClassTurnInPlace &&
                 name.ends_with(aState.stationaryAimYawDeg > 0 ? "_L" : "_R");
         }
+        // aimTipSettleS: the goal of an aimed turn moved on (the view keeps turning to the same side); the playing turn-in-place clip is
+        // kept until both feet have been planted for aimTipSettleS (m_tipPlantedS, from the pick on), then the search may chain the next turn
+        bool tipUnsettled = false;
+        if (m_cfg.aimTipSettleS > 0.0f && m_cur.valid && contValid && steer::ClassifyClip(db.ClipName(static_cast<uint32_t>(m_cur.clip))) == steer::kClassTurnInPlace)
+        {
+            const bool planted = cancelstart::Contact(db, m_cur.clip, m_cur.clipTime, 0) >= m_cfg.aimTipSettleContact &&
+                                 cancelstart::Contact(db, m_cur.clip, m_cur.clipTime, 1) >= m_cfg.aimTipSettleContact;
+            m_tipPlantedS = planted ? m_tipPlantedS + aDt : 0.0f;
+            tipUnsettled = !planted || m_tipPlantedS < m_cfg.aimTipSettleS;
+        }
+        if (!continueAimTurn && tipUnsettled && contEvaluated && stationaryAim &&
+            aState.stationaryAimTurn && last.stationaryAimTurn && res.interrupt == Interrupt::DoNotInterrupt && res.dbSet.Test(bestDb))
+            continueAimTurn = db.ClipName(static_cast<uint32_t>(m_cur.clip)).ends_with(aState.stationaryAimYawDeg > 0 ? "_L" : "_R");
 
         // Preserve the admitted reface's footwork while the caller still owns
         // this exact start and direction. A changed state/forced interrupt,
@@ -2266,6 +2368,72 @@ public:
         else if (bestDb >= 0)
         {
             const DatabaseRecord& D = db.Db(static_cast<uint32_t>(bestDb));
+            // strafePivotTravelEntry: a strafe pivot the turn commit will hold (the same conditions as strafePivot / the turn commit below)
+            // picked before its authored travel reversal plays from its travel reversal instead: among the indexed rows of the picked
+            // entry from strafePivotEntryLeadS before the reversal to the reversal, the row whose pose channels best match the shown pose
+            // (SetShownPoseHistory; without one the pose history of the query) wins; excluded rows (MarkExcluded: recent picks, stance
+            // entries, no-reselect clips) and BLOCK rows are skipped; no such row = the pick is kept. A pick the turnFootPhase rule moved
+            // to the entry of the planted foot (turnFootPhase 2) is kept. bestCost is the normal query cost of the moved row, so the
+            // guards below compare the row that plays. Before the guards and the play rate, which read bestRow (mutation 50: off;
+            // mutations 36 / 32, no strafe pivot / turn commit, too)
+            bool entryShifted = false;
+            if (UTPP_AND_NOT(JUMPPICK, 50) UTPP_AND_NOT(JUMPPICK, 36) UTPP_AND_NOT(JUMPPICK, 32) !bestIsCont && !aForce && m_cfg.strafePivotTravelEntry &&
+                m_cfg.turnCommit && m_cfg.strafePivotTailS > 0.0f && m_guardsOn && aState.aimStrafeRotation && aState.isPivoting &&
+                aState.movementMode == 0 && aState.movementState == 1 && aState.stance == 0)
+            {
+                const float rfps = fps > 0.0f ? fps : 30.0f;
+                const uint32_t d = static_cast<uint32_t>(bestDb);
+                const RowRecord& r0 = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
+                const EntryRecord& e0 = db.Entry(r0.entry);
+                const float t0 = static_cast<float>(r0.frame - db.Clip(e0.clip).firstFrame) / rfps;
+                const float rev = m_clipTravelRevS[e0.clip];
+                const float at = rev - m_cfg.strafePivotEntryLeadS;
+                if (rev > 0.0f && res.turnFootPhase != 2 && m_clipTurnEndS[e0.clip] <= t0 && t0 < at && at - t0 <= m_cfg.strafePivotEntryMaxSkipS &&
+                    steer::IsPivot(steer::ClassifyClip(db.ClipName(e0.clip))))
+                {
+                    const uint32_t marked = MarkExcluded(d, startTurnDirection);
+                    const bool shown = m_shownHist && m_shownHist->numSamples >= 2;
+                    const PoseHistory* const callerHist = m_hist;
+                    if (shown)
+                        m_hist = m_shownHist;
+                    BuildQuery(d, true, allowLastPose);
+                    int32_t pick = -1;
+                    float pickCost = std::numeric_limits<float>::max();
+                    const MotionClipRecord& ec = db.Clip(e0.clip);
+                    const uint32_t target = ec.firstFrame + static_cast<uint32_t>(std::fmax(at, 0.0f) * rfps + 0.5f);
+                    const uint32_t revFrame = ec.firstFrame + static_cast<uint32_t>(rev * rfps + 0.5f);
+                    for (uint32_t row = e0.firstRow; row < e0.firstRow + e0.numRows; ++row)
+                    {
+                        const RowRecord& rr = db.Row(row);
+                        if (rr.frame < target)
+                            continue;
+                        if (rr.frame > revFrame)
+                            break;
+                        const uint32_t local = row - D.firstRow;
+                        if ((rr.flags & kRowBlock) || m_excluded[local])
+                            continue;
+                        const float c = DbRowCost(d, local) + rr.costAddend;
+                        if (c < pickCost)
+                        {
+                            pickCost = c;
+                            pick = static_cast<int32_t>(local);
+                        }
+                    }
+                    m_hist = callerHist;
+                    ClearExcluded(d, marked);
+                    if (pick >= 0)
+                    {
+                        if (shown)
+                        {
+                            BuildQuery(d, true, allowLastPose);
+                            pickCost = DbRowCost(d, static_cast<uint32_t>(pick)) + db.Row(D.firstRow + static_cast<uint32_t>(pick)).costAddend;
+                        }
+                        bestRow = pick;
+                        bestCost = pickCost;
+                        entryShifted = true;
+                    }
+                }
+            }
             const RowRecord& rr = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
             const EntryRecord& en = db.Entry(rr.entry);
             const MotionClipRecord& cl = db.Clip(en.clip);
@@ -2347,6 +2515,13 @@ public:
                 bestEntry = contEntry;
                 ++m_strafeSectorHolds;
             }
+            // strafePivotTravelEntry: counted / reported only when the moved row is the one selected (a guard above may have kept the
+            // continuing clip instead)
+            if (entryShifted && jump)
+            {
+                ++m_strafeEntryShifts;
+                res.strafeEntryShift = true;
+            }
             // Queries in the search loop are scratch per database. Rebuild the winner
             // while continuing candidates still refer to the previous player; the last
             // searched schema need not be the selected schema.
@@ -2414,8 +2589,15 @@ public:
                 m_stopHoldStart = newTime;
                 // turnCommit: armed only by a pivot / moving-turn clip selected on a reversal while moving on the stand ground
                 // mutation 32: no turn commit (the selected turn competes on cost from its next update on)
+                // strafePivotTailS: a pivot entered past its authored root turn is committed for that tail from the pick on
+                // mutation 36: no strafe pivot commit (the aimed strafe taps)
+                const bool turnLeft = m_clipTurnEndS[en.clip] > newTime;
+                const bool strafePivot = UTPP_AND_NOT(JUMPPICK, 36) !turnLeft && m_cfg.strafePivotTailS > 0.0f && m_guardsOn && aState.aimStrafeRotation &&
+                                         steer::IsPivot(steer::ClassifyClip(db.ClipName(en.clip)));
                 m_turnHoldClip = UTPP_AND_NOT(JUMPPICK, 32) m_cfg.turnCommit && aState.isPivoting && aState.movementMode == 0 && aState.movementState == 1 &&
-                                 aState.stance == 0 && m_clipTurnEndS[en.clip] > newTime ? static_cast<int32_t>(en.clip) : -1;
+                                 aState.stance == 0 && (turnLeft || strafePivot) ? static_cast<int32_t>(en.clip) : -1;
+                m_turnHoldEndS = turnLeft ? m_clipTurnEndS[en.clip] : newTime;
+                m_turnHoldTailS = turnLeft ? m_cfg.turnCommitTailS : m_cfg.strafePivotTailS;
                 m_turnHoldStance = aState.stance;
                 m_turnHoldFlags = HoldFlags(aState) & ~4;
                 m_turnHoldPivotDropped = false;
@@ -2437,6 +2619,12 @@ public:
                 res.blend.blendTime = (aState.stationaryShotTurn || stationaryAim) &&
                     steer::ClassifyClip(db.ClipName(en.clip)) == steer::kClassTurnInPlace ?
                     std::min(blendTime, tipCap) : blendTime;
+                // strafePivotBlendS: the fade into a committed strafe pivot that plays from its travel reversal on (moved there by
+                // strafePivotTravelEntry, or picked there; 0 = the ordinary fade). A pivot still braking keeps the ordinary fade.
+                // mutation 51: the ordinary fade into a committed strafe pivot
+                if (UTPP_AND_NOT(JUMPPICK, 51) strafePivot && m_turnHoldClip >= 0 && m_cfg.strafePivotBlendS > 0.0f &&
+                    (entryShifted || (m_clipTravelRevS[en.clip] > 0.0f && newTime >= m_clipTravelRevS[en.clip] - m_cfg.strafePivotEntryLeadS - 0.5f / (fps > 0.0f ? fps : 30.0f))))
+                    res.blend.blendTime = std::fmin(res.blend.blendTime, m_cfg.strafePivotBlendS);
                 // fix3/jump (blendSlideFamily): FootOut <-> KneesOut inside a slide
                 // mutation 6: the family switch keeps the 0.2 s slide fade
                 if (UTPP_AND_NOT(JUMPPICK, 6) m_cfg.blendSlideFamily > 0.0f && m_cur.valid && m_cur.db >= 0 && m_dbSlide[static_cast<uint32_t>(m_cur.db)] &&
@@ -2497,6 +2685,7 @@ public:
                 m_slideExitHoldLeft = m_dbSlideExit[static_cast<uint32_t>(bestDb)] ? m_cfg.slideExitMinHoldS : 0.0f;
                 m_slideExitAge = 0.0f;
                 m_sinceJumpS = 0.0f;
+                m_tipPlantedS = 0.0f;
                 m_upshiftEdgeDone = false;
                 m_holdStance = aState.stance;
                 m_holdGait = aState.gait;
@@ -3624,6 +3813,7 @@ private:
     float m_sinceDodgeS = 1.0e9f;       // seconds since the last dodge feed (MatcherConfig::dodgeFacingHoldS)
     float m_sinceDodgeFacingS = 1.0e9f; // seconds since the dodge facing hold last held (heading catch-up after it)
     float m_sinceJumpS = 1.0e9f;        // seconds since the playing clip was selected (MatcherConfig::freshEventS, loopDwellS)
+    float m_tipPlantedS = 0.0f;         // MatcherConfig::aimTipSettleS: seconds both feet of the playing turn-in-place clip are planted (0 at a pick)
     float m_refaceSwapAgeS = 1.0e9f;    // seconds since a reface start replaced another reface start (MatcherConfig::refaceSwapDwellS)
     float m_slideExitAge = 1.0e9f;      // fix/slide-exit: seconds since an exit clip was selected (MatcherConfig::slideExitBiasS)
     int m_holdStance = 0, m_holdGait = 0, m_holdMovementState = 0, m_holdFlags = 0; // fix/slide-exit: chooser state when the exit clip was selected
@@ -3644,8 +3834,12 @@ private:
     int m_stopHoldStance = 0, m_stopHoldFlags = 0; // stopCommitTailS: stance / HoldFlags when it was selected
     float m_stopHoldStart = 0.0f;           // stopCommitMaxS: clip time of the held Stop clip at its selection
     std::vector<float> m_clipTurnEndS;      // turnCommit: clip index -> clip time where the authored root turn is done (-1 = not a turn clip)
+    std::vector<float> m_clipTravelRevS;    // strafePivotTravelEntry: clip index -> clip time of the authored travel reversal (-1 = none)
+    uint64_t m_strafeEntryShifts = 0;       // strafePivotTravelEntry: selected picks moved to their travel reversal so far
     int32_t m_turnHoldClip = -1;            // turnCommit: the held turn clip (-1 = none)
     float m_turnTailS = 0.0f;               // turnCommitTailS: seconds the held turn clip has played past its turn end
+    float m_turnHoldEndS = 0.0f;            // turnCommit: clip time of the held clip's turn end (the pick time for a strafe pivot)
+    float m_turnHoldTailS = 0.0f;           // turnCommit: tail of the held clip (turnCommitTailS / strafePivotTailS)
     bool m_downshiftDeferred = false;       // downshiftDeferS: a downshift edge was deferred and is still to be delivered
     int m_turnHoldStance = 0, m_turnHoldFlags = 0; // turnCommit: stance / HoldFlags (pivot bit cleared) when it was selected
     bool m_turnHoldPivotDropped = false;    // turnCommit: isPivoting dropped since the selection (a rise afterwards is a new reversal)

@@ -447,7 +447,8 @@ bool FirmFeet();
 // at or below the knee fold margin = no turn in place pin); a negative value keeps the current one. False = invalid / NaN, previous
 // kept. C++ API (tools, tests).
 bool SetFirmFeetParams(float aLimit, float aHandBackSpeed, float aKneeMarginDeg = -1.0f, float aReleaseSpeed = -1.0f,
-                       float aLatchSpeed = -1.0f, float aTurnKneeMarginDeg = -1.0f);
+                       float aLatchSpeed = -1.0f, float aTurnKneeMarginDeg = -1.0f, float aStrafeLatchSpeed = -1.0f,
+                       float aStrafeLimit = -1.0f);
 // Firm pivot foot in turns in place (CET mm.turnFootPin, default off; acts with the firm feet on): while a turn-in-place clip plays, a
 // firm latch may fold the knee up to the turn-in-place knee margin (FirmFeetConfig::turnKneeMargin) above the animated flexion instead
 // of the firm knee margin, so the pivot foot stays pinned while the animated toe sweeps; the larger margin stays with the latch while
@@ -669,6 +670,8 @@ struct MotionSetFrame // UTPP-MOTION SEAM
     int startTurnDirection = 0; // current MOTION ordinary reface start, never legacy v1 state
     int cancelStartSupport = -1; // short cancelled-start support: -1 none, 0 left, 1 right
     uint8_t clipClass = 0; // actual current clip class; idle databases can also contain turns
+    bool aimStrafePivot = false; // a pivot clip plays in aimed strafing (ChooserState::aimStrafeRotation): firm feet latch at a jog
+    bool aimStrafe = false; // aimed strafing (ChooserState::aimStrafeRotation): firm feet fade a latch with a fading contact
     int8_t moveTurnSign = 0; // authored root turn of the playing moving turn / pivot clip: +1 left, -1 right, 0 none (ChooserMatcher::MoveTurnSign)
     bool stops = false; // UTPP-MOTION SEAM idle / stop database (replant Stops profile)
     bool travFrame = false;                  // UTPP-MOTION SEAM trav: traversal montage frame (root already

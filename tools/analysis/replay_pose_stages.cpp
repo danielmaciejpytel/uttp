@@ -79,6 +79,9 @@
 //   --foot-lock 0|1     foot locker off / on after --settings-log (motionhost::SetFootLock; off = the animated feet, for inspection)
 //   --turn-foot-pin 0|1 firm pivot foot in turns in place off / on after --settings-log (motionhost::SetTurnFootPin, the
 //                       mm.turnFootPin setting; the settings log call MMTurnFootPin is applied as well)
+//                       --firm-strafe-latch-speed V the latch capsule speed while an aimed strafe pivot plays
+//                       (FirmFeetConfig::strafeLatchSpeed, 0 = the latch speed), --firm-strafe-limit L the hold limit
+//                       of such a latch (m, FirmFeetConfig::strafeLimit)
 //   --foot-yaw-lock 0|1 planted foot yaw lock off / on (motionhost::SetFootYawLock); adds one YAWLOCK line (yaw lock updates, unplants,
 //                       replants, updates held at the correction bound)
 //   --foot-yaw-twist R  twist reduction of the yaw lock (0..0.99), --foot-yaw-corr M its correction bound (m),
@@ -138,6 +141,13 @@
 //                       the settings log call MMAimRootAccumulate is applied as well). Not passed: unchanged.
 //   --aim-pivot-deg D   with --aim-rotation 1: the Aim pivot threshold (deg, default 10) (test override of MapConfig::aimPivotDeg)
 //   --aim-pivot-gate S  with --aim-rotation 1: the pivot / start elapsed-time gate (s, default 0.5; 0 = no gate)
+//   --aim-pivot-regate D  with --aim-rotation 1: a new reversal of at least D deg skips that gate (default 150; 0 = the gate as before)
+//   --strafe-pivot-tail S  commit of pivots entered past their authored turn (MatcherConfig::strafePivotTailS, default 0.3; 0 = off)
+//   --strafe-pivot-entry 0|1  a committed strafe pivot picked before its authored travel reversal starts just before that reversal
+//                       (MatcherConfig::strafePivotTravelEntry, default 1; 0 = it plays from the picked row)
+//   --strafe-pivot-blend S  longest fade into a committed strafe pivot (MatcherConfig::strafePivotBlendS, default 0.1; 0 = the ordinary fade)
+//   --aim-tip-settle S[,C]  an aimed turn in place whose goal moved on to the same side plays until both foot contacts are >= C for S
+//                       seconds (MatcherConfig::aimTipSettleS / aimTipSettleContact, default 0.1 / 0.98; 0 = off)
 //   --force-aim 1       synthetic aim: every feed reads the PSM upper body Aim with a drawn weapon (the recordings have almost no
 //                       aiming while moving); combine with --aim-camera P for the overlay and the aim target. Default off.
 //   --forecast-dump 1   also write <out prefix>.forecast.txt: per feed the feed time, the query trajectory's current sample position and
@@ -214,6 +224,11 @@ void TestSetMapOverrides(int32_t aCapsuleSpeedQuery, int32_t aVelocityPredicates
 void TestSetMapStepDownReach(int32_t aOn);
 void SetStepDownReach(bool aOn);
 void TestSetMapAimPivot(float aPivotDeg, float aGateS);
+void TestSetMapAimPivotRegate(float aRegateDeg);
+void TestSetStrafePivotTail(float aS);
+void TestSetAimTipSettle(float aS, float aContact);
+void TestSetStrafePivotEntry(int aOn);
+void TestSetStrafePivotBlend(float aS);
 void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope);
 void TestSetMapCapsuleRateGuards(int32_t aGuards, float aBlendS);
 void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg);
@@ -605,7 +620,8 @@ int main(int argc, char** argv)
     uint64_t yawTotal[4] = {}, yawLast[4] = {}; // --foot-yaw-lock: YAWLOCK counters (summed over the foot locker resets)
     uint64_t firmTotal[4] = {}, firmLast[4] = {}; // --firm-feet: FIRMFEET counters (summed over the foot locker resets)
     // < 0 = not passed (build defaults)
-    float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f, firmTurnKnee = -1.0f;
+    float firmLimit = -1.0f, firmHandBack = -1.0f, firmKnee = -1.0f, firmRelease = -1.0f, firmLatch = -1.0f, firmTurnKnee = -1.0f,
+          firmStrafeLatch = -1.0f, firmStrafeLimit = -1.0f;
     int32_t turnRate = -1;                     // -1 = not passed
     float turnRateMax = -1.0f;                 // < 0 = not passed
     int32_t swivelPole = -1;                   // -1 = not passed
@@ -638,6 +654,11 @@ int main(int argc, char** argv)
     int32_t aimRotation = -1;                  // --aim-rotation: < 0 = not passed (the settings log / build default)
     int32_t aimRootAccumulate = -1;            // --aim-root-accumulate: < 0 = not passed (the settings log / build default)
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
+    float aimPivotRegateDeg = std::numeric_limits<float>::quiet_NaN(); // --aim-pivot-regate
+    float strafePivotTailS = -1.0f;                                     // --strafe-pivot-tail (< 0 = not passed)
+    int strafePivotEntry = -1;                                          // --strafe-pivot-entry (< 0 = not passed)
+    float strafePivotBlendS = -1.0f;                                    // --strafe-pivot-blend (< 0 = not passed)
+    float aimTipSettleS = -1.0f, aimTipSettleContact = -1.0f;           // --aim-tip-settle S[,C] (< 0 = not passed)
     bool forceAim = false;                     // --force-aim 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
     uint64_t airFeeds = 0, airFeedRows = 0; // --air-feed: feeds handed to the driver / of them with air fields in the dump
@@ -744,6 +765,10 @@ int main(int argc, char** argv)
             firmRelease = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-latch-speed") == 0)
             firmLatch = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-strafe-latch-speed") == 0)
+            firmStrafeLatch = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--firm-strafe-limit") == 0)
+            firmStrafeLimit = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--turn-rate") == 0)
             turnRate = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--turn-rate-max") == 0)
@@ -808,6 +833,21 @@ int main(int argc, char** argv)
             aimPivotDeg = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-pivot-gate") == 0)
             aimPivotGateS = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-pivot-regate") == 0)
+            aimPivotRegateDeg = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--strafe-pivot-tail") == 0)
+            strafePivotTailS = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--strafe-pivot-entry") == 0)
+            strafePivotEntry = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--strafe-pivot-blend") == 0)
+            strafePivotBlendS = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--aim-tip-settle") == 0)
+        {
+            const std::string v = argv[i + 1];
+            const size_t c = v.find(',');
+            aimTipSettleS = std::stof(v.substr(0, c));
+            aimTipSettleContact = c == std::string::npos ? -1.0f : std::stof(v.substr(c + 1));
+        }
         else if (std::strcmp(argv[i], "--force-aim") == 0)
             forceAim = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--stair-steps") == 0)
@@ -999,10 +1039,12 @@ int main(int argc, char** argv)
     if ((footYawTwist >= 0.0f || footYawCorr >= 0.0f || footYawUnplant >= 0.0f) &&
         !motionhost::SetFootYawLockParams(footYawTwist, footYawCorr, footYawUnplant >= 0.0f ? footYawUnplant * 0.017453293f : -1.0f))
         return 2;
-    if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f || firmTurnKnee >= 0.0f)
+    if (firmLimit >= 0.0f || firmHandBack >= 0.0f || firmKnee >= 0.0f || firmRelease >= 0.0f || firmLatch >= 0.0f || firmTurnKnee >= 0.0f ||
+        firmStrafeLatch >= 0.0f || firmStrafeLimit >= 0.0f)
     {
         // a value not passed keeps the build default (negative)
-        if (!motionhost::SetFirmFeetParams(firmLimit, firmHandBack, firmKnee, firmRelease, firmLatch, firmTurnKnee))
+        if (!motionhost::SetFirmFeetParams(firmLimit, firmHandBack, firmKnee, firmRelease, firmLatch, firmTurnKnee, firmStrafeLatch,
+                                           firmStrafeLimit))
             return 2;
     }
     if (turnRate >= 0)
@@ -1052,6 +1094,16 @@ int main(int argc, char** argv)
         motiondriver::SetAimRootAccumulate(aimRootAccumulate != 0);
     if (std::isfinite(aimPivotDeg) || std::isfinite(aimPivotGateS))
         motiondriver::TestSetMapAimPivot(aimPivotDeg, aimPivotGateS);
+    if (std::isfinite(aimPivotRegateDeg))
+        motiondriver::TestSetMapAimPivotRegate(aimPivotRegateDeg);
+    if (strafePivotTailS >= 0.0f)
+        motiondriver::TestSetStrafePivotTail(strafePivotTailS);
+    if (strafePivotEntry >= 0)
+        motiondriver::TestSetStrafePivotEntry(strafePivotEntry);
+    if (strafePivotBlendS >= 0.0f)
+        motiondriver::TestSetStrafePivotBlend(strafePivotBlendS);
+    if (aimTipSettleS >= 0.0f)
+        motiondriver::TestSetAimTipSettle(aimTipSettleS, aimTipSettleContact);
     FILE* forecastOut = nullptr;
     FILE* selOut = nullptr;
     if (selDump && out != "-")
