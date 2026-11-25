@@ -2092,11 +2092,11 @@ function M.RegisterSettings(core)
       .. "Off: the wheel stops at the last third-person step.", apply = function(v) M.cfg.zoomUnarmedFppHandoff = v end })
   R({ key = "camera.collision", section = "camera", type = "bool", default = true, label = "Camera collision",
     apply = function(v) M.cfg.collision = v end })
-  R({ key = "camera.vaultRise", section = "camera", type = "float", default = 0, min = 0, max = 1.2, step = 0.1,
+  R({ key = "camera.vaultRise", section = "camera", type = "float", default = 0.6, min = 0, max = 1.2, step = 0.1,
     label = "Camera rise over obstacles (m)", format = "%.1f",
     desc = "While V jumps over an obstacle at a run or a walk, the camera rises by about this much and keeps looking at her, so the "
       .. "obstacle hides less of her; it comes back down shortly after she lands. Walls and ceilings still stop it. "
-      .. "0 (default) = the camera does not move up. About 0.6 is a good first try.",
+      .. "0.6 is the default; 0 = the camera does not move up.",
     apply = function(v) M.cfg.vaultRise = v end })
   R({ key = "camera.enterTime", section = "camera", type = "float", default = 0.45, min = 0, max = 2, step = 0.05,
     label = "Enter time (s)", apply = function(v) M.cfg.enterTime = v end })

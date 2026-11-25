@@ -592,12 +592,12 @@ local LAYOUT = {
   -- in turns on the spot" (mm.turnFootPin, utpp_motion: the pivot foot of a turn in place stays fixed, default on), then "Natural body turn
   -- while aiming on the move" (mm.aimRootAccumulate, utpp_motion: the lower body turns with its steps while aiming, default on), then "Body lean" and
   -- "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns), then "Quick
-  -- straighten after turns" (mm.fastTurnExit, utpp_motion: V runs straight as soon as a turn ends, default off), then
-  -- "Steadier jump and landing animations" (mm.steadyAirPicks, utpp_motion, default off)
-  --   Advanced camera options: "Camera rise over obstacles (m)" (camera.vaultRise, utpp_camera, default 0 = off). The
+  -- straighten after turns" (mm.fastTurnExit, utpp_motion: V runs straight as soon as a turn ends, default on), then
+  -- "Steadier jump and landing animations" (mm.steadyAirPicks, utpp_motion, default on)
+  --   Advanced camera options: "Camera rise over obstacles (m)" (camera.vaultRise, utpp_camera, default 0.6; 0 = off). The
   -- advanced interaction options end with "Climbing straight after a jump" and "Try other climb animations"
   -- (traversal.jumpStartGround / traversal.rejectedFallback, utpp_motion, both default on), then "Vault and climb from
-  -- farther away" and "Vault into a drop" (traversal.obstacleReach / traversal.dropVault, utpp_motion, both default off)
+  -- farther away" and "Vault into a drop" (traversal.obstacleReach / traversal.dropVault, utpp_motion, both default on)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",

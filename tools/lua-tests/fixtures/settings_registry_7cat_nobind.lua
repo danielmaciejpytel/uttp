@@ -63,7 +63,7 @@ return {
     ["camera.side"] = "1",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
-    ["camera.vaultRise"] = "0",
+    ["camera.vaultRise"] = "0.59999999999999998",
     ["camera.worldCamera"] = "true",
     ["camera.worldCameraRetry"] = "true",
     ["camera.zoomUnarmed.boomFrame"] = "0.5",
@@ -117,7 +117,7 @@ return {
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.farJumpGravity"] = "false",
-    ["mm.fastTurnExit"] = "false",
+    ["mm.fastTurnExit"] = "true",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.firmFeet"] = "true",
@@ -151,7 +151,7 @@ return {
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stairSteps"] = "false",
-    ["mm.steadyAirPicks"] = "false",
+    ["mm.steadyAirPicks"] = "true",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -191,9 +191,9 @@ return {
     ["ragdoll.getUpPush"] = "true",
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
-    ["traversal.dropVault"] = "false",
+    ["traversal.dropVault"] = "true",
     ["traversal.jumpStartGround"] = "true",
-    ["traversal.obstacleReach"] = "false",
+    ["traversal.obstacleReach"] = "true",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
     ["vehicle.forceTppOnEnter"] = "true",
@@ -314,12 +314,12 @@ return {
     "native UTPPSetMMTurnFootPin(true)",
     "native UTPPSetMMAimRootAccumulate(true)",
     "native UTPPSetMMOverlayInertialSwitch(true)",
-    "native UTPPSetMMFastTurnExit(false)",
+    "native UTPPSetMMFastTurnExit(true)",
     "native UTPPSetMMTraversalJumpStartGround(true)",
     "native UTPPSetMMTraversalRejectedFallback(true)",
-    "native UTPPSetObstacleReach(false)",
-    "native UTPPSetDropVault(false)",
-    "native UTPPSetMMSteadyAirPicks(false)",
+    "native UTPPSetObstacleReach(true)",
+    "native UTPPSetDropVault(true)",
+    "native UTPPSetMMSteadyAirPicks(true)",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
@@ -337,12 +337,12 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(0.20000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
-    "apply mm.fastTurnExit(false,\"ok\")",
-    "apply mm.steadyAirPicks(false,\"ok\")",
+    "apply mm.fastTurnExit(true,\"ok\")",
+    "apply mm.steadyAirPicks(true,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
-    "apply traversal.obstacleReach(false,\"ok\")",
-    "apply traversal.dropVault(false,\"ok\")",
+    "apply traversal.obstacleReach(true,\"ok\")",
+    "apply traversal.dropVault(true,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -401,7 +401,7 @@ return {
     "apply camera.zoomUnarmed.lastFov(25,\"ok\")",
     "apply camera.zoomUnarmed.fppHandoff(false,\"ok\")",
     "apply camera.collision(true,\"ok\")",
-    "apply camera.vaultRise(0,\"ok\")",
+    "apply camera.vaultRise(0.59999999999999998,\"ok\")",
     "apply camera.enterTime(0.45000000000000001,\"ok\")",
     "apply camera.exitTime(0.34999999999999998,\"ok\")",
     "apply camera.poseNudge(true,\"ok\")",
@@ -552,12 +552,12 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
-    "apply mm.fastTurnExit(false,\"ok\")",
-    "apply mm.steadyAirPicks(false,\"ok\")",
+    "apply mm.fastTurnExit(true,\"ok\")",
+    "apply mm.steadyAirPicks(true,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
-    "apply traversal.obstacleReach(false,\"ok\")",
-    "apply traversal.dropVault(false,\"ok\")",
+    "apply traversal.obstacleReach(true,\"ok\")",
+    "apply traversal.dropVault(true,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -616,7 +616,7 @@ return {
     "apply camera.zoomUnarmed.lastFov(25,\"ok\")",
     "apply camera.zoomUnarmed.fppHandoff(false,\"ok\")",
     "apply camera.collision(true,\"ok\")",
-    "apply camera.vaultRise(0,\"ok\")",
+    "apply camera.vaultRise(0.59999999999999998,\"ok\")",
     "apply camera.enterTime(0.45000000000000001,\"ok\")",
     "apply camera.exitTime(0.34999999999999998,\"ok\")",
     "apply camera.poseNudge(true,\"ok\")",
@@ -1231,7 +1231,7 @@ return {
       ["type"] = "bool"
     },
     ["camera.vaultRise"] = {
-      ["default"] = "0",
+      ["default"] = "0.59999999999999998",
       ["hasApply"] = true,
       ["hold"] = false,
       ["max"] = 1.2,
@@ -1708,7 +1708,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.fastTurnExit"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -1997,7 +1997,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.steadyAirPicks"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2348,7 +2348,7 @@ return {
       ["type"] = "float"
     },
     ["traversal.dropVault"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2364,7 +2364,7 @@ return {
       ["type"] = "bool"
     },
     ["traversal.obstacleReach"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2507,7 +2507,7 @@ return {
     ["camera.side"] = "1",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
-    ["camera.vaultRise"] = "0",
+    ["camera.vaultRise"] = "0.59999999999999998",
     ["camera.worldCamera"] = "true",
     ["camera.worldCameraRetry"] = "true",
     ["camera.zoomUnarmed.boomFrame"] = "0.5",
@@ -2561,7 +2561,7 @@ return {
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.farJumpGravity"] = "false",
-    ["mm.fastTurnExit"] = "false",
+    ["mm.fastTurnExit"] = "true",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.firmFeet"] = "true",
@@ -2595,7 +2595,7 @@ return {
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stairSteps"] = "false",
-    ["mm.steadyAirPicks"] = "false",
+    ["mm.steadyAirPicks"] = "true",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -2635,9 +2635,9 @@ return {
     ["ragdoll.getUpPush"] = "true",
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
-    ["traversal.dropVault"] = "false",
+    ["traversal.dropVault"] = "true",
     ["traversal.jumpStartGround"] = "true",
-    ["traversal.obstacleReach"] = "false",
+    ["traversal.obstacleReach"] = "true",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
     ["vehicle.forceTppOnEnter"] = "true",
@@ -3165,12 +3165,12 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(0.20000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
-    "apply mm.fastTurnExit(false,\"ok\")",
-    "apply mm.steadyAirPicks(false,\"ok\")",
+    "apply mm.fastTurnExit(true,\"ok\")",
+    "apply mm.steadyAirPicks(true,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
-    "apply traversal.obstacleReach(false,\"ok\")",
-    "apply traversal.dropVault(false,\"ok\")",
+    "apply traversal.obstacleReach(true,\"ok\")",
+    "apply traversal.dropVault(true,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -3229,7 +3229,7 @@ return {
     "apply camera.zoomUnarmed.lastFov(25,\"ok\")",
     "apply camera.zoomUnarmed.fppHandoff(false,\"ok\")",
     "apply camera.collision(true,\"ok\")",
-    "apply camera.vaultRise(0,\"ok\")",
+    "apply camera.vaultRise(0.59999999999999998,\"ok\")",
     "apply camera.enterTime(0.45000000000000001,\"ok\")",
     "apply camera.exitTime(0.34999999999999998,\"ok\")",
     "apply camera.poseNudge(true,\"ok\")",
@@ -3368,12 +3368,12 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=0.2\r\
 mm.leanHeadScale=0.2\r\
-mm.fastTurnExit=false\r\
-mm.steadyAirPicks=false\r\
+mm.fastTurnExit=true\r\
+mm.steadyAirPicks=true\r\
 traversal.jumpStartGround=true\r\
 traversal.rejectedFallback=true\r\
-traversal.obstacleReach=false\r\
-traversal.dropVault=false\r\
+traversal.obstacleReach=true\r\
+traversal.dropVault=true\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
@@ -3432,7 +3432,7 @@ camera.zoomUnarmed.fov=45\r\
 camera.zoomUnarmed.lastFov=25\r\
 camera.zoomUnarmed.fppHandoff=false\r\
 camera.collision=true\r\
-camera.vaultRise=0\r\
+camera.vaultRise=0.6\r\
 camera.enterTime=0.45\r\
 camera.exitTime=0.35\r\
 camera.poseNudge=true\r\
@@ -3794,7 +3794,7 @@ vehicle.jumpOutSidePush=true\r\
     ["camera.side"] = "1",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
-    ["camera.vaultRise"] = "0",
+    ["camera.vaultRise"] = "0.59999999999999998",
     ["camera.worldCamera"] = "true",
     ["camera.worldCameraRetry"] = "true",
     ["camera.zoomUnarmed.boomFrame"] = "0.5",
@@ -3848,7 +3848,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.farJumpGravity"] = "false",
-    ["mm.fastTurnExit"] = "false",
+    ["mm.fastTurnExit"] = "true",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.firmFeet"] = "true",
@@ -3882,7 +3882,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stairSteps"] = "false",
-    ["mm.steadyAirPicks"] = "false",
+    ["mm.steadyAirPicks"] = "true",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -3922,9 +3922,9 @@ vehicle.jumpOutSidePush=true\r\
     ["ragdoll.getUpPush"] = "true",
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
-    ["traversal.dropVault"] = "false",
+    ["traversal.dropVault"] = "true",
     ["traversal.jumpStartGround"] = "true",
-    ["traversal.obstacleReach"] = "false",
+    ["traversal.obstacleReach"] = "true",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
     ["vehicle.forceTppOnEnter"] = "true",
@@ -4025,12 +4025,12 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.2\r\
-mm.fastTurnExit=false\r\
-mm.steadyAirPicks=false\r\
+mm.fastTurnExit=true\r\
+mm.steadyAirPicks=true\r\
 traversal.jumpStartGround=true\r\
 traversal.rejectedFallback=true\r\
-traversal.obstacleReach=false\r\
-traversal.dropVault=false\r\
+traversal.obstacleReach=true\r\
+traversal.dropVault=true\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
@@ -4089,7 +4089,7 @@ camera.zoomUnarmed.fov=45\r\
 camera.zoomUnarmed.lastFov=25\r\
 camera.zoomUnarmed.fppHandoff=false\r\
 camera.collision=true\r\
-camera.vaultRise=0\r\
+camera.vaultRise=0.6\r\
 camera.enterTime=0.45\r\
 camera.exitTime=0.35\r\
 camera.poseNudge=true\r\

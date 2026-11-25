@@ -3990,6 +3990,7 @@ end
 -- vault animation moves the game's FPP pitch: no one-frame pitch snap (<= 0.5 deg on that frame and while vaulting)
 do
   local W, _, cam = lwSetup()
+  cam.cfg.vaultRise = 0 -- this block measures the look write hand-over alone; the vault rise has its own checks (camera stance test)
   W.speed = 2
   cam.FreeLook(true)
   frames(W, 0.5, 60, function() W.lwTick(5, 0) end)

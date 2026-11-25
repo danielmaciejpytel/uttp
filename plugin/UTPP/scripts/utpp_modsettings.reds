@@ -309,8 +309,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "25")
   @runtimeProperty("ModSettings.displayName", "Quick straighten after turns")
-  @runtimeProperty("ModSettings.description", "When you stop turning with the mouse or stick while V runs, she finishes the turn at once and runs straight right away instead of easing out of the curve. Entering and holding a turn are unchanged. Off (default) = she eases out of it. No effect with the Game Animations pack.")
-  public let mm_fastTurnExit: Bool = false;
+  @runtimeProperty("ModSettings.description", "When you stop turning with the mouse or stick while V runs, she finishes the turn at once and runs straight right away instead of easing out of the curve. Entering and holding a turn are unchanged (default). Off = she eases out of it. No effect with the Game Animations pack.")
+  public let mm_fastTurnExit: Bool = true;
 
   // mm.steadyAirPicks
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -318,8 +318,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "26")
   @runtimeProperty("ModSettings.displayName", "Steadier jump and landing animations")
-  @runtimeProperty("ModSettings.description", "V's jump and landing animations change less often: brushing the edge of a ledge plays no landing, a fall does not start a new jump animation, each landing plays once and the move after a vault or climb is not cut short. Off (default) = the animations are picked as before. No effect with the Game Animations pack.")
-  public let mm_steadyAirPicks: Bool = false;
+  @runtimeProperty("ModSettings.description", "V's jump and landing animations change less often: brushing the edge of a ledge plays no landing, a fall does not start a new jump animation, each landing plays once and the move after a vault or climb is not cut short (default). Off = the animations are picked as before. No effect with the Game Animations pack.")
+  public let mm_steadyAirPicks: Bool = true;
 
   // mm.shoulderWidth
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -366,11 +366,11 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "2")
   @runtimeProperty("ModSettings.order", "31")
   @runtimeProperty("ModSettings.displayName", "Camera rise over obstacles (m)")
-  @runtimeProperty("ModSettings.description", "While V jumps over an obstacle at a run or a walk, the camera rises by about this much and keeps looking at her, so the obstacle hides less of her; it comes back down shortly after she lands. Walls and ceilings still stop it. 0 (default) = the camera does not move up. About 0.6 is a good first try.")
+  @runtimeProperty("ModSettings.description", "While V jumps over an obstacle at a run or a walk, the camera rises by about this much and keeps looking at her, so the obstacle hides less of her; it comes back down shortly after she lands. Walls and ceilings still stop it. 0.6 is the default; 0 = the camera does not move up.")
   @runtimeProperty("ModSettings.min", "0.0")
   @runtimeProperty("ModSettings.max", "1.2")
   @runtimeProperty("ModSettings.step", "0.1")
-  public let camera_vaultRise: Float = 0.0;
+  public let camera_vaultRise: Float = 0.6;
 
   // perspective.animate
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -751,8 +751,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "4")
   @runtimeProperty("ModSettings.order", "70")
   @runtimeProperty("ModSettings.displayName", "Vault and climb from farther away")
-  @runtimeProperty("ModSettings.description", "If you press jump while running at a low obstacle that is still a little too far, the jump waits up to 0.4 s so the game can vault or climb it. Otherwise you jump as usual. No effect with the Game Animations pack.")
-  public let traversal_obstacleReach: Bool = false;
+  @runtimeProperty("ModSettings.description", "If you press jump while running at a low obstacle that is still a little too far, the jump waits up to 0.4 s so the game can vault or climb it. Otherwise you jump as usual. On by default. No effect with the Game Animations pack.")
+  public let traversal_obstacleReach: Bool = true;
 
   // traversal.dropVault
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")
@@ -760,8 +760,8 @@ public class UTPPModSettings extends IScriptable {
   @runtimeProperty("ModSettings.category.order", "4")
   @runtimeProperty("ModSettings.order", "71")
   @runtimeProperty("ModSettings.displayName", "Vault into a drop")
-  @runtimeProperty("ModSettings.description", "When there is no floor behind a low obstacle, V vaults over it into a fall. No effect with the Game Animations pack.")
-  public let traversal_dropVault: Bool = false;
+  @runtimeProperty("ModSettings.description", "When there is no floor behind a low obstacle, V vaults over it into a fall. On by default. No effect with the Game Animations pack.")
+  public let traversal_dropVault: Bool = true;
 
   // perspective.vehicleKeepTpp
   @runtimeProperty("ModSettings.mod", "Ultimate Third Person")

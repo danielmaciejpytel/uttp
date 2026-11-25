@@ -264,8 +264,8 @@ do
     sw ~= nil and sw.type == "bool" and sw.default == true and sw.section == "animation" and sw.label == "Stride matching"
     and type(sw.desc) == "string" and sw.desc:find("slide less", 1, true) ~= nil)
   local fx = defs["mm.fastTurnExit"]
-  check("registered mm.fastTurnExit: bool, off by default, animation section, label 'Quick straighten after turns'",
-    fx ~= nil and fx.type == "bool" and fx.default == false and fx.section == "animation" and fx.label == "Quick straighten after turns"
+  check("registered mm.fastTurnExit: bool, on by default, animation section, label 'Quick straighten after turns'",
+    fx ~= nil and fx.type == "bool" and fx.default == true and fx.section == "animation" and fx.label == "Quick straighten after turns"
     and type(fx.desc) == "string" and fx.desc:find("runs straight", 1, true) ~= nil)
   local ff = defs["mm.firmFeet"]
   check("registered mm.firmFeet: bool, on by default, animation section, label 'Firm feet in turns and stops'",
@@ -696,14 +696,14 @@ do
   check("rejected strideWarp retries", #t.stride == 4 and t.stride[4] == true and v.rt.optionsApplied.strideWarp == true)
 end
 
--- mm.fastTurnExit (one of M.OPTIONS; DLL default off): off is sent once when motion comes on, then only on a change
+-- mm.fastTurnExit (one of M.OPTIONS; menu default on, DLL default off): on is sent once when motion comes on, then only on a change
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("fastTurnExit starts off and is sent when motion comes on",
-    v.want.fastTurnExit == false and v.Sync(t.api) == "enabled" and #t.turnExit == 1 and t.turnExit[1] == false)
-  v.SetOption("fastTurnExit", true, t.api)
-  check("fastTurnExit switched on is sent once", #t.turnExit == 2 and t.turnExit[2] == true and v.Sync(t.api) == "same" and #t.turnExit == 2)
+  check("fastTurnExit starts on and is sent when motion comes on",
+    v.want.fastTurnExit == true and v.Sync(t.api) == "enabled" and #t.turnExit == 1 and t.turnExit[1] == true)
+  v.SetOption("fastTurnExit", false, t.api)
+  check("fastTurnExit switched off is sent once", #t.turnExit == 2 and t.turnExit[2] == false and v.Sync(t.api) == "same" and #t.turnExit == 2)
 end
 
 -- traversal.jumpStartGround / traversal.rejectedFallback (M.OPTIONS; DLL default on): on is sent once when motion comes on,
@@ -722,15 +722,18 @@ do
     #t.travFallback == 2 and t.travFallback[2] == false and v.Sync(t.api) == "same" and #t.travFallback == 2 and #t.travJump == 2)
 end
 
--- traversal.obstacleReach / traversal.dropVault (script switches) and mm.steadyAirPicks (M.OPTIONS, all default off): refused
+-- traversal.obstacleReach / traversal.dropVault (script switches) and mm.steadyAirPicks (M.OPTIONS, all default on): refused
 -- before a game session exists and sent again, sent to every new session, the script switches off with the motion driver
 do
   local v, t = fresh(), mock()
   v.SetEnabled(true)
-  check("optional traversal and air picks start off and are sent when motion comes on",
-    v.want.travObstacleReach == false and v.want.travDropVault == false and v.want.steadyAirPicks == false
-    and v.Sync(t.api) == "enabled" and #t.travReach == 1 and t.travReach[1] == false and #t.travDrop == 1
-    and t.travDrop[1] == false and #t.steadyAir == 1 and t.steadyAir[1] == false)
+  check("optional traversal and air picks start on and are sent when motion comes on",
+    v.want.travObstacleReach == true and v.want.travDropVault == true and v.want.steadyAirPicks == true
+    and v.Sync(t.api) == "enabled" and #t.travReach == 1 and t.travReach[1] == true and #t.travDrop == 1
+    and t.travDrop[1] == true and #t.steadyAir == 1 and t.steadyAir[1] == true)
+  v.SetOption("travObstacleReach", false, t.api)
+  v.SetOption("travDropVault", false, t.api)
+  v.SetOption("steadyAirPicks", false, t.api)
   t.travScriptReject = true -- the script system is not there yet
   v.SetOption("travObstacleReach", true, t.api)
   v.SetOption("travDropVault", true, t.api)
@@ -744,8 +747,8 @@ do
   local reach, drop = #t.travReach, #t.travDrop
   check("accepted script switches are not resent", v.Sync(t.api) == "same" and #t.travReach == reach and #t.travDrop == drop)
   v.SetOption("steadyAirPicks", true, t.api)
-  check("steadyAirPicks switched on is sent once", #t.steadyAir == 2 and t.steadyAir[2] == true and v.Sync(t.api) == "same"
-    and #t.steadyAir == 2)
+  check("steadyAirPicks switched on is sent once", #t.steadyAir == 3 and t.steadyAir[3] == true and v.Sync(t.api) == "same"
+    and #t.steadyAir == 3)
   t.enabled = false -- load / respawn: a new session, its script switches start off
   check("a new session gets the switched-on options again",
     v.Sync(t.api) == "enabled" and #t.travReach == reach + 1 and t.travReach[reach + 1] == true and #t.travDrop == drop + 1
