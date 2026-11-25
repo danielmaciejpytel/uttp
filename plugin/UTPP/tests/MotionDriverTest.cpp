@@ -1339,6 +1339,216 @@ int main(int argc, char** argv)
             (void)feed(dt60);
     }
 
+    // ---- 8k2. feed budget trip with a ranged weapon in hand: the base path has no weapon overlay, aim offset or grip IK, so the
+    // motion pose keeps running (same pause length, one trip, no second trip, traversal off, no MOTION trace lines). A put-away
+    // weapon or a climb ends that for the rest of the pause. Pistol2H, running, first hip shot inside the pause.
+    {
+        using mm::adapter::Budget;
+        const float dt60 = 1.0f / 60.0f;
+        const uint32_t drawn = mm::integ::kPsmWeaponKnown | mm::integ::kPsmWeaponDrawn;
+        int32_t hand[2] = {-1, -1};
+        for (uint32_t i = 0; i < rw.bones; ++i)
+        {
+            if (rw.hashes[i] == mm::integ::CNameHash("LeftInHandMiddle"))
+                hand[0] = static_cast<int32_t>(i);
+            if (rw.hashes[i] == mm::integ::CNameHash("RightInHandMiddle"))
+                hand[1] = static_cast<int32_t>(i);
+        }
+        // distance of the two hands in the published pose (model space, cm)
+        auto gapCm = [&](const mm::integ::PoseSnapshot& aSnap) {
+            std::vector<std::array<double, 7>> m(rw.bones);
+            for (uint32_t i = 0; i < rw.bones; ++i)
+            {
+                const float* v = aSnap.pose + size_t(i) * 7;
+                std::array<double, 7> l{v[0], v[1], v[2], v[3], v[4], v[5], v[6]};
+                const int p = rw.parents[i];
+                if (p < 0 || static_cast<uint32_t>(p) >= i)
+                {
+                    m[i] = l;
+                    continue;
+                }
+                const auto& a = m[static_cast<size_t>(p)];
+                const double x = a[3], y = a[4], z = a[5], w = a[6];
+                const double tx = 2 * (y * l[2] - z * l[1]), ty = 2 * (z * l[0] - x * l[2]), tz = 2 * (x * l[1] - y * l[0]);
+                m[i] = {a[0] + l[0] + w * tx + (y * tz - z * ty), a[1] + l[1] + w * ty + (z * tx - x * tz),
+                        a[2] + l[2] + w * tz + (x * ty - y * tx), w * l[3] + x * l[6] + y * l[5] - z * l[4],
+                        w * l[4] - x * l[5] + y * l[6] + z * l[3], w * l[5] + x * l[4] - y * l[3] + z * l[6],
+                        w * l[6] - x * l[3] - y * l[4] - z * l[5]};
+            }
+            if (hand[0] < 0 || hand[1] < 0)
+                return -1.0;
+            const auto& a = m[static_cast<size_t>(hand[0])];
+            const auto& b = m[static_cast<size_t>(hand[1])];
+            return 100.0 * std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+        };
+        struct Fed
+        {
+            bool step = false, budget = false;
+            double gap = -1.0;
+        };
+        auto feed = [&](uint32_t aPsm) {
+            motionhost::FeedInput f = WalkFeed();
+            f.velWorld[1] = 4.5f;
+            f.psmBlock = aPsm;
+            Fed r;
+            r.step = motiondriver::Step(f, 0, f.dt);
+            r.budget = std::strcmp(motiondriver::LastSkipReason(), "budget") == 0;
+            mm::integ::PoseSnapshot snap{};
+            snap.weight = 0.75f;
+            snap.numBones = rw.bones;
+            snap.firstBone = motiondriver::kFirstBone;
+            snap.rig = kRigPtr;
+            for (uint32_t i = 0; i < mm::integ::kMaxMMBones; ++i)
+                snap.gameIndex[i] = (i >= motiondriver::kFirstBone && i < rw.bones) ? static_cast<int32_t>(i) : -1;
+            for (uint32_t i = 0; i < rw.bones; ++i)
+                snap.pose[size_t(i) * 7 + 6] = 1.0f;
+            if (motiondriver::ApplyToSnapshot(snap) && r.step)
+                r.gap = gapCm(snap);
+            return r;
+        };
+        auto field = [&](const char* aField) { return StatusField(motiondriver::Status(), aField); };
+        auto trips = [&]() { return std::strtoull(field("budgetTrips=").c_str(), nullptr, 10); };
+        auto fresh = [&]() {
+            motiondriver::TestSetFeedTimesUs(100.0f, 100.0f);
+            motiondriver::SetWeaponAction(0);
+            motiondriver::SetEnabled(false);
+            motiondriver::SetEnabled(true);
+            motiondriver::SetOverlayInputs(3, 0, false, false, 3); // Pistol2H, relaxed
+            // a full window without a trip: the next pause is the first one (5 s) again
+            for (int i = 0; i < static_cast<int>(Budget::kWindow) + 30; ++i)
+                (void)feed(drawn);
+        };
+        // slow feeds until the budget trips (the trip feed's pose is still published); false = no trip within aMax feeds
+        auto runToTrip = [&](uint32_t aPsm, int aMax) {
+            const unsigned long long before = trips();
+            motiondriver::TestSetFeedTimesUs(800.0f, 800.0f);
+            for (int i = 0; i < aMax; ++i)
+            {
+                if (!feed(aPsm).step)
+                    return false;
+                if (trips() != before)
+                    return true;
+            }
+            return false;
+        };
+        // reference without a trip: the first hip shot out of the relaxed run
+        fresh();
+        const double relaxedGap = feed(drawn).gap;
+        motiondriver::SetWeaponAction(8);
+        double refWorst = 0.0;
+        for (int i = 0; i < 90; ++i)
+        {
+            const Fed r = feed(drawn);
+            if (i >= 24)
+                refWorst = std::fmax(refWorst, r.gap);
+        }
+        const std::string refHip = field("hipFirePose=");
+        // the same with the budget tripped during the relaxed run, the shot starting inside the pause
+        fresh();
+        motiondriver::SetTrace(true);
+        const size_t tripLines = LogCount("UTPP mm.motionDriver budget trip #"), keepLines = LogCount("UTPP mm.motionDriver budgetKeep #");
+        const size_t resumeLines = LogCount("UTPP mm.motionDriver budget resume #");
+        const unsigned long long tripsBefore = trips();
+        const bool tripped = runToTrip(drawn, 700);
+        const size_t motionAtTrip = LogCount("UTPP MOTION");
+        const std::string stTrip = motiondriver::Status();
+        int pauseFeeds = 0, lost = 0;
+        size_t motionPauseEnd = motionAtTrip; // trace lines up to the last feed of the pause (the resume feed writes again)
+        double keptWorst = 0.0;
+        std::string keptHip, keptReason, keptTrav;
+        const size_t resumeBefore = LogCount("UTPP mm.motionDriver budget resume #");
+        for (int i = 0; i < 400; ++i)
+        {
+            if (i == 30)
+                motiondriver::SetWeaponAction(8);
+            const Fed r = feed(drawn); // 800 us all through the pause: kept feeds must not trip again
+            if (LogCount("UTPP mm.motionDriver budget resume #") != resumeBefore)
+                break;
+            ++pauseFeeds;
+            motionPauseEnd = LogCount("UTPP MOTION");
+            lost += r.step ? 0 : 1;
+            if (i >= 54)
+                keptWorst = std::fmax(keptWorst, r.step ? r.gap : 1000.0);
+            if (i == 100)
+            {
+                keptHip = field("hipFirePose=");
+                keptReason = field("reason=") + "/" + field("budgetKeep=") + "/" + field("budgetPauseS=");
+                keptTrav = motiondriver::TravActive() ? "1" : "0";
+            }
+        }
+        const size_t motionInPause = motionPauseEnd - motionAtTrip;
+        const std::string stResume = motiondriver::Status();
+        motiondriver::TestSetFeedTimesUs(100.0f, 100.0f);
+        for (int i = 0; i < 90; ++i)
+            (void)feed(drawn);
+        const size_t motionAfter = LogCount("UTPP MOTION") - motionAtTrip - motionInPause;
+        motiondriver::SetTrace(false);
+        Check(refHip == "1" && relaxedGap > 20.0 && refWorst > 0.0 && refWorst < 10.0,
+              "8k2 reference: relaxed run holds the pistol one-handed, a hip shot brings both hands to it",
+              "relaxed gap " + std::to_string(relaxedGap) + " cm, shot " + std::to_string(refWorst) + " cm, hipFirePose=" + refHip);
+        Check(tripped && lost == 0 && pauseFeeds >= 290 && pauseFeeds <= 310 && keptHip == "1" && keptWorst > 0.0 &&
+                  keptWorst < 10.0 && std::fabs(keptWorst - refWorst) < 2.0,
+              "8k2 trip with the pistol in hand: every feed of the 5 s pause keeps the motion pose, the first shot takes the hip pose "
+              "with both hands on the pistol",
+              "tripped " + std::to_string(tripped) + " pause feeds " + std::to_string(pauseFeeds) + " lost " + std::to_string(lost) +
+                  " hipFirePose=" + keptHip + " gap " + std::to_string(keptWorst) + " cm (no trip " + std::to_string(refWorst) + ")");
+        Check(keptReason.rfind("none/1/", 0) == 0 && std::atof(keptReason.c_str() + 7) > 0.0 && keptTrav == "0" &&
+                  StatusField(stTrip, "budgetKeep=") == "1" && StatusField(stResume, "budgetKeep=") == "0",
+              "8k2 status in the kept pause: reason=none budgetKeep=1 budgetPauseS > 0, traversal off; budgetKeep=0 after the resume",
+              keptReason + " trav " + keptTrav + " after " + StatusField(stResume, "budgetKeep="));
+        Check(trips() == tripsBefore + 1 && LogCount("UTPP mm.motionDriver budget trip #") == tripLines + 1 &&
+                  LogCount("UTPP mm.motionDriver budgetKeep #") == keepLines + 1 &&
+                  LogCount("UTPP mm.motionDriver budget resume #") == resumeLines + 1,
+              "8k2 one trip, one budgetKeep line, one resume; slow feeds of the kept pause never trip again",
+              "trips +" + std::to_string(trips() - tripsBefore) + " keep lines +" +
+                  std::to_string(LogCount("UTPP mm.motionDriver budgetKeep #") - keepLines));
+        Check(motionInPause == 0 && motionAfter > 0, "8k2 no MOTION trace lines in the kept pause, they return after it",
+              std::to_string(motionInPause) + " in the pause, " + std::to_string(motionAfter) + " after");
+        // the weapon is put away inside a kept pause: the rest of the pause is the plain pause (no second keep when drawn again)
+        fresh();
+        const bool tripped2 = runToTrip(drawn, 700);
+        bool keptBefore = true;
+        for (int i = 0; i < 20; ++i)
+            keptBefore = feed(drawn).step && keptBefore;
+        const Fed away = feed(mm::integ::kPsmWeaponKnown);
+        const std::string awayKeep = field("budgetKeep=");
+        bool stayed = true;
+        for (int i = 0; i < 20; ++i)
+        {
+            const Fed r = feed(drawn);
+            stayed = stayed && !r.step && r.budget;
+        }
+        Check(tripped2 && keptBefore && !away.step && away.budget && awayKeep == "0" && stayed,
+              "8k2 weapon put away in a kept pause: base path for the rest of the pause, drawing again does not bring the motion pose back",
+              "kept " + std::to_string(keptBefore) + " away step " + std::to_string(away.step) + " budgetKeep=" + awayKeep +
+                  " stayed " + std::to_string(stayed));
+        // a climb inside a kept pause ends it the same way (traversal runs as in every budget pause)
+        fresh();
+        const bool tripped3 = runToTrip(drawn, 700);
+        const bool keptBefore3 = feed(drawn).step;
+        const Fed climb = feed(drawn | (uint32_t(mm::adapter::kPsmClimb + 1) << mm::integ::kPsmDetailShift));
+        Check(tripped3 && keptBefore3 && !climb.step && climb.budget && field("budgetKeep=") == "0",
+              "8k2 climb in a kept pause: base path", "step " + std::to_string(climb.step) + " budgetKeep=" + field("budgetKeep="));
+        // melee release inside a kept pause ends it too
+        fresh();
+        const bool tripped4 = runToTrip(drawn, 700);
+        motiondriver::SetOverlayInputs(3, 0, true, false, 3);
+        const Fed released = feed(drawn);
+        Check(tripped4 && !released.step && field("budgetKeep=") == "0", "8k2 overlay release in a kept pause: no motion pose",
+              "step " + std::to_string(released.step) + " budgetKeep=" + field("budgetKeep="));
+        // back to the inputs of the sections around
+        motiondriver::TestSetFeedTimesUs(-1.0f, -1.0f);
+        motiondriver::SetWeaponAction(0);
+        motiondriver::SetOverlayInputs(0, 0, false, false);
+        motiondriver::SetEnabled(false);
+        motiondriver::SetEnabled(true);
+        for (int i = 0; i < 30; ++i)
+        {
+            motionhost::FeedInput f = WalkFeed();
+            (void)motiondriver::Step(f, 0, dt60);
+        }
+    }
+
     // ---- 8c. MotionSetFrame pose lifetime (commit A review): Frame copies the v2 pose into the caller's buffer under the v2 lock, so a
     // bundle swap / free by the worker (reload, body switch) after Frame returned cannot leave the caller with a dangling pointer.
     // Instrumented (TestKeepRetiredPoses): a replaced bundle's pose buffer is NaN-filled and kept alive, so a pointer into the old
