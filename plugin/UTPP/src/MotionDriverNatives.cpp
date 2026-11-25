@@ -690,6 +690,18 @@ void Native_SetMMFastTurnExit(RED4ext::IScriptable*, RED4ext::CStackFrame* aFram
     if (aOut)
         *aOut = ok;
 }
+// steady picks in flights, landings and traversal exits (CET utpp_motion mm.steadyAirPicks; DLL default off). Logged in the
+// setting-call form the offline replay applies.
+void Native_SetMMSteadyAirPicks(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = motiondriver::SetSteadyAirPicks(on);
+    pluginlog::LogInfo("UTPPSetMMSteadyAirPicks(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // firm pivot foot in turns in place (CET utpp_motion mm.turnFootPin; DLL default off). Logged in the setting-call form the offline
 // replay applies.
 void Native_SetMMTurnFootPin(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
@@ -1103,6 +1115,8 @@ void RegisterNatives()
     o8->flags = flags; o8->AddParam("Bool", "on"); o8->SetReturnType("Bool"); rtti->RegisterFunction(o8);
     auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMMFastTurnExit", "UTPPSetMMFastTurnExit", &Native_SetMMFastTurnExit);
     o9->flags = flags; o9->AddParam("Bool", "on"); o9->SetReturnType("Bool"); rtti->RegisterFunction(o9);
+    auto* os = RED4ext::CGlobalFunction::Create("UTPPSetMMSteadyAirPicks", "UTPPSetMMSteadyAirPicks", &Native_SetMMSteadyAirPicks);
+    os->flags = flags; os->AddParam("Bool", "on"); os->SetReturnType("Bool"); rtti->RegisterFunction(os);
     auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMOverlayInertialSwitch", "UTPPSetMMOverlayInertialSwitch",
                                                  &Native_SetMMOverlayInertialSwitch);
     o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);

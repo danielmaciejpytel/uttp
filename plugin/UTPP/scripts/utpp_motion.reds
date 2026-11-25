@@ -137,6 +137,10 @@ public native func UTPPSetMMFastTurnExit(on: Bool) -> Bool
 // game's own animation plays. Always true. Keep in sync with MotionDriverNatives.cpp.
 public native func UTPPSetMMTraversalJumpStartGround(on: Bool) -> Bool
 public native func UTPPSetMMTraversalRejectedFallback(on: Bool) -> Bool
+// Steady picks in jumps, landings and traversal exits (DLL default off; CET setting mm.steadyAirPicks): no landing on a ledge-edge
+// graze, no new take-off clip while falling, one landing clip per landing and a held traversal exit. Always true. Keep in sync with
+// MotionDriverNatives.cpp.
+public native func UTPPSetMMSteadyAirPicks(on: Bool) -> Bool
 // Planted foot yaw lock (DLL default on; CET setting mm.footYawLock): a planted foot keeps the direction it points in while the body
 // turns over it, turned about its toe, and follows the animation again only after a large turn. Always true. Keep in sync with
 // MotionDriverNatives.cpp.

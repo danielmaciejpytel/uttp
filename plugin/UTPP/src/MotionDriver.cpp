@@ -351,6 +351,18 @@ int32_t g_handBackBlendReq = -1; // SetHandBackBlend: -1 = the build default of 
 bool g_overlayInertialSwitchOn = true; // SetOverlayInertialSwitch (default on, like the setting)
 int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the setting mm.strideWarp); -1 = the build default of the blend stack
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
+bool g_steadyAirOn = false;         // SetSteadyAirPicks (chooser mapping, matcher, traversal exit latch)
+float g_steadyTravExitLeft = 0.0f;  // s of ChooserState::justTraversed left after a traversal hand-back (SetSteadyAirPicks)
+uint32_t g_steadyTravFrames = 0;    // telemetry: feeds the latch kept justTraversed
+int32_t g_steadyMontageClip = -1;   // the database clip of the last montage frame (-1 = none)
+int32_t g_steadyExitClip = -1;      // ... of the montage that handed back, while the exit latch runs
+int g_steadyGroundGait = -1;        // chooser gait of the last ground feed outside a traversal and its exit latch
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+char g_testExitClipName[128] = "";  // TestForceTravHandback: the montage sequence of the forced hand-back
+#endif
+// the montage blend-out span: the reference keeps JustTraversed while the traversal montage blends out, with the turn within 50 deg
+constexpr float kSteadyTravExitS = 0.25f;
+constexpr float kSteadyTravExitTurnDeg = 50.0f;
 bool g_capsuleForecastOn = false; // SetCapsuleForecast (MapConfig::capsuleForecast, mm.capsuleForecast)
 bool g_aimRotationOn = true;      // SetAimRotation (MapConfig::aimRotation, mm.aimRotation)
 bool g_aimRootAccumulate = false; // SetAimRootAccumulate (mm.aimRootAccumulate): moving-aim root accumulates, lag bound kAimRootLagDeg
@@ -2395,6 +2407,24 @@ bool StrideWarp()
     return g_strideWarpReq >= 0 ? g_strideWarpReq != 0 : UTPP_STRIDE_WARP != 0;
 }
 
+bool SetSteadyAirPicks(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_steadyAirOn = aOn;
+    if (!aOn)
+        g_steadyTravExitLeft = 0.0f;
+    return true;
+}
+
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+void TestForceTravHandback(const char* aSequence)
+{
+    std::lock_guard lock(g_m);
+    g_trav.handbackNext = true; // offline replays: the dumps carry no traversal events
+    std::snprintf(g_testExitClipName, sizeof g_testExitClipName, "%s", aSequence ? aSequence : "");
+}
+#endif
+
 void SetStepDownReach(bool aOn)
 {
     std::lock_guard lock(g_m);
@@ -4199,6 +4229,10 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
         std::snprintf(magTxt, sizeof(magTxt), " magTap=%.2f/%.2f/%llu", static_cast<double>(g_magTap.weight),
                       static_cast<double>(g_magTapPeak), static_cast<unsigned long long>(g_magTapStarted));
     g_magTapPeak = 0.0f;
+    char steadyTxt[64] = ""; // only with mm.steadyAirPicks on: cumulative feeds of each rule (contact hold, landing latch, fall hold, exit latch)
+    if (g_steadyAirOn)
+        std::snprintf(steadyTxt, sizeof(steadyTxt), " steady=%u/%u/%u/%u", b.map.steadyContactHolds, b.map.steadyLandLatches,
+                      b.matcher.SteadyFallHolds(), g_steadyTravFrames);
     char bpTxt[112] = ""; // aim pitch plan 2026-10-30 section 4: only while the barrel loop runs / fades or measured (loop off: unchanged)
     if (info.barrelActive || info.barrelMeasured)
         std::snprintf(bpTxt, sizeof(bpTxt), " bp=%.1f/%.1f/%.2f/%.1f/%.1f/%.2f/%.2f/%.1f/%.2f/%u", static_cast<double>(info.aoPitchInDeg),
@@ -4216,7 +4250,7 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
     std::snprintf(g_traceBuf, sizeof(g_traceBuf),
                   "UTPP MOTION t=%.3f db=%d:%.*s clip=%d:%.*s ct=%.3f cost=%.3f blend=%.2f%s rot=%s start=%d pivot=%d inYaw=%.1f velYaw=%.1f"
                   " target=%d ov=%s lay=spine%.2f,armL%.2f,armR%.2f,legs%.2f,head%.2f,pelvis%.2f aimW=%.2f"
-                  " air=mode%d,ttl%.2f,land%d%d trav=%d:%s@%.2f act=%d reloadUpper=%.2f shot=%d:%d/%d:%d:%.3f:%llu%s brake=%s/%.2f accel=%s/%.2f support=%d%s headLead=%d lead=%.2f corr=%.2f%s%s%s%s%s%s%s%s",
+                  " air=mode%d,ttl%.2f,land%d%d trav=%d:%s@%.2f act=%d reloadUpper=%.2f shot=%d:%d/%d:%d:%.3f:%llu%s brake=%s/%.2f accel=%s/%.2f support=%d%s headLead=%d lead=%.2f corr=%.2f%s%s%s%s%s%s%s%s%s",
                   static_cast<double>(g_traceClock), r.database, static_cast<int>(dn.size()), dn.data(), r.clip,
                   static_cast<int>(cn.size()), cn.data(), static_cast<double>(r.clipTime),
                   static_cast<double>(r.cost < 1e30f ? r.cost : -1.0f),
@@ -4235,7 +4269,7 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
                   b.map.capsuleBrakeModel > 0.0f ? "cp" : "motion", static_cast<double>(b.map.capsuleBrakeModel),
                   b.map.capsuleAccelModel > 0.0f ? "cp" : "motion", static_cast<double>(b.map.capsuleAccelModel),
                   b.eval.CancelledStartSupport(), changed ? " chg" : "", g_headLeadOn ? 1 : 0, static_cast<double>(g_hl.Lead()),
-                  static_cast<double>(g_hl.Corr()), slideTxt, owTxt, leanTxt, ptTxt, hipTxt, shooterTxt, magTxt, bpTxt);
+                  static_cast<double>(g_hl.Corr()), slideTxt, owTxt, leanTxt, ptTxt, hipTxt, shooterTxt, magTxt, bpTxt, steadyTxt);
     ++g_traceLines;
     g_log(g_traceBuf);
     if (info.poseDiagValid)
@@ -4524,6 +4558,7 @@ bool TravFrameLocked(Bundle& b, const motionhost::FeedInput& aRaw, const motion:
                             g_trav.vel[1]);
     g_trav.frame = true;
     ++g_travProbe.frames;
+    g_steadyMontageClip = mr.clip; // SetSteadyAirPicks: the exit pick continues this sequence
     g_travProbe.poseTime = mr.clipTime;
     g_travProbe.root[0] = static_cast<float>(fr.root.pos.x);
     g_travProbe.root[1] = static_cast<float>(fr.root.pos.y);
@@ -5848,6 +5883,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
                       utpp::mm::air::kStepDownMaxSeconds == adapter::kGroundDropStepMaxS,
                   "the runtime air state and the chooser mapping agree on a step-down");
     mc.stepDownReach = g_stepDownReachOn; // SetStepDownReach (same switch as the runtime air state)
+    mc.steadyAirPicks = g_steadyAirOn;    // SetSteadyAirPicks
+    b.matcher.SetSteadyAirPicks(g_steadyAirOn);
     mc.capsuleForecast = g_capsuleForecastOn; // SetCapsuleForecast
     mc.aimRotation = g_aimRotationOn; // SetAimRotation
     mc.contactHoldS = adapter::kContactHoldSeconds; // fix/jumpout-cam
@@ -6014,7 +6051,48 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         g_rootYawDeg = aRaw.playerYawDeg; // root yaw re-seeded as on re-entry (not integrated over the montage)
         g_prevDb = -1;
         g_pt.Reset(); // pelvis trim: no snap back in on the handback feed (montage cut short: no montage-branch reset)
+        g_steadyTravExitLeft = g_steadyAirOn ? kSteadyTravExitS : 0.0f;
+#if defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        if (g_testExitClipName[0])
+        {
+            for (uint32_t k = 0; k < b.db.NumClips(); ++k)
+                if (b.db.ClipName(k) == std::string_view(g_testExitClipName))
+                    g_steadyMontageClip = static_cast<int32_t>(k);
+            g_testExitClipName[0] = 0;
+        }
+#endif
+        g_steadyExitClip = g_steadyMontageClip;
+        g_steadyMontageClip = -1;
     }
+    else if (g_steadyTravExitLeft > 0.0f)
+    {
+        // SetSteadyAirPicks: the traversal exit tail stays in the search for the blend-out span (not past a turn, a flight or a new montage)
+        g_steadyTravExitLeft -= dt;
+        if (!g_steadyAirOn || travDetail || g_trav.active || cs.movementMode != 0 ||
+            std::fabs(b.map.st.turnAngle) > kSteadyTravExitTurnDeg)
+            g_steadyTravExitLeft = 0.0f;
+        else if (g_steadyTravExitLeft > 0.0f)
+        {
+            cs.justTraversed = true;
+            ++g_steadyTravFrames;
+        }
+    }
+    if (reentry && !travHandback) // the exit latch and its clip index never outlive a gap in ownership (or the database)
+    {
+        g_steadyTravExitLeft = 0.0f;
+        g_steadyMontageClip = g_steadyGroundGait = -1;
+    }
+    // SetSteadyAirPicks: a vault or climb that no montage played (rejected plan, game animation) has no traversal exit to enter
+    if (g_steadyAirOn && !travHandback && g_steadyTravExitLeft <= 0.0f)
+        cs.justTraversed = false;
+    // SetSteadyAirPicks: the first feeds after a vault report the run state before the game restores the sprint: a sprint into the
+    // obstacle stays a sprint through the exit window while the stick is held
+    if (g_steadyTravExitLeft > 0.0f && g_steadyGroundGait == 2 && cs.gait == 1 && cs.movementState == 1 &&
+        std::hypot(f.move[0], f.move[1]) > adapter::kStickReleased)
+        cs.gait = 2;
+    else if (g_steadyTravExitLeft <= 0.0f && !travDetail && !g_trav.active && cs.movementMode == 0)
+        g_steadyGroundGait = cs.gait;
+    b.matcher.SetSteadyExitClip(g_steadyTravExitLeft > 0.0f ? g_steadyExitClip : -1, travHandback);
     const uint32_t nt = adapter::BuildQueryTrajectory(b.map, b.qtimes, g_traj.data(), static_cast<uint32_t>(g_traj.size()));
     if (nt == 0)
     {

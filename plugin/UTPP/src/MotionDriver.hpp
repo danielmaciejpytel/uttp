@@ -327,6 +327,10 @@ bool SetOrientWarp(bool aOn);
 // installed bundle at once (a running warp fades in / out, no pose jump) and to every bundle loaded later. Always true. StrideWarp = the
 // state of the installed bundle (else the requested one).
 bool SetStrideWarp(bool aOn);
+// Steady picks in flights, on landings and on traversal exits (setting mm.steadyAirPicks; default off = the previous picks): no
+// landing on a ledge-edge graze, no one-row clip-start candidate in the jump / traversal-exit databases, no other take-off clip in a
+// falling flight, one landing set per landing, and JustTraversed for the montage blend-out span after a traversal. Always true.
+bool SetSteadyAirPicks(bool aOn);
 bool StrideWarp();
 // Inertialized overlay switch (CET mm.overlayInertialSwitch; MotionPose SetOverlayInertialSwitch; default on): a weapon class or
 // style change swaps the overlay pose at once and the composed pose is inertialized instead of the 0.2 / 0.3 s crossfades: arms and
