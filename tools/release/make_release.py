@@ -347,9 +347,12 @@ DAYOF_DATA = [
 # Re-pinned 2026-11-15 (arm IK requests):
 #   utpp_melee.reds           c555abd5... -> aa3c1117...  FUNCTIONAL: while a covered melee weapon is drawn in third person, IK
 #                                                           requests with weight 0 keep the base graph's arm solve off
+# Re-pinned 2026-11-25 (fists strikes keep V's direction):
+#   utpp_melee.reds           aa3c1117... -> 67f18ca5...  FUNCTIONAL: with no live non-friendly NPC within 3 m the script marks fists
+#                                                           strikes as free, so the Locomotion heartbeat does not block on them
 DAYOF_CODE = [
     ("melee", P_REDS + "utpp_melee.reds", "scripts/utpp_melee.reds",
-     "aa3c11170aaeb66342646ebbe5554b799a412b0a55f5f781100ff849128f6ed1"),
+     "67f18ca5e07e9ea9bab5cc63e84a834ffb14e85122cdabbe7f7b676a8d4ed57f"),
     ("melee", P_ARC + "utpp_melee_tpp.archive.xl", "archive/utpp_melee_tpp.archive.xl",
      "e9d806ec607eb6145860992b235632a08020722a490f3adea3c4a0b0367dd57d"),
     ("car", P_REDS + "utpp_vehicle_approach.reds", "scripts/utpp_vehicle_approach.reds",

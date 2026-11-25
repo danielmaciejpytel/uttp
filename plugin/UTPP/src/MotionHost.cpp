@@ -715,6 +715,9 @@ bool g_meleeGuardSetting = true;        // UTPPSetMeleeGuardSetting (melee.guard
 bool g_meleeGuardFullSetting = false;   // UTPPSetMeleeGuardFullSetting (melee.guardFullBody, default off: stage 2, legs)
 bool g_meleeGuardTiltSetting = false;   // UTPPSetMeleeGuardAimTiltSetting (melee.guardAimTilt, default off)
 mm::melee::GuardGate g_meleeGuardGate;  // decision + air debounce
+mm::melee::GuardTurn g_meleeGuardTurn;  // capsule turn of a standing held block (releases the full-body legs)
+bool g_meleeBlockHeld = false;          // last feed: guard-list weapon, UpperBody Aim, third person
+bool g_meleeBlockMoving = false;        // last feed: ... and V moves (stick or sustained capsule speed)
 bool g_meleeGuardWant = false;          // last feed: guard wanted
 bool g_meleeGuardTail = false;          // last feed: the guard was on and the upper mask has not faded out yet
 uint64_t g_meleeGuardSwitches = 0;      // guard off -> on
@@ -1655,6 +1658,7 @@ const MotionSetFrame* MotionStepLocked(const FeedInput& aRaw, float aDt, float c
     raw.capsuleDeltaCurrent[0] = capX * aDt;
     raw.capsuleDeltaCurrent[1] = capY * aDt;
     raw.capsuleYawDelta = capYaw;
+    raw.meleeGuardFacing = g_meleeBlockHeld && !g_meleeBlockMoving && !raw.meleeOwnsBody;
     raw.capsuleYawAhead = g_yawAhead; // the pose is drawn with the capsule turned by the coming tick's request
     raw.turnExit = g_turnExit.Active();
     if (!g_motion || !g_motion->step || !g_motion->step(raw, g_effGate, aDt)) // UTPP-MOTION SEAM
@@ -2560,6 +2564,8 @@ void ResetRuntimeLocked()
     g_meleeFullStick = false;
     g_meleeFullGround = -1;
     g_meleeGuardGate.Reset(); // melee guard (flag, settings and the full-body state mask are settings: kept)
+    g_meleeGuardTurn.Reset();
+    g_meleeBlockHeld = g_meleeBlockMoving = false;
     g_meleeGuardWant = false;
     g_meleeGuardTail = false;
 }
@@ -4018,6 +4024,16 @@ void Feed(const FeedInput& aRawIn)
         if (pending)
             g_yawAhead = std::clamp(WrapPi((g_lastCmdDeg - g_lastCmdCurDeg) * kDegToRad), -1.5f, 1.5f);
     }
+    // turning while blocking (mm/MeleeFullBody.hpp GuardTurn): decided before the driver step, which reads both flags
+    {
+        const float mx = std::isfinite(aRaw.move[0]) ? aRaw.move[0] : 0.0f, my = std::isfinite(aRaw.move[1]) ? aRaw.move[1] : 0.0f;
+        const float press = steer::StickFilterConfig{}.press;
+        const bool stick = g_stickFilterOn ? g_stickHeld : (mx * mx + my * my > press * press);
+        g_meleeBlockHeld = g_meleeGuardFlag && g_upperBody == mm::strafe::kAimUpperBody && g_meleeState >= kPsmMeleeWeaponIdle &&
+                           aRaw.tppActive;
+        g_meleeBlockMoving = stick || g_meleeFullGate.FastOff();
+        g_meleeGuardTurn.Update(g_meleeBlockHeld, g_meleeBlockMoving, yawStep);
+    }
     // the change of the drawn yaw since the last feed (offset roots)
     const float yawStepDrawn = g_havePrevYaw ? WrapPi(yawStep + g_yawAhead - g_prevYawAhead) : 0.0f;
     if (g_havePrevYaw && dt > 0.0f)
@@ -5471,6 +5487,7 @@ void Feed(const FeedInput& aRawIn)
         fi.maxVertical = g_gateDebounceCfg.maxVertical;
         fi.planarSpeed = g_rawSpeed;
         fi.dt = dt;
+        fi.guardTurned = g_meleeGuardTurn.Latched() && mm::melee::GuardTurnReleases(g_meleeState);
         g_meleeFullStick = fi.stickHeld;
         g_meleeFullGround = fi.haveAir ? (fi.onGround ? 1 : 0) : -1;
         const bool fullWant = g_meleeFullGate.Update(fi);

@@ -684,10 +684,10 @@ if not WRITE then
         .. placeOf("mm.groundFeet") .. " " .. placeOf("mm.footYawLock") .. " " .. placeOf("mm.turnFootPin") .. " " .. placeOf("mm.aimRootAccumulate") .. " " .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
     -- 2026-10-30 aim pitch plan: "Weapon aims at crosshair point" (mm.aimAtCrosshair, utpp_motion) after the crosshair colour, player level
     -- 2026-11-09: Melee full body / Melee aim tilt (player level) after Weapon aims at crosshair point
-    check("layout: Combat = crosshair colour, then Weapon aims at crosshair point, Melee full body, Melee aim tilt, then the advanced combat options",
+    check("layout: Combat = crosshair colour, then Weapon aims at crosshair point, Melee full body, Melee aim tilt, Fists in their own direction, then the advanced combat options",
       placeOf("crosshair.color") == "player/combat/70" and placeOf("mm.aimAtCrosshair") == "hidden/combat/80"
       and placeOf("melee.fullBody") == "player/combat/90" and placeOf("melee.aimTilt") == "player/combat/100"
-      and placeOf("perspective.shortScopeFpp") == "advanced/combat/110",
+      and placeOf("bodyturn.meleeFreeStrike") == "player/combat/110" and placeOf("perspective.shortScopeFpp") == "advanced/combat/120",
       placeOf("crosshair.color") .. " " .. placeOf("mm.aimAtCrosshair") .. " " .. placeOf("melee.fullBody") .. " "
       .. placeOf("melee.aimTilt") .. " " .. placeOf("perspective.shortScopeFpp"))
     check("layout: Vehicles = vehicle player options then the advanced vehicle options (running rank)",

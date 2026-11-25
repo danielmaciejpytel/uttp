@@ -1834,8 +1834,46 @@ static void TestSprintLunge()
     Expect("SL-6 melee gate alone: the lunge flag changes nothing", a.reasons == b.reasons && a.covered == b.covered && a.upperFromGame == b.upperFromGame);
 }
 
+static void TestGuardTurn()
+{
+    const float deg = 0.017453292f;
+    melee::GuardTurn t;
+    bool latched = false;
+    for (int i = 0; i < 200; ++i) // mouse jitter: +-3 deg alternating never adds up
+        latched = t.Update(true, false, (i % 2 ? 3.0f : -3.0f) * deg) || latched;
+    Expect("guard turn: jitter does not release the legs", !latched);
+    t.Reset();
+    int first = -1;
+    for (int i = 0; i < 20 && first < 0; ++i)
+        if (t.Update(true, false, 1.0f * deg))
+            first = i + 1;
+    Expect("guard turn: released after kGuardTurnDeg of turning", first >= 10 && first <= 11, std::to_string(first));
+    Expect("guard turn: stays released while the block is held and V stands", t.Update(true, false, 0.0f));
+    Expect("guard turn: moving clears it", !t.Update(true, true, 5.0f * deg) && !t.Latched());
+    t.Update(true, false, 30.0f * deg);
+    Expect("guard turn: releasing the block clears it", !t.Update(false, false, 30.0f * deg) && !t.Latched());
+    Expect("guard turn: block-held states only (attacks out of the block keep the full body)",
+           melee::GuardTurnReleases(melee::kMwBlock) && melee::GuardTurnReleases(melee::kMwDeflect) && !melee::GuardTurnReleases(melee::kMwBlockAttack) &&
+               !melee::GuardTurnReleases(melee::kMwComboAttack) && !melee::GuardTurnReleases(melee::kMwHold));
+    melee::Input in;
+    in.flag = true;
+    in.meleeMask = true;
+    in.meleeState = melee::kMwBlock;
+    in.allowedStates = 0x37FDE0u; // the fists line of the script's state table (includes Block)
+    in.owner = true;
+    in.stance = melee::kStanceStand;
+    in.dt = 1.0f / 60.0f;
+    in.haveAir = true;
+    melee::Gate g;
+    Expect("guard turn: standing block takes the full body", g.Update(in) && g.OnWithoutOwner());
+    in.guardTurned = true;
+    Expect("guard turn: a turned block hands the legs back (why turn)",
+           !g.Update(in) && !g.OnWithoutOwner() && g.LastWhy() == melee::kWhyTurn && std::string(melee::WhyName(g.LastWhy())) == "turn");
+}
+
 int main()
 {
+    TestGuardTurn();
     TestSprintHold();
     TestSprintLunge();
     TestStandingGrounded();

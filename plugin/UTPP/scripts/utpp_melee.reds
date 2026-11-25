@@ -278,6 +278,9 @@ public func UTPPMeleeAimTargetTick(player: ref<PlayerPuppet>, scriptInterface: r
     q.maxDistance = 5.0;
     q.filterObjectByDistance = true;
     target = DefaultTransition.GetTargetObject(scriptInterface, q, 5.0);
+    UTPPMeleeEnemyTick(player, target, now);
+  } else {
+    player.utppMeleeEnemyNear = false;
   }
   if IsDefined(target) {
     player.utppMeleeAimSent = 2;
@@ -376,6 +379,69 @@ public func UTPPMeleeFullBodyTick(player: ref<PlayerPuppet>, scriptInterface: re
   }
   UTPPMeleeArmIkTick(player, want);
   UTPPMeleeAimTargetTick(player, scriptInterface, now);
+  // read by the Locomotion heartbeat together with the melee state of its own frame (utpp_locomotion.reds)
+  player.utppFreeStrikeEligible = !player.utppMeleeFreeStrikeOff && UTPPMeleeGuardWanted(player) && !player.utppMeleeEnemyNear;
+}
+
+// ---- strikes in V's own direction (CET setting bodyturn.meleeFreeStrike, default on) ----
+// Fists and strong arms (the guard list). With no enemy near, a strike does not turn V onto the camera: she keeps facing where
+// she faces or runs. With an enemy near, the strike keeps the previous behaviour: V turns toward the camera and the tracked
+// target. The game's melee hit follows the camera and its tracked target, never the capsule yaw, so "near" is judged on what the
+// game can hit: its crosshair query or its tracked target, a live NPC that is not friendly, within a short ground distance of V.
+@addField(PlayerPuppet) public let utppMeleeFreeStrikeOff: Bool; // the setting is off (a new session starts with it on)
+@addField(PlayerPuppet) public let utppMeleeEnemyNear: Bool;
+@addField(PlayerPuppet) public let utppMeleeEnemyAt: Float;      // sim time the near enemy was last seen
+
+// m: 3.0 to count as near (the game's fist lock reaches about 2 m, plus a step), 3.5 to stay near
+public func UTPPMeleeEnemyRange(near: Bool) -> Float {
+  if near {
+    return 3.5;
+  }
+  return 3.0;
+}
+
+// An enemy stays near for 0.5 s after the last sighting (the crosshair query drops a target for single frames in a swing).
+public func UTPPMeleeEnemyNearNext(near: Bool, seen: Bool, sinceSeen: Float) -> Bool {
+  if seen {
+    return true;
+  }
+  return near && sinceSeen >= 0.0 && sinceSeen < 0.5;
+}
+
+public func UTPPMeleeIsEnemyWithin(player: ref<PlayerPuppet>, object: ref<GameObject>, range: Float) -> Bool {
+  let puppet: ref<ScriptedPuppet> = object as ScriptedPuppet;
+  if !IsDefined(puppet) || !ScriptedPuppet.IsActive(puppet) {
+    return false;
+  }
+  if Equals(GameObject.GetAttitudeTowards(puppet, player), EAIAttitude.AIA_Friendly) {
+    return false;
+  }
+  return Vector4.Distance2D(puppet.GetWorldPosition(), player.GetWorldPosition()) <= range;
+}
+
+public func UTPPMeleeEnemyTick(player: ref<PlayerPuppet>, queried: ref<GameObject>, now: Float) -> Void {
+  let range: Float = UTPPMeleeEnemyRange(player.utppMeleeEnemyNear);
+  let seen: Bool = UTPPMeleeIsEnemyWithin(player, queried, range);
+  if !seen {
+    let tracked: wref<TargetingComponent> = GameInstance.GetTargetingSystem(player.GetGame()).GetTrackedTargetComponent(player);
+    if IsDefined(tracked) {
+      seen = UTPPMeleeIsEnemyWithin(player, tracked.GetEntity() as GameObject, range);
+    }
+  }
+  player.utppMeleeEnemyNear = UTPPMeleeEnemyNearNext(player.utppMeleeEnemyNear, seen, now - player.utppMeleeEnemyAt);
+  if seen {
+    player.utppMeleeEnemyAt = now;
+  }
+}
+
+// CET: Game.UTPPSetMeleeFreeStrike(on); false without a player (CET sends it again)
+public func UTPPSetMeleeFreeStrike(on: Bool) -> Bool {
+  let player: ref<PlayerPuppet> = GetPlayer(GetGameInstance());
+  if !IsDefined(player) {
+    return false;
+  }
+  player.utppMeleeFreeStrikeOff = !on;
+  return true;
 }
 
 // Strike turn signal (CET utpp_bodyturn, setting bodyturn.meleeStrikeTurn): where the game's fist strike will go.
