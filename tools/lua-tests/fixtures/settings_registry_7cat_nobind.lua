@@ -149,6 +149,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.stairSteps"] = "false",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -296,6 +297,7 @@ return {
     "native UTPPSetMMPelvisPlacement(false)",
     "native UTPPSetMMBodyHeightSmooth(true)",
     "native UTPPSetMMGroundFeet(true)",
+    "native UTPPSetMMStairSteps(false)",
     "native UTPPSetMMHandBackBlend(false)",
     "native UTPPSetMMStepDownReach(false)",
     "native UTPPSetMMFarJumpGravity(false)",
@@ -326,6 +328,7 @@ return {
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.groundFeet(true,\"ok\")",
+    "apply mm.stairSteps(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -533,6 +536,7 @@ return {
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.groundFeet(true,\"ok\")",
+    "apply mm.stairSteps(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -1951,6 +1955,14 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
+    ["mm.stairSteps"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "motion",
+      ["type"] = "bool"
+    },
     ["mm.stepDownReach"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -2500,6 +2512,7 @@ return {
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.stairSteps"] = "false",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -2673,6 +2686,7 @@ return {
     "mm.pelvisPlacement",
     "mm.bodyHeightSmooth",
     "mm.groundFeet",
+    "mm.stairSteps",
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
@@ -2868,6 +2882,7 @@ return {
     "mm.pelvisPlacement",
     "mm.bodyHeightSmooth",
     "mm.groundFeet",
+    "mm.stairSteps",
     "mm.handBackBlend",
     "mm.stepDownReach",
     "mm.farJumpGravity",
@@ -3053,6 +3068,7 @@ return {
     "apply mm.pelvisPlacement(false,\"ok\")",
     "apply mm.bodyHeightSmooth(true,\"ok\")",
     "apply mm.groundFeet(true,\"ok\")",
+    "apply mm.stairSteps(false,\"ok\")",
     "apply mm.handBackBlend(false,\"ok\")",
     "apply mm.stepDownReach(false,\"ok\")",
     "apply mm.farJumpGravity(false,\"ok\")",
@@ -3248,6 +3264,7 @@ mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
 mm.groundFeet=true\r\
+mm.stairSteps=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
@@ -3518,6 +3535,7 @@ vehicle.jumpOutSidePush=true\r\
       "mm.pelvisPlacement",
       "mm.bodyHeightSmooth",
       "mm.groundFeet",
+      "mm.stairSteps",
       "mm.handBackBlend",
       "mm.stepDownReach",
       "mm.farJumpGravity",
@@ -3739,6 +3757,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.shootTransfer"] = "true",
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
+    ["mm.stairSteps"] = "false",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -3881,6 +3900,7 @@ mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
 mm.bodyHeightSmooth=true\r\
 mm.groundFeet=true\r\
+mm.stairSteps=false\r\
 mm.handBackBlend=false\r\
 mm.stepDownReach=false\r\
 mm.farJumpGravity=false\r\
@@ -4068,6 +4088,7 @@ other.module=42\r\
     "/utpp/motion|switch|mm.pelvisPlacement",
     "/utpp/motion|switch|mm.bodyHeightSmooth",
     "/utpp/motion|switch|mm.groundFeet",
+    "/utpp/motion|switch|mm.stairSteps",
     "/utpp/motion|switch|mm.handBackBlend",
     "/utpp/motion|switch|mm.stepDownReach",
     "/utpp/motion|switch|mm.farJumpGravity",

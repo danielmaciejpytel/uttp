@@ -103,6 +103,8 @@ public native func UTPPSetMMPelvisPlacement(on: Bool) -> Void
 public native func UTPPSetMMBodyHeightSmooth(on: Bool) -> Void
 // Places the feet on the traced ground (slopes, steps, stairs) with one leg solve; the pelvis follows (on by default).
 public native func UTPPSetMMGroundFeet(on: Bool) -> Void
+// Shorter, quicker steps fitted to the stair treads at the same speed (needs the ground traces of UTPPSetMMGroundFeet; off by default).
+public native func UTPPSetMMStairSteps(on: Bool) -> Void
 // Calibration of the ground under the soles (m, |bias| < 0.2).
 public native func UTPPSetMMGroundFeetBias(bias: Float) -> Void
 public native func UTPPSetMMHandBackBlend(on: Bool) -> Void

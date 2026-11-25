@@ -101,6 +101,15 @@
 //                       the --terrain ground; the stage then runs on the published pose with the drawn capsule of --draw-z, through the
 //                       same rt::StepAndApply the game calls (the body height offset first, as FkHook ApplyBodyHeight). The driver feed
 //                       is not changed (the clip choice is the recorded one). One GROUNDFEET line.
+//   --stair-steps 0|1   steps fitted to stair treads (mm/StairSteps.hpp, the mm.stairSteps setting; the settings log call MMStairSteps
+//                       is applied as well): the emulated ground traces feed the stair detector, the feed plays a stand loop at the
+//                       cadence of a whole number of treads per step. --stair-min-scale S: shortest step (fraction of the clip's own;
+//                       not passed = build default). With --terrain, <out prefix>.stairs.txt gets per written feed the tread, the
+//                       weight, the cadence and the treads per step; one STAIRSTEPS line. With --terrain the stair slowdown
+//                       (stairsteps::rt::SpeedMul, read after each feed as the script does) is emulated on the recorded path: the next
+//                       feed's horizontal velocity is scaled by it and V falls behind the recorded positions by what it did not cover
+//                       (the drawn height is taken at the shifted position). --stair-speed M (0 < M <= 1): a fixed multiplier on a
+//                       fitted flight instead (eased in and out, 0.2 s), for tests.
 //   --terrain flat|slope|stairs|stairs-down|curb|rubble  ground under the recorded path, h(x, y) above the capsule height at the first
 //                       written feed: along the direction of the written path (--terrain-dir side: across the facing at that feed, for
 //                       standing across a step edge); slope --slope-deg (15), stairs / curb rise --step-rise (0.17) and run --step-run
@@ -350,6 +359,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMAimWorldSmoothing") motiondriver::SetAimWorldSmoothing(flag(0), arg(1));
         else if (name == "MMBodyHeightSmooth") motionhost::SetBodyHeightSmooth(flag(0));
         else if (name == "MMGroundFeet") motionhost::SetGroundFeet(flag(0));
+        else if (name == "MMStairSteps") mm::stairsteps::rt::SetEnabled(flag(0));
         else if (name == "MMCapsuleForecast") motiondriver::SetCapsuleForecast(flag(0));
         else if (name == "MMAimRotation") motiondriver::SetAimRotation(flag(0));
         else known = false;
@@ -589,6 +599,9 @@ int main(int argc, char** argv)
     int32_t aimCameraPose = -1;                // --aim-camera: overlay pose of a drawn weapon, < 0 = not passed (no aim target fed)
     int32_t bodyHeight = -1;                   // --body-height-smooth: < 0 = not passed (the settings log / build default)
     bool drawZNext = true;                     // --draw-z next (default) | same
+    int32_t stairSteps = -1;                   // --stair-steps: < 0 = not passed
+    float stairMinScale = -1.0f;               // --stair-min-scale: < 0 = not passed
+    float stairSpeed = -1.0f;                  // --stair-speed: <= 0 = the native slowdown
     int32_t groundFeet = -1;                   // --ground-feet: < 0 = not passed
     Terrain terrain;                           // --terrain (None = not passed) and its parameters
     bool terrainSide = false;                  // --terrain-dir side
@@ -769,6 +782,12 @@ int main(int argc, char** argv)
             aimPivotGateS = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--force-aim") == 0)
             forceAim = std::atoi(argv[i + 1]) != 0;
+        else if (std::strcmp(argv[i], "--stair-steps") == 0)
+            stairSteps = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--stair-min-scale") == 0)
+            stairMinScale = float(std::atof(argv[i + 1]));
+        else if (std::strcmp(argv[i], "--stair-speed") == 0)
+            stairSpeed = float(std::atof(argv[i + 1]));
         else if (std::strcmp(argv[i], "--ground-feet") == 0)
             groundFeet = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--terrain") == 0)
@@ -1026,9 +1045,14 @@ int main(int argc, char** argv)
     std::vector<double> bodyHeightAbs;
     if (groundFeet >= 0)
         motionhost::SetGroundFeet(groundFeet != 0);
+    if (stairSteps >= 0)
+        mm::stairsteps::rt::SetEnabled(stairSteps != 0);
+    if (stairMinScale > 0.0f)
+        mm::stairsteps::rt::g_tracker.SetMinScale(stairMinScale);
     // --terrain: anchor at the first written feed, the drawn capsule height per feed (the ground under the capsule; a jump of the
     // ground is taken over about 0.4 s: the gap decays with tau 0.1 s, a slope is followed at once)
     std::vector<float> drawnZ;
+    std::vector<double> drawnGap; // the jump smoothing part of drawnZ (kept when the stair slowdown shifts a position)
     if (terrain.kind != Terrain::None)
     {
         size_t a = 0;
@@ -1068,6 +1092,7 @@ int main(int argc, char** argv)
             }
             gPrev = g;
             drawnZ[k] = float(g + gap);
+            drawnGap.push_back(gap);
         }
         std::printf("TERRAIN kind=%d anchor=%.3f,%.3f,%.3f dir=%.3f,%.3f rise=%.3f run=%.3f slopeDeg=%.1f offset=%.3f\n", int(terrain.kind),
                     terrain.ax, terrain.ay, terrain.az, terrain.ux, terrain.uy, terrain.rise, terrain.run, terrain.slopeDeg, terrain.offset);
@@ -1080,9 +1105,18 @@ int main(int argc, char** argv)
     std::vector<double> gfSoleErr, gfLift, gfPelvis;
     double gfSoleMin = 0.0;
     uint64_t gfRows = 0, gfApplied = 0, gfTraced = 0, gfHits = 0;
-    // stage counters are global: the GROUNDFEET line reports them from the first row of the scene window on
+    // stage counters are global: the GROUNDFEET line reports them over the scene window (first row in it to the first row past it)
     bool gfWin = false;
-    uint64_t gfKnee0 = 0, gfClamp0 = 0, gfIdentity0 = 0, gfNoSamples0 = 0, gfSudden0 = 0, gfRejected0 = 0;
+    uint64_t gfKnee0 = 0, gfClamp0 = 0, gfIdentity0 = 0, gfNoSamples0 = 0, gfSudden0 = 0, gfRejected0 = 0, gfStairSwings0 = 0, gfStairLands0 = 0, gfLandClamps0 = 0;
+    bool gfWinEnd = false; // the counters at the first row past the window
+    uint64_t gfEnd[9] = {};
+    float gfLandClampMaxEnd = 0.0f;
+    const auto gfNow = [&](int k) {
+        namespace gf = mm::groundfeet::rt;
+        const std::atomic<uint64_t>* c[9] = {&gf::g_kneeLimits, &gf::g_clamps, &gf::g_identity, &gf::g_noSamples, &gf::g_sudden,
+                                             &gf::g_rejected, &gf::g_stairSwings, &gf::g_stairLands, &gf::g_landClamps};
+        return gfWinEnd ? gfEnd[k] : c[k]->load();
+    };
     FILE* groundOut = nullptr;
     if (terrain.kind != Terrain::None && out != "-")
     {
@@ -1092,7 +1126,20 @@ int main(int argc, char** argv)
         std::fprintf(groundOut, "# terrain kind=%d anchor=%.4f %.4f %.4f dir=%.5f %.5f rise=%.4f run=%.4f slopeDeg=%.3f offset=%.4f\n",
                      int(terrain.kind), terrain.ax, terrain.ay, terrain.az, terrain.ux, terrain.uy, terrain.rise, terrain.run,
                      terrain.slopeDeg, terrain.offset);
-        std::fprintf(groundOut, "# t drawnCapZ applied liftL liftR pelvis soleErrL soleErrR plantedL plantedR\n");
+        std::fprintf(groundOut, "# t drawnCapZ applied liftL liftR pelvis soleErrL soleErrR plantedL plantedR planWL planWR planLiftL planLiftR\n");
+    }
+    FILE* stairsOut = nullptr; // --stair-steps with --terrain: per written feed tread, weight, cadence, treads per step
+    uint64_t stairRows = 0, stairOnRows = 0;
+    double stairCadenceSum = 0.0, stairCadenceMax = 1.0;
+    uint64_t stairTreadsHist[8] = {};
+    uint64_t stairLandN = 0; // landings with a phase error and the sum of |error| (m)
+    double stairLandAbs = 0.0;
+    if (terrain.kind != Terrain::None && out != "-" && mm::stairsteps::rt::Enabled())
+    {
+        stairsOut = std::fopen((out + ".stairs.txt").c_str(), "w");
+        if (!stairsOut)
+            return 7;
+        std::fprintf(stairsOut, "# t tread weight cadence treads landErr (m, nan = no landing) fail (Estimate::fail of the last fit) speedMul\n");
     }
     // --qpc-feed: feed time t -> QueryPerformanceCounter ticks (offset by 1 s so the first stamp is not 0, which the host reads as unset)
     LARGE_INTEGER qpcHz{};
@@ -1158,8 +1205,62 @@ int main(int argc, char** argv)
     };
     std::map<int, std::string> clipsSeen;
     size_t written = 0, missing = 0;
+    // stair slowdown emulation (--terrain with --stair-steps): the recorded positions, the lag behind them (m, world x / y) and the
+    // multiplier in effect
+    const bool speedEmu = terrain.kind != Terrain::None && mm::stairsteps::rt::Enabled();
+    std::vector<std::array<float, 2>> recPos;
+    if (speedEmu)
+        for (const auto& in : inputs)
+            recPos.push_back({in.capsulePos[0], in.capsulePos[1]});
+    double lagX = 0.0, lagY = 0.0, speedMul = 1.0, speedMulSum = 0.0, lagMax = 0.0;
+    uint64_t speedRows = 0, speedSlowRows = 0;
+    const auto shiftRow = [&](size_t k, double aLagX, double aLagY) {
+        inputs[k].capsulePos[0] = float(recPos[k][0] - aLagX);
+        inputs[k].capsulePos[1] = float(recPos[k][1] - aLagY);
+        rows[k].cap[0] = inputs[k].capsulePos[0];
+        rows[k].cap[1] = inputs[k].capsulePos[1];
+        drawnZ[k] = float(terrain.CapsuleBase(inputs[k].capsulePos[0], inputs[k].capsulePos[1], 0.3) + drawnGap[k]);
+    };
     for (size_t i = 0; i < inputs.size(); ++i)
     {
+        if (speedEmu)
+        {
+            // the multiplier the script applied after the previous feed (MaxSpeed): this feed's velocity is scaled by it and V covers
+            // that share of the recorded step; the next feed's capsule (it draws this pose) is shifted by the same lag ahead of time
+            double want = 1.0;
+            if (stairSpeed > 0.0f)
+            {
+                const bool fitted = mm::stairsteps::rt::g_treads.load() > 0 && mm::stairsteps::rt::g_weight.load() > 0.0f;
+                const double target = fitted ? std::clamp(double(stairSpeed), 0.1, 1.0) : 1.0;
+                want = speedMul + (target - speedMul) * (1.0 - std::exp(-double(rows[i].dt) / 0.2));
+                if (target == 1.0 && std::fabs(want - 1.0) < 1.0e-3)
+                    want = 1.0;
+            }
+            else
+                want = double(mm::stairsteps::rt::SpeedMul());
+            speedMul = want;
+            if (i > 0)
+            {
+                lagX += (1.0 - speedMul) * (double(recPos[i][0]) - double(recPos[i - 1][0]));
+                lagY += (1.0 - speedMul) * (double(recPos[i][1]) - double(recPos[i - 1][1]));
+            }
+            if (lagX != 0.0 || lagY != 0.0)
+            {
+                shiftRow(i, lagX, lagY);
+                if (i + 1 < inputs.size())
+                    shiftRow(i + 1, lagX + (1.0 - speedMul) * (double(recPos[i + 1][0]) - double(recPos[i][0])),
+                             lagY + (1.0 - speedMul) * (double(recPos[i + 1][1]) - double(recPos[i][1])));
+            }
+            inputs[i].velWorld[0] *= float(speedMul);
+            inputs[i].velWorld[1] *= float(speedMul);
+            if (rows[i].t >= from && rows[i].t <= to)
+            {
+                ++speedRows;
+                speedSlowRows += speedMul < 0.999 ? 1 : 0;
+                speedMulSum += speedMul;
+                lagMax = std::max(lagMax, std::hypot(lagX, lagY));
+            }
+        }
         g_log = {};
         g_tailValid = false;
         if (qpcFeed)
@@ -1288,6 +1389,13 @@ int main(int argc, char** argv)
             bodyHeightAbs.push_back(std::fabs(double(bodyOff)) * 100.0);
             bodyHeightAbsMax = std::max(bodyHeightAbsMax, std::fabs(double(bodyOff)) * 100.0);
         }
+        if (terrain.kind != Terrain::None && gfWin && !gfWinEnd && rows[i].t > to)
+        {
+            for (int k = 0; k < 9; ++k)
+                gfEnd[k] = gfNow(k);
+            gfLandClampMaxEnd = mm::groundfeet::rt::g_landClampMax.load();
+            gfWinEnd = true;
+        }
         if (terrain.kind != Terrain::None && rows[i].t >= from && rows[i].t <= to)
         {
             namespace gf = mm::groundfeet::rt;
@@ -1300,6 +1408,10 @@ int main(int argc, char** argv)
                 gfNoSamples0 = gf::g_noSamples.load();
                 gfSudden0 = gf::g_sudden.load();
                 gfRejected0 = gf::g_rejected.load();
+                gfStairSwings0 = gf::g_stairSwings.load();
+                gfStairLands0 = gf::g_stairLands.load();
+                gfLandClamps0 = gf::g_landClamps.load();
+                gf::g_landClampMax.store(0.0f);
             }
             math::Vec3 toePost[2];
             const bool okPost = haveToePre && FeetAt(*db, toeBones, 0, [&](uint32_t b, math::Vec3& p, math::Quat& q) {
@@ -1337,10 +1449,39 @@ int main(int argc, char** argv)
                 pelvisOff = gf::g_pelvis.load();
                 gfPelvis.push_back(std::fabs(double(pelvisOff)) * 100.0);
             }
+            if (stairsOut)
+            {
+                namespace ss = mm::stairsteps::rt;
+                const float cad = ss::g_cadence.load(), wgt = ss::g_weight.load();
+                const int32_t tr = ss::g_treads.load();
+                const float landErr = ss::g_landErr.load();
+                std::fprintf(stairsOut, "%.6f %.4f %.3f %.4f %d %.4f %d %.4f\n", double(rows[i].t), double(ss::g_tread.load()), double(wgt), double(cad), tr,
+                             double(landErr), ss::g_tracker.LastFail(), speedMul);
+                if (std::isfinite(landErr))
+                {
+                    ++stairLandN;
+                    stairLandAbs += std::fabs(double(landErr));
+                }
+                ++stairRows;
+                if (cad != 1.0f)
+                {
+                    ++stairOnRows;
+                    stairCadenceSum += cad;
+                    stairCadenceMax = std::max(stairCadenceMax, double(cad));
+                    ++stairTreadsHist[std::clamp(tr, 0, 7)];
+                }
+            }
             if (groundOut)
-                std::fprintf(groundOut, "%.6f %.5f %d %.5f %.5f %.5f %.3f %.3f %d %d\n", double(rows[i].t), double(capZAt(zi)),
-                             groundApplied ? 1 : 0, double(lift[0]), double(lift[1]), double(pelvisOff), err[0], err[1], planted[0] ? 1 : 0,
-                             planted[1] ? 1 : 0);
+            {
+                // the plan of this frame's stage update: the planned swing over a stair flight (weight, ground height at the ball)
+                mm::groundfeet::Plan gp;
+                if (!gf::g_plan.Read(gp))
+                    gp = mm::groundfeet::Plan{};
+                std::fprintf(groundOut, "%.6f %.5f %d %.5f %.5f %.5f %.3f %.3f %d %d %.3f %.3f %.5f %.5f\n", double(rows[i].t),
+                             double(capZAt(zi)), groundApplied ? 1 : 0, double(lift[0]), double(lift[1]), double(pelvisOff), err[0], err[1],
+                             planted[0] ? 1 : 0, planted[1] ? 1 : 0, double(gp.foot[0].planW), double(gp.foot[1].planW),
+                             double(gp.foot[0].planLift), double(gp.foot[1].planLift));
+            }
         }
         if (forecastOut)
         {
@@ -1658,16 +1799,34 @@ int main(int argc, char** argv)
         namespace gf = mm::groundfeet::rt;
         std::printf("GROUNDFEET on=%d terrain=%d rows=%llu applied=%llu traced=%llu hits=%llu plantedN=%zu soleErrP50Cm=%.2f "
                     "soleErrP95Cm=%.2f soleErrMaxCm=%.2f soleMinCm=%.2f liftP95Cm=%.2f liftMaxCm=%.2f pelvisP95Cm=%.2f pelvisMaxCm=%.2f "
-                    "kneeLimits=%llu clamps=%llu identity=%llu noSamples=%llu sudden=%llu rejected=%llu\n",
+                    "kneeLimits=%llu clamps=%llu identity=%llu noSamples=%llu sudden=%llu rejected=%llu stairSwings=%llu stairLands=%llu "
+                    "landClamps=%llu landClampMaxCm=%.1f\n",
                     gf::Enabled() ? 1 : 0, int(terrain.kind), static_cast<unsigned long long>(gfRows),
                     static_cast<unsigned long long>(gfApplied), static_cast<unsigned long long>(gfTraced),
                     static_cast<unsigned long long>(gfHits), gfSoleErr.size(), q(gfSoleErr, 0.5), q(gfSoleErr, 0.95), q(gfSoleErr, 1.0),
                     gfSoleMin, q(gfLift, 0.95), q(gfLift, 1.0), q(gfPelvis, 0.95), q(gfPelvis, 1.0),
-                    static_cast<unsigned long long>(gf::g_kneeLimits.load() - gfKnee0),
-                    static_cast<unsigned long long>(gf::g_clamps.load() - gfClamp0), static_cast<unsigned long long>(gf::g_identity.load() - gfIdentity0),
-                    static_cast<unsigned long long>(gf::g_noSamples.load() - gfNoSamples0),
-                    static_cast<unsigned long long>(gf::g_sudden.load() - gfSudden0),
-                    static_cast<unsigned long long>(gf::g_rejected.load() - gfRejected0));
+                    static_cast<unsigned long long>(gfNow(0) - gfKnee0), static_cast<unsigned long long>(gfNow(1) - gfClamp0),
+                    static_cast<unsigned long long>(gfNow(2) - gfIdentity0), static_cast<unsigned long long>(gfNow(3) - gfNoSamples0),
+                    static_cast<unsigned long long>(gfNow(4) - gfSudden0), static_cast<unsigned long long>(gfNow(5) - gfRejected0),
+                    static_cast<unsigned long long>(gfNow(6) - gfStairSwings0), static_cast<unsigned long long>(gfNow(7) - gfStairLands0),
+                    static_cast<unsigned long long>(gfNow(8) - gfLandClamps0),
+                    (gfWinEnd ? gfLandClampMaxEnd : gf::g_landClampMax.load()) * 100.0);
+    }
+    if (speedEmu)
+        std::printf("STAIRSPEED rows=%llu slowRows=%llu mulMean=%.3f lagMaxM=%.3f\n", static_cast<unsigned long long>(speedRows),
+                    static_cast<unsigned long long>(speedSlowRows), speedRows ? speedMulSum / double(speedRows) : 1.0, lagMax);
+    if (stairsOut)
+    {
+        std::fclose(stairsOut);
+        const auto& tk = mm::stairsteps::rt::g_tracker;
+        std::printf("STAIRSTEPS rows=%llu cadenceRows=%llu cadenceMean=%.3f cadenceMax=%.3f treads1=%llu treads2=%llu treads3=%llu treads4=%llu treads5+=%llu fits=%llu validFits=%llu landings=%llu landErrMeanCm=%.2f\n",
+                    static_cast<unsigned long long>(stairRows), static_cast<unsigned long long>(stairOnRows),
+                    stairOnRows ? stairCadenceSum / double(stairOnRows) : 1.0, stairCadenceMax,
+                    static_cast<unsigned long long>(stairTreadsHist[1]), static_cast<unsigned long long>(stairTreadsHist[2]),
+                    static_cast<unsigned long long>(stairTreadsHist[3]), static_cast<unsigned long long>(stairTreadsHist[4]),
+                    static_cast<unsigned long long>(stairTreadsHist[5] + stairTreadsHist[6] + stairTreadsHist[7]),
+                    static_cast<unsigned long long>(tk.Fits()), static_cast<unsigned long long>(tk.ValidFits()),
+                    static_cast<unsigned long long>(stairLandN), stairLandN ? 100.0 * stairLandAbs / double(stairLandN) : 0.0);
     }
     motionhost::SetMotionHooks(nullptr);
     motionhost::TestSetQpcTicks(-1);

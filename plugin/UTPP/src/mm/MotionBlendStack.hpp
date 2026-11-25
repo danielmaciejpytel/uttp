@@ -632,6 +632,13 @@ class BlendStack
             head.rootApproximate = false;
         }
         m_strideScale = 1.0f;
+        // a fitted stair flight (StairSteps.hpp, MatchResult::stairFlightCadence above 1) lowers the stride floor so the warp shortens
+        // the step by the played cadence (stairCadence, with the landing correction); gated on the flight's own cadence, so a landing
+        // correction that dips the played cadence under 1 does not switch the floor and the knee limit (LegStrideScale) back and forth
+        m_strideFloor = selected.stairFlightCadence > 1.0f && std::isfinite(selected.stairFlightCadence) &&
+                                std::isfinite(selected.stairCadence)
+                            ? stridewarp::kScaleFloor / std::fmax(selected.stairCadence, selected.stairFlightCadence)
+                            : stridewarp::kScaleFloor;
         if (m_strideWarp && (m_strideYawFade || m_strideCrouchMode == 2) && m_graph.enabled)
         {
             if (m_strideYawValid)
@@ -1005,6 +1012,7 @@ class BlendStack
         in.alpha = m_warpCurve >= 0 ? Curve(p, m_warpCurve) : 1.0f;
         const bool crouched = StrideCrouchClip(p.clip);
         in.allowed = p.strideGround && !p.airFade && IsLoop(p.clip) && !(crouched && m_strideCrouchMode == 1);
+        in.floor = m_strideFloor;
         if (crouched && m_strideCrouchMode == 2)
             in.yawFade = stridewarp::YawFade(m_strideYawRate, m_strideCrouchYawStart, m_strideCrouchYawEnd);
         else if (m_strideYawFade)
@@ -1059,7 +1067,10 @@ class BlendStack
     float LegStrideScale(const std::vector<BoneTransform> &pose, const std::vector<int32_t> &chain, size_t k, math::Vec3 ankle,
                          math::Vec3 thigh, math::Vec3 direction, float scale) const
     {
-        if (!m_strideKneeLimit || k + 2 >= chain.size())
+        // On a stair flight with a raised cadence (m_strideFloor below kScaleFloor) the knee limit is off: lifting the scale of the
+        // trailing leg late in its stance moved the planted foot backwards (walk loops on 17 cm steps: planted-foot slide p95 43 -> 120
+        // cm/s with it, 25 cm/s without).
+        if (!m_strideKneeLimit || m_strideFloor < stridewarp::kScaleFloor || k + 2 >= chain.size())
             return scale;
         const math::Vec3 shinOffset = pose[size_t(chain[k + 1])].p, ankleOffset = pose[size_t(chain[k + 2])].p;
         const math::Vec3 r = ankle - thigh;
@@ -1512,6 +1523,7 @@ class BlendStack
     int32_t m_warpCurve = -1; // clip warping curve that gates stride warping (see Init)
     int32_t m_thighBones[2]{-1, -1};
     bool m_strideWarp = UTPP_STRIDE_WARP != 0; // SetStrideWarp
+    float m_strideFloor = stridewarp::kScaleFloor; // shortest stride of this update (WarpStride; a stair cadence lowers it)
     float m_strideScale = 1.0f;                // StrideScale
     std::vector<float> m_strideClipFactor;     // StrideClipFactor, per clip
     std::vector<uint8_t> m_strideCrouchClip;   // StrideCrouchClip, per clip

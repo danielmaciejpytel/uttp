@@ -1150,6 +1150,13 @@ target_compile_features(utpp_mm_loco_ground_feet_test PRIVATE cxx_std_20)
 target_compile_options(utpp_mm_loco_ground_feet_test PRIVATE ${UTPP_WARNINGS} /EHsc)
 add_test(NAME utpp_mm_loco_ground_feet_test COMMAND utpp_mm_loco_ground_feet_test "${UTPP_MMDB_TEST_FILE}")
 
+# ---- steps fitted to stair treads (mm/StairSteps.hpp; mm.stairSteps, off by default): tread detection up / down at 30 / 60 / 144 Hz,
+# none on flat ground or a slope, the stride fit, the tread phase error, the off switch and the stride floor of the stairs ----
+add_executable(utpp_mm_loco_stair_steps_test tests/StairStepsTest.cpp src/mm/StairSteps.hpp src/mm/StrideWarp.hpp)
+target_compile_features(utpp_mm_loco_stair_steps_test PRIVATE cxx_std_20)
+target_compile_options(utpp_mm_loco_stair_steps_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_mm_loco_stair_steps_test COMMAND utpp_mm_loco_stair_steps_test)
+
 # ---- live pose history (mm/LivePoseHistory.hpp; MotionDriver SetLivePoseHistory, off by default) ----
 if(DEFINED _utpp_nlr_base AND EXISTS "${_utpp_nlr_base}.utppmm" AND EXISTS "${_utpp_nlr_base}.chooser.json")
   add_executable(utpp_mm_live_pose_history_test tests/LivePoseHistoryTest.cpp src/mm/LivePoseHistory.hpp src/mm/ExitPoseHistory.hpp)

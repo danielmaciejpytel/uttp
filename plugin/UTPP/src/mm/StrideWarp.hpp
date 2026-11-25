@@ -55,6 +55,7 @@ struct Inputs
     float alpha = 1;        // warping curve of the clip at its current time, [0, 1]
     bool allowed = false;   // ground locomotion pick (not air, slide, traversal or vehicle)
     float yawFade = 1;      // YawFade of the smoothed visual yaw rate, [0, 1]
+    float floor = kScaleFloor; // shortest stride of this update (lower on a stair flight that raised the cadence, StairSteps.hpp)
 };
 
 struct State
@@ -65,6 +66,12 @@ struct State
     bool legValid = false;  // leg holds a previous update (the first warped update of a layer takes the knee-limited scale directly)
 };
 
+// Shortest stride of an update: Inputs::floor within [0.3, kScaleFloor] (kScaleFloor when it is not a finite value below it).
+inline float Floor(const Inputs &in) noexcept
+{
+    return std::isfinite(in.floor) && in.floor < kScaleFloor ? std::fmax(in.floor, 0.3f) : kScaleFloor;
+}
+
 // Stride scale the clip asks for this frame (before interpolation and alpha); 1 = no warp.
 inline float TargetScale(const Inputs &in) noexcept
 {
@@ -72,7 +79,7 @@ inline float TargetScale(const Inputs &in) noexcept
         return 1.0f;
     const float capsule = std::max(0.0f, in.capsuleSpeed);
     const float factor = std::isfinite(in.clipFactor) ? std::clamp(in.clipFactor, kClipFactorMin, kClipFactorMax) : 1.0f;
-    return std::clamp(capsule / (in.rootSpeed * factor), kScaleFloor, 1.0f);
+    return std::clamp(capsule / (in.rootSpeed * factor), Floor(in), 1.0f);
 }
 
 // Clip factor from summed planted samples of a clip: backward speed of the planted toes along the root direction in the character frame
@@ -96,7 +103,7 @@ inline float Step(State &state, const Inputs &in) noexcept
     }
     else if (std::isfinite(in.dt) && in.dt > 0)
         state.scale += (target - state.scale) * (1.0f - std::exp(-kInterpSpeed * in.dt));
-    state.scale = std::clamp(state.scale, kScaleFloor, 1.0f);
+    state.scale = std::clamp(state.scale, Floor(in), 1.0f);
     const float alpha = std::isfinite(in.alpha) ? std::clamp(in.alpha, 0.0f, 1.0f) : 0.0f;
     const float fade = std::isfinite(in.yawFade) ? std::clamp(in.yawFade, 0.0f, 1.0f) : 1.0f;
     return 1.0f - alpha * fade * (1.0f - state.scale);

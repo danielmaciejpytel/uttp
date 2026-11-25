@@ -5643,6 +5643,27 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     f.wantsToWalk = aRaw.haveExtra && aRaw.walkToggled;
     f.haveCapsuleZ = aRaw.haveExtra && std::isfinite(aRaw.capsulePos[2]); // speedconv::kStepHold
     f.capsuleZ = f.haveCapsuleZ ? aRaw.capsulePos[2] : 0.0f;
+    // mm.stairSteps (mm/StairSteps.hpp): the stair flight under V from the ground traces of this frame (off: none). The fit needs the
+    // stride warp to shorten the step, so without it the stairs are not handed on.
+    if (mm::stairsteps::rt::Enabled())
+    {
+        const bool ground = !(f.air.valid && !f.air.onGround) && !adapter::PsmAir(f.psmDetailed) && !g_trav.active;
+        const mm::stairsteps::FeedOut stairs = mm::stairsteps::rt::Update(dt, aRaw.haveExtra, aRaw.capsulePos[0], aRaw.capsulePos[1],
+                                                                         aRaw.velWorld[0], aRaw.velWorld[1], ground);
+        mm::stairsteps::rt::g_strideWarp.store(b.eval.StrideWarp(), std::memory_order_relaxed);
+        if (stairs.weight > 0.0f && b.eval.StrideWarp())
+        {
+            f.stairTreadM = stairs.treadM;
+            f.stairWeight = stairs.weight;
+            f.stairSpeedMs = std::hypot(aRaw.velWorld[0], aRaw.velWorld[1]);
+            f.stairMinScale = stairs.minScale;
+            for (int k = 0; k < 2; ++k)
+            {
+                f.stairPhaseErr[k] = stairs.phaseErr[k];
+                f.stairPhaseOk[k] = stairs.phaseOk[k];
+            }
+        }
+    }
     // G5: Tier2 Slow (separate native, sent right before this feed) lowers the stand run cap; G2: the walk toggle speed (0 = off)
     f.tier2Slow = g_tier2Slow.load(std::memory_order_acquire);
     // G9: aim jog off -> AimWalk at the vanilla speed asks for the Walk gait (MotionAdapter MapToChooser)
@@ -5945,6 +5966,12 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
     b.matcher.SetShownPoseHistory(nullptr);
+    if (mm::stairsteps::rt::Enabled())
+    {
+        mm::stairsteps::rt::g_cadence.store(r.stairCadence, std::memory_order_relaxed);
+        mm::stairsteps::rt::g_treads.store(r.stairTreads, std::memory_order_relaxed);
+        mm::stairsteps::rt::g_landErr.store(r.stairLanded ? r.stairLandErr : NAN, std::memory_order_relaxed);
+    }
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_strafeProbe.strafeSectorHolds = b.matcher.StrafeSectorHolds();
 #endif

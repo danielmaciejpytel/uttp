@@ -41,6 +41,7 @@
 #include "LegIk.hpp"
 #include "MMMath.hpp"
 #include "PelvisPlacement.hpp"
+#include "StairSteps.hpp"
 
 namespace utpp::mm::groundfeet
 {
@@ -81,6 +82,17 @@ struct Config
     float suddenRateTau = 0.1f;      // s, how fast a snap update moves the expected vertical rate
     float bias = 0.0f;               // m, ground hit minus capsule height on flat ground (calibration)
     float heelAbove = 0.01f;         // m, a heel hit this far above the ball's plane at the heel is the support of that foot
+    float flightDropFollow = 0.9f;   // m, on a stair flight going down (Samples::stair) a hit this deep below the capsule is used
+    float descentBase = 0.3f;        // pelvis lowering on a flight going down: share of the rise (stairsteps::swing::DescentDrop) ...
+    float descentPerTread = 0.15f;   // ... plus this share per tread of the fitted step (at most 4)
+    float flightRateTau = 0.08f;     // s, on a stair flight the steady vertical rate of the drawn capsule is smoothed with this
+    float landVMax = 0.5f;           // m/s, largest plane rate a landing swing hands on (StairSwings)
+    float swingStart = 0.04f;        // m, ball height above the floor estimate from which a planned stair swing starts (above
+                                     // swingLow: a ball wavering around swingLow in the stance does not start and land swings)
+    float landAbove = 0.03f;         // m, highest a landing swing's plane may stay above the foot's own trace (StairSwings)
+    float swingFadeS = 0.1f;         // s, full-scale fade of a planned swing's weight (a lost flight, the option switched off)
+    float handBlend = 22.0f;         // rad/s, critically damped release of a landing swing going down into the planting plane
+    float handVMax = 3.0f;           // m/s, largest rate difference that release starts with
 };
 
 inline bool ValidConfig(const Config& c)
@@ -97,7 +109,10 @@ inline bool ValidConfig(const Config& c)
            pos(c.pelvisStiffness) && nonneg(c.maxDrop) && nonneg(c.maxCompensation) && nonneg(c.heelLift) && c.heelLift <= 1.0f &&
            std::isfinite(c.reach) && c.reach > 0.5f && c.reach <= 1.0f && std::isfinite(c.softReach) && c.softReach > 0.5f &&
            c.softReach <= c.reach && pos(c.suddenStep) && pos(c.frontLegSpeed) &&
-           pos(c.suddenRateTau) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f && nonneg(c.heelAbove);
+           pos(c.suddenRateTau) && std::isfinite(c.bias) && std::fabs(c.bias) < 0.2f && nonneg(c.heelAbove) &&
+           std::isfinite(c.flightDropFollow) && c.flightDropFollow >= c.maxGroundDrop && nonneg(c.descentBase) &&
+           nonneg(c.descentPerTread) && pos(c.flightRateTau) && nonneg(c.landVMax) && nonneg(c.landAbove) && pos(c.swingFadeS) &&
+           std::isfinite(c.swingStart) && c.swingStart >= c.swingLow && pos(c.handBlend) && nonneg(c.handVMax);
 }
 
 // One trace per foot under the ball (foot) and one under the heel (heel; hit 0 = not traced), in the model frame of the capsule the
@@ -118,6 +133,8 @@ struct Samples
     int64_t ticks = 0;     // clock of the trace (0 = unset)
     FootSample foot[2];
     FootSample heel[2];
+    stairsteps::Flight stair; // the stair flight under V (option mm.stairSteps; valid 0 = none): the swing over it (Stage)
+    float capX = 0.0f, capY = 0.0f; // world position of the trace capsule (set with a stair flight only)
 };
 static_assert(std::is_trivially_copyable_v<Samples> && sizeof(Samples) % 4 == 0);
 
@@ -130,6 +147,12 @@ struct FootPlane
     float nx = 0.0f, ny = 0.0f, nz = 1.0f;
     float carry = 1.0f;
     float above = 0.0f;
+    float planLift = 0.0f; // m, ground height at the ball of a foot swinging over a stair flight (stairsteps::swing), model
+    float planW = 0.0f;    // its share of the lift [0, 1] (0 = none: the plane above alone, bit for bit)
+    // a stair swing going down and after its landing (all 0 = none: bit for bit):
+    float holdLift = 0.0f; // m, what is left of the swing's height above the planting plane's goal (added to the lift, >= 0)
+    float holdW = 0.0f;    // share of the swing's untilted foot still held after the landing [0, 1]
+    float dropFree = 0.0f; // share by which this leg's knee fold no longer limits the pelvis drop [0, 1]
 };
 struct Plan
 {
@@ -272,12 +295,26 @@ inline FootGoal Goal(const Config& c, const FootPlane& p, const LegFrame& l, flo
         const float follow = std::isfinite(aFollow) ? aFollow : 0.0f;
         lift = std::fmax(carry * lift + (1.0f - carry) * follow, lift - std::fmax(above - c.swingClearance, 0.0f));
     }
+    // a foot swinging over a stair flight: its planned ground (the same dead zone and weight), untilted
+    const float planW = std::isfinite(p.planW) && std::isfinite(p.planLift) ? std::clamp(p.planW, 0.0f, 1.0f) : 0.0f;
+    if (planW > 0.0f)
+    {
+        const float pl = (p.planLift < 0.0f ? -1.0f : 1.0f) * std::fmax(std::fabs(p.planLift) - c.deadHeight, 0.0f) * w;
+        lift += (pl - lift) * planW;
+    }
     // tilt: slopes along the heading and to the side, limited, then the dead angle
     const float sf = std::clamp(-math::Dot(n, fwd) / n.z, -std::tan(detail::Deg(c.maxPitchDeg)), std::tan(detail::Deg(c.maxPitchDeg)));
     const float sr = std::clamp(-math::Dot(n, right) / n.z, -std::tan(detail::Deg(c.maxRollDeg)), std::tan(detail::Deg(c.maxRollDeg)));
     const math::Vec3 nt = legik::Norm(fwd * (-sf) + right * (-sr) + math::Vec3{0.0f, 0.0f, 1.0f});
     const float a = std::acos(std::clamp(nt.z, -1.0f, 1.0f));
-    const float tilt = std::fmax(a - detail::Deg(c.deadAngleDeg), 0.0f) * w * carry;
+    float tilt = std::fmax(a - detail::Deg(c.deadAngleDeg), 0.0f) * w * carry;
+    if (planW > 0.0f)
+        tilt *= 1.0f - planW;
+    const float holdW = std::isfinite(p.holdW) ? std::clamp(p.holdW, 0.0f, 1.0f) : 0.0f;
+    if (holdW > 0.0f)
+        tilt *= 1.0f - holdW;
+    if (std::isfinite(p.holdLift) && p.holdLift > 0.0f)
+        lift += p.holdLift;
     math::Quat r{0.0f, 0.0f, 0.0f, 1.0f};
     if (tilt > 0.0f)
     {
@@ -388,14 +425,21 @@ inline ApplyResult Apply(const Config& aCfg, const bodyheight::LegRig& aRig, flo
     else if (off < 0.0f)
     {
         // a drop only as far as each knee may fold over the animation with its foot where the animation put it
+        const float wanted = off;
         for (int s = 0; s < 2; ++s)
         {
             const LegFrame& l = f.leg[s];
             const float lmin = MinReach(c, l);
             const math::Vec3 d = l.ga.p - l.gc.p;
             const float disc = d.z * d.z - math::Dot(d, d) + lmin * lmin;
-            if (disc >= 0.0f)
-                off = std::fmax(off, std::fmin(0.0f, -d.z + std::sqrt(disc)));
+            if (disc < 0.0f)
+                continue;
+            float lim = std::fmin(0.0f, -d.z + std::sqrt(disc));
+            // a leg swinging down a stair flight does not hold the pelvis up (its own solve below keeps the knee limit)
+            const float release = std::isfinite(aPlan.foot[s].dropFree) ? std::clamp(aPlan.foot[s].dropFree, 0.0f, 1.0f) : 0.0f;
+            if (release > 0.0f && lim > wanted)
+                lim += (wanted - lim) * release;
+            off = std::fmax(off, lim);
         }
     }
     r.pelvis = off;
@@ -468,7 +512,25 @@ struct StageDiag
     uint64_t sudden = 0;      // capsule snaps taken into the pelvis spring
     uint64_t rejected = 0;    // feet without a usable sample (no hit, inconsistent with the capsule, bad normal)
     uint64_t heel = 0;        // feet whose heel sample was the support
+    uint64_t stairSwings = 0; // swings planned over a stair flight (StairSwings)
+    uint64_t stairLands = 0;  // ... and their landings
+    uint64_t landClamps = 0;  // ... landings whose plane the foot's trace bounded (landAbove / maxPenetration) and the last
+    float landClampLast = 0.0f; //    such correction (m)
 };
+
+// Deepest hit below the capsule (m) a trace may have on a stair flight going down: the flight's drop to the traced point (its
+// distance ahead of the capsule along the flight, in treads, plus one and a half rises for the tread under the capsule and the
+// sphere of the capsule) and 5 cm, at most Config::flightDropFollow (a hit deeper than the flight explains, a gap in the flight, is
+// not used).
+inline float FlightDropLimit(const stairsteps::Flight& f, const FootSample& s, float aYaw, float aMax = 0.9f)
+{
+    if (!(f.tread > 1.0e-3f) || !std::isfinite(f.rise) || !std::isfinite(aYaw) || !std::isfinite(s.x) || !std::isfinite(s.y))
+        return 0.0f;
+    float wx = 0.0f, wy = 0.0f;
+    math::Rot2(aYaw, s.x, s.y, wx, wy);
+    const float ahead = std::fmax(wx * f.dirX + wy * f.dirY, 0.0f);
+    return std::fmin(std::fabs(f.rise) * (ahead / f.tread + 1.5f) + 0.05f, aMax);
+}
 
 // Per-frame state: the planting planes, their fades and the pelvis spring.
 class Stage
@@ -493,6 +555,8 @@ public:
         m_havePrev = false;
         m_haveFloor = false;
         m_floor = 0.0f;
+        m_haveFloorHeel = false;
+        m_floorHeel = 0.0f;
         m_plan = Plan{};
     }
 
@@ -520,6 +584,11 @@ public:
         const float dt = first ? 0.0f : aDt;
         ++m_diag.steps;
         const bool allowed = aAllowed && !aPlatform;
+        // a stair flight under V (option mm.stairSteps; none with the option off)
+        const stairsteps::Flight* fl = allowed && aSamples && aSamples->stair.valid != 0 && aSamples->stair.weight > 0.0f &&
+                                               aSamples->stair.tread > 1.0e-3f && std::isfinite(aSamples->stair.rise)
+                                           ? &aSamples->stair
+                                           : nullptr;
         const float wh = std::sqrt(m_cfg.heightStiffness), wn = std::sqrt(m_cfg.normalStiffness);
         const float fade = dt > 0.0f ? std::exp(-dt / m_cfg.fadeTau) : 1.0f;
         for (int s = 0; s < 2; ++s)
@@ -542,7 +611,8 @@ public:
                                     (aG - aSamples->capZ <= m_cfg.maxGroundDelta ||
                                      (aG - aSamples->capZ <= m_cfg.maxGroundRiseFollow && m_vz > m_cfg.minClimbRate)) &&
                                     (drop <= m_cfg.maxGroundDrop ||
-                                     (drop <= m_cfg.maxGroundDropFollow && m_vz < -m_cfg.minDescentRate));
+                                     (drop <= m_cfg.maxGroundDropFollow && m_vz < -m_cfg.minDescentRate) ||
+                                     (fl && fl->rise < 0.0f && drop <= FlightDropLimit(*fl, fs, aSamples->yaw, m_cfg.flightDropFollow)));
                     if (ok)
                     {
                         aN = aN * (1.0f / nl);
@@ -581,7 +651,19 @@ public:
                 }
                 if (!valid)
                     ++m_diag.rejected;
+                // a stair flight: the trace of this foot in the world (its own landing, the support's tread: StairSwings)
+                f.trOk = fl && valid && std::isfinite(aSamples->yaw);
+                if (f.trOk)
+                {
+                    float wx = 0.0f, wy = 0.0f;
+                    math::Rot2(aSamples->yaw, f.x, f.y, wx, wy);
+                    f.trG = g;
+                    f.trWX = aSamples->capX + wx;
+                    f.trWY = aSamples->capY + wy;
+                }
             }
+            else
+                f.trOk = false;
             if (valid)
             {
                 if (!f.init)
@@ -644,10 +726,19 @@ public:
             }
             // a steady vertical rate (stairs, a ramp the trace normal does not show) is expected motion too: only the part of the
             // change that neither the slope nor the last steady rate explains is a snap
+            // on a stair flight the slope is the flight's (rise over tread along its direction, weighted): its climb or descent is
+            // expected, only the rest is a snap
+            if (fl && aHaveXY && std::isfinite(aDrawn[0]) && std::isfinite(aDrawn[1]))
+            {
+                const float along = (aDrawn[0] - m_prev[0]) * fl->dirX + (aDrawn[1] - m_prev[1]) * fl->dirY;
+                expected = along * fl->rise / fl->tread * std::clamp(fl->weight, 0.0f, 1.0f);
+            }
             const float dz = drawnZ - m_prev[2];
             const float bySlope = dz - expected, byRate = dz - m_vz * dt;
             const float sudden = std::fabs(bySlope) <= std::fabs(byRate) ? bySlope : byRate;
-            if (std::fabs(sudden) > m_cfg.suddenStep)
+            if (fl && std::fabs(sudden) <= m_cfg.suddenStep)
+                m_vz += (dz / dt - m_vz) * (1.0f - std::exp(-dt / m_cfg.flightRateTau)); // steady rate, smoothed (knee gate)
+            else if (std::fabs(sudden) > m_cfg.suddenStep)
             {
                 m_pel = std::clamp(m_pel - sudden, -m_cfg.maxCompensation, m_cfg.maxCompensation);
                 ++m_diag.sudden;
@@ -690,9 +781,31 @@ public:
                     m_plan.foot[s].carry = 1.0f - u * u * (3.0f - 2.0f * u);
                     m_plan.foot[s].above = above;
                 }
+                const bool stairs = fl || m_foot[0].sw || m_foot[1].sw || Holding(m_foot[0]) || Holding(m_foot[1]);
+                if (stairs)
+                    StairSwings(pf, aSamples, fl, aDrawn, aHaveXY, dt);
+                else
+                {
+                    for (Foot& f : m_foot)
+                    {
+                        f.wasDown = f.sup = f.landOk = false; // off a flight: a later flight plans from fresh landings only
+                        f.goalN = 0;
+                    }
+                    m_stepEst = 0.0f;
+                }
                 FootGoal g[2];
                 for (int s = 0; s < 2; ++s)
                     g[s] = Goal(m_cfg, m_plan.foot[s], pf.leg[s]);
+                if (stairs && dt > 0.0f)
+                    for (int s = 0; s < 2; ++s)
+                    {
+                        // the goal's last world height and its rate: what a landing swing going down hands on (HandSwing)
+                        Foot& f = m_foot[s];
+                        const float z = aDrawn[2] + g[s].lift;
+                        f.goalRate = f.goalN > 0 ? (z - f.goalZ) / dt : 0.0f;
+                        f.goalZ = z;
+                        f.goalN = std::min(f.goalN + 1, 2);
+                    }
                 if (front >= 0)
                 {
                     const float d0 = pf.leg[0].ball.x * m_move[0] + pf.leg[0].ball.y * m_move[1];
@@ -700,6 +813,8 @@ public:
                     front = d1 > d0 ? 1 : 0;
                 }
                 target = PelvisTarget(m_cfg, pf, g, aBodyOffset, front);
+                if (fl)
+                    target = std::fmin(target, stairsteps::swing::DescentDrop(*fl, m_cfg.descentBase, m_cfg.descentPerTread, m_cfg.maxDrop));
             }
         }
         if (dt > 0.0f)
@@ -731,17 +846,273 @@ private:
         math::Vec3 n{0.0f, 0.0f, 1.0f}, nv{};
         float w = 0.0f;
         float x = 0.0f, y = 0.0f;   // traced point (model frame)
+        // swing over a stair flight (StairSwings)
+        bool wasDown = false;                 // the ball was on the clip's floor in the last update
+        bool sw = false;                      // a planned swing is running
+        stairsteps::Flight swFl;              // the flight latched at its lift-off
+        stairsteps::swing::Plan swPlan;
+        float swG = 0.0f, swGv = 0.0f;        // planned ground (world) and its rate
+        float swReq = 0.0f, swReqV = 0.0f;    // the swing's height requirement (world, SwingReq) followed: a lower one critically
+                                              // damped, a higher one at once (and its rate)
+        float swPath = 0.0f;                  // planned glide (world) and the mid-sole / ball over the clip's floor at the last step
+        float swPrevS = 0.0f, swPrevAbove = 0.0f;
+        float swW = 0.0f;                     // its weight (the flight's)
+        float goalZ = 0.0f, goalRate = 0.0f;  // the foot goal's world height at the last update and its rate (goalN updates)
+        int goalN = 0;
+        float holdX = 0.0f, holdXv = 0.0f;    // release of a landing swing going down: height left above the plane's goal ...
+        float holdK = 0.0f, holdKv = 0.0f;    // ... and the share of the untilted, unlimited swing foot left (HandSwing)
+        bool sup = false;                     // the last planted point (world x, y: the traced point the plane height came from, else
+        float supX = 0.0f, supY = 0.0f, supH = 0.0f; // the mid-sole) and plane height (support of the other foot)
+        bool trOk = false;                    // a stair flight: this frame's trace of the foot (world height and point)
+        float trG = 0.0f, trWX = 0.0f, trWY = 0.0f;
+        bool landOk = false;                  // its last landing on the flight (world x, y of the support point)
+        float landX = 0.0f, landY = 0.0f;
     };
+
+    static bool Holding(const Foot& f) { return f.holdX != 0.0f || f.holdXv != 0.0f || f.holdK != 0.0f; }
+
+    // One update of the release of a landing swing going down (critically damped towards 0).
+    void StepHold(Foot& f, float aDt) const
+    {
+        if (!Holding(f) || !(aDt > 0.0f))
+            return;
+        detail::Spring(f.holdX, f.holdXv, 0.0f, m_cfg.handBlend, aDt);
+        detail::Spring(f.holdK, f.holdKv, 0.0f, m_cfg.handBlend, aDt);
+        if (!std::isfinite(f.holdX) || !std::isfinite(f.holdXv) || f.holdX < 0.0f ||
+            (f.holdX < 2.0e-4f && std::fabs(f.holdXv) < 5.0e-3f))
+            f.holdX = f.holdXv = 0.0f; // never below the planting plane's goal
+        if (!std::isfinite(f.holdK) || !std::isfinite(f.holdKv) || f.holdK < 1.0e-2f)
+            f.holdK = f.holdKv = 0.0f;
+    }
+
+    // The end of a planned swing (its landing, or an abort): the planting plane goes on from the planned height and a bounded rate
+    // (the swing's weight of each), never deeper than maxPenetration below this frame's trace. Going down, the foot's goal does not
+    // step onto that plane in one frame: what it was above the plane's goal (continued at its own rate) is released critically
+    // damped (handBlend), together with the untilted foot and the released pelvis limit of the swing.
+    void HandSwing(Foot& f, FootPlane& p, const float (&aDrawn)[3], const LegFrame& aLeg, float aDt)
+    {
+        const float w = std::clamp(f.swW, 0.0f, 1.0f);
+        if (f.init && std::isfinite(f.swG) && std::isfinite(f.swGv))
+        {
+            f.gz += (f.swG - f.gz) * w;
+            f.gv += (std::clamp(f.swGv, -m_cfg.landVMax, m_cfg.landVMax) - f.gv) * w;
+            float clamp = 0.0f;
+            if (f.trOk && f.gz < f.trG - m_cfg.maxPenetration)
+            {
+                clamp = f.trG - m_cfg.maxPenetration - f.gz;
+                f.gz = f.trG - m_cfg.maxPenetration;
+                f.gv = std::fmax(f.gv, 0.0f);
+            }
+            else if (f.trOk && f.gz > f.trG + m_cfg.landAbove)
+            {
+                clamp = f.gz - f.trG - m_cfg.landAbove;
+                f.gz = f.trG + m_cfg.landAbove; // never lands in the air over its own trace
+                f.gv = std::fmin(f.gv, 0.0f);
+            }
+            if (clamp > 0.0f)
+            {
+                ++m_diag.landClamps;
+                m_diag.landClampLast = clamp;
+            }
+            if (p.w > 0.0f)
+                p.h = f.gz - aDrawn[2];
+        }
+        if (f.swFl.rise < 0.0f && w > 0.0f && f.goalN >= 2 && aDt > 0.0f)
+        {
+            FootPlane plain = p;
+            plain.planW = plain.planLift = plain.holdLift = plain.holdW = 0.0f;
+            const float x = f.goalZ + f.goalRate * aDt - (aDrawn[2] + Goal(m_cfg, plain, aLeg).lift);
+            if (std::isfinite(x))
+            {
+                f.holdX = std::clamp(x, 0.0f, m_cfg.flightDropFollow);
+                f.holdXv = f.holdX > 0.0f ? std::clamp(f.goalRate - f.gv, -m_cfg.handVMax, m_cfg.handVMax) : 0.0f;
+                f.holdK = w;
+                f.holdKv = 0.0f;
+            }
+        }
+        f.sw = false;
+        f.swW = 0.0f;
+    }
+
+    // Swings over a stair flight (stairsteps::swing): at the lift-off of a foot (its ball leaves the clip's floor) the tread it lands on
+    // is planned from the other foot's tread and the fitted step; while it swings its ground glides from the tread it left to that
+    // tread (FootPlane::planLift / planW); at the landing the planting plane goes on from the planned height.
+    void StairSwings(const PoseFrame& pf, const Samples* aSamples, const stairsteps::Flight* fl, const float (&aDrawn)[3], bool aHaveXY,
+                     float dt)
+    {
+        namespace sw = stairsteps::swing;
+        const sw::Config sc{};
+        const float lowH = std::fmin(pf.leg[0].heel.z, pf.leg[1].heel.z);
+        m_floorHeel = (!m_haveFloorHeel || !std::isfinite(m_floorHeel)) ? lowH : std::fmin(lowH, m_floorHeel + m_cfg.floorRise * dt);
+        m_haveFloorHeel = std::isfinite(m_floorHeel);
+        const bool xy = aHaveXY && aSamples && std::isfinite(aDrawn[0]) && std::isfinite(aDrawn[1]) && std::isfinite(aSamples->yaw);
+        const float cy = xy ? std::cos(aSamples->yaw) : 1.0f, sy = xy ? std::sin(aSamples->yaw) : 0.0f;
+        auto wx = [&](const math::Vec3& v) { return aDrawn[0] + cy * v.x - sy * v.y; };
+        auto wy = [&](const math::Vec3& v) { return aDrawn[1] + sy * v.x + cy * v.y; };
+        // the releases of earlier landings decay first (a landing of this update starts its own at full size)
+        for (Foot& f : m_foot)
+            StepHold(f, dt);
+        // landings first (both feet): a foot on the clip's floor ends its swing and becomes the support of the other one; a new contact
+        // measures the step from the other foot's last landing along the flight
+        bool landed[2] = {false, false};
+        for (int s = 0; s < 2 && xy; ++s)
+        {
+            Foot& f = m_foot[s];
+            FootPlane& p = m_plan.foot[s];
+            if (!(p.above <= m_cfg.swingLow))
+                continue;
+            if (f.sw)
+            {
+                HandSwing(f, p, aDrawn, pf.leg[s], dt); // landing: the planting plane goes on from the planned height
+                ++m_diag.stairLands;
+            }
+            // the support of the other foot: the point its plane height was traced at (its tread), else the mid-sole
+            const math::Vec3 mid = (pf.leg[s].ball + pf.leg[s].heel) * 0.5f;
+            f.sup = f.init;
+            f.supX = f.trOk ? f.trWX : wx(mid);
+            f.supY = f.trOk ? f.trWY : wy(mid);
+            f.supH = f.trOk ? f.trG : f.gz; // the traced height of its tread (a plane still settling does not carry over)
+            f.swW = 0.0f;
+            landed[s] = !f.wasDown;
+            f.wasDown = true;
+            if (landed[s])
+            {
+                const Foot& o = m_foot[1 - s];
+                if (fl && o.landOk)
+                {
+                    const float st = stairsteps::swing::Along(*fl, f.supX, f.supY) - stairsteps::swing::Along(*fl, o.landX, o.landY);
+                    if (st > 0.5f * fl->tread && st < 3.0f)
+                        m_stepEst = st;
+                }
+                f.landOk = true;
+                f.landX = f.supX;
+                f.landY = f.supY;
+            }
+        }
+        for (int s = 0; s < 2; ++s)
+        {
+            Foot& f = m_foot[s];
+            FootPlane& p = m_plan.foot[s];
+            const LegFrame& l = pf.leg[s];
+            if (!xy)
+            {
+                if (f.sw)
+                {
+                    p.planW = f.swW;
+                    p.planLift = f.swG - aDrawn[2];
+                }
+                continue;
+            }
+            const math::Vec3 mid = (l.ball + l.heel) * 0.5f;
+            const float mx = wx(mid), my = wy(mid);
+            if (p.above <= m_cfg.swingLow)
+                continue; // landed (above)
+            if (!f.sw && p.above <= m_cfg.swingStart)
+                continue; // not lifted far enough yet: still down
+            // the toe tip in 3D (ahead of the ball along the foot) and its own height over the clip's floor
+            math::Vec3 toeDir = l.ball - l.heel;
+            const float tl = detail::Len(toeDir);
+            toeDir = tl > 1.0e-3f ? toeDir * (1.0f / tl) : math::Vec3{0.0f, 1.0f, 0.0f};
+            const math::Vec3 toe = l.ball + toeDir * sc.toe;
+            const Foot& o = m_foot[1 - s];
+            if (!f.sw && f.wasDown && fl && f.init)
+            {
+                // the other foot supports the body when it stands now (a walk); in the flight phase of a run it does not
+                const bool support = o.sup && o.wasDown;
+                sw::Plan plan;
+                const float sOwn = f.trOk ? sw::Along(*fl, f.trWX, f.trWY) : NAN;
+                if (sw::PlanSwing(sc, *fl, sw::Along(*fl, mx, my), f.gz, sw::Along(*fl, o.supX, o.supY), o.supH, support, plan, sOwn,
+                                  m_stepEst > 0.0f ? m_stepEst : NAN, f.landOk ? sw::Along(*fl, f.landX, f.landY) : NAN))
+                {
+                    plan.capFrom = sw::CapStart(sc, *fl, plan, sw::Along(*fl, wx(toe), wy(toe)) - sw::Along(*fl, mx, my));
+                    f.sw = true;
+                    f.swFl = *fl;
+                    f.swPlan = plan;
+                    f.swG = f.gz;
+                    f.swGv = 0.0f;
+                    f.swReq = f.gz;
+                    f.swReqV = 0.0f;
+                    f.swPath = f.gz;
+                    f.swPrevS = plan.s0;
+                    f.swPrevAbove = p.above;
+                    f.swW = fl->weight;
+                    ++m_diag.stairSwings;
+                }
+            }
+            f.wasDown = false;
+            if (!f.sw)
+                continue;
+            const stairsteps::Flight& F = f.swFl;
+            const float sBall = sw::Along(F, wx(l.ball), wy(l.ball)), sHeel = sw::Along(F, wx(l.heel), wy(l.heel));
+            const float sMid = sw::Along(F, mx, my), sToe = sw::Along(F, wx(toe), wy(toe));
+            // the lower of the toe tip along the sole and the toe level with the ball (a raised toe never lowers the requirement)
+            const float toeAbove = m_haveFloor ? std::fmax(std::fmin(toe.z, l.ball.z) - m_floor, -0.03f) : p.above;
+            // the other foot landed: an unanchored plan (the flight phase of a run) lands one step past it
+            if (landed[1 - s] && !f.swPlan.anchored)
+            {
+                const float step = m_stepEst > 0.0f ? m_stepEst : float(F.treads) * F.tread;
+                sw::Anchor(sc, F, f.swPlan, sw::Along(F, o.supX, o.supY), o.supH, step);
+            }
+            if (dt > 0.0f)
+                sw::Retarget(sc, F, f.swPlan, sMid, (sMid - f.swPrevS) / dt, p.above, (p.above - f.swPrevAbove) / dt);
+            if (f.trOk && !sw::Reconcile(sc, F, f.swPlan, sw::Along(F, f.trWX, f.trWY), f.trG))
+                sw::Converge(sc, F, f.swPlan, sw::Along(F, f.trWX, f.trWY), f.trG);
+            sw::Advance(sc, f.swPlan, sMid, dt);
+            if (f.swPlan.u < f.swPlan.capFrom)
+                f.swPlan.capFrom = sw::CapStart(sc, F, f.swPlan, sToe - sMid); // the landing may have moved (not once the blend began)
+            f.swPath = sw::PathStep(f.swPlan, f.swPath, f.swPrevS, sMid, F.rise < 0.0f);
+            f.swPrevS = sMid;
+            f.swPrevAbove = p.above;
+            const float heelAbove = m_haveFloorHeel ? std::fmax(l.heel.z - m_floorHeel, 0.0f) : 0.0f;
+            // the glide is smooth by itself; the requirement steps where a nose is passed going down or the plan is re-anchored: it is
+            // followed (a lower one critically damped, a higher one at once) and joined with the glide
+            const float req = sw::SwingReq(sc, F, f.swPlan, f.swPlan.u, sToe, toeAbove, sHeel, heelAbove, sBall, p.above);
+            if (std::isfinite(req))
+                sw::Follow(f.swReq, f.swReqV, req, sc.follow, dt, sc.followVMax);
+            const float g = sw::SwingJoin(sc, f.swPath, std::isfinite(req) ? f.swReq : NAN, f.swPlan.u);
+            if (!std::isfinite(g))
+            {
+                HandSwing(f, p, aDrawn, pf.leg[s], dt); // abort: the plane goes on from the planned height
+                continue;
+            }
+            f.swGv = dt > 0.0f ? (g - f.swG) / dt : 0.0f;
+            f.swG = g;
+            // the swing's weight follows the flight's (0 once it is lost or the option is off) at most 1 / swingFadeS per second
+            const float wTarget = fl ? std::clamp(fl->weight, 0.0f, 1.0f) : 0.0f;
+            const float wStep = dt > 0.0f ? dt / m_cfg.swingFadeS : 0.0f;
+            f.swW = f.swW + std::clamp(wTarget - f.swW, -wStep, wStep);
+            if (!(f.swW > 0.0f) && !fl)
+            {
+                f.sw = false;
+                f.swW = 0.0f;
+                continue;
+            }
+            p.planW = f.swW;
+            p.planLift = f.swG - aDrawn[2];
+        }
+        // what the swings going down hand to Goal and Apply (nothing of it for a swing going up)
+        for (int s = 0; s < 2; ++s)
+        {
+            const Foot& f = m_foot[s];
+            FootPlane& p = m_plan.foot[s];
+            p.holdLift = f.holdX;
+            p.holdW = f.holdK;
+            p.dropFree = std::fmax(f.sw && f.swFl.rise < 0.0f ? p.planW : 0.0f, f.holdK);
+        }
+    }
 
     Config m_cfg;
     Foot m_foot[2];
     float m_pel = 0.0f, m_pelV = 0.0f;
     float m_vz = 0.0f; // steady drawn height rate (m/s)
+    float m_stepEst = 0.0f; // m, last measured step on a stair flight (landing past the other foot's last landing; 0 = none)
     float m_move[2] = {0.0f, 1.0f}; // drawn motion direction of the last update (model axes)
     bool m_havePrev = false;
     float m_prev[3] = {0.0f, 0.0f, 0.0f};
     float m_floor = 0.0f;  // m, floor estimate of the clip (model z of the lowest ball, rising at most floorRise per second)
     bool m_haveFloor = false;
+    float m_floorHeel = 0.0f; // m, the same for the heels (StairSwings)
+    bool m_haveFloorHeel = false;
     Plan m_plan;
     StageDiag m_diag;
 };
