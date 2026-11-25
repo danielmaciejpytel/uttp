@@ -1,0 +1,10 @@
+{
+  "name": "spike",
+  "note": "Two boxes, 2 m (X) x 4 m (Y) footprint, 1.0 m and 2.0 m tall, 3 m gap between the facing sides. Layout origin = middle of the gap, ground level.",
+  "anchor": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw_deg": 0.0, "todo": "NOT SET - pass --anchor X Y Z [YAW] to build_playground_stage.py; z is the ground height"},
+  "burial_m": 0.3,
+  "boxes": [
+    {"name": "box_low_1m",  "center": [-2.5, 0.0, 0.5], "half": [1.0, 2.0, 0.5], "yaw_deg": 0.0},
+    {"name": "box_high_2m", "center": [ 2.5, 0.0, 1.0], "half": [1.0, 2.0, 1.0], "yaw_deg": 0.0}
+  ]
+}
