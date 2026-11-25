@@ -77,7 +77,9 @@ static constexpr double kDestMax = 0.02;      // [P] climb end on HorizontalDest
 // extended speed grid (0-10 m/s). Recorded after the TR-dll planner change (minRate 0.40, 0.40 m run-climb step limit, low hurdle on; wide
 // vault is measured with its key on), as the minimum over the v1, v2 and motion_knee data files; `kLegacyAccepted` is the pre-change result of the original grid (speeds 0 / 1.5 / 4 m/s, original vault cases) that the
 // all-new-keys-off configuration must still reproduce exactly.
-static constexpr int kMinAccepted[2][6] = {{504, 378, 378, 588, 279, 159}, {504, 379, 378, 624, 288, 165}};
+// With the rejected fallback (Config::rejectedFallback: other montages / neighbouring table rows under the same gate) every grid
+// case of these six classes has an accepted plan; before it: woman 504 / 378 / 378 / 588 / 279 / 159, man 504 / 379 / 378 / 624 / 288 / 165.
+static constexpr int kMinAccepted[2][6] = {{506, 380, 382, 756, 324, 288}, {506, 380, 382, 756, 324, 288}};
 // [min, max]: the man vault count is 624 on the v1 file (ctest) and 630 on the motion_knee file; everything else is exact
 static constexpr int kLegacyAccepted[2][4] = {{216, 126, 108, 588}, {216, 126, 108, 624}};
 static constexpr int kLegacyAcceptedMax[2][4] = {{216, 126, 108, 588}, {216, 126, 108, 630}};
@@ -312,6 +314,7 @@ static bool Evaluate(const DecisionTable& aT, const TraversalFile& aF, const Cas
 struct Totals
 {
     int cases = 0, started = 0;
+    std::map<std::string, int> alternatives; // accepted plans by Plan::alternative ("" = direct row evaluation)
     double contact = 0, planarTick = 0, planarClip = 0, warpAdded = 0, durErr60 = 0, destErr = 0, minRate = 1e9,
            maxRate = 0;
     int clamped = 0;
@@ -372,6 +375,7 @@ static void RunCase(const DecisionTable& aT, const TraversalFile& aF, const Case
         return;
     ++aTot.started;
     ++aTot.accepted[cls];
+    ++aTot.alternatives[std::string(p.alternative) + " " + (p.alternative[0] ? p.montage->name : std::string())];
     char b[512];
     std::snprintf(b, sizeof b,
                   "%s -> %s start %d rate %.2f: contact %.4f, planar tick60 %.4f tick30 %.4f clip %.4f, warp-added %.4f, "
@@ -762,6 +766,141 @@ static void StartWindowAndFoot(const DecisionTable& aT, const TraversalFile& aF,
     Check(unjustified == 0, r + ": lead foot ignored while a montage with a better start foot passes");
 }
 
+// Traversal starts recorded on the test course that the gate rejected (handed back to the game animation). The obstacle geometry
+// is rebuilt from the course boxes and the recorded capsule position / facing / height / depth / speed:
+//  - three Climbs onto a wall 2.5 m above a 1.0 m platform, started 0.1 s after a jump (capsule 0.55-0.68 m above the platform,
+//    rising about 4 m/s): the airborne catch row is rejected (warp), a jump start must play the ground climb of the speed band;
+//  - one running Vault over a 0.5 m deep box 1.2 m tall with a 1.0 m drop behind: both montages of the depth row are rejected
+//    (warp), the other depth row's run Hurdle passes;
+//  - two accepted vaults of the same run (controls: the new keys must not change them).
+struct Station
+{
+    const char* tag;
+    bool climb;
+    V3 pos;
+    double yawDeg, speed, h, faceY, faceDist, ext, depth, back;
+    const char* want; // expected montage name prefix with the new keys
+    const char* alt;  // expected Plan::alternative
+};
+
+static Case MakeStation(const Station& aS, bool aHands)
+{
+    Case k;
+    const double yaw = aS.yawDeg * 3.14159265358979323846 / 180.0;
+    const V3 fwd{-std::sin(yaw), std::cos(yaw), 0}, face{0, aS.faceY, 0};
+    k.o.action = aS.climb ? GameAction::Climb : GameAction::Vault;
+    k.o.topPoint = aS.pos + fwd * (aS.faceDist / (fwd.y * face.y));
+    k.o.topPoint.z = aS.pos.z + aS.h;
+    k.o.collisionNormal = face * -1.0;
+    k.o.topExtent = aS.ext;
+    k.o.obstacleEnd = k.o.topPoint + face * aS.depth;
+    k.o.behindPoint = k.o.obstacleEnd + face * 0.1;
+    k.o.behindPoint.z = k.o.topPoint.z - aS.back;
+    k.o.inputDirection = fwd;
+    k.o.hasHands = aHands;
+    const V3 lat{face.y, -face.x, 0};
+    k.o.leftHand = k.o.topPoint - lat * 0.22;
+    k.o.rightHand = k.o.topPoint + lat * 0.22;
+    k.c.pos = aS.pos;
+    k.c.yaw = yaw;
+    k.c.speed = aS.speed;
+    if (aS.climb)
+    {
+        k.c.airborne = true;
+        k.c.verticalSpeed = 4.0;
+        k.c.haveTakeoff = true;
+        k.c.takeoffZ = 378.1;
+    }
+    k.tag = std::string(aS.tag) + (aHands ? " hands" : "");
+    return k;
+}
+
+static void RecordedStations(const DecisionTable& aT, const TraversalFile& aF, const char* aRig)
+{
+    static const Station kStations[] = {
+        {"climb 2.5 m, jump start standing", true, {1581.339, 2208.627, 378.645}, 4.5, 0.6, 1.95, 1, 0.473, 3.40, 3.39, 1.95,
+         "AM_M_Neutral_Traversal_Climb_Start_2_5_stand_F", "jumpStart"},
+        {"climb 2.5 m, jump start running", true, {1581.055, 2208.142, 378.783}, -4.5, 4.5, 1.82, 1, 0.958, 3.40, 3.39, 1.82,
+         "AM_M_Neutral_Traversal_Climb_Start_2_5_run_F", "jumpStart"},
+        {"climb 2.5 m, jump start walking", true, {1580.864, 2208.552, 378.647}, 4.5, 2.4, 1.95, 1, 0.548, 3.40, 3.39, 1.95,
+         "AM_M_Neutral_Traversal_Climb_Start_2_5_walk_F", "jumpStart"},
+        {"running vault 1.2 m", false, {1581.486, 2201.097, 377.100}, 153.3, 4.8, 1.20, -1, 0.497, 0.57, 0.51, 1.00,
+         "AM_M_Neutral_Traversal_Hurdle_1_0_run_F_Lfoot", "depthRow"},
+        {"running vault 1.0 m thin (control)", false, {1580.472, 2187.168, 377.100}, 2.3, 3.9, 1.00, 1, 0.832, 0.21, 0.20, 1.00,
+         "AM_M_Neutral_Traversal_Hurdle_1_0_run_F_Lfoot", ""},
+        {"running vault 1.0 m deep (control)", false, {1580.397, 2191.572, 377.100}, -3.2, 3.8, 1.00, 1, 0.528, 0.50, 0.50, 1.00,
+         "AM_M_Neutral_Traversal_Hurdle_1_0_run_F_V2_Lfoot", ""},
+    };
+    const std::string r(aRig);
+    Config off;
+    off.jumpStartAsGround = false;
+    off.rejectedFallback = false;
+    for (const Station& st : kStations)
+        for (int hands = 0; hands < (st.climb ? 2 : 1); ++hands)
+        {
+            const Case k = MakeStation(st, hands != 0);
+            const std::string tag = r + " " + k.tag;
+            const Plan before = PlanTraversal(aT, aF, k.o, k.c, GameTweaks{}, off);
+            const bool control = !st.alt[0];
+            Check(before.result == (control ? StartResult::Ok : StartResult::Rejected),
+                  tag + ": keys off -> " + ToString(before.result) + " (the recorded result)");
+            Plan p;
+            Metrics m60, m30;
+            const bool ok = Evaluate(aT, aF, k, Config{}, p, m60, m30);
+            std::printf("%s station [%s]: keys off %s(%s) %s -> %s(%s) %s alt %s, rate %.2f, warp-added %.3f / limit %.2f, "
+                        "contact %.4f\n",
+                        aRig, k.tag.c_str(), ToString(before.result), before.rejectReason,
+                        before.montage ? before.montage->name.c_str() : "-", ToString(p.result), p.rejectReason,
+                        p.montage ? p.montage->name.c_str() : "-", p.alternative, p.rate, p.gateWarpAdded, p.gateStepLimit,
+                        m60.contact);
+            Check(ok && p.montage, tag + ": not accepted");
+            if (!ok || !p.montage)
+                continue;
+            Check(p.montage->name.rfind(st.want, 0) == 0, tag + ": montage " + p.montage->name + ", expected " + st.want);
+            Check(std::string(p.alternative) == st.alt, tag + ": alternative '" + p.alternative + "', expected '" + st.alt + "'");
+            if (control)
+                Check(p.montage == before.montage && p.startFrame == before.startFrame && p.endFrame == before.endFrame,
+                      tag + ": the new keys changed an accepted plan");
+            const double lim = ExpectedStepLimit(k.c.speed, st.climb);
+            Check(m60.contact <= kContactMax, tag + ": hand contact " + std::to_string(m60.contact));
+            Check(m60.planarTick <= lim && m30.planarTick <= lim && m60.planarClip <= lim && m60.warpAdded <= lim,
+                  tag + ": root step above the limit");
+            Check(m60.doneCount == 1 && m60.justTraversedOnDone, tag + ": hand-back not exactly once");
+            if (!control)
+            {
+                // the same start onto a vehicle (kind 1): neither alternative route, the recorded rejection / refusal stays
+                Case veh = k;
+                veh.o.kind = 1;
+                const Plan v = PlanTraversal(aT, aF, veh.o, veh.c, GameTweaks{}, Config{});
+                const Plan vOff = PlanTraversal(aT, aF, veh.o, veh.c, GameTweaks{}, off);
+                Check(v.result == vOff.result && v.montage == vOff.montage && !v.alternative[0] && v.result != StartResult::Ok,
+                      tag + ": the new keys changed a vehicle plan");
+            }
+            if (st.climb)
+            {
+                Check(m60.durErr <= 1.0 / 60.0 + 1e-9, tag + ": hand-back time differs from the game climb time");
+                Check(m60.destErr <= kDestMax, tag + ": does not end on the game destination");
+                // a capsule that is not rising (falling / unknown) keeps the airborne catch row as the direct evaluation
+                CapsuleState fall = k.c;
+                fall.verticalSpeed = -3.0;
+                Config direct = Config{};
+                direct.rejectedFallback = false;
+                const Plan q = PlanTraversal(aT, aF, k.o, fall, GameTweaks{}, direct);
+                Check(q.montage && q.montage->name.find("_Catch_") != std::string::npos,
+                      tag + ": falling start does not take the catch row");
+                const Plan fb = PlanTraversal(aT, aF, k.o, fall, GameTweaks{}, Config{});
+                Check(fb.result == StartResult::Ok && std::string(fb.alternative) == "ground",
+                      tag + ": rejected catch does not fall back to the ground rows (" + ToString(fb.result) + ")");
+                // no takeoff height (older feed): the height above the capsule picks the same ground row
+                CapsuleState noTakeoff = k.c;
+                noTakeoff.haveTakeoff = false;
+                const Plan n = PlanTraversal(aT, aF, k.o, noTakeoff, GameTweaks{}, Config{});
+                Check(n.result == StartResult::Ok && n.montage && n.montage->name.rfind(st.want, 0) == 0,
+                      tag + ": jump start without a takeoff height");
+            }
+        }
+}
+
 static void LegacyIdentity(const DecisionTable& aT, const TraversalFile& aF, const char* aRig, int aRigIdx)
 {
     Config legacy;
@@ -770,6 +909,8 @@ static void LegacyIdentity(const DecisionTable& aT, const TraversalFile& aF, con
     legacy.wideVault = false;
     legacy.lowHurdle = false;
     legacy.scaleGateByRig = false;
+    legacy.jumpStartAsGround = false;
+    legacy.rejectedFallback = false;
     int ok[4] = {0, 0, 0, 0};
     std::vector<Case> all;
     for (const Case& c : ClimbCases())
@@ -954,7 +1095,12 @@ int main(int argc, char** argv)
         VaultRouting(table, files[i], rigs[i]);
         LegacyIdentity(table, files[i], rigs[i], i);
         StartWindowAndFoot(table, files[i], rigs[i]);
+        RecordedStations(table, files[i], rigs[i]);
         const char* cn[6] = {"High", "Mid", "Low", "vault", "wide vault", "low hurdle"};
+        for (int k = 0; k < 2; ++k)
+            for (const auto& [alt, n] : (k == 0 ? tc : tv).alternatives)
+                std::printf("%s %s grid, plan source [%s]: %d\n", rigs[i], k == 0 ? "climb" : "vault",
+                            alt == " " ? "direct" : alt.c_str(), n);
         for (int k = 0; k < 6; ++k)
         {
             const Totals& t = k < 3 ? tc : tv;

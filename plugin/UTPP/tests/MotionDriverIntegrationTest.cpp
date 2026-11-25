@@ -4107,6 +4107,7 @@ int main(int argc, char** argv)
             };
             const float dt = 1.0f / 60.0f;
             float capPos[3] = {0, 0, 0};
+            bool jumpAir = false; // feeds of a jump before a traversal state: off the ground
             // The game's feed (main 57968d8): every feed is UTPPFeedFromLocomotion of the active PSM state - the walk-in from
             // the stand state (UTPPLocoStateId "stand" = 1), the climb from the ClimbEvents.OnUpdate wrap and the vault from the
             // LocomotionEventsTransition wrap (state names "climb" / "vault" -> UTPPLocoStateId 0 = kLocoOther), each right after
@@ -4131,7 +4132,7 @@ int main(int argc, char** argv)
                 in.haveExtra = true;
                 std::memcpy(in.capsulePos, capPos, sizeof capPos);
                 in.haveAir = true;
-                in.onGround = !trav;
+                in.onGround = !trav && !jumpAir;
                 in.distToGround = -2.0f;
                 in.psmFall = 0;
                 if (aDetail >= 0)
@@ -4584,6 +4585,42 @@ int main(int argc, char** argv)
                     const std::string lineVeh = linesVeh ? g_travInfoLines.back() : std::string("-");
                     const bool fedStat = vaultOnce(motiondriver::kObstacleStatic, ownsStat, motionStat, ps);
                     const std::string lineStat = g_travInfoLines.size() > linesVeh ? g_travInfoLines.back() : std::string("-");
+                    {
+                        // jump start end to end: grounded run-up, 8 rising feeds, then the game's airborne Climb onto a wall 2.5 m above
+                        // the takeoff - the driver passes the rise and the takeoff height to the plan (ground rows, not the catch row)
+                        capPos[0] = capPos[1] = capPos[2] = 0.0f;
+                        const float walk[3] = {0.0f, 2.4f, 0.0f}, rising[3] = {0.0f, 2.4f, 4.1f};
+                        for (int i = 0; i < 60; ++i)
+                            feedAt(-1, walk);
+                        jumpAir = true;
+                        for (int i = 0; i < 8; ++i)
+                            feedAt(-1, rising);
+                        const trv::V3 p0{capPos[0], capPos[1], capPos[2]};
+                        motiontrav::GameObstacle j;
+                        j.action = motiontrav::GameAction::Climb;
+                        j.topPoint = {p0.x, p0.y + 0.55, 2.5};
+                        j.collisionNormal = {0, -1, 0};
+                        j.topExtent = 3.4;
+                        j.obstacleEnd = {p0.x, p0.y + 3.95, 2.5};
+                        j.behindPoint = {p0.x, p0.y + 3.95, p0.z};
+                        j.inputDirection = {0, 1, 0};
+                        const size_t before = g_travInfoLines.size();
+                        motiondriver::TraversalEvent ev = toEvent(j, p0, 2.4);
+                        ev.airborne = true;
+                        const bool fed = motiondriver::FeedTraversal(ev);
+                        const bool owns = motiondriver::OwnsTraversal();
+                        int motionFeeds = 0;
+                        for (int i = 0; i < 40; ++i)
+                            motionFeeds += feedAt(8, walk) ? 1 : 0;
+                        jumpAir = false;
+                        for (int i = 0; i < 20; ++i)
+                            feedAt(-1, walk);
+                        const std::string line = g_travInfoLines.size() > before ? g_travInfoLines.back() : std::string("-");
+                        Check(fed && owns && motionFeeds > 0 && line.find(" result=Ok(-) montage=AM_M_Neutral_Traversal_Climb_Start_2_5_walk_F") != std::string::npos &&
+                                  line.find(" alt=jumpStart vz=4.1 rise=0.5") != std::string::npos,
+                              "8v jump start: an airborne climb of a rising capsule is an owned ground-row plan", line);
+                    }
+                    g_travInfoLines.resize(std::min(g_travInfoLines.size(), size_t{2})); // the line count below is the two vaults
                     motiondriver::SetLogger(nullptr);
                     char d[900];
                     std::snprintf(d, sizeof d, "vehicle: fed %d result %s(%s) kind %d owns %d v2 detail-9 feeds %d/40 | static: fed %d result %s(%s) owns %d v2 feeds %d/40 | lines %zu: '%s' / '%s'",

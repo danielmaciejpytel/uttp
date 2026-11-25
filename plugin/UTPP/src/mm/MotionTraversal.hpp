@@ -41,7 +41,9 @@
 //  - Start frame: the frame (up to the FrontLedge window start) whose distance to the front contact point matches the
 //    capsule's (stand-in for the MotionMatch start time).
 //  - Gate: a plan whose warped root steps > maxStepM horizontally (per clip frame or per gateDt tick), whose warp adds
-//    > maxStepM per clip frame, or whose climb rate had to be clamped is Rejected (the game animation is kept).
+//    > maxStepM per clip frame, or whose climb rate had to be clamped is Rejected (the game animation is kept
+//    when no alternative passes: Config::rejectedFallback).
+//  - Jump start: a climb / vault that starts just after a jump (capsule still rising) uses the ground rows (Config::jumpStartAsGround).
 // Units: metres, seconds, yaw radians about +Z. Facing convention of the baked .utpptrav root tracks (CP axes): yaw 0
 // faces +Y (the clips move along +Y), forward(yaw) = (-sin yaw, cos yaw).
 #include "TraversalFile.hpp"
@@ -95,6 +97,9 @@ struct CapsuleState
     double speed = 0;             // horizontal linear speed, m/s
     bool airborne = false;        // Locomotion == 5 / dodgeAir / fall
     double climbSpeedModifier = 1; // gamedataStatType.ClimbSpeedModifier (<= 0 -> 1 as in LT:2746-2749)
+    double verticalSpeed = 0;      // vertical velocity of the capsule before the event, m/s (+ up); 0 = unknown
+    bool haveTakeoff = false;      // takeoffZ = capsule height of the last grounded feed shortly before an airborne event
+    double takeoffZ = 0;
     uint8_t leadFoot = 0;          // foot planted at the event (contacts of the shown pose): 0 unknown (both / none), 1 left, 2 right (Config::leadFootRow)
 };
 
@@ -160,6 +165,21 @@ struct Config
     // With clampStartWindow: when every in-window plan is rejected by the gate, plan again with the full start search (the start may then
     // lie past the window; Plan::startOutsideWindow), so the accepted set is never smaller than without the window.
     bool startWindowFallback = true;
+    // Jump start: the game starts a climb / vault a moment after V jumps, with the capsule off the ground and still going up. The
+    // reference starts that traversal from the ground (same button press); its airborne catch montages are authored for a fast fall
+    // (the clip root drops about half a metre per frame inside the FrontLedge window, which the warp would have to cancel:
+    // Rejected(warp)). An airborne start with the capsule rising faster than jumpRisingMinMs is therefore evaluated with the table's
+    // ground rows: first with the obstacle height above the takeoff height (CapsuleState::takeoffZ, rise 0 .. jumpTakeoffMaxRiseM),
+    // then above the capsule; when neither gives an accepted plan, with the airborne rows. The game's climb class / duration, the
+    // warp targets and the gate are those of the real event.
+    bool jumpStartAsGround = true;
+    double jumpRisingMinMs = 0.5;
+    double jumpTakeoffMaxRiseM = 1.3;
+    // Rejected fallback: when the plan is Rejected by the gate, plan again with the other montages of the row and with neighbouring
+    // table rows (airborne: the ground rows; the other Hurdle depth row; the neighbouring speed rows) instead of handing the
+    // traversal back to the game. The same gate applies, so the accepted set can only grow; when nothing passes, the first
+    // rejection is returned. Neither this nor the jump start applies to a climb onto a vehicle.
+    bool rejectedFallback = true;
     // trav tests only: non-empty = skip the decision table / action mapping and plan this montage of the file
     // (still needs solvable windows and a FrontLedge window); empty (default) = the table decides
     std::string forceMontage;
@@ -213,6 +233,8 @@ struct Plan
     bool rateClamped = false;
     double rateWanted = 1;            // clip time / game duration before the [minRate, maxRate] clamp (1 = no duration match)
     bool startOutsideWindow = false;  // clampStartWindow: planned again without the window after a gate rejection (startWindowFallback)
+    const char* alternative = "";     // static string: not the direct row evaluation gave this plan ("jumpStart", "montage", "ground",
+                                      // "depthRow", "speedRow"); "" = direct
     const char* rejectReason = "";    // static string: why the gate rejected the plan ("rate", "step", "warp"); "" when not rejected
     double gateStepLimit = 0;         // horizontal step limit the gate applied (Config::maxStepM scaled by the rig), metres
     double gatePlanarStep = 0;        // max horizontal root step per clip frame and per gateDt tick
@@ -470,8 +492,16 @@ inline Inputs MakeGameInputs(const GameObstacle& aO, const CapsuleState& aC, con
 
 namespace motion_detail
 {
+// Table inputs changed for an alternative evaluation (jump start / rejected fallback); everything else is that of the real event.
+struct RowVariant
+{
+    bool ground = false;   // MovementMode Walking
+    double heightM = -1;   // > 0: ObstacleHeight input (metres)
+    double depthCm = -1;   // >= 0: ObstacleDepth input
+    double speedCmS = -1;  // >= 0: Speed input
+};
 inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO,
-                          const CapsuleState& aC, const GameTweaks& aT, const Config& aCfg)
+                          const CapsuleState& aC, const GameTweaks& aT, const Config& aCfg, const RowVariant& aRow = {})
 {
     using namespace motion_detail;
     Plan p;
@@ -495,6 +525,14 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
     if (aCfg.forceMontage.empty())
     {
         Inputs tin = in;
+        if (aRow.ground)
+            tin.movementMode = 1;
+        if (aRow.heightM > 0)
+            tin.obstacleHeight = aRow.heightM * 100.0;
+        if (aRow.depthCm >= 0)
+            tin.obstacleDepth = aRow.depthCm;
+        if (aRow.speedCmS >= 0)
+            tin.speed = aRow.speedCmS;
         // lowHurdle: 10..50 cm behind the edge has no row (BackLedgeHeight >= 50 -> Hurdle, <= 10 -> Mantle): evaluate it as 50 cm
         if (aO.action == GameAction::Vault && aCfg.lowHurdle && in.backLedgeHeight >= aCfg.lowHurdleMinM * 100.0 &&
             in.backLedgeHeight < 50.0)
@@ -507,9 +545,10 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
             in.backLedgeHeight >= aCfg.lowHurdleMinM * 100.0)
         {
             // wide obstacle (table: Mantle): the table's Vault row (no back floor, depth under the 59 cm edge)
-            Inputs vin = in;
+            Inputs vin = tin;
+            vin.backLedgeHeight = in.backLedgeHeight;
             vin.hasBackFloor = false;
-            vin.obstacleDepth = std::min(in.obstacleDepth, 58.9);
+            vin.obstacleDepth = std::min(tin.obstacleDepth, 58.9);
             const Decision dv = aTable.Evaluate(vin);
             if (dv.status == Status::Ok && dv.actionName == "Vault")
             {
@@ -571,7 +610,7 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
             for (const auto& name : rowOrder)
             {
                 sub.forceMontage = name;
-                Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub);
+                Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub, aRow);
                 if (q.result != StartResult::Ok || !q.montage)
                     continue;
                 const int rank = StartFootRank(*q.montage, q.startFrame, aC.leadFoot);
@@ -587,7 +626,7 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
             if (bestRank < 3)
                 return best;
             sub.forceMontage = rowOrder.front(); // every candidate rejected: the row-order choice's rejection
-            Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub);
+            Plan q = PlanOnce(aTable, aFile, aO, aC, aT, sub, aRow);
             q.decision = p.decision;
             return q;
         }
@@ -827,18 +866,113 @@ inline Plan PlanOnce(const DecisionTable& aTable, const TraversalFile& aFile, co
 
 } // namespace motion_detail
 
-inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO,
-                          const CapsuleState& aC, const GameTweaks& aT, const Config& aCfg)
+namespace motion_detail
 {
-    Plan p = motion_detail::PlanOnce(aTable, aFile, aO, aC, aT, aCfg);
+// One row evaluation, with the start-window retry (Config::startWindowFallback).
+inline Plan PlanRows(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO, const CapsuleState& aC,
+                     const GameTweaks& aT, const Config& aCfg, const RowVariant& aRow)
+{
+    Plan p = PlanOnce(aTable, aFile, aO, aC, aT, aCfg, aRow);
     if (p.result == StartResult::Rejected && aCfg.clampStartWindow && aCfg.startWindowFallback)
     {
         Config full = aCfg;
         full.clampStartWindow = false;
-        Plan q = motion_detail::PlanOnce(aTable, aFile, aO, aC, aT, full);
+        Plan q = PlanOnce(aTable, aFile, aO, aC, aT, full, aRow);
         if (q.result == StartResult::Ok)
         {
             q.startOutsideWindow = true;
+            return q;
+        }
+    }
+    return p;
+}
+// PlanRows, then (when Rejected) every other montage of the same row evaluation: the first accepted one in row order, else the
+// first rejection.
+inline Plan PlanAnyOfRow(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO, const CapsuleState& aC,
+                         const GameTweaks& aT, const Config& aCfg, const RowVariant& aRow)
+{
+    Plan first = PlanRows(aTable, aFile, aO, aC, aT, aCfg, aRow);
+    if (first.result != StartResult::Rejected)
+        return first;
+    for (const std::string& name : first.decision.montages)
+    {
+        if ((first.montage && first.montage->name == name) || !aFile.Find(name))
+            continue;
+        Config one = aCfg;
+        one.forceMontage = name;
+        one.leadFootRow = false;
+        Plan q = PlanRows(aTable, aFile, aO, aC, aT, one, aRow);
+        if (q.result == StartResult::Ok)
+        {
+            q.decision = first.decision;
+            return q;
+        }
+    }
+    return first;
+}
+// Representative Speed inputs (cm/s) of the table's stand / walk / run rows (bands 0-100, 100-250, 250+).
+inline constexpr double kRowSpeedStand = 50.0, kRowSpeedWalk = 175.0, kRowSpeedRun = 400.0;
+} // namespace motion_detail
+
+inline Plan PlanTraversal(const DecisionTable& aTable, const TraversalFile& aFile, const GameObstacle& aO,
+                          const CapsuleState& aC, const GameTweaks& aT, const Config& aCfg)
+{
+    using motion_detail::RowVariant;
+    // a climb onto a vehicle (kind 1) uses neither alternative route: its rejected plans stay with the game animation (a vault over one
+    // is already decided by vehicleVaultToGame)
+    const bool tableRoute = aCfg.forceMontage.empty() && !(aO.kind == 1 && aO.action == GameAction::Climb);
+    if (tableRoute && aCfg.jumpStartAsGround && aC.airborne && std::isfinite(aC.verticalSpeed) &&
+        aC.verticalSpeed > aCfg.jumpRisingMinMs)
+    {
+        RowVariant row;
+        row.ground = true;
+        const double rise = aC.pos.z - aC.takeoffZ;
+        const bool takeoff = aC.haveTakeoff && std::isfinite(rise) && rise > 0.0 && rise <= aCfg.jumpTakeoffMaxRiseM;
+        for (int k = takeoff ? 0 : 1; k < 2; ++k) // height above the takeoff, then above the capsule
+        {
+            row.heightM = k == 0 ? aO.topPoint.z - aC.takeoffZ : -1.0;
+            Plan q = motion_detail::PlanAnyOfRow(aTable, aFile, aO, aC, aT, aCfg, row);
+            if (q.result == StartResult::Ok)
+            {
+                q.alternative = "jumpStart";
+                return q;
+            }
+        }
+    }
+    Plan p = motion_detail::PlanRows(aTable, aFile, aO, aC, aT, aCfg, {});
+    if (p.result != StartResult::Rejected || !tableRoute || !aCfg.rejectedFallback || !aCfg.gate)
+        return p;
+    // neighbouring rows, closest first
+    const double speedCmS = aC.speed * 100.0;
+    const double depthCm = aO.topExtent * 100.0;
+    struct Step
+    {
+        double depthCm, speedCmS;
+        const char* tag;
+    };
+    std::vector<Step> steps;
+    steps.push_back({-1.0, -1.0, aC.airborne ? "ground" : "montage"}); // the other montages of the direct / ground row
+    if (aO.action == GameAction::Vault && depthCm < 60.0)
+        steps.push_back({depthCm < 25.0 ? 42.0 : 12.0, -1.0, "depthRow"}); // the other Hurdle depth row (0-25 / 25-60 cm)
+    if (speedCmS >= 250.0)
+        steps.push_back({-1.0, motion_detail::kRowSpeedWalk, "speedRow"});
+    else if (speedCmS >= 100.0)
+    {
+        steps.push_back({-1.0, motion_detail::kRowSpeedRun, "speedRow"});
+        steps.push_back({-1.0, motion_detail::kRowSpeedStand, "speedRow"});
+    }
+    else
+        steps.push_back({-1.0, motion_detail::kRowSpeedWalk, "speedRow"});
+    for (const Step& st : steps)
+    {
+        RowVariant row;
+        row.ground = aC.airborne;
+        row.depthCm = st.depthCm;
+        row.speedCmS = st.speedCmS;
+        Plan q = motion_detail::PlanAnyOfRow(aTable, aFile, aO, aC, aT, aCfg, row);
+        if (q.result == StartResult::Ok)
+        {
+            q.alternative = st.tag;
             return q;
         }
     }

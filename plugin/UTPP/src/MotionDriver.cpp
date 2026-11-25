@@ -977,8 +977,40 @@ struct TravRun
     // after Evaluate, so the MM inertializer never sees it: the handback keeps it and turns it back to 0 over kTravBlendOut
     float lastYaw = 0.0f, yawBack = 0.0f, yawBackT = -1.0f; // rad, rad, s since the handback (< 0 = none)
     uint8_t leadFoot = 0; // foot planted by the shown pose when the event was fed (0 unknown, 1 left, 2 right)
+    // jump start (motiontrav::Config::jumpStartAsGround): vertical velocity and takeoff height when the event was fed
+    float verticalSpeed = 0.0f; // m/s, 0 = unknown
+    bool haveTakeoff = false;
+    float takeoffZ = 0.0f;
 };
 TravRun g_trav;
+// capsule height of the last grounded feed and the vertical velocity of the last feed (feeds with the air and capsule fields only)
+struct TravAirTrack
+{
+    float vz = 0.0f;           // 0 = unknown
+    bool haveGround = false;
+    float groundZ = 0.0f;
+    float sinceGround = 0.0f;  // s of feed time since that grounded feed
+};
+TravAirTrack g_travAir;
+constexpr float kTravTakeoffMaxAgeS = 1.5f; // [P] a jump apex lies well inside this after the takeoff
+
+void TravAirTrackLocked(const motionhost::FeedInput& aRaw, float aDt)
+{
+    if (!aRaw.haveAir || !aRaw.haveExtra || !std::isfinite(aRaw.capsulePos[2]) || !std::isfinite(aRaw.velWorld[2]))
+    {
+        g_travAir = TravAirTrack{};
+        return;
+    }
+    g_travAir.vz = aRaw.velWorld[2];
+    if (aRaw.onGround)
+    {
+        g_travAir.haveGround = true;
+        g_travAir.groundZ = aRaw.capsulePos[2];
+        g_travAir.sinceGround = 0.0f;
+    }
+    else if (std::isfinite(aDt) && aDt > 0.0f)
+        g_travAir.sinceGround += std::fmin(aDt, 0.25f);
+}
 #ifndef UTPP_TRAV_START_WINDOW_DEFAULT
 #define UTPP_TRAV_START_WINDOW_DEFAULT 0
 #endif
@@ -3900,7 +3932,7 @@ void TravPlanInfoLocked(const motiontrav::GameObstacle& aO, const motiontrav::Ca
     const double fx = -aO.collisionNormal.x, fy = -aO.collisionNormal.y, fl = std::hypot(fx, fy);
     const double depth = fl > 1e-9 ? ((aO.obstacleEnd.x - aO.topPoint.x) * fx + (aO.obstacleEnd.y - aO.topPoint.y) * fy) / fl : 0.0;
     const char* decision = !aP.decision.actionName.empty() ? aP.decision.actionName.c_str() : "-";
-    char line[320];
+    char line[400];
     std::snprintf(line, sizeof line,
                   "UTPP trav: action=%d h=%.2f ext=%.2f depth=%.2f back=%.2f v=%.1f kind=%d decision=%s result=%s(%s) montage=%s%s",
                   aO.action == motiontrav::GameAction::Vault ? 9 : 8, aP.obstacleHeight, aO.topExtent, depth,
@@ -3916,6 +3948,12 @@ void TravPlanInfoLocked(const motiontrav::GameObstacle& aO, const motiontrav::Ca
                       aP.montage ? motiontrav::StartFootRank(*aP.montage, aP.startFrame, aC.leadFoot) : -1);
     }
     ++g_travProbe.infoLines;
+    if (aP.alternative && aP.alternative[0]) // jump start / rejected fallback rows gave the plan
+    {
+        const size_t used = std::strlen(line);
+        std::snprintf(line + used, sizeof line - used, " alt=%s vz=%.1f rise=%.2f", aP.alternative, aC.verticalSpeed,
+                      aC.haveTakeoff ? aC.pos.z - aC.takeoffZ : -1.0);
+    }
     g_log(line);
 }
 
@@ -3946,6 +3984,9 @@ void TravPlanLocked(Bundle& b)
     c.airborne = e.airborne;
     c.climbSpeedModifier = e.climbSpeedModifier;
     c.leadFoot = g_trav.leadFoot;
+    c.verticalSpeed = g_trav.verticalSpeed;
+    c.haveTakeoff = g_trav.haveTakeoff;
+    c.takeoffZ = g_trav.takeoffZ;
     motiontrav::Config cfg;
     cfg.clampStartWindow = g_travStartWindowOn;
     cfg.leadFootRow = g_travLeadFootOn;
@@ -5418,6 +5459,7 @@ float DodgeFacingYawDeg(const Bundle& b, const motionhost::FeedInput& aRaw, bool
 bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 {
     ++g_stepSerial;
+    TravAirTrackLocked(aRaw, aDt);
     g_meleeOwnsBody = aRaw.meleeOwnsBody;
     g_meleeUpperMasked = aRaw.meleeUpperMasked;
     {
@@ -7380,6 +7422,9 @@ bool FeedTraversal(const TraversalEvent& aEv)
         g_trav.havePending = true;
         g_trav.age = 0.0f;
         g_trav.leadFoot = LeadFootLocked(); // the shown pose at the event, not at a later Step that plans a deferred event
+        g_trav.verticalSpeed = g_travAir.vz; // likewise the jump state before the event
+        g_trav.haveTakeoff = g_travAir.haveGround && g_travAir.sinceGround <= kTravTakeoffMaxAgeS;
+        g_trav.takeoffZ = g_travAir.groundZ;
         ++g_travProbe.events;
         // task A: plan now when the body's bundle is ready and v2 is not skipping for a global reason, so OwnsTraversal is
         // already set when the next v1 Feed runs its gate; otherwise the next Step that reaches the traversal code plans it
