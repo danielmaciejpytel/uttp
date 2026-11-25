@@ -2,6 +2,61 @@
 
 Changes of Ultimate Third Person Project, newest version first.
 
+## 0.2.0 - 2026-11-25
+
+For Cyberpunk 2077 2.5 with Phantom Liberty. The requirements are the same as for 0.1.2: RED4ext 1.31.1, redscript 0.5.32, Cyber Engine Tweaks 1.38.1, Codeware 1.21.4, ArchiveXL 1.28.8, Input Loader 0.2.6 and Mod Settings 0.2.30.
+
+**Updating:** install 0.2.0 over the version you have and let it replace every file. No file of an older version has to be removed. Coming from any 0.1.x version, the settings of the mod are reset to their defaults once at the first start (see Changed); a fresh install shows no message.
+
+### Added
+
+- **Feet on uneven ground** (on): V's feet are placed on slopes, steps, stairs and curbs, the legs bend and the hips lower to match.
+- **Firm feet in turns and stops**, **Planted feet keep their direction** and **Firm pivot foot in turns on the spot** (all on).
+- **Stride matching** (on): V's steps are shortened to her speed in the walking, running and crouched movement loops.
+- **Fit steps to stairs** (off): shorter, quicker steps on stairs at the same speed. At walking and running pace a step still spans two to four stairs. It needs Feet on uneven ground and Stride matching.
+- **Head follows the camera** (on): in Shooter mode and while strafing without aiming, the head and neck turn and tilt towards the camera, up to 45 degrees to the side, then the upper body follows.
+- **Natural body turn while aiming on the move** (on): after V has turned to the crosshair, her legs and hips keep their own direction and turn with her steps; the upper body and the weapon stay on the crosshair.
+- **Gamepad stick speed** (Advanced): Walk or run (default) or Follows the stick.
+- **Body lean** and **Head lean** are now options in Mod Settings.
+
+### Changed
+
+- **Animation selection** behaves more like a full motion-matching reference, with more protection against animations flickering between each other.
+- **Playback speed:** on the ground the movement animations follow V's actual speed, including crouched movement. The movement predicted for picking animations is shaped for starts, stops, gait changes, turns, strafing, crouching, aiming, stairs, jumps and landings.
+- **Turns:** in 180-degree turns on the move the body turns the same way as the turn animation, the turn steering follows only the active animation, and the knees follow the direction of the hips.
+- **Stops and crouch:** less forward overshoot and a firmer foot plant when stopping; a different choice of the crouched stop, and a floating foot is lowered at the end of it.
+- **Dodges:** the direction is taken relative to the character, the dodge animation is turned towards the travel direction (up to 90 degrees), and the animation is kept while V faces away from the travel direction.
+- **Lean:** much lighter by default (body and head 0.2; before 0.85 and 0.9). It now also works with a weapon drawn, while aiming (body only) and while crouched.
+- **Walking:** the walk toggle speed is 1.9 m/s by default (was 1.6).
+- **Gamepad:** by default a stick pushed less than about two thirds of the way gives a steady walk, further gives a full run, and crouching uses the full crouch speed. This changes how fast V moves; Follows the stick restores the analog speed.
+- **Aiming:** the barrel is also corrected sideways towards the crosshair; the upper body is steadier while V turns and during camera jerks; a change of direction while aiming and moving can play a turn animation from 10 degrees; quick left and right taps stay on turn-step animations with firmer feet.
+- Moving forward while aiming is faster (3.85 m/s, was 3.3), with sideways and backwards movement scaled to it.
+- The supporting hand stays on two-handed weapons and the pistol, for example in an aimed slide or while crouched.
+- If the mod pauses itself to protect the frame rate while a ranged weapon is drawn, the weapon pose is kept.
+- **Shooter mode** (still off by default) holds each direction animation for a minimum time.
+- The body height is smoothed when V moves over bumpy ground.
+- Male V's drawn body is no longer turned 4 degrees against the camera by default; female V keeps 4 degrees.
+- **All settings of the mod are reset to their defaults once**, at the first start after updating from 0.1.x, because 0.2.0 changes the movement and its defaults. A message on the screen tells you when it happened: "The default settings of Ultimate Third Person Project were restored because of major changes in the mod. Have a good game!" The two "Swap shoulder" controls are not changed. This happens once: afterwards your settings are kept as before.
+
+### Fixed
+
+- **Lean:** in Shooter mode and while facing the aim, V no longer rolls along the wrong axis.
+- **Feet:** smaller foot correction peaks on reversals and run stops.
+- **Walls:** sprinting into a wall, or being pinned against it, holds the idle pose instead of flickering between turn animations.
+- **Dodge:** the direction warping no longer twists V's body during a dodge; this mattered most at 30 FPS.
+- **Weapons:** drawing, holstering or changing the weapon type blends into the new pose without overshooting.
+- **Camera:** curbs and stair steps should no longer switch the camera into its fast-fall mode.
+- **Elevators and moving platforms:** V should no longer play jump or fall animations during the ride, and the camera and body height should ride with the cabin.
+- **Mod Settings:** the lists should now show a readable label for every value.
+
+### Notes
+
+- The motion-matching databases and the lean and traversal data are the same as in 0.1.2. No new climbing or vaulting behaviour is switched on in this version.
+
+### Known issues
+
+See [Known issues](README.md#known-issues-in-020) in the readme.
+
 ## 0.1.2 - 2026-11-15
 
 For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscript 0.5.32, Cyber Engine Tweaks 1.38.1, Codeware 1.21.4, ArchiveXL 1.28.8, Input Loader 0.2.6 and Mod Settings 0.2.30.
@@ -65,7 +120,7 @@ For Cyberpunk 2077 2.5 with Phantom Liberty. Tested with RED4ext 1.31.1, redscri
 
 ### Known issues
 
-See [Known issues](README.md#known-issues-in-012) in the readme.
+See [Known issues](README.md#known-issues-in-020) in the readme (the list of the current version).
 
 ## 0.1.0 - 2026-11-13
 

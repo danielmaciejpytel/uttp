@@ -8,7 +8,7 @@ Lokomocja oparta na Motion Matching, naturalne obroty ciała oraz precyzyjne cel
 <p align="center">
   <img src="https://img.shields.io/badge/Cyberpunk_2077-2.5-FCEE0A?style=for-the-badge&labelColor=1a1a1a" alt="Cyberpunk 2077 2.5">
   <img src="https://img.shields.io/badge/Phantom_Liberty-required-FF2A6D?style=for-the-badge&labelColor=1a1a1a" alt="Wymagane Phantom Liberty">
-  <img src="https://img.shields.io/badge/version-0.1.2-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Wersja 0.1.2">
+  <img src="https://img.shields.io/badge/version-0.2.0-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Wersja 0.2.0">
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/RED4ext-1.31.1-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="RED4ext 1.31.1">
@@ -22,6 +22,7 @@ Lokomocja oparta na Motion Matching, naturalne obroty ciała oraz precyzyjne cel
 <p align="center">
   <b>Polski</b> · <a href="README.md">English</a> ·
   <a href="#szybki-start">Szybki start</a> ·
+  <a href="#co-nowego-w-020">Co nowego</a> ·
   <a href="#zobacz-różnicę">Zobacz różnicę</a> ·
   <a href="#funkcje">Funkcje</a> ·
   <a href="#wymagania">Wymagania</a> ·
@@ -35,16 +36,53 @@ Lokomocja oparta na Motion Matching, naturalne obroty ciała oraz precyzyjne cel
 ## Szybki start
 
 > [!NOTE]
-> Wersja 0.1.2 nadaje V z kobiecym ciałem bardziej kobiecą sylwetkę, gdy stoi i porusza się bez broni. Wersja 0.1.1 dodała broń do walki wręcz, pierwszą wersję walki dwiema broniami, płynniejszy ruch na klawiaturze oraz liczne poprawki ciała i cieni. To nadal wczesna wersja; zobacz [listę zmian](CHANGELOG.md). Uwagi są bardzo mile widziane.
+> Wersja 0.2.0 przerabia poruszanie się pieszo: sposób doboru i tempo animacji, ruszanie, zatrzymania, obroty i uniki, stawianie stóp na nierównym terenie, znacznie lżejsze pochylenie oraz zachowanie przy celowaniu i obrotach. Przy aktualizacji ustawienia moda są jednorazowo przywracane do nowych wartości domyślnych. To nadal wczesna wersja; zobacz [listę zmian](CHANGELOG.md). Prace nad 0.2.5, skupione na lokomocji i pokonywaniu przeszkód, już trwają. Uwagi są bardzo mile widziane.
 
 1. Zainstaluj [wymagane komponenty](#wymagania): RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL i Input Loader.
 2. Zainstaluj UTPP przez Vortex (**Mod manager download**) albo rozpakuj archiwum do folderu gry.
 3. Uruchom grę i wczytaj zapis. V jest teraz widoczna w trzeciej osobie.
 4. Opcjonalnie dostosuj mod w **Mod Settings > Ultimate Third Person**.
 
+## Co nowego w 0.2.0
+
+Bazy Motion Matching są takie same jak w 0.1.2. Wersja 0.2.0 zmienia sposób doboru, tempo i łączenie animacji oraz korekty stóp i celowania. Pełną listę zawiera [lista zmian](CHANGELOG.md).
+
+- **Dobór animacji:** działa bliżej pełnego wzorca Motion Matching i ma więcej zabezpieczeń przed migotaniem między animacjami.
+- **Tempo animacji:** na ziemi animacje ruchu dopasowują się do rzeczywistej prędkości V, aby ograniczyć ślizganie stóp, a przewidywany ruch, według którego dobierane są animacje, jest kształtowany dla ruszania, zatrzymań, zmian chodu, obrotów, kroków w bok, kucania, celowania, schodów, skoków i lądowań.
+- **Dopasowanie kroku:** kroki V są skracane do jej prędkości w pętlach chodu, biegu i ruchu w kucki.
+- **Stopy:** postawione stopy mocniej trzymają się ziemi przy obrotach i zatrzymaniach i zachowują swój kierunek, a stopa, na której V obraca się w miejscu, zostaje na miejscu. Stopy są stawiane na zboczach, stopniach, schodach i krawężnikach, a biodra w razie potrzeby się obniżają. To opcje w menu, domyślnie włączone. **Fit steps to stairs** (krótsze, szybsze kroki przy tej samej prędkości) jest opcją dodatkową, domyślnie wyłączoną.
+- **Obroty, zatrzymania i uniki:** przy zawracaniu o 180 stopni w ruchu ciało V obraca się w tę samą stronę co animacja obrotu, kolana podążają za kierunkiem bioder, V mniej wybiega do przodu przy zatrzymaniu, a sprint w ścianę utrzymuje pozę bezczynną zamiast migotać między animacjami zwrotów. Kierunek uniku jest liczony względem postaci, a nie obróconej sylwetki, animacja uniku jest obracana w stronę ruchu (maksymalnie o 90 stopni), a korekta kierunku nie skręca już ciała V w jej trakcie.
+- **Kucanie:** ruch w kucki odtwarza się w rzeczywistym tempie V; zmienił się też wybór zatrzymania w kucki i ułożenie stóp na jego końcu.
+- **Pochylenie:** domyślnie znacznie lżejsze, działa teraz także z wyjętą bronią, przy celowaniu (tylko ciało) i w kucki. W trybie Shooter i podczas obrócenia w stronę celu zależy od bocznego przyspieszenia samej V, więc V nie przechyla się już względem złej osi.
+- **Chód i pad:** po włączeniu chodu V porusza się z prędkością 1,9 m/s. **Na padzie zmienia to prędkość poruszania:** domyślnie drążek wychylony mniej niż w około dwóch trzecich daje równy chód, dalej — pełny bieg, a w kucki zawsze używana jest pełna prędkość. Opcja **Follows the stick** przywraca płynną prędkość zależną od wychylenia.
+- **Celowanie:** lufa jest korygowana w stronę celownika także na boki, górna część ciała jest stabilniejsza podczas obrotów V i szarpnięć kamery, przy zmianie kierunku w ruchu z celowaniem animacja zwrotu może uruchomić się od mniejszego kąta, a krótkie stuknięcia w lewo i w prawo pozostają przy animacjach zwrotów ze stabilniejszymi stopami. Dłoń podtrzymująca zostaje na broni dwuręcznej i pistolecie, np. przy celowanym ślizgu lub w kucki. Ruch do przodu przy celowaniu jest szybszy (3,85 m/s, wcześniej 3,3), a ruch na boki i w tył jest do niego przeskalowany.
+- **Naturalny obrót ciała przy celowaniu w ruchu:** gdy V obróci się już w stronę celownika, jej nogi i biodra zachowują własny kierunek i obracają się razem z krokami, a górna część ciała i broń pozostają na celowniku.
+- **Głowa podąża za kamerą:** w trybie Shooter i przy ruchu bokiem bez celowania głowa i szyja V obracają się i pochylają w stronę, w którą patrzy kamera (do 45 stopni w bok), a dalej dołącza górna część ciała.
+- **Broń i tryb Shooter:** wyjęcie, schowanie lub zmiana rodzaju broni płynnie przechodzi do nowej pozy bez przestrzelenia; jeśli mod wstrzyma się, by chronić liczbę klatek, gdy V trzyma broń dystansową, poza broni zostaje zachowana. Tryb Shooter (nadal domyślnie wyłączony) utrzymuje każdą animację kierunku przez minimalny czas, aby ograniczyć przeskakiwanie tam i z powrotem.
+- **Kamera i windy:** krawężniki i stopnie nie powinny już przełączać kamery w tryb szybkiego opadania, a w windach i na ruchomych platformach V nie powinna już odtwarzać animacji skoku ani spadania; kamera i wysokość ciała powinny poruszać się razem z kabiną.
+- **Menu:** każda wartość na listach w Mod Settings powinna mieć teraz czytelną nazwę.
+
+### Nowe i zmienione ustawienia
+
+W **Mod Settings > Ultimate Third Person**:
+
+- **General > Head follows the camera** — nowa, domyślnie włączona.
+- **Camera > Walk speed (m/s)** — prędkość po włączeniu chodu; domyślnie 1,9 (wcześniej 1,6).
+- **Camera > Stride matching** — nowa, domyślnie włączona.
+- **Camera > Firm feet in turns and stops** — nowa, domyślnie włączona.
+- **Camera > Feet on uneven ground** — nowa, domyślnie włączona.
+- **Camera > Fit steps to stairs** — nowa, domyślnie **wyłączona**; wymaga Feet on uneven ground i Stride matching.
+- **Camera > Planted feet keep their direction** — nowa, domyślnie włączona.
+- **Camera > Firm pivot foot in turns on the spot** — nowa, domyślnie włączona; wymaga Firm feet in turns and stops.
+- **Camera > Natural body turn while aiming on the move** — nowa, domyślnie włączona.
+- **Camera > Body lean** i **Head lean** — nowe na tej stronie; domyślnie po 0,2 (wcześniej siła pochylenia wynosiła 0,85 dla ciała i 0,9 dla głowy).
+- **Advanced > Gamepad stick speed** — nowa: Walk or run (domyślnie) albo Follows the stick (prędkość zmienia się płynnie z wychyleniem drążka, jak w podstawowej grze).
+
+Wartości domyślne pozostałych opcji na tej stronie się nie zmieniły.
+
 ## Zobacz różnicę
 
-Po lewej: oryginalne animacje gry. Po prawej: Ultimate Third Person Project. Nagrania w rzeczywistym tempie.
+Po lewej: oryginalne animacje gry. Po prawej: Ultimate Third Person Project. Nagrania w rzeczywistym tempie, wykonane na wcześniejszej wersji moda.
 
 | Bieg, ślizg, kucanie | Celowanie i strzelanie | Pięści |
 |:---:|:---:|:---:|
@@ -54,7 +92,7 @@ Po lewej: oryginalne animacje gry. Po prawej: Ultimate Third Person Project. Nag
 
 | | | |
 |:---|:---|:---|
-| 🏃 **Motion Matching**<br>Animacje ruchu dobierane klatka po klatce z dużej bazy. | 🔄 **Obroty ciała**<br>V naturalnie obraca się wraz z kamerą i kierunkiem ruchu. | 🦶 **Blokowanie stóp**<br>Mniej widocznego ślizgania przy ruszaniu, zatrzymywaniu i skręcaniu. |
+| 🏃 **Motion Matching**<br>Animacje ruchu dobierane klatka po klatce z dużej bazy. | 🔄 **Obroty ciała**<br>V naturalnie obraca się wraz z kamerą i kierunkiem ruchu. | 🦶 **Stawianie stóp**<br>Blokowanie stóp oraz opcje stabilnych stóp, dopasowania kroku i nierównego terenu. |
 | 🎯 **Celowanie**<br>Najbardziej responsywne celowanie i strzelanie w trzeciej osobie w grze. | 🔫 **Odrzut i chwyt broni**<br>Odrzut z animacji broni w grze, lewa dłoń na łożu, kolba przy ramieniu. | 🥊 **Walka wręcz**<br>Pięści, noże, katany, broń obuchowa, pałki, Ostrza Modliszkowe i Ręce Goryla w trzeciej osobie, oparte na oryginalnych animacjach walki z gry. |
 | 🚗 **Pojazdy**<br>Wsiadanie do samochodów i na motocykle oraz wysiadanie w trzeciej osobie. | ↔️ **Zmiana ramienia kamery**<br>Jeden klawisz na klawiaturze i padzie, przypisywany w Mod Settings. | 🎞️ **Pakiet animacji**<br>Animacje UTPP lub oryginalne animacje gry, przełączane w menu. |
 | 🩻 **Poprawki deformacji**<br>Skóra ciała przeliczana dla póz moda oraz dodatkowe korekty ramion i przedramion. | ✨ **Płynne przejścia**<br>Mniej nagłych przeskoków między animacjami. | 🧾 **Logi diagnostyczne**<br>Wbudowane logi i plik raportu ułatwiają zgłaszanie problemów. |
@@ -67,7 +105,12 @@ Po lewej: oryginalne animacje gry. Po prawej: Ultimate Third Person Project. Nag
 - Płynne przejścia między sprintem, zatrzymaniem, obrotem i kucaniem
 - Obroty ciała podczas ruchu
 - Koordynacja kierunku kamery i ruchu
-- Blokowanie stóp ograniczające widoczne ślizganie
+- Blokowanie stóp ograniczające widoczne ślizganie, z opcjami stabilnych postawionych stóp i stabilnej stopy obrotu przy zwrotach i zatrzymaniach
+- Dopasowanie kroku: kroki skracane do prędkości w chodzie, biegu i ruchu w kucki (opcja w menu)
+- Stopy stawiane na zboczach, stopniach, schodach i krawężnikach (opcja w menu); dopasowanie kroków do schodów trzeba włączyć
+- Animacje ruchu odtwarzane na ziemi w rzeczywistym tempie V
+- Głowa podąża za kamerą w trybie Shooter i przy ruchu bokiem bez celowania
+- Regulowane pochylenie ciała i głowy w zakrętach
 - Najbardziej responsywne celowanie i strzelanie w trzeciej osobie, jakie dotąd powstało dla Cyberpunk 2077
 - Ulepszony odrzut i mieszanie animacji górnej części ciała
 - Lepsza ciągłość ułożenia dłoni, broni i przeładowania, w tym chwyt łoża lewą dłonią i kolba przy ramieniu
@@ -131,11 +174,11 @@ Poniższe wymagania są potrzebne do poprawnego działania UTPP.
 - **Cyber Engine Tweaks 1.38.1** — udostępnia logikę ustawień, kamery, ciała i pojazdów wykorzystywaną przez UTPP.
 - **Codeware 1.21.4** — udostępnia rozszerzenia API używane przez skrypty UTPP.
 - **ArchiveXL 1.28.8** — zapewnia dodatkową obsługę animacji i archiwów wykorzystywaną przez UTPP.
-- **Input Loader** (sprawdzono z 0.2.6) — zapewnia klawisz zmiany ramienia kamery; pozostałe funkcje działają bez niego.
-- **Mod Settings** (zalecany, sprawdzono z 0.2.30) — strona Ultimate Third Person w ustawieniach gry.
+- **Input Loader** (wersja 0.2.6) — zapewnia klawisz zmiany ramienia kamery; pozostałe funkcje działają bez niego.
+- **Mod Settings** (zalecany, wersja 0.2.30) — strona Ultimate Third Person w ustawieniach gry.
 
 > [!WARNING]
-> Powyższe wersje sprawdzono z tym wydaniem. Starsze nie będą działać z grą w wersji 2.5. Nowsze mogą działać, ale ich zgodność nie jest gwarantowana do czasu sprawdzenia.
+> UTPP 0.2.0 jest przeznaczony dla wersji podanych powyżej; wymagania są takie same jak w 0.1.2. Starsze nie będą działać z grą w wersji 2.5. Nowsze mogą działać, ale ich zgodność nie jest gwarantowana do czasu sprawdzenia.
 
 Zainstaluj i zaktualizuj wymagane frameworki przed zgłoszeniem problemu z UTPP.
 
@@ -171,7 +214,7 @@ Nie używaj przestarzałych, zdublowanych ani wymieszanych wersji wymaganych fra
 > [!CAUTION]
 > Przy aktualizacji UTPP usuwaj stare pliki wyłącznie wtedy, gdy nakazuje to opis wydania. Nie mieszaj plików z różnych wersji UTPP.
 
-**Aktualizacja do 0.1.2:** zainstaluj 0.1.2 na posiadaną wersję i pozwól zastąpić wszystkie pliki. Nie trzeba usuwać żadnego pliku ze starszej wersji. Przy przejściu z 0.1.1 ustawienia zostają zachowane. Przy przejściu z 0.1.0 ustawienia moda zostaną przy pierwszym uruchomieniu jednorazowo przywrócone do domyślnych, ponieważ w 0.1.1 zmieniły się wartości domyślne i działanie kilku opcji; poinformuje o tym komunikat na ekranie. Dwa przypisania „Swap shoulder” pozostaną bez zmian. Dzieje się to tylko raz — później ustawienia są zachowywane jak wcześniej.
+**Aktualizacja do 0.2.0:** zainstaluj 0.2.0 na posiadaną wersję i pozwól zastąpić wszystkie pliki. Nie trzeba usuwać żadnego pliku ze starszej wersji. Przy przejściu z dowolnej wersji 0.1.x ustawienia moda zostaną przy pierwszym uruchomieniu jednorazowo przywrócone do domyślnych, ponieważ 0.2.0 zmienia ruch i jego wartości domyślne; poinformuje o tym komunikat na ekranie. Świeża instalacja nie wyświetla komunikatu. Dwa przypisania „Swap shoulder” pozostaną bez zmian. Dzieje się to tylko raz — później ustawienia są zachowywane jak wcześniej.
 
 Przed instalacją lub aktualizacją UTPP zawsze zachowaj kopię swojej konfiguracji modów.
 
@@ -251,7 +294,7 @@ Na potrzeby diagnozy sprawdzaj UTPP z wymaganymi zależnościami, bez dodatkowyc
 <details>
 <summary><b>Szczegóły</b></summary>
 
-Wersja 0.1.2 to trzecie publiczne wydanie UTPP i nadal wczesny etap projektu.
+Wersja 0.2.0 to czwarte publiczne wydanie UTPP i nadal wczesny etap projektu.
 
 Niektóre pozy, rodzaje broni, stany ciała, animacje fabularne i przejścia wymagają dalszego dopracowania. Efekt może też zależeć od konfiguracji postaci, broni i animacji.
 
@@ -272,13 +315,19 @@ Projekt rozwija się etapami, ze stałym naciskiem na jakość ruchu, ciągłoś
 
 </details>
 
-## Znane problemy w 0.1.2
+## Znane problemy w 0.2.0
 
 <details>
 <summary><b>Szczegóły</b></summary>
 
-Te problemy są znane w wersji 0.1.2 i planowane do poprawy w kolejnych aktualizacjach. Nie musisz ich zgłaszać. Poprawki od wersji 0.1.0 opisano na [liście zmian](CHANGELOG.md).
+Te problemy są znane w wersji 0.2.0 i planowane do poprawy w kolejnych aktualizacjach. Nie musisz ich zgłaszać. Zmiany od wersji 0.1.2 opisano na [liście zmian](CHANGELOG.md). Lista obejmuje znane problemy z 0.1.2, z których nie wszystkie zostały ponownie sprawdzone.
 
+- Wspinanie lub przeskok rozpoczęte tuż po skoku często nie zostaje wykonane
+- Celowanie: przy szarpnięciach kamery i szybkich obrotach lufa może nieco bardziej zostawać za celownikiem, ponieważ celowanie jest wygładzane
+- Głowa podążająca za kamerą: szyja V może się bardziej deformować, głównie u V z męskim ciałem (opcję można wyłączyć); pochylenie działające w większej liczbie stanów nieznacznie to powiększa
+- Stopy: przy schodzeniu po schodach kolano może w pojedynczych klatkach mocno się zgiąć; przy ruszaniu V może częściej zmieniać nogę prowadzącą; przy części obrotów i krótkich stuknięciach w bok podczas celowania mogą pojawić się większe korekty lub ślizganie stóp, głównie u V z męskim ciałem
+- Stabilne stopy przy zwrotach i zatrzymaniach: obrót V z męskim ciałem w biegu może wyglądać nieco gorzej
+- Naturalny obrót ciała przy celowaniu w ruchu: przy niektórych ruszeniach stopy mogą bardziej się ślizgać, a część dużych zmian kierunku wypada gorzej
 - Rzadki crash kilka sekund po wczytaniu zapisu, w którym V siedzi w pojeździe; ponowne wczytanie działa
 - Nóż: gdy kolejny cios kombinacji zaczyna się późno podczas chodzenia, ramiona mogą gwałtownie przeskoczyć między ciosami
 - Ostrza Modliszkowe i Ręce Goryla: wyjęcie odtwarza oryginalną animację gry
@@ -327,7 +376,7 @@ Dziękuję twórcom licencjonowanych animacji i materiałów technicznych, na kt
 <details>
 <summary><b>Szczegóły</b></summary>
 
-Projekt UTPP jest opracowywany, kierowany i testowany w grze przez autora. Przy jego tworzeniu korzystano z generatywnej AI:
+Projekt UTPP jest opracowywany i kierowany przez autora. Przy jego tworzeniu korzystano z generatywnej AI:
 
 - Kod: większość pluginu, skryptów i narzędzi napisali agenci programistyczni AI pod kierunkiem autora
 - Animacje: część przejść, wysiadania z pojazdów i animacji walki wręcz wygenerowano lokalnie przy użyciu NVIDIA Kimodo i MotionBricks

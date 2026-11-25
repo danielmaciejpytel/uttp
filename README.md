@@ -8,7 +8,7 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 <p align="center">
   <img src="https://img.shields.io/badge/Cyberpunk_2077-2.5-FCEE0A?style=for-the-badge&labelColor=1a1a1a" alt="Cyberpunk 2077 2.5">
   <img src="https://img.shields.io/badge/Phantom_Liberty-required-FF2A6D?style=for-the-badge&labelColor=1a1a1a" alt="Phantom Liberty required">
-  <img src="https://img.shields.io/badge/version-0.1.2-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Version 0.1.2">
+  <img src="https://img.shields.io/badge/version-0.2.0-00E5FF?style=for-the-badge&labelColor=1a1a1a" alt="Version 0.2.0">
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/RED4ext-1.31.1-FCEE0A?style=flat-square&labelColor=1a1a1a" alt="RED4ext 1.31.1">
@@ -22,6 +22,7 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 <p align="center">
   <a href="README.pl.md">Polski</a> · <b>English</b> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="#whats-new-in-020">What's new</a> ·
   <a href="#see-the-difference">See the difference</a> ·
   <a href="#features">Features</a> ·
   <a href="#requirements">Requirements</a> ·
@@ -35,16 +36,53 @@ Motion Matching locomotion, natural body rotation and sharp third-person aiming 
 ## Quick start
 
 > [!NOTE]
-> Version 0.1.2 gives female V a more feminine figure while she stands and moves without a weapon. Version 0.1.1 added melee weapons, a first version of dual wield, smoother keyboard movement and many body and shadow fixes. It is still an early version; see the [changelog](CHANGELOG.md). Feedback is very welcome.
+> Version 0.2.0 reworks the on-foot movement: how animations are picked and timed, starts, stops, turns and dodges, feet placed on uneven ground, a much lighter lean, and aiming and turning behaviour. The settings of the mod are reset to their new defaults once when you update. It is still an early version; see the [changelog](CHANGELOG.md). Work on 0.2.5, focused on locomotion and traversal, is already under way. Feedback is very welcome.
 
 1. Install the [requirements](#requirements): RED4ext, redscript, Cyber Engine Tweaks, Codeware, ArchiveXL and Input Loader.
 2. Install UTPP with Vortex (**Mod manager download**) or extract the archive into the game folder.
 3. Start the game and load a save. V is now in third person.
 4. Optional: tune it in **Mod Settings > Ultimate Third Person**.
 
+## What's new in 0.2.0
+
+The motion-matching databases are the same as in 0.1.2. Version 0.2.0 changes how the animations are picked, timed and blended, and how the feet and the aim are corrected. The full list is in the [changelog](CHANGELOG.md).
+
+- **Animation selection:** it behaves more like a full motion-matching reference, with more protection against animations flickering between each other.
+- **Playback speed:** on the ground the movement animations follow V's actual speed to reduce foot sliding, and the movement predicted for picking animations is shaped for starts, stops, gait changes, turns, strafing, crouching, aiming, stairs, jumps and landings.
+- **Stride matching:** V's steps are shortened to her speed in the walking, running and crouched movement loops.
+- **Feet:** planted feet are held more firmly in turns and stops and keep their direction, and the pivot foot stays in place in turns on the spot. Feet are placed on slopes, steps, stairs and curbs, with the hips lowered as needed. These are menu options, on by default. **Fit steps to stairs** (shorter, quicker steps at the same speed) is opt-in and off by default.
+- **Turns, stops and dodges:** in 180-degree turns on the move V's body turns the same way as the turn animation, the knees follow the direction of the hips, stops overshoot less, and sprinting into a wall holds the idle pose instead of flickering between turn animations. Dodges take their direction relative to the character rather than the turned body, the dodge animation is turned towards the travel direction (up to 90 degrees) and the direction warping no longer twists V's body during it.
+- **Crouch:** crouched movement plays at V's actual speed, with changes to the choice of the crouched stop and to the feet at the end of it.
+- **Lean:** much lighter by default, now also with a weapon drawn, while aiming (body only) and while crouched. In Shooter mode and while facing the aim it follows V's own sideways acceleration, so she no longer rolls along the wrong axis.
+- **Walking and gamepad:** the walk toggle moves V at 1.9 m/s. **On a gamepad this changes how fast V moves:** by default, a stick pushed less than about two thirds of the way gives a steady walk, further gives a full run, and crouching always uses the full crouch speed. Choose **Follows the stick** to get the analog speed back.
+- **Aiming:** the barrel is also corrected sideways towards the crosshair, the upper body is steadier while V turns and during camera jerks, a change of direction while aiming and moving can play a turn animation from a smaller angle, and quick left and right taps stay on turn-step animations with firmer feet. The supporting hand stays on two-handed weapons and the pistol, for example in an aimed slide or while crouched. Moving forward while aiming is faster (3.85 m/s, was 3.3), with sideways and backwards movement scaled to it.
+- **Natural body turn while aiming on the move:** after V has turned to the crosshair, her legs and hips keep their own direction and turn with her steps, while the upper body and the weapon stay on the crosshair.
+- **Head follows the camera:** in Shooter mode and while strafing without aiming, V's head and neck turn and tilt towards where the camera looks (up to 45 degrees to the side), then the upper body follows.
+- **Weapons and Shooter mode:** drawing, holstering or changing the weapon type blends into the new weapon pose without overshooting; if the mod pauses itself to protect the frame rate while a ranged weapon is drawn, the weapon pose is kept. Shooter mode (still off by default) holds each direction animation for a minimum time, to reduce back-and-forth changes.
+- **Camera and elevators:** curbs and stair steps should no longer switch the camera into its fast-fall mode, and in elevators and on moving platforms V should no longer play jump or fall animations, and the camera and body height should ride with the cabin.
+- **Menu:** the lists in Mod Settings should now show a readable label for every value.
+
+### New and changed settings
+
+In **Mod Settings > Ultimate Third Person**:
+
+- **General > Head follows the camera** - new, on by default.
+- **Camera > Walk speed (m/s)** - speed with the walk toggle; default 1.9 (was 1.6).
+- **Camera > Stride matching** - new, on by default.
+- **Camera > Firm feet in turns and stops** - new, on by default.
+- **Camera > Feet on uneven ground** - new, on by default.
+- **Camera > Fit steps to stairs** - new, **off** by default; needs Feet on uneven ground and Stride matching.
+- **Camera > Planted feet keep their direction** - new, on by default.
+- **Camera > Firm pivot foot in turns on the spot** - new, on by default; needs Firm feet in turns and stops.
+- **Camera > Natural body turn while aiming on the move** - new, on by default.
+- **Camera > Body lean** and **Head lean** - new on this page; default 0.2 each (the lean strength was 0.85 for the body and 0.9 for the head before).
+- **Advanced > Gamepad stick speed** - new: Walk or run (default) or Follows the stick (the speed changes smoothly with the stick, as in the base game).
+
+The defaults of the other options on this page are unchanged.
+
 ## See the difference
 
-Left: the game's own animations. Right: Ultimate Third Person Project. Real-time speed.
+Left: the game's own animations. Right: Ultimate Third Person Project. Real-time speed. Recorded with an earlier version of the mod.
 
 | Run, slide, crouch | Aiming and shooting | Fists |
 |:---:|:---:|:---:|
@@ -54,7 +92,7 @@ Left: the game's own animations. Right: Ultimate Third Person Project. Real-time
 
 | | | |
 |:---|:---|:---|
-| 🏃 **Motion Matching**<br>Locomotion picked frame by frame from a large animation database. | 🔄 **Body rotation**<br>V turns naturally with the camera and the movement direction. | 🦶 **Foot locking**<br>Less visible sliding on starts, stops and turns. |
+| 🏃 **Motion Matching**<br>Locomotion picked frame by frame from a large animation database. | 🔄 **Body rotation**<br>V turns naturally with the camera and the movement direction. | 🦶 **Foot placement**<br>Foot locking, plus options for firm feet, stride matching and uneven ground. |
 | 🎯 **Aiming**<br>The most responsive third-person aiming and shooting in the game. | 🔫 **Recoil and grip**<br>Recoil from the game's weapon animations, left hand on the handguard, stock at the shoulder. | 🥊 **Melee**<br>Fists, knives, katanas, blunt weapons, batons, Mantis Blades and Gorilla Arms in third person, built from the game's own combat animations. |
 | 🚗 **Vehicles**<br>Third-person entering and leaving of cars and motorcycles. | ↔️ **Shoulder swap**<br>One key on keyboard and controller, assignable in Mod Settings. | 🎞️ **Animation pack**<br>UTPP animations or the game's own, switchable in the menu. |
 | 🩻 **Deformation fixes**<br>Body skin recalculated for the mod's poses, plus targeted corrections for arms and forearms. | ✨ **Smooth transitions**<br>Less snapping and popping between animations. | 🧾 **Diagnostic logs**<br>Built-in logs and a report file for easy problem reports. |
@@ -67,7 +105,12 @@ Left: the game's own animations. Right: Ultimate Third Person Project. Real-time
 - Smooth sprint, stop, turn and crouch transitions
 - Body rotation during movement
 - Camera and movement direction coordination
-- Foot-locking support to reduce visible sliding
+- Foot-locking support to reduce visible sliding, with options for firm planted feet and a firm pivot foot in turns and stops
+- Stride matching: steps shortened to the movement speed in walking, running and crouched movement (menu option)
+- Feet placed on slopes, steps, stairs and curbs (menu option); fitting the steps to stairs is opt-in
+- Movement animations played at V's actual speed on the ground
+- Head follows the camera in Shooter mode and while strafing without aiming
+- Adjustable body and head lean into turns
 - The most responsive third-person aiming and shooting behavior in Cyberpunk 2077 ever created
 - Improved recoil and upper-body animation blending
 - Better hand, weapon and reload pose continuity, including a left-hand grip on the rifle handguard and the stock at the shoulder
@@ -131,11 +174,11 @@ The following requirements are needed for UTPP to work correctly.
 - **Cyber Engine Tweaks 1.38.1** - provides settings, camera, body and vehicle logic used by UTPP.
 - **Codeware 1.21.4** - provides API extensions used by UTPP scripts.
 - **ArchiveXL 1.28.8** - provides additional animation and archive support used by UTPP.
-- **Input Loader** (tested with 0.2.6) - provides the shoulder swap key; everything else works without it.
-- **Mod Settings** (recommended, tested with 0.2.30) - the Ultimate Third Person page of the game's settings screen.
+- **Input Loader** (version 0.2.6) - provides the shoulder swap key; everything else works without it.
+- **Mod Settings** (recommended, version 0.2.30) - the Ultimate Third Person page of the game's settings screen.
 
 > [!WARNING]
-> The versions listed above are the versions tested with this release. Older versions will not work with game version 2.5. Newer versions may work, but compatibility is not guaranteed until tested.
+> UTPP 0.2.0 is made for the versions listed above; the requirements are the same as for 0.1.2. Older versions will not work with game version 2.5. Newer versions may work, but compatibility is not guaranteed until tested.
 
 Please install and update the required frameworks before reporting an issue with UTPP.
 
@@ -171,7 +214,7 @@ Do not use outdated, duplicate or mixed versions of the required frameworks. If 
 > [!CAUTION]
 > When updating UTPP, remove obsolete files only when instructed by the release notes. Do not mix files from different UTPP versions.
 
-**Updating to 0.1.2:** install 0.1.2 over the version you have and let it replace every file. No file of an older version has to be removed. Coming from 0.1.1, your settings are kept. Coming from 0.1.0, the settings of the mod are reset to their defaults once at the first start, because the defaults and the way several options work changed in 0.1.1; a message on the screen tells you when it happened. The two "Swap shoulder" controls are not changed. This happens once: afterwards your settings are kept as before.
+**Updating to 0.2.0:** install 0.2.0 over the version you have and let it replace every file. No file of an older version has to be removed. Coming from any 0.1.x version, the settings of the mod are reset to their defaults once at the first start, because 0.2.0 changes the movement and its defaults; a message on the screen tells you when it happened. A fresh install shows no message. The two "Swap shoulder" controls are not changed. This happens once: afterwards your settings are kept as before.
 
 Always keep a backup of your mod setup before installing or updating UTPP.
 
@@ -251,7 +294,7 @@ For the best troubleshooting results, test UTPP with the required dependencies a
 <details>
 <summary><b>Details</b></summary>
 
-Version 0.1.2 is the third public release of UTPP and still an early version of the project.
+Version 0.2.0 is the fourth public release of UTPP and still an early version of the project.
 
 Some poses, weapons, body states, story animations and transitions require further refinement. Results may also vary depending on the installed character, weapon and animation setup.
 
@@ -272,13 +315,19 @@ The project is being developed in stages, with continued focus on movement quali
 
 </details>
 
-## Known issues in 0.1.2
+## Known issues in 0.2.0
 
 <details>
 <summary><b>Details</b></summary>
 
-These problems are known in version 0.1.2 and are planned to be fixed in the next updates. You do not need to report them. What was fixed since 0.1.0 is listed in the [changelog](CHANGELOG.md).
+These problems are known in version 0.2.0 and are planned to be fixed in the next updates. You do not need to report them. Changes since 0.1.2 are listed in the [changelog](CHANGELOG.md). The list includes the known issues of 0.1.2, which have not all been checked again.
 
+- Climbing or vaulting started right after a jump is often not performed
+- Aiming: during camera jerks and fast turns the muzzle can trail the crosshair a little more, because the aim is smoothed
+- Head follows the camera: V's neck can deform more, mainly with male V (the option can be switched off); the lean in more states adds a little to this
+- Feet: going down stairs a knee can bend sharply for single frames; V can change the leading leg more often when starting to move; some turns and quick aimed left and right taps can show larger foot corrections or sliding, mostly with male V
+- Firm feet in turns and stops: male V's turn while running can look slightly worse
+- Natural body turn while aiming on the move: the feet can slide more on some starts, and some wide direction changes are handled less well
 - Rare game crash a few seconds after loading a save in which V sits on a vehicle; loading again works
 - Knife: when the next strike of a combo starts late while V walks, the arms can snap between the two strikes
 - Mantis Blades and Gorilla Arms: drawing them plays the game's own animation
@@ -327,7 +376,7 @@ Thanks to the creators of the licensed animation content and the technical refer
 <details>
 <summary><b>Details</b></summary>
 
-UTPP is designed, directed and tested in game by its author. Generative AI was used in its making:
+UTPP is designed and directed by its author. Generative AI was used in its making:
 
 - Code: most of the plugin, scripts and tools were written with AI coding agents under the author's direction
 - Animation: some transition, vehicle-exit and melee clips were generated locally with NVIDIA Kimodo and MotionBricks
