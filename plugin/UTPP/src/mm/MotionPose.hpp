@@ -278,6 +278,7 @@ struct FrameInfo
     } figure;
     ov::ClavicleLimitResult clavicleLimit; // mesh-space arm clavicle deviation of this frame before the limit
     ov::ClavicleTransientResult clavicleTransient; // transient bound of the clavicles (gate 1 = free, pose untouched)
+    ov::SupportHandKeepResult supportKeep;         // support hand re-solved onto the weapon after the clavicle bounds
     ov::GirdleResult girdle;                       // girdle width bound of the mesh-space arm poses (applied = the pose was changed)
     float forearmTwistMovedDeg[2] = {};   // forearm roll moved into the hand on the output (left, right; ForearmTwist.hpp)
     // rifle-hand-fix 2026-11-09: support (left) hand of a 2H pose - hand twist about the forearm -> hand axis before / after the
@@ -833,6 +834,8 @@ private:
             // (MeshArmClavicleLimit.hpp STATUS); the deviation goes to FrameInfo::clavicleLimit and the trace.
             if (li.OP && li.B)
             {
+                // support hand on the weapon: anchored to the right hand before the clavicle bounds move each shoulder on its own
+                const ov::SupportHandAnchor support = m_rig.Valid(sk) ? ov::CaptureSupportHand(sk, *m_lay, m_rig) : ov::SupportHandAnchor{};
                 info.clavicleLimit = ov::LimitMeshArmClavicles(sk, *m_scratch, m_shootClavL, m_shootClavR,
                                                                ov::kMeshArmClavicleRuntimeLimitDeg, ov::kMeshArmClavicleSoftDeg, *m_lay);
                 // the shoulders stay with the chest through a weapon pose crossfade (run stop: moving pose with local-space arms ->
@@ -845,6 +848,23 @@ private:
                         stopFade = stopFade || (m_machine.poses.key[i] != m_machine.poses.target && (m_machine.poses.key[i] & 1) != 0 &&
                                                 m_machine.poses.key[i] / 12 == m_machine.poses.target / 12 && m_machine.poses.w[i] > 0.0f);
                 info.clavicleTransient = m_clavTransient.Apply(sk, *m_scratch, m_shootClavL, m_shootClavR, stopFade, aDt, *m_lay);
+                // a bounded clavicle carries its hand with the shoulder joint; in a two-handed weapon pose the left arm is re-solved so
+                // the support hand stays where it was relative to the right hand (aimed slide: 28 - 32 cm apart instead of 7);
+                // weight = share of the two-handed weapon poses (Pistol2H / Rifle, standing or moving)
+                if (support.valid && (info.clavicleLimit.applied || info.clavicleTransient.applied))
+                {
+                    float wAll = 0.0f, w2H = 0.0f;
+                    for (int i = 0; i < m_machine.poses.count; ++i)
+                    {
+                        if (!(m_machine.poses.w[i] > 0.0f))
+                            continue;
+                        wAll += m_machine.poses.w[i];
+                        const int o = m_machine.poses.key[i] / 12;
+                        if (o == static_cast<int>(ov::PoseOverlay::Pistol2H) || o == static_cast<int>(ov::PoseOverlay::Rifle))
+                            w2H += m_machine.poses.w[i];
+                    }
+                    info.supportKeep = ov::KeepSupportHand(sk, m_rig, support, wAll > 0.0f ? w2H / wAll : 0.0f, gik::Params{}, *m_lay);
+                }
                 // the shoulders of a mesh-space arm pose stay within 1.5 cm of the body's own girdle width (crouched two-handed aim:
                 // 3.5 - 4 cm narrower): clavicles turn the upper arm joints outward, the hands and the weapon shift together by at most
                 // ov::kGirdleMaxHandShiftM (ov::BoundGirdleWidth); a pose within 1.5 cm is untouched

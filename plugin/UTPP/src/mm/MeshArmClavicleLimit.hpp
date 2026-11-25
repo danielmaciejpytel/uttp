@@ -503,4 +503,77 @@ inline GirdleResult BoundGirdleWidth(const Skeleton& aSk, const Pose& aOwn, cons
     return r;
 #endif
 }
+
+// ---- support hand kept on the weapon through the clavicle bounds ------------------------------------------------------------------------
+// Why: LimitMeshArmClavicles and ClavicleTransientBound keep the mesh rotation of the arm under each clavicle, so each hand moves with its
+// own shoulder joint. In a two-handed weapon pose (Pistol2H / Rifle) the two shoulders move by different amounts and the support hand
+// leaves the weapon: aimed pistol slide (recording 2026-11-25 01:33:16, transient bound held through the slide, both clavicles limited)
+// put the hands 28 - 32 cm apart instead of 7, the left arm hanging next to the gun.
+// What: CaptureSupportHand stores the left hand in the frame of the right hand before the bounds; KeepSupportHand re-solves the left arm
+// (two-bone IK below the bounded clavicle) so that the left hand is again at that place relative to the right hand, blended by aWeight
+// (the two-handed share of the weapon poses). The right arm, the weapon and the clavicles stay as bounded. A left hand that moved less
+// than kSupportKeepMinDriftM relative to the right hand is left bitwise untouched.
+// Mutation UTPP_CLAVLIMIT_MUTATION 8 = never re-solved.
+inline constexpr float kSupportKeepMinDriftM = 0.001f;
+
+struct SupportHandAnchor
+{
+    bool valid = false;
+    Quat relRot{};   // left hand rotation in the right hand frame
+    Vec3 relPos{};   // left hand position in the right hand frame (m)
+};
+
+struct SupportHandKeepResult
+{
+    bool applied = false;
+    float driftM = 0.0f;  // distance of the left hand from its anchored place before the re-solve
+    float handErr = 0.0f; // after the re-solve at full weight (gik::Result::handErr)
+};
+
+inline SupportHandAnchor CaptureSupportHand(const Skeleton& aSk, const Pose& aPose, const gik::Rig& aRig)
+{
+    SupportHandAnchor a;
+    if (!aRig.left.Valid(aSk) || !aRig.right.Valid(aSk))
+        return a;
+    Quat rR, rL;
+    Vec3 pR, pL;
+    gik::ModelOf(aSk, aPose, aRig.right.hand, rR, pR);
+    gik::ModelOf(aSk, aPose, aRig.left.hand, rL, pL);
+    const Quat inv = math::QuatInv(math::QuatNormalize(rR));
+    a.relRot = math::QuatNormalize(math::QuatMul(inv, rL));
+    a.relPos = math::QuatRotate(inv, pL - pR);
+    a.valid = std::isfinite(a.relRot.x + a.relRot.y + a.relRot.z + a.relRot.w) && std::isfinite(a.relPos.x + a.relPos.y + a.relPos.z);
+    return a;
+}
+
+inline SupportHandKeepResult KeepSupportHand(const Skeleton& aSk, const gik::Rig& aRig, const SupportHandAnchor& aAnchor, float aWeight,
+                                             const gik::Params& aParams, Pose& aPose)
+{
+    SupportHandKeepResult r;
+    const float w = Clamp01(aWeight);
+    if (!aAnchor.valid || !(w > 1e-4f) || !aRig.left.Valid(aSk) || !aRig.right.Valid(aSk))
+        return r;
+    Quat rR, rL;
+    Vec3 pR, pL;
+    gik::ModelOf(aSk, aPose, aRig.right.hand, rR, pR);
+    gik::ModelOf(aSk, aPose, aRig.left.hand, rL, pL);
+    rR = math::QuatNormalize(rR);
+    const Vec3 tp = pR + math::QuatRotate(rR, aAnchor.relPos);
+    const Quat tr = math::QuatNormalize(math::QuatMul(rR, aAnchor.relRot));
+    r.driftM = gik::Len(pL - tp);
+    if (!std::isfinite(r.driftM) || !(r.driftM > kSupportKeepMinDriftM))
+        return r;
+#if defined(UTPP_CLAVLIMIT_MUTATION) && UTPP_CLAVLIMIT_MUTATION == 8
+    (void)aParams;
+    return r; // mutation 8: never re-solved
+#else
+    gik::Result ik;
+    if (gik::SolveArm(aSk, aPose, aRig.left, tp, &tr, w, aParams, ik))
+    {
+        r.applied = true;
+        r.handErr = ik.handErr;
+    }
+    return r;
+#endif
+}
 } // namespace utpp::mm::ov

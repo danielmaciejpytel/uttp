@@ -20,8 +20,11 @@
 //   CG-4  the width never falls (after >= before on every frame, both bodies);
 //   CG-5  no pop through the aim crossfade: the largest per-frame step of the upper arm joints after is not above the largest step
 //         before + 0.5 cm (sequence of the crouch idle aim in / out).
-// Mutation builds (UTPP_CLAVLIMIT_MUTATION 6 = never acts, 7 = the arms are not solved back) must print a FAIL CG- line (6: CG-1,
-// 7: CG-3).
+//   CG-6  support hand: both clavicles turned by different amounts with the children kept (-8 / +4 deg about the clavicle Y axis, as the
+//         clavicle limit and the transient bound do; the opposite turn takes the straight crouch-aim left arm beyond its reach) move the left hand off its place relative to the right hand (> 0.5 cm); KeepSupportHand puts it back
+//         within 1 mm; a pose with unturned clavicles is untouched bit for bit (crouch Pistol2H aim sequence).
+// Mutation builds (UTPP_CLAVLIMIT_MUTATION 6 = never acts, 7 = the arms are not solved back, 8 = the support hand is never re-solved)
+// must print a FAIL CG- line (6: CG-1, 7: CG-3, 8: CG-6).
 
 #include <algorithm>
 #include <cmath>
@@ -242,6 +245,8 @@ static void TestBody(const char* aDb, const char* aOv, uint64_t aHash, const cha
 
     // aim crossfade in / out under the crouch idle loop
     Stat seq;
+    float keepDriftBefore = 0.0f, keepDriftMin = 1e9f, keepAfter = 0.0f;
+    int keepUntouchedBad = 0;
     float stepB = 0.0f, stepA = 0.0f;
     {
         const int pr = f->FindOverlayPose(PoseOverlay::Pistol2H, AimState::Ready, true, false);
@@ -269,6 +274,31 @@ static void TestBody(const char* aDb, const char* aOv, uint64_t aHash, const cha
             in.OPLower = OPb.get();
             CurvesMix(cr, ca, w, in.curves);
             frame(in, seq, g_dumpBody == aTag, t, jb, ja, true, 1.0f);
+            // CG-6: clavicles turned by different amounts with the children kept (what the clavicle limit and the transient bound
+            // do) carry each hand with its own shoulder; KeepSupportHand puts the left hand back on its place relative to the right hand
+            {
+                auto P = std::make_unique<Pose>(*before);
+                const SupportHandAnchor anchor = CaptureSupportHand(sk, *P, rig);
+                auto Q = std::make_unique<Pose>(*P);
+                const SupportHandKeepResult idle = KeepSupportHand(sk, rig, anchor, 1.0f, params, *Q);
+                keepUntouchedBad += idle.applied || !SamePose(*P, *Q, sk.n);
+                const float turnDeg[2] = {-8.0f, 4.0f};
+                for (int s = 0; s < 2; ++s)
+                {
+                    const float h = turnDeg[s] * 0.5f * 3.14159265f / 180.0f;
+                    const Quat old = P->b[clav[s]].r;
+                    SetClavicleKeepChildren(sk, clav[s], old, math::QuatNormalize(math::QuatMul(old, Quat{0.0f, std::sin(h), 0.0f, std::cos(h)})), *P);
+                }
+                const SupportHandKeepResult kr = KeepSupportHand(sk, rig, anchor, 1.0f, params, *P);
+                Quat qR, qL;
+                Vec3 xR, xL;
+                gik::ModelOf(sk, *P, rig.right.hand, qR, xR);
+                gik::ModelOf(sk, *P, rig.left.hand, qL, xL);
+                const Vec3 want = xR + math::QuatRotate(math::QuatNormalize(qR), anchor.relPos);
+                keepDriftBefore = std::max(keepDriftBefore, kr.driftM * 100.0f);
+                keepDriftMin = std::min(keepDriftMin, kr.driftM * 100.0f);
+                keepAfter = std::max(keepAfter, gik::Len(xL - want) * 100.0f);
+            }
             if (k > 0)
                 for (int s = 0; s < 2; ++s)
                 {
@@ -300,6 +330,9 @@ static void TestBody(const char* aDb, const char* aOv, uint64_t aHash, const cha
             " (two-handed pistol crouch aim: weapon shift max %.3f cm)", aTag, double(all.handPos), double(all.handRot), double(all.wpnRot),
             double(all.wpnPos), double(g_maxShift * 100.0f), double(p2hCrouchAim.wpnPos)));
     Check(all.narrower == 0, F("CG-4 %s: the width never falls (%d frames narrower)", aTag, all.narrower));
+    Check(keepDriftMin > 0.5f && keepAfter <= 0.1f && keepUntouchedBad == 0,
+          F("CG-6 %s: support hand kept on the weapon after uneven clavicle turns: drift before %.2f - %.2f cm, after max %.4f cm (<= 0.1);"
+            " %d unturned frames changed", aTag, double(keepDriftMin), double(keepDriftBefore), double(keepAfter), keepUntouchedBad));
     Check(stepA <= stepB + 0.5f, F("CG-5 %s: aim in / out, largest upper arm joint step after %.2f cm, before %.2f cm", aTag, double(stepA), double(stepB)));
 }
 

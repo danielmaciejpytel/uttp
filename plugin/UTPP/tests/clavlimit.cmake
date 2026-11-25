@@ -45,8 +45,8 @@ endforeach()
 
 # Settled shoulder girdle of the mesh-space arm poses (tests/ClavicleGirdleTest.cpp, MeshArmGirdleBound in src/mm/MeshArmClavicleLimit.hpp): crouch and
 # standing weapon poses of both motion databases. Mutation builds must print a "FAIL CG-" line: 6 = the girdle bound never acts,
-# 7 = the arms are not re-solved (the hands move with the shoulder joints).
-foreach(_m 0 6 7)
+# 7 = the arms are not re-solved (the hands move with the shoulder joints), 8 = the support hand is never re-solved onto the weapon.
+foreach(_m 0 6 7 8)
     if(_m EQUAL 0)
         set(_utpp_cg_name utpp_clavicle_girdle_test)
     else()
