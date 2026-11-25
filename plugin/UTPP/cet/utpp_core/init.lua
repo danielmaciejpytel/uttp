@@ -102,7 +102,7 @@ M.PACK_FORCED = {
 M.PACK_NOTE = " No effect with the Game Animations pack."
 M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
-  "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
+  "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim" }) do M.PACK_DEPENDENT[k] = true end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
@@ -590,13 +590,14 @@ local LAYOUT = {
   -- (mm.groundFeet, utpp_motion: the feet stand on the traced ground, default on), then "Fit steps to stairs" (mm.stairSteps,
   -- utpp_motion: shorter steps fitted to the stair treads, default off), then "Planted feet keep their direction"
   -- (mm.footYawLock, utpp_motion: a planted foot keeps its direction while the body turns, default on), then "Firm pivot foot
-  -- in turns on the spot" (mm.turnFootPin, utpp_motion: the pivot foot of a turn in place stays fixed, default on), then "Body lean" and
+  -- in turns on the spot" (mm.turnFootPin, utpp_motion: the pivot foot of a turn in place stays fixed, default on), then "Natural body turn
+  -- while aiming on the move" (mm.aimRootAccumulate, utpp_motion: the lower body turns with its steps while aiming, default on), then "Body lean" and
   -- "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
                          "mm.bodyYawOffsetFemale", "mm.bodyYawOffsetMale", "mm.headLead", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
-                         "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.leanScale", "mm.leanHeadScale",
+                         "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale",
                          "mm.shoulderWidth", "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },

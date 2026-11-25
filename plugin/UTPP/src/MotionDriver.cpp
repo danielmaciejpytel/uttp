@@ -360,6 +360,7 @@ int32_t g_strideWarpReq = 1;     // SetStrideWarp: 0 / 1 (starts on like the set
 bool g_stepDownReachOn = adapter::kStepDownReachDefault; // SetStepDownReach (chooser mapping + runtime air state)
 bool g_capsuleForecastOn = false; // SetCapsuleForecast (MapConfig::capsuleForecast, mm.capsuleForecast)
 bool g_aimRotationOn = true;      // SetAimRotation (MapConfig::aimRotation, mm.aimRotation)
+bool g_aimRootAccumulate = false; // SetAimRootAccumulate (mm.aimRootAccumulate): moving-aim root accumulates, lag bound kAimRootLagDeg
 int32_t g_prevPickClip = -1;      // clip of the last search result (MapContext::currentPickAgeS)
 float g_pickAgeS = 1.0e9f;        // time since that clip was picked (s); large = no pick since the last reset
 bool g_farJumpGravityOn = motion::kFarJumpGravityScaleDefault; // SetFarJumpGravityScale (applied when a database loads)
@@ -474,6 +475,17 @@ constexpr int64_t kShooterModeHoldMaxNs = 3000000000; // 3 s
 constexpr float kShooterModeAirRate = 200.0f * 3.14159265358979323846f / 180.0f;
 // A capsule turn above this at idle (no stick) in Shooter mode is the camera orbit (follow mode), never UTPP's own facing turn.
 constexpr float kShooterModeOrbitDegPerS = 3.0f;
+// mm.aimRootAccumulate: largest lag of the root heading behind the aimed direction while V aims on the move. The lag is measured in
+// the aim offset's own terms (the yaw of its target relative to the root); the margin below its spine yaw clamp covers what is added
+// on top of the root frame (body yaw offset, pelvis trim, orientation warp) and the rate bound of the spine yaw filter.
+constexpr float kAimRootLagMarginDeg = 8.0f;
+constexpr float kAimRootLagDeg = motionpose::kAimSpineYawClampDeg - kAimRootLagMarginDeg;
+static_assert(kAimRootLagDeg > 0.0f && kAimRootLagDeg < motionpose::kAimSpineYawClampDeg, "aim root lag inside the spine yaw clamp");
+// Past the band edge the lag comes back at the bounded follow rate (MotionOffsetRoot kAimFollowRate, 450 deg/s): a camera turn faster
+// than that may carry it beyond the spine yaw clamp for the time of the turn, at most this far (the hard edge, never passed).
+constexpr float kAimRootOvershootDeg = 30.0f;
+constexpr float kAimRootLagHardDeg = motionpose::kAimSpineYawClampDeg + kAimRootOvershootDeg;
+static_assert(kAimRootLagHardDeg < 120.0f, "the hard edge keeps the aim offset target on its side of the back");
 // Rate bound of the visual-root lock while V moves in Shooter mode / H2 (MotionOffsetRoot Step::lockMaxRate): 450 deg/s = 7.5 deg per
 // 60 Hz feed, under the 8 deg per feed that reads as a snap; 540 (ADS while moving) is kept for the aim lock.
 #if UTPP_SHOOTER_MODE_MUTATION == 10
@@ -2409,6 +2421,12 @@ void SetAimRotation(bool aOn)
     g_aimRotationOn = aOn;
 }
 
+void SetAimRootAccumulate(bool aOn)
+{
+    std::lock_guard lock(g_m);
+    g_aimRootAccumulate = aOn;
+}
+
 void SetFarJumpGravityScale(bool aOn)
 {
     std::lock_guard lock(g_m);
@@ -3250,6 +3268,7 @@ void RecordBarrelProbeLocked(const motionpose::OverlayFrameInputs& aIn, const mo
     p.biasDeg = aInfo.barrelBiasDeg;
     p.residualDeg = aInfo.barrelResidualDeg;
     p.targetDist = aInfo.barrelTargetDist;
+    p.yawErrDeg = aInfo.barrelYawErrDeg;
     p.excluded = aInfo.barrelExcluded;
     g_barrelProbe = p;
 #else
@@ -6272,6 +6291,26 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         const bool airLock = b.map.shooterModeActive && cs.movementMode == 1 && !b.map.slideActive && !ctx.aimFacing;
 #endif
         rootEvaluation.input.airFollow = airLock;
+        // mm.aimRootAccumulate: while V aims on the move the root accumulates (steered clip yaw) and its lag behind the aimed direction
+        // stays within kAimRootLagDeg (MotionOffsetRoot.hpp item 6); the non-aiming Shooter / H2 lock is unchanged. The aimed direction
+        // is the world yaw the aim offset turns to (the actor-relative aim yaw of this frame, world smoothing included); without an aim
+        // target the camera yaw.
+        if (g_aimRootAccumulate && ctx.aimFacing && rootEvaluation.input.aimFacing)
+        {
+            const bool aimYaw = in.haveAim && std::isfinite(in.aimYawDeg) && std::isfinite(aRaw.playerYawDeg);
+            const float lagDeg = aimYaw ? aRaw.playerYawDeg + in.aimYawDeg
+                                        : (std::isfinite(f.cameraYawDeg) ? f.cameraYawDeg : aRaw.playerYawDeg);
+            rootEvaluation.input.aimAccumulate = true;
+            rootEvaluation.input.aimLagWorld = lagDeg * integ::kDegToRad;
+            rootEvaluation.input.aimLagMax = kAimRootLagDeg * integ::kDegToRad;
+            rootEvaluation.input.aimLagHard = kAimRootLagHardDeg * integ::kDegToRad;
+            // A start clip is authored along the travel: during it V squares up to the aim as when the accumulate begins (a root that
+            // kept the start's steered yaw lagged the travel by up to ~37 deg in the synthetic camera sweeps and bent the knees).
+            const uint8_t fc = r.clip >= 0 && static_cast<uint32_t>(r.clip) < b.db.NumClips()
+                                   ? steer::ClassifyClip(b.db.ClipName(static_cast<uint32_t>(r.clip)))
+                                   : steer::kClassTurnInPlace;
+            rootEvaluation.input.aimSquareUp = fc == steer::kClassStart || fc == steer::kClassStartSprint;
+        }
         rootEvaluation.input.lockMaxRate = airLock ? kShooterModeAirRate : (strafeLock && !ctx.aimFacing ? kShooterModeLockRate : 0.0f);
 #if UTPP_SHOOTER_MODE_MUTATION != 15
         rootEvaluation.input.holdOnGap = g_shooter_modeSetting && g_fnHoldValid && SteadyNs() - g_fnHoldNs <= kShooterModeHoldMaxNs;
@@ -6465,6 +6504,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             const auto before = b.root.Frame(), after = rootEvaluation.proposal.Frame();
             p.before[0] = before.x, p.before[1] = before.y, p.before[2] = before.yaw;
             p.after[0] = after.x, p.after[1] = after.y, p.after[2] = after.yaw;
+            p.visualWorldYaw = rootEvaluation.proposal.VisualWorldYaw();
+            p.cameraYawDeg = f.cameraYawDeg;
             g_rootProbe = p;
         }
 #endif

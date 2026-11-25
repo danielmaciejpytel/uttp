@@ -880,6 +880,269 @@ int main()
             C("forward: the Step default is off", motionRoot::Step{}.forwardLimit < 0);
         }
     }
+    {
+        // header item 6: moving-aim accumulate. Off = the lock (bit identical); on = the visible heading keeps its world yaw and turns
+        // with the clip yaw, and a lag behind aimLagTarget beyond aimLagMax comes back at most at the lock rate.
+        const float dt = 1.f / 60.f, deg = math::kPi / 180.f;
+        C("aim accumulate: the Step default is off", !motionRoot::Step{}.aimAccumulate);
+        Step base;
+        base.dt = dt;
+        base.movingGround = true;
+        base.aimFacing = true;
+        base.capsuleYawDelta = 4.f * deg; // the camera (and the capsule) turns 240 deg/s
+        base.animationYawDelta = .5f * deg;
+        OffsetRoot lockA, lockB, acc;
+        lockA.Seed(0, 0, .2f);
+        lockB.Seed(0, 0, .2f);
+        acc.Seed(0, 0, .2f);
+        Step offFlag = base;
+        offFlag.aimLagTarget = .3f; // ignored without the flag
+        bool identical = true;
+        for (int i = 0; i < 30; ++i)
+        {
+            lockA.Update(base);
+            lockB.Update(offFlag);
+            identical &= lockA.Yaw() == lockB.Yaw() && lockA.X() == lockB.X() && lockA.Y() == lockB.Y();
+        }
+        C("aim accumulate off: the moving-aim lock is unchanged (bit identical)", identical);
+        Step on = base;
+        on.aimAccumulate = true;
+        on.aimLagTarget = 0.f; // the aimed heading = the capsule
+        on.aimLagMax = 60.f * deg;
+        // it begins by squaring up to the aim (the seeded 11.5 deg offset) like the lock, then accumulates
+        Step still = on;
+        still.capsuleYawDelta = 0.f;
+        still.animationYawDelta = 0.f;
+        for (int i = 0; i < 30; ++i)
+            acc.Update(still);
+        C("aim accumulate: squares up to the aim first", std::fabs(acc.Yaw()) <= motionRoot::kAimEntryDone + 1e-5f && acc.Output().aimLatched);
+        // inside the band: world heading changes by the clip yaw only (the offset absorbs the capsule turn)
+        float world = 0.f, capsule = 0.f;
+        bool accumulates = true, bounded = true, noRelease = true;
+        for (int i = 0; i < 14; ++i) // 56 deg of capsule turn, the offset reaches about -51 deg (+ the <= 2 deg left by the squaring up)
+        {
+            const float before = math::WrapAngle(capsule + acc.Yaw());
+            acc.Update(on);
+            capsule += on.capsuleYawDelta;
+            world = math::WrapAngle(capsule + acc.Yaw());
+            accumulates &= Near(math::WrapAngle(world - before), on.animationYawDelta, 1e-4f);
+            noRelease &= !acc.Output().rotationRelease;
+        }
+        C("aim accumulate: inside the lag band the heading turns by the clip yaw only", accumulates);
+        C("aim accumulate: not a rotation release", noRelease);
+        float worst = 0.f;
+        for (int i = 0; i < 120; ++i) // the capsule keeps turning: the lag settles at the bound, never past it by more than one step
+        {
+            const float before = math::WrapAngle(capsule + acc.Yaw());
+            acc.Update(on);
+            capsule += on.capsuleYawDelta;
+            world = math::WrapAngle(capsule + acc.Yaw());
+            const float turn = std::fabs(math::WrapAngle(world - before));
+            bounded &= turn <= motionRoot::kAimFollowRate * dt + 1e-4f;
+            worst = std::fmax(worst, std::fabs(acc.Yaw()));
+        }
+        C("aim accumulate: the lag stays at 60 deg while the capsule turns", worst <= 60.f * deg + 1e-4f && std::fabs(acc.Yaw()) > 59.f * deg);
+        C("aim accumulate: the heading never turns faster than the follow rate", bounded);
+        // aim starts while V faces away: the lag comes back at the follow rate, not in one step, and V squares up to the aim
+        OffsetRoot farLag;
+        farLag.Seed(0, 0, 150.f * deg);
+        farLag.Update(still);
+        C("aim accumulate: a large lag is taken back at the follow rate", Near(farLag.Yaw(), 150.f * deg - motionRoot::kAimFollowRate * dt, 1e-4f));
+        for (int i = 0; i < 60; ++i)
+            farLag.Update(still);
+        C("aim accumulate: ... until V faces the aim", std::fabs(farLag.Yaw()) <= motionRoot::kAimEntryDone + 1e-5f && farLag.Output().aimLatched);
+        // The driver's band: pulled back to 52 deg, hard edge 90 deg; the aim offset's spine yaw clamp is 60 deg. The camera (and the
+        // capsule, the aimed heading = the capsule here) turns at 900 deg/s = 15 deg per 60 Hz feed, faster than the follow rate.
+        const float follow = motionRoot::kAimFollowRate * dt, clamp60 = 60.f * deg;
+        Step band = on;
+        band.aimLagMax = 52.f * deg;
+        band.aimLagHard = 90.f * deg;
+        band.animationYawDelta = 0.f;
+        Step bandStill = band, bandSlow = band, bandFast = band;
+        bandStill.capsuleYawDelta = 0.f;
+        bandSlow.capsuleYawDelta = 4.f * deg;
+        bandFast.capsuleYawDelta = 15.f * deg;
+        // a step's world turn of the heading (the capsule turn plus the change of the offset)
+        auto worldTurn = [](float before, float after, float capsuleTurn) { return std::fabs(math::WrapAngle(capsuleTurn + after - before)); };
+        {
+            // a 90 deg flick in 6 feeds from the band edge: no step beyond the follow rate until the hard edge, the lag past the spine
+            // clamp for at most 9 feeds in all and back under it within 4 feeds after the camera stops, then back at the band edge
+            OffsetRoot fl;
+            fl.Seed(0, 0, 0.f);
+            fl.Update(bandStill); // facing the aim: squared up at once
+            for (int i = 0; i < 20; ++i)
+                fl.Update(bandSlow); // 240 deg/s: the lag settles at the band edge
+            const bool atEdge = Near(fl.Yaw(), -52.f * deg, 1e-4f);
+            int over = 0, backAfter = -1, beyondRate = 0, atHard = 0;
+            float worstLag = 0.f;
+            for (int i = 0; i < 40; ++i)
+            {
+                const Step& s = i < 6 ? bandFast : bandStill;
+                const float before = fl.Yaw();
+                fl.Update(s);
+                const float lagNow = std::fabs(fl.Yaw());
+                const bool hardEdge = Near(lagNow, 90.f * deg, 1e-4f);
+                atHard += hardEdge;
+                beyondRate += !hardEdge && worldTurn(before, fl.Yaw(), s.capsuleYawDelta) > follow + 1e-4f;
+                over += lagNow > clamp60 + 1e-4f;
+                worstLag = std::fmax(worstLag, lagNow);
+                if (i >= 6 && backAfter < 0 && lagNow <= clamp60 + 1e-4f)
+                    backAfter = i - 5;
+            }
+            std::printf("aim accumulate flick 90 deg / 6 feeds: feeds past the 60 deg clamp %d, back under it %d feeds after the stop, "
+                        "worst lag %.1f deg, feeds at the hard edge %d\n", over, backAfter, worstLag / deg, atHard);
+            C("aim accumulate flick: from the band edge", atEdge);
+            C("aim accumulate flick: no step beyond the follow rate below the hard edge", beyondRate == 0);
+            C("aim accumulate flick: never past the hard edge", worstLag <= 90.f * deg + 1e-4f);
+            C("aim accumulate flick: past the 60 deg clamp for at most 9 feeds", over <= 9);
+            C("aim accumulate flick: back under the clamp within 4 feeds after the camera stops", backAfter > 0 && backAfter <= 4);
+            C("aim accumulate flick: back at the band edge", Near(fl.Yaw(), -52.f * deg, 1e-4f));
+        }
+        {
+            // the same flick while the clip steers 2 deg per feed toward the camera (a travel turn): the world turn of the heading, the
+            // clip yaw included, stays within the follow rate below the hard edge; a clip turning against the camera is not slowed
+            for (const float clipDeg : {-2.f, 2.f})
+            {
+                OffsetRoot fl;
+                fl.Seed(0, 0, 0.f);
+                fl.Update(bandStill);
+                for (int i = 0; i < 20; ++i)
+                    fl.Update(bandSlow);
+                Step steer = bandFast, steerStill = bandStill;
+                steer.animationYawDelta = steerStill.animationYawDelta = clipDeg * deg;
+                int beyondRate = 0;
+                float worstTurn = 0.f;
+                for (int i = 0; i < 40; ++i)
+                {
+                    const Step& s = i < 6 ? steer : steerStill;
+                    const float before = fl.Yaw();
+                    fl.Update(s);
+                    const float turn = worldTurn(before, fl.Yaw(), s.capsuleYawDelta);
+                    const bool hardEdge = Near(std::fabs(fl.Yaw()), 90.f * deg, 1e-4f);
+                    beyondRate += !hardEdge && turn > follow + 1e-4f;
+                    if (!hardEdge)
+                        worstTurn = std::fmax(worstTurn, turn);
+                }
+                std::printf("aim accumulate flick with clip yaw %+.0f deg per feed: largest world turn below the hard edge %.2f deg\n", clipDeg,
+                            worstTurn / deg);
+                C(clipDeg > 0 ? "aim accumulate flick: the clip's turn toward the camera counts against the follow rate"
+                              : "aim accumulate flick: a clip turning away from the camera stays within the follow rate",
+                  beyondRate == 0);
+            }
+        }
+        {
+            // a 720 deg spin at 900 deg/s: the lag stops at the hard edge on its side (never the long way round), then comes back
+            OffsetRoot spin;
+            spin.Seed(0, 0, 0.f);
+            spin.Update(bandStill);
+            bool sameSide = true, beyondRate = false;
+            float worstLag = 0.f;
+            for (int i = 0; i < 48; ++i)
+            {
+                const float before = spin.Yaw();
+                spin.Update(bandFast);
+                sameSide &= spin.Yaw() <= 0.f;
+                worstLag = std::fmax(worstLag, std::fabs(spin.Yaw()));
+                beyondRate |= std::fabs(spin.Yaw()) < 90.f * deg - 1e-4f && worldTurn(before, spin.Yaw(), bandFast.capsuleYawDelta) > follow + 1e-4f;
+            }
+            C("aim accumulate spin: the lag keeps its side and stops at the hard edge",
+              sameSide && worstLag <= 90.f * deg + 1e-4f && Near(spin.Yaw(), -90.f * deg, 1e-4f));
+            C("aim accumulate spin: below the hard edge no step beyond the follow rate", !beyondRate);
+            for (int i = 0; i < 3; ++i)
+                spin.Update(bandStill);
+            C("aim accumulate spin: back at the follow rate once the camera stops", Near(spin.Yaw(), -90.f * deg + 3.f * follow, 1e-4f));
+        }
+        {
+            // squaring up while the camera turns away: within the hard edge the correction is bounded by the follow rate (the lag may grow
+            // for the time of the turn); from beyond the hard edge the lag never grows; both are done soon after the camera stops
+            OffsetRoot near, far;
+            near.Seed(0, 0, 60.f * deg);
+            far.Seed(0, 0, 150.f * deg);
+            Step away = band;
+            away.capsuleYawDelta = -15.f * deg; // the visual-minus-capsule yaw grows by 15 deg per step without a correction
+            Step awayStill = away;
+            awayStill.capsuleYawDelta = 0.f;
+            bool nearBounded = true, farNoGrowth = true;
+            float nearWorst = 0.f, farPrev = 150.f * deg;
+            int nearDone = -1, farDone = -1;
+            for (int i = 0; i < 90; ++i)
+            {
+                const Step& s = i < 6 ? away : awayStill;
+                const float before = near.Yaw();
+                near.Update(s);
+                far.Update(s);
+                nearWorst = std::fmax(nearWorst, std::fabs(near.Yaw()));
+                nearBounded &= std::fabs(near.Yaw()) >= 90.f * deg - 1e-4f || worldTurn(before, near.Yaw(), s.capsuleYawDelta) <= follow + 1e-4f;
+                farNoGrowth &= std::fabs(far.Yaw()) <= farPrev + 1e-5f;
+                farPrev = std::fabs(far.Yaw());
+                if (nearDone < 0 && near.Output().aimLatched)
+                    nearDone = i + 1;
+                if (farDone < 0 && far.Output().aimLatched)
+                    farDone = i + 1;
+            }
+            std::printf("aim accumulate squaring up while the camera turns away 90 deg: from 60 deg worst lag %.1f deg, done after %d "
+                        "feeds; from 150 deg done after %d feeds\n", nearWorst / deg, nearDone, farDone);
+            C("aim accumulate squaring up: within the hard edge no step beyond the follow rate", nearBounded && nearWorst <= 90.f * deg + 1e-4f);
+            C("aim accumulate squaring up: from beyond the hard edge the lag never grows", farNoGrowth);
+            C("aim accumulate squaring up: done within 50 feeds (60 deg) / 60 feeds (150 deg)", nearDone > 0 && nearDone <= 50 && farDone > 0 &&
+                                                                                                    farDone <= 60);
+        }
+        // the band side follows the lag continuously: a 130 deg camera snap in one step does not flip V to the other band edge; the lag
+        // stops at the hard edge and comes back at the follow rate
+        OffsetRoot side;
+        side.Seed(0, 0, 0.f);
+        Step settle = still;
+        side.Update(settle); // facing the aim: squared up at once
+        Step left = settle;
+        left.capsuleYawDelta = 55.f * deg;
+        side.Update(left); // lag -55 deg
+        Step snap = settle;
+        snap.capsuleYawDelta = 130.f * deg; // wrapped lag +175 deg, continuous lag -185 deg
+        side.Update(snap);
+        C("aim accumulate: a one-step camera snap keeps the band side (at the hard edge)", Near(side.Yaw(), -motionRoot::kAimLagHardDefault, 1e-4f));
+        side.Update(settle);
+        C("aim accumulate: ... and comes back at the follow rate", Near(side.Yaw(), -motionRoot::kAimLagHardDefault + follow, 1e-4f));
+        {
+            // aimSquareUp (a start clip): from the band edge V squares up to the aim again (at most the follow rate per step), the latch is
+            // held off meanwhile and taken again once the flag clears and the lag is within kAimEntryDone
+            OffsetRoot sq;
+            sq.Seed(0, 0, 0.f);
+            sq.Update(bandStill);
+            for (int i = 0; i < 20; ++i)
+                sq.Update(bandSlow);
+            Step square = bandStill;
+            square.aimSquareUp = true;
+            bool shrinks = true, bounded = true, unlatched = true;
+            float prevLag = std::fabs(sq.Yaw());
+            for (int i = 0; i < 30; ++i)
+            {
+                const float before = sq.Yaw();
+                sq.Update(square);
+                shrinks &= std::fabs(sq.Yaw()) <= prevLag + 1e-6f;
+                bounded &= worldTurn(before, sq.Yaw(), 0.f) <= follow + 1e-4f;
+                unlatched &= !sq.Output().aimLatched;
+                prevLag = std::fabs(sq.Yaw());
+            }
+            C("aim accumulate square up: the lag shrinks at most at the follow rate with the latch held off", shrinks && bounded && unlatched);
+            C("aim accumulate square up: ... down to the aim", std::fabs(sq.Yaw()) <= motionRoot::kAimEntryDone + 1e-5f);
+            sq.Update(bandStill);
+            C("aim accumulate square up: the latch returns once the flag clears", sq.Output().aimLatched);
+        }
+        // standing aim is unchanged by the flag (turn in place keeps its own path)
+        OffsetRoot standA, standB;
+        standA.Seed(0, 0, .4f);
+        standB.Seed(0, 0, .4f);
+        Step stand = base, standOn = on;
+        stand.movingGround = standOn.movingGround = false;
+        bool standSame = true;
+        for (int i = 0; i < 30; ++i)
+        {
+            standA.Update(stand);
+            standB.Update(standOn);
+            standSame &= standA.Yaw() == standB.Yaw();
+        }
+        C("aim accumulate: standing aim (turn in place) is unchanged", standSame);
+    }
     std::printf("%d PASS %d FAIL\n", pass, fail);
     return fail ? 1 : 0;
 }
