@@ -61,6 +61,7 @@ return {
     ["camera.predictBodyTurn"] = "false",
     ["camera.sens"] = "1",
     ["camera.side"] = "1",
+    ["camera.sideRelief"] = "true",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
     ["camera.vaultRise"] = "0.59999999999999998",
@@ -401,6 +402,7 @@ return {
     "apply camera.zoomUnarmed.lastFov(25,\"ok\")",
     "apply camera.zoomUnarmed.fppHandoff(false,\"ok\")",
     "apply camera.collision(true,\"ok\")",
+    "apply camera.sideRelief(true,\"ok\")",
     "apply camera.vaultRise(0.59999999999999998,\"ok\")",
     "apply camera.enterTime(0.45000000000000001,\"ok\")",
     "apply camera.exitTime(0.34999999999999998,\"ok\")",
@@ -616,6 +618,7 @@ return {
     "apply camera.zoomUnarmed.lastFov(25,\"ok\")",
     "apply camera.zoomUnarmed.fppHandoff(false,\"ok\")",
     "apply camera.collision(true,\"ok\")",
+    "apply camera.sideRelief(true,\"ok\")",
     "apply camera.vaultRise(0.59999999999999998,\"ok\")",
     "apply camera.enterTime(0.45000000000000001,\"ok\")",
     "apply camera.exitTime(0.34999999999999998,\"ok\")",
@@ -1213,6 +1216,14 @@ return {
       ["section"] = "camera_placement",
       ["step"] = 0.01,
       ["type"] = "float"
+    },
+    ["camera.sideRelief"] = {
+      ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "camera",
+      ["type"] = "bool"
     },
     ["camera.startTpp"] = {
       ["default"] = "true",
@@ -2505,6 +2516,7 @@ return {
     ["camera.predictBodyTurn"] = "false",
     ["camera.sens"] = "1",
     ["camera.side"] = "1",
+    ["camera.sideRelief"] = "true",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
     ["camera.vaultRise"] = "0.59999999999999998",
@@ -2833,6 +2845,7 @@ return {
     "camera.zoomUnarmed.lastFov",
     "camera.zoomUnarmed.fppHandoff",
     "camera.collision",
+    "camera.sideRelief",
     "camera.vaultRise",
     "camera.enterTime",
     "camera.exitTime",
@@ -3036,6 +3049,7 @@ return {
     "camera.zoomUnarmed.lastFov",
     "camera.zoomUnarmed.fppHandoff",
     "camera.collision",
+    "camera.sideRelief",
     "camera.vaultRise",
     "camera.enterTime",
     "camera.exitTime",
@@ -3229,6 +3243,7 @@ return {
     "apply camera.zoomUnarmed.lastFov(25,\"ok\")",
     "apply camera.zoomUnarmed.fppHandoff(false,\"ok\")",
     "apply camera.collision(true,\"ok\")",
+    "apply camera.sideRelief(true,\"ok\")",
     "apply camera.vaultRise(0.59999999999999998,\"ok\")",
     "apply camera.enterTime(0.45000000000000001,\"ok\")",
     "apply camera.exitTime(0.34999999999999998,\"ok\")",
@@ -3432,6 +3447,7 @@ camera.zoomUnarmed.fov=45\r\
 camera.zoomUnarmed.lastFov=25\r\
 camera.zoomUnarmed.fppHandoff=false\r\
 camera.collision=true\r\
+camera.sideRelief=true\r\
 camera.vaultRise=0.6\r\
 camera.enterTime=0.45\r\
 camera.exitTime=0.35\r\
@@ -3599,6 +3615,7 @@ vehicle.jumpOutSidePush=true\r\
       "camera.zoomUnarmed.lastFov",
       "camera.zoomUnarmed.fppHandoff",
       "camera.collision",
+      "camera.sideRelief",
       "camera.vaultRise",
       "camera.enterTime",
       "camera.exitTime",
@@ -3792,6 +3809,7 @@ vehicle.jumpOutSidePush=true\r\
     ["camera.predictBodyTurn"] = "false",
     ["camera.sens"] = "1.3",
     ["camera.side"] = "1",
+    ["camera.sideRelief"] = "true",
     ["camera.startTpp"] = "true",
     ["camera.trace"] = "false",
     ["camera.vaultRise"] = "0.59999999999999998",
@@ -4089,6 +4107,7 @@ camera.zoomUnarmed.fov=45\r\
 camera.zoomUnarmed.lastFov=25\r\
 camera.zoomUnarmed.fppHandoff=false\r\
 camera.collision=true\r\
+camera.sideRelief=true\r\
 camera.vaultRise=0.6\r\
 camera.enterTime=0.45\r\
 camera.exitTime=0.35\r\
@@ -4279,6 +4298,7 @@ other.module=42\r\
     "/utpp/camera|float|camera.zoomUnarmed.distance",
     "/utpp/camera|float|camera.zoomUnarmed.lastDistance",
     "/utpp/camera|switch|camera.zoomUnarmed.fppHandoff",
+    "/utpp/camera|switch|camera.sideRelief",
     "/utpp/camera|float|camera.vaultRise",
     "/utpp/camera|float|camera.enterTime",
     "/utpp/camera|float|camera.exitTime",

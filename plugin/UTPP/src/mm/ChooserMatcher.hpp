@@ -2082,10 +2082,14 @@ public:
                         last.movementMode == 1 && aState.verticalVelocityCmS > 0.0f;
         UTPP_IF_MUT(JUMPPICK, 14)
             m_jumpRiseOff = m_jumpRiseOff && m_flightAge == 0.0f; // mutation 14: only on the first airborne update (the impulse), not through the rise
-        // SetSteadyAirPicks (2): a falling flight (not on its first update) whose playing jump clip still has kSteadyFallMinLeftS left
-        m_steadyFallHold = m_steadyAirPicks && aState.movementMode == 1 && m_flightActive && m_flightAge > 0.0f &&
-                           aState.verticalVelocityCmS < -kSteadyFallVzCmS && m_cur.valid && m_cur.clip >= 0 &&
-                           m_clipJumpKind[static_cast<uint32_t>(m_cur.clip)] != 0 &&
+        // SetSteadyAirPicks (2): a falling flight (not on its first update) whose playing jump clip still has kSteadyFallMinLeftS left.
+        // (4): the same already in the rise of a flight that took off in motion on a take-off (Start) clip: against a wall or a ledge
+        // (before a climb) the capsule stops, its velocity direction is noise, and a second take-off clip (standing, backward) would
+        // cut the first one off mid-air. A run-off clip may still change to a take-off (the game's jump state can arrive one feed late)
+        m_steadyFallHold = m_steadyAirPicks && aState.movementMode == 1 && m_flightActive && m_flightAge > 0.0f && m_cur.valid &&
+                           m_cur.clip >= 0 && m_clipJumpKind[static_cast<uint32_t>(m_cur.clip)] != 0 &&
+                           (aState.verticalVelocityCmS < -kSteadyFallVzCmS ||
+                            (!m_flightStanding && m_clipJumpKind[static_cast<uint32_t>(m_cur.clip)] != 3)) &&
                            m_cur.clipTime < static_cast<float>(db.Clip(static_cast<uint32_t>(m_cur.clip)).numFrames - 1) / db.Header().fps -
                                                 kSteadyFallMinLeftS;
         if (m_steadyFallHold)

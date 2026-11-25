@@ -477,5 +477,180 @@ do
     string.format("arm %.2f / %.2f z %.2f ceil %.2f", r2.arm, r2.fullLen, r2.world.z, ceil))
 end
 
+-- ================================================================ side relief and vault into a drop (mocked geometry)
+do
+  -- boxes { x0, x1, y0, y1, z0, z1 }; a ray that starts inside a box does not see it
+  local function rayBoxes(boxes)
+    return function(a, b)
+      local len = CM.dist(a, b)
+      local best = nil
+      for _, bx in ipairs(boxes) do
+        local t0, t1, miss = 0, 1, false
+        for _, ax in ipairs({ { "x", 1, 2 }, { "y", 3, 4 }, { "z", 5, 6 } }) do
+          local o, d, lo, hi = a[ax[1]], b[ax[1]] - a[ax[1]], bx[ax[2]], bx[ax[3]]
+          if math.abs(d) < 1e-12 then
+            if o < lo or o > hi then miss = true end
+          else
+            local u, w = (lo - o) / d, (hi - o) / d
+            if u > w then u, w = w, u end
+            t0, t1 = math.max(t0, u), math.min(t1, w)
+          end
+        end
+        if not miss and t0 <= t1 and t0 > 1e-9 and (best == nil or t0 * len < best) then best = t0 * len end
+      end
+      return best
+    end
+  end
+  local MEDIUM = { distance = 2.75, side = 1.0, height = -0.35, fov = 55 }
+  local function run(aCfg, aFrames, aPos, aRay, aExtra)
+    local S = CM.newSolver(aCfg)
+    local out = {}
+    for i = 1, aFrames do
+      local t = i * DT
+      local pos = aPos(t)
+      local inp = { dt = DT, playerPos = pos, playerQ = CM.QID, bodyYaw = 0, fppPitch = -15, dyaw = 0, dpitch = 0, moving = true,
+        profile = MEDIUM, side = 1, w = 1, raycast = aRay, sideRelief = true }
+      if aExtra then aExtra(inp, t) end
+      local r = CM.solve(S, inp)
+      r.pos = pos
+      out[i] = r
+    end
+    return out, S
+  end
+  local function sameRes(a, b)
+    for i = 1, #a do
+      if a[i].world.x ~= b[i].world.x or a[i].world.y ~= b[i].world.y or a[i].world.z ~= b[i].world.z
+        or a[i].shownPitch ~= b[i].shownPitch then return false end
+    end
+    return true
+  end
+  -- V runs at 6 m/s past a pillar that is 0.5 m to her right
+  local pillar = rayBoxes({ { 0.5, 1.5, -0.5, 0.5, -1, 4 } })
+  local function runPast(t) return { x = 0, y = -5 + 6 * t, z = 0 } end
+  local function measure(res)
+    local near, step = 1e9, 0
+    for i = 1, #res do
+      local r = res[i]
+      near = math.min(near, CM.dist(r.world, { x = r.pos.x, y = r.pos.y, z = r.pos.z + 1.65 }))
+      if i > 1 then
+        local q = res[i - 1]
+        step = math.max(step, CM.dist(CM.sub(r.world, r.pos), CM.sub(q.world, q.pos)))
+      end
+    end
+    return near, step
+  end
+  local oldRes = run(CM.config({ sideRelief = false }), 200, runPast, pillar)
+  local newRes, Snew = run(CM.config(), 200, runPast, pillar)
+  local oldNear, oldStep = measure(oldRes)
+  local newNear, newStep = measure(newRes)
+  print(string.format("side relief, pillar: nearest camera-head %.2f -> %.2f m, largest step against V %.2f -> %.2f m per frame",
+    oldNear, newNear, oldStep, newStep))
+  check("side relief: without it the pillar pulls the camera in to V (< 1.1 m from her head)", oldNear < 1.1, oldNear)
+  check("side relief: with it the camera stays >= 1.5 m from V's head", newNear >= 1.5, newNear)
+  check("side relief: no jump (<= 0.2 m per frame against V at 60 FPS, and not above the old one)",
+    newStep <= 0.2 and newStep <= oldStep, newStep)
+  check("side relief: back to the full shoulder offset behind the pillar, no state left",
+    Snew.sr == nil and newRes[#newRes].sideRelief == 1)
+  local clipped = false
+  for i = 1, #newRes do
+    local r = newRes[i]
+    clipped = clipped or pillar(r.pivot, r.world) ~= nil
+  end
+  check("side relief: the camera never goes through the pillar", not clipped)
+  local empty = rayBoxes({})
+  check("side relief: with nothing in the way the camera is unchanged",
+    sameRes(run(CM.config(), 90, runPast, empty), run(CM.config({ sideRelief = false }), 90, runPast, empty)))
+  local back = rayBoxes({ { -10, 10, -1.3, -1.0, -1, 5 } })
+  local function stand() return { x = 0, y = 0, z = 0 } end
+  check("side relief: a wall behind V shortens the boom as before (no offset change)",
+    sameRes(run(CM.config(), 90, stand, back), run(CM.config({ sideRelief = false }), 90, stand, back)))
+  local function aiming(i) i.aim, i.aimW = true, 1 end
+  check("side relief: none while aiming", sameRes(run(CM.config({ sideRelief = false }), 150, runPast, pillar, aiming),
+    run(CM.config(), 150, runPast, pillar, aiming)))
+  check("side relief: none in a vehicle", sameRes(oldRes, run(CM.config(), 200, runPast, pillar, function(i) i.sideRelief = false end)))
+  -- raycast load: casts per frame of the whole solve (collision and side relief), each one cast per collision group in the game
+  local function perFrame(aCfg, aRay)
+    local n = 0
+    run(aCfg, 200, runPast, function(x, y) n = n + 1 return aRay(x, y) end)
+    return n / 200
+  end
+  local openOff, openOn = perFrame(CM.config({ sideRelief = false }), empty), perFrame(CM.config(), empty)
+  local pillarOff, pillarOn = perFrame(CM.config({ sideRelief = false }), pillar), perFrame(CM.config(), pillar)
+  print(string.format("side relief, casts per frame (without -> with): open field %.2f -> %.2f, past the pillar %.2f -> %.2f",
+    openOff, openOn, pillarOff, pillarOn))
+  check("side relief: in the open it adds less than 2 casts per frame", openOn - openOff < 2, openOn - openOff)
+
+  -- vault over a 1 m box into a 3.5 m drop: V's path of a recorded session (forward distance and capsule height over time)
+  local KEY = { { 0.0, -1.2, 0 }, { 0.1, -0.55, 0 }, { 0.19, 0.04, 0 }, { 0.29, 0.69, 0 }, { 0.40, 1.22, -0.28 },
+    { 0.50, 1.64, -0.66 }, { 0.60, 2.08, -1.21 }, { 0.70, 2.58, -1.92 }, { 0.79, 3.02, -2.67 }, { 0.89, 3.52, -3.5 },
+    { 1.0, 3.95, -3.5 }, { 1.1, 4.12, -3.5 }, { 4.0, 4.2, -3.5 } }
+  local T0 = 1.0
+  local function dropPos(t)
+    local u = t - T0
+    if u <= 0 then return { x = 0, y = -1.2 + 6.5 * u, z = 0 } end
+    for i = 2, #KEY do
+      local a, b = KEY[i - 1], KEY[i]
+      if u <= b[1] then
+        local f = (u - a[1]) / (b[1] - a[1])
+        return { x = 0, y = a[2] + (b[2] - a[2]) * f, z = a[3] + (b[3] - a[3]) * f }
+      end
+    end
+    return { x = 0, y = 4.2, z = -3.5 }
+  end
+  local ledge = rayBoxes({ { -30, 30, -30, 0.21, -10, 0 }, { -1.2, 1.2, 0.0, 0.21, 0, 1.0 }, { -30, 30, 0.21, 30, -10, -3.5 } })
+  local function flags(i, t)
+    local u = t - T0
+    i.vault = u >= 0 and u < 0.23
+    i.air = u >= 0.23 and u < 0.9
+    i.jump = false
+  end
+  -- hidden frames: V is past the box and the box (or the ledge) hides that point of her from the camera
+  local function hidden(res, point)
+    local n = 0
+    for i = 1, #res do
+      local r = res[i]
+      if r.pos.y > 0.4 then
+        local h = { x = r.pos.x, y = r.pos.y, z = r.pos.z + point }
+        local d = ledge(r.world, h)
+        if d ~= nil and d < CM.dist(r.world, h) - 0.05 then n = n + 1 end
+      end
+    end
+    return n
+  end
+  local frames = math.floor(5.0 * FPS)
+  local before = run(CM.config({ vaultRise = 0.6, vaultDropExtra = 0 }), frames, dropPos, ledge, flags)
+  local after, Sdrop = run(CM.config({ vaultRise = 0.6 }), frames, dropPos, ledge, flags)
+  local counts = {}
+  for _, h in ipairs({ 0.3, 0.6, 0.9, 1.2 }) do
+    counts[#counts + 1] = string.format("%.1f m: %d -> %d", h, hidden(before, h), hidden(after, h))
+  end
+  local sumB = hidden(before, 0.3) + hidden(before, 0.6) + hidden(before, 0.9) + hidden(before, 1.2)
+  local sumA = hidden(after, 0.3) + hidden(after, 0.6) + hidden(after, 0.9) + hidden(after, 1.2)
+  local peakA, stepB, stepA, tiltStep, found = 0, 0, 0, 0, nil
+  for i = 2, frames do
+    peakA = math.max(peakA, after[i].vaultRise)
+    stepB = math.max(stepB, CM.dist(before[i].world, before[i - 1].world))
+    stepA = math.max(stepA, CM.dist(after[i].world, after[i - 1].world))
+    tiltStep = math.max(tiltStep, math.abs(after[i].shownPitch - after[i - 1].shownPitch))
+    found = found or after[i].vaultDrop
+  end
+  print(string.format("vault drop: hidden frames by height over V's origin (%s); rise peak %.2f m; largest camera step "
+    .. "%.3f -> %.3f m; tilt step %.2f deg; found %s", table.concat(counts, ", "), peakA, stepB, stepA, tiltStep, tostring(found)))
+  check("vault drop: the drop is found ahead during the vault", found == "ahead", found)
+  check("vault drop: fewer frames with parts of V behind the box", sumA < sumB, string.format("%d -> %d", sumB, sumA))
+  check("vault drop: the extra rise is there (peak above 1.0 m for 0.6)", peakA > 1.0 and peakA <= 1.2 + 1e-9, peakA)
+  check("vault drop: no pop (tilt <= 2.2 deg per frame, camera step at most 4 cm above the old one)",
+    tiltStep <= 2.2 and stepA <= stepB + 0.04, string.format("%.2f deg, %.3f / %.3f m", tiltStep, stepA, stepB))
+  check("vault drop: back down after the landing, no state left", Sdrop.vr == nil and after[frames].vaultRise == 0)
+  -- a vault on level ground gets no extra
+  local level = rayBoxes({ { -30, 30, -30, 30, -10, 0 }, { -1.2, 1.2, 0.0, 0.21, 0, 1.0 } })
+  local function levelPos(t) return { x = 0, y = -1.2 + 6.0 * (t - T0), z = 0 } end
+  local function vflags(i, t) i.vault = t >= T0 and t < T0 + 0.45 end
+  check("vault drop: a vault on level ground is unchanged", sameRes(run(CM.config({ vaultRise = 0.6 }), frames, levelPos, level, vflags),
+    run(CM.config({ vaultRise = 0.6, vaultDropExtra = 0 }), frames, levelPos, level, vflags)))
+  local _, Soff = run(CM.config(), frames, dropPos, ledge, flags)
+  check("vault drop: with the rise at 0 nothing is kept", Soff.vr == nil)
+end
+
 print(string.format("utpp_camera stance test: %d passed, %d failed", results.pass, results.fail))
 assert(results.fail == 0, "utpp_camera stance test failed")
