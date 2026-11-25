@@ -37,7 +37,7 @@ inline constexpr int kLegPasses = 2;               // leg passes: the need, then
 inline constexpr int kSmoothFrames = 4;            // clip frames each side (widen, then average)
 inline constexpr double kRootLiftMaxM = 0.10;
 inline constexpr double kRootBackMaxM = 0.08;
-inline constexpr double kFootAlongMaxM = 0.15;     // horizontal move of a foot against the clip, root and ankle together
+inline constexpr double kFootAlongMaxM = 0.25;     // horizontal move of a foot against the clip, root and ankle together
 inline constexpr double kLegLiftMaxM = 0.35;
 inline constexpr double kPalmHeightM = 0.025;      // palm joint line above the top surface (half the hand's thickness)
 inline constexpr double kPalmMinPastEdgeM = 0.04;  // palm centre at least this far past the front edge
@@ -58,7 +58,7 @@ inline constexpr double kReachFadeFrom = 1.00, kReachFadeTo = 1.15; // shoulder 
 inline constexpr double kMoveFadeFromM = 0.35, kMoveFadeToM = 0.55; // wrist correction length
 inline constexpr double kPastFadeFromM = 0.30, kPastFadeToM = 0.55; // shoulder past the held point along the facing: let go
 inline constexpr double kArmSwingMaxDeg = 50.0;    // upper arm and forearm direction change against the clip pose
-inline constexpr double kLegSwingMaxDeg = 38.0;
+inline constexpr double kLegSwingMaxDeg = 36.0;
 inline constexpr double kKneeMinInnerDeg = 30.0;   // the leg is never folded tighter than this (or than the clip already is)
 inline constexpr double kElbowMinInnerDeg = 30.0;
 inline constexpr double kWristMaxDeg = 25.0;      // the wrist turns at most this far from the clip's wrist; past it the hand follows the forearm
