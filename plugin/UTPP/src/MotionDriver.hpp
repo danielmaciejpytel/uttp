@@ -234,6 +234,7 @@ struct StrafeProbe
     bool shouldSpin = false;                       // chooser input ShouldSpinTransition of that Step
     bool shooterStrafe = false;                    // chooser input ChooserState::shooterStrafe of that Step
     uint64_t strafeSectorHolds = 0;                // the matcher's count of jumps the Shooter sector delay held (after that Step's update)
+    uint64_t strafeEntryShifts = 0;                // the matcher's count of strafe pivot picks moved to their travel reversal (after that Step's update)
 };
 StrafeProbe TestStrafeProbe();
 // test targets only: the aim point / barrel loop seam of the last v2 evaluation (aim pitch plan 2026-10-30 seam C).

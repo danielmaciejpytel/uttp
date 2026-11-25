@@ -751,6 +751,19 @@ struct MatcherConfig
     // next pivot: two changes for one tap. 0.3 keeps the taps under the clip change limit with the smallest foot lock correction of the
     // tails tried (0.2 / 0.25 / 0.3 / 0.35). 0 = such pivots are not committed.
     float strafePivotTailS = 0.3f;
+    // strafePivotTravelEntry: such a strafe pivot (committed by strafePivotTailS) picked before its authored travel reversal starts at
+    // strafePivotEntryLeadS before that reversal instead of at the picked row, when the reversal is at most strafePivotEntryMaxSkipS ahead.
+    // In aimed strafe taps the capsule reverses within about one frame, while the pivots were picked 0.2 s before their own reversal: the
+    // committed clip played only its braking phase, its root running the old way at 2 - 4 m/s against the capsule with a foot planted, and
+    // that foot slid 50 - 70 cm through the world (the foot lock bounded its correction and then released it). From the reversal on the
+    // root moves with the capsule. Rows of another clip, unindexed target frames and every other pick are untouched. false = off.
+    bool strafePivotTravelEntry = true;
+    float strafePivotEntryLeadS = 0.03f;
+    float strafePivotEntryMaxSkipS = 0.4f;
+    // strafePivotBlendS: the fade into such a committed strafe pivot lasts at most this long (seconds; the ground fade is 0.5 s). During the
+    // ordinary fade the outgoing clip, still running the old way with that foot planted, kept dragging the shown foot along: the Male rifle
+    // taps slid 44 cm with the travel entry alone, 17 cm with 0.1 (24 without both); 0.15 / 0.2 left 35 / 47 cm. 0 = the ordinary fade.
+    float strafePivotBlendS = 0.1f;
     // turnFootPhase: a jump into a moving turn / pivot clip (steer::IsPivot / IsMoveTurn with an authored root turn, MoveTurnSign) on a
     // reversal while moving on the stand ground is re-ranked inside the winner's database among the rows of the same turn direction, with
     // the pose channels of the query read from the shown pose (SetShownPoseHistory) instead of the database mean. Without it the pick on a
@@ -1223,6 +1236,41 @@ public:
                 }
             }
         }
+        // strafePivotTravelEntry: clip time of the authored travel reversal of a pivot clip with less than 45 deg of root yaw (the strafe
+        // pivots): the first frame from which the root step, expressed in the clip's first frame, runs along the clip's final travel
+        // direction (mean of its last five steps) for three frames, after a step that did not. -1 = no such clip or no reversal.
+        m_clipTravelRevS.assign(aDb->NumClips(), -1.0f);
+        for (uint32_t c = 0; c < aDb->NumClips(); ++c)
+        {
+            const MotionClipRecord& cl = aDb->Clip(c);
+            if (!steer::IsPivot(steer::ClassifyClip(aDb->ClipName(c))) || (cl.flags & kClipLoop) || cl.numFrames < 8)
+                continue;
+            std::vector<float> ax(cl.numFrames), ay(cl.numFrames);
+            double yaw = 0.0;
+            for (uint32_t f = 0; f < cl.numFrames; ++f)
+            {
+                const auto& r = aDb->Root(cl.firstFrame + f);
+                const double cy = std::cos(yaw), sy = std::sin(yaw);
+                ax[f] = static_cast<float>(cy * r.dx - sy * r.dy);
+                ay[f] = static_cast<float>(sy * r.dx + cy * r.dy);
+                yaw += r.dyaw;
+            }
+            if (!(std::fabs(yaw) < math::kPi / 4.0))
+                continue;
+            float fx = 0.0f, fy = 0.0f;
+            for (uint32_t f = cl.numFrames - 5; f < cl.numFrames; ++f)
+                fx += ax[f], fy += ay[f];
+            const float fl = std::hypot(fx, fy);
+            if (!(fl > 1e-5f))
+                continue;
+            const auto along = [&](uint32_t f) { return (ax[f] * fx + ay[f] * fy) / fl; };
+            for (uint32_t f = 1; f + 3 <= cl.numFrames; ++f)
+                if (along(f - 1) <= 0.0f && along(f) > 0.0f && along(f + 1) > 0.0f && along(f + 2) > 0.0f)
+                {
+                    m_clipTravelRevS[c] = static_cast<float>(f) / aDb->Header().fps;
+                    break;
+                }
+        }
         // headingCatchUpS: clips made for a body that keeps its facing - pattern and side-step shuffle clips, pivots / turns with less than 45 deg of authored
         // root yaw, and loops that run in any direction but forward (forward = Loop_F and the curved Loop_F_L_* / Loop_F_R_*)
         m_clipKeepsFacing.assign(aDb->NumClips(), 0);
@@ -1359,8 +1407,14 @@ public:
         m_cfg.aimTipSettleS = aS;
         m_cfg.aimTipSettleContact = aContact;
     }
+    // tests only: MatcherConfig::strafePivotTravelEntry of a running matcher (motiondriver::TestSetStrafePivotEntry)
+    void TestSetStrafePivotTravelEntry(bool aOn) { m_cfg.strafePivotTravelEntry = aOn; }
+    void TestSetStrafePivotBlendS(float aS) { m_cfg.strafePivotBlendS = aS; }
 #endif
     uint64_t StrafeSectorHolds() const { return m_strafeSectorHolds; }
+    // strafePivotTravelEntry: picks moved to their travel reversal so far, and the authored travel reversal of a clip (s, -1 = none)
+    uint64_t StrafeEntryShifts() const { return m_strafeEntryShifts; }
+    float ClipTravelReversalS(uint32_t aClip) const { return aClip < m_clipTravelRevS.size() ? m_clipTravelRevS[aClip] : -1.0f; }
     // Authored ROOT, not a name suffix or the already steered blended root rate.
     // Zero means an invalid clip, a non-reface, or no meaningful authored turn.
     int StartTurnDirection(int32_t aClip) const
@@ -2270,6 +2324,40 @@ public:
         else if (bestDb >= 0)
         {
             const DatabaseRecord& D = db.Db(static_cast<uint32_t>(bestDb));
+            // strafePivotTravelEntry: a strafe pivot the turn commit will hold (the same conditions as strafePivot below) picked before its
+            // authored travel reversal plays from strafePivotEntryLeadS before that reversal (the first indexed row of its entry at or after
+            // that frame); before the guards and the play rate, which read bestRow (mutation 50: off; mutation 36, no strafe pivot commit, too)
+            if (UTPP_AND_NOT(JUMPPICK, 50) UTPP_AND_NOT(JUMPPICK, 36) !bestIsCont && m_cfg.strafePivotTravelEntry && m_cfg.turnCommit && m_cfg.strafePivotTailS > 0.0f && m_guardsOn &&
+                aState.aimStrafeRotation && aState.isPivoting && aState.movementMode == 0 && aState.movementState == 1 && aState.stance == 0)
+            {
+                const RowRecord& r0 = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
+                const EntryRecord& e0 = db.Entry(r0.entry);
+                const MotionClipRecord& c0 = db.Clip(e0.clip);
+                const float t0 = static_cast<float>(r0.frame - c0.firstFrame) / fps;
+                const float rev = m_clipTravelRevS[e0.clip];
+                const float at = rev - m_cfg.strafePivotEntryLeadS;
+                if (rev > 0.0f && m_clipTurnEndS[e0.clip] <= t0 && t0 < at && at - t0 <= m_cfg.strafePivotEntryMaxSkipS &&
+                    steer::IsPivot(steer::ClassifyClip(db.ClipName(e0.clip))))
+                {
+                    const uint32_t target = c0.firstFrame + static_cast<uint32_t>(at * fps + 0.5f);
+                    const uint32_t revFrame = c0.firstFrame + static_cast<uint32_t>(rev * fps + 0.5f);
+                    uint32_t lo = e0.firstRow, hi = e0.firstRow + e0.numRows;
+                    while (lo < hi)
+                    {
+                        const uint32_t mid = (lo + hi) / 2;
+                        if (db.Row(mid).frame < target)
+                            lo = mid + 1;
+                        else
+                            hi = mid;
+                    }
+                    if (lo < e0.firstRow + e0.numRows && db.Row(lo).frame <= revFrame)
+                    {
+                        bestRow = static_cast<int32_t>(lo - D.firstRow);
+                        ++m_strafeEntryShifts;
+                        m_lastStrafeEntryFromS = t0;
+                    }
+                }
+            }
             const RowRecord& rr = db.Row(D.firstRow + static_cast<uint32_t>(bestRow));
             const EntryRecord& en = db.Entry(rr.entry);
             const MotionClipRecord& cl = db.Clip(en.clip);
@@ -2448,6 +2536,10 @@ public:
                 res.blend.blendTime = (aState.stationaryShotTurn || stationaryAim) &&
                     steer::ClassifyClip(db.ClipName(en.clip)) == steer::kClassTurnInPlace ?
                     std::min(blendTime, tipCap) : blendTime;
+                // strafePivotBlendS: the fade into a committed strafe pivot (0 = the ordinary fade)
+                // mutation 51: the ordinary fade into a committed strafe pivot
+                if (UTPP_AND_NOT(JUMPPICK, 51) strafePivot && m_turnHoldClip >= 0 && m_cfg.strafePivotBlendS > 0.0f)
+                    res.blend.blendTime = std::fmin(res.blend.blendTime, m_cfg.strafePivotBlendS);
                 // fix3/jump (blendSlideFamily): FootOut <-> KneesOut inside a slide
                 // mutation 6: the family switch keeps the 0.2 s slide fade
                 if (UTPP_AND_NOT(JUMPPICK, 6) m_cfg.blendSlideFamily > 0.0f && m_cur.valid && m_cur.db >= 0 && m_dbSlide[static_cast<uint32_t>(m_cur.db)] &&
@@ -3559,6 +3651,9 @@ private:
     int m_stopHoldStance = 0, m_stopHoldFlags = 0; // stopCommitTailS: stance / HoldFlags when it was selected
     float m_stopHoldStart = 0.0f;           // stopCommitMaxS: clip time of the held Stop clip at its selection
     std::vector<float> m_clipTurnEndS;      // turnCommit: clip index -> clip time where the authored root turn is done (-1 = not a turn clip)
+    std::vector<float> m_clipTravelRevS;    // strafePivotTravelEntry: clip index -> clip time of the authored travel reversal (-1 = none)
+    uint64_t m_strafeEntryShifts = 0;       // strafePivotTravelEntry: picks moved to their travel reversal so far
+    float m_lastStrafeEntryFromS = 0.0f;    // strafePivotTravelEntry: clip time of the last moved pick's own row
     int32_t m_turnHoldClip = -1;            // turnCommit: the held turn clip (-1 = none)
     float m_turnTailS = 0.0f;               // turnCommitTailS: seconds the held turn clip has played past its turn end
     float m_turnHoldEndS = 0.0f;            // turnCommit: clip time of the held clip's turn end (the pick time for a strafe pivot)

@@ -2756,6 +2756,20 @@ void TestSetStrafePivotTail(float aS)
     std::lock_guard lock(g_m);
     g_testStrafePivotTailS = aS >= 0.0f ? aS : ProductionMatcherConfig().strafePivotTailS;
 }
+// MatcherConfig::strafePivotTravelEntry of the running matcher from the next update on (0 = off, 1 = on, < 0 = back to the production
+// value); -1 until the first call = never touched
+int g_testStrafePivotEntry = -1;
+float g_testStrafePivotBlendS = -1.0f;
+void TestSetStrafePivotBlend(float aS)
+{
+    std::lock_guard lock(g_m);
+    g_testStrafePivotBlendS = aS >= 0.0f ? aS : ProductionMatcherConfig().strafePivotBlendS;
+}
+void TestSetStrafePivotEntry(int aOn)
+{
+    std::lock_guard lock(g_m);
+    g_testStrafePivotEntry = aOn >= 0 ? (aOn != 0 ? 1 : 0) : (ProductionMatcherConfig().strafePivotTravelEntry ? 1 : 0);
+}
 // MatcherConfig::aimTipSettleS / aimTipSettleContact of the running matcher from the next update on (aS 0 = off, < 0 = back to the
 // production values); -1 until the first call = never touched
 float g_testAimTipSettleS = -1.0f, g_testAimTipSettleContact = -1.0f;
@@ -5970,12 +5984,17 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         b.matcher.TestSetStrafePivotTailS(g_testStrafePivotTailS);
     if (g_testAimTipSettleS >= 0.0f)
         b.matcher.TestSetAimTipSettle(g_testAimTipSettleS, g_testAimTipSettleContact);
+    if (g_testStrafePivotEntry >= 0)
+        b.matcher.TestSetStrafePivotTravelEntry(g_testStrafePivotEntry != 0);
+    if (g_testStrafePivotBlendS >= 0.0f)
+        b.matcher.TestSetStrafePivotBlendS(g_testStrafePivotBlendS);
 #endif
     b.matcher.SetShownPoseHistory(turnShown);
     motion::MatchResult r = b.matcher.Update(dt, g_traj.data(), nt, cs, history); // UTPP-MOTION SEAM trav: copy (handback blend)
     b.matcher.SetShownPoseHistory(nullptr);
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
     g_strafeProbe.strafeSectorHolds = b.matcher.StrafeSectorHolds();
+    g_strafeProbe.strafeEntryShifts = b.matcher.StrafeEntryShifts();
 #endif
     ++g_turnFootOutcome[r.turnFootPhase & 3];
     BudgetStageRecordLocked(r);

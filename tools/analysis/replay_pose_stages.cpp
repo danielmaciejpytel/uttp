@@ -125,6 +125,9 @@
 //   --aim-pivot-gate S  with --aim-rotation 1: the pivot / start elapsed-time gate (s, default 0.5; 0 = no gate)
 //   --aim-pivot-regate D  with --aim-rotation 1: a new reversal of at least D deg skips that gate (default 150; 0 = the gate as before)
 //   --strafe-pivot-tail S  commit of pivots entered past their authored turn (MatcherConfig::strafePivotTailS, default 0.3; 0 = off)
+//   --strafe-pivot-entry 0|1  a committed strafe pivot picked before its authored travel reversal starts just before that reversal
+//                       (MatcherConfig::strafePivotTravelEntry, default 1; 0 = it plays from the picked row)
+//   --strafe-pivot-blend S  longest fade into a committed strafe pivot (MatcherConfig::strafePivotBlendS, default 0.1; 0 = the ordinary fade)
 //   --aim-tip-settle S[,C]  an aimed turn in place whose goal moved on to the same side plays until both foot contacts are >= C for S
 //                       seconds (MatcherConfig::aimTipSettleS / aimTipSettleContact, default 0.1 / 0.98; 0 = off)
 //   --force-aim 1       synthetic aim: every feed reads the PSM upper body Aim with a drawn weapon (the recordings have almost no
@@ -202,6 +205,8 @@ void TestSetMapAimPivot(float aPivotDeg, float aGateS);
 void TestSetMapAimPivotRegate(float aRegateDeg);
 void TestSetStrafePivotTail(float aS);
 void TestSetAimTipSettle(float aS, float aContact);
+void TestSetStrafePivotEntry(int aOn);
+void TestSetStrafePivotBlend(float aS);
 void TestSetMapCapsuleRate(int32_t aMode, int32_t aScope);
 void TestSetMapCapsuleRateGuards(int32_t aGuards, float aBlendS);
 void TestSetMapSpeedConverter(int32_t aBits, float aFriction, float aMaxTurnDeg);
@@ -616,6 +621,8 @@ int main(int argc, char** argv)
     float aimPivotDeg = std::numeric_limits<float>::quiet_NaN(), aimPivotGateS = std::numeric_limits<float>::quiet_NaN();
     float aimPivotRegateDeg = std::numeric_limits<float>::quiet_NaN(); // --aim-pivot-regate
     float strafePivotTailS = -1.0f;                                     // --strafe-pivot-tail (< 0 = not passed)
+    int strafePivotEntry = -1;                                          // --strafe-pivot-entry (< 0 = not passed)
+    float strafePivotBlendS = -1.0f;                                    // --strafe-pivot-blend (< 0 = not passed)
     float aimTipSettleS = -1.0f, aimTipSettleContact = -1.0f;           // --aim-tip-settle S[,C] (< 0 = not passed)
     bool forceAim = false;                     // --force-aim 1
     uint64_t aimCameraFeeds = 0, aimCameraAimFeeds = 0;
@@ -781,6 +788,10 @@ int main(int argc, char** argv)
             aimPivotRegateDeg = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--strafe-pivot-tail") == 0)
             strafePivotTailS = std::stof(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--strafe-pivot-entry") == 0)
+            strafePivotEntry = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--strafe-pivot-blend") == 0)
+            strafePivotBlendS = std::stof(argv[i + 1]);
         else if (std::strcmp(argv[i], "--aim-tip-settle") == 0)
         {
             const std::string v = argv[i + 1];
@@ -1024,6 +1035,10 @@ int main(int argc, char** argv)
         motiondriver::TestSetMapAimPivotRegate(aimPivotRegateDeg);
     if (strafePivotTailS >= 0.0f)
         motiondriver::TestSetStrafePivotTail(strafePivotTailS);
+    if (strafePivotEntry >= 0)
+        motiondriver::TestSetStrafePivotEntry(strafePivotEntry);
+    if (strafePivotBlendS >= 0.0f)
+        motiondriver::TestSetStrafePivotBlend(strafePivotBlendS);
     if (aimTipSettleS >= 0.0f)
         motiondriver::TestSetAimTipSettle(aimTipSettleS, aimTipSettleContact);
     FILE* forecastOut = nullptr;
