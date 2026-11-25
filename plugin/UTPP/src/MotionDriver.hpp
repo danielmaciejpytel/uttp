@@ -251,6 +251,14 @@ struct BarrelProbe
     uint32_t excluded = 0;
 };
 BarrelProbe TestBarrelProbe();
+// test targets only: barrel elevation error (deg, + = above P, the aim point of the last BarrelProbe) of the pose before and after the
+// lean layer of the last feed; after = before when the lean applied nothing. measured = false without an aim point or weapon bone.
+struct LeanBarrelProbe
+{
+    bool measured = false, applied = false;
+    float beforeDeg = 0.0f, afterDeg = 0.0f;
+};
+LeanBarrelProbe TestLeanBarrelProbe();
 // test targets only: the root frame step of the last v2 Step (inputs of the native offset root and its offset before / after).
 struct RootProbe
 {

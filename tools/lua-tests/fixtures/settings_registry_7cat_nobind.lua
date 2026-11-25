@@ -131,7 +131,7 @@ return {
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
     ["mm.lean"] = "true",
-    ["mm.leanCoverage"] = "\"standard\"",
+    ["mm.leanCoverage"] = "\"wide\"",
     ["mm.leanHead"] = "true",
     ["mm.leanHeadScale"] = "0.20000000000000001",
     ["mm.leanScale"] = "0.20000000000000001",
@@ -303,7 +303,7 @@ return {
     "native UTPPSetMMFarJumpGravity(false)",
     "native UTPPSetMMCapsuleForecast(false)",
     "native UTPPSetMMAimRotation(true)",
-    "native UTPPSetMotionLeanCoverage(0)",
+    "native UTPPSetMotionLeanCoverage(1)",
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
     "native UTPPSetMMFootYawLock(true)",
@@ -335,7 +335,7 @@ return {
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.aimRotation(true,\"ok\")",
-    "apply mm.leanCoverage(\"standard\",\"ok\")",
+    "apply mm.leanCoverage(\"wide\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
@@ -543,7 +543,7 @@ return {
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.aimRotation(true,\"ok\")",
-    "apply mm.leanCoverage(\"standard\",\"ok\")",
+    "apply mm.leanCoverage(\"wide\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
@@ -1797,7 +1797,7 @@ return {
     },
     ["mm.leanCoverage"] = {
       ["choices"] = "standard,wide",
-      ["default"] = "\"standard\"",
+      ["default"] = "\"wide\"",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2494,7 +2494,7 @@ return {
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
     ["mm.lean"] = "true",
-    ["mm.leanCoverage"] = "\"standard\"",
+    ["mm.leanCoverage"] = "\"wide\"",
     ["mm.leanHead"] = "true",
     ["mm.leanHeadScale"] = "0.20000000000000001",
     ["mm.leanScale"] = "0.20000000000000001",
@@ -3075,7 +3075,7 @@ return {
     "apply mm.overlayInertialSwitch(true,\"ok\")",
     "apply mm.capsuleForecast(false,\"ok\")",
     "apply mm.aimRotation(true,\"ok\")",
-    "apply mm.leanCoverage(\"standard\",\"ok\")",
+    "apply mm.leanCoverage(\"wide\",\"ok\")",
     "apply mm.selectionGuards(true,\"ok\")",
     "apply mm.debug(false,\"ok\")",
     "apply camera.impl(true,\"ok\")",
@@ -3271,7 +3271,7 @@ mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
 mm.aimRotation=true\r\
-mm.leanCoverage=standard\r\
+mm.leanCoverage=wide\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
 camera.impl=true\r\
@@ -3739,7 +3739,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.kneeFix"] = "true",
     ["mm.kneeHold"] = "true",
     ["mm.lean"] = "true",
-    ["mm.leanCoverage"] = "\"standard\"",
+    ["mm.leanCoverage"] = "\"wide\"",
     ["mm.leanHead"] = "true",
     ["mm.leanHeadScale"] = "0.20000000000000001",
     ["mm.leanScale"] = "1.1000000000000001",
@@ -3907,7 +3907,7 @@ mm.farJumpGravity=false\r\
 mm.overlayInertialSwitch=true\r\
 mm.capsuleForecast=false\r\
 mm.aimRotation=true\r\
-mm.leanCoverage=standard\r\
+mm.leanCoverage=wide\r\
 mm.selectionGuards=true\r\
 mm.debug=false\r\
 camera.impl=true\r\

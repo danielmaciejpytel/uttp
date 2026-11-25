@@ -231,7 +231,8 @@ constexpr const char* kMeta[] = {"t", "dt", "owned", "published", "tailed", "cli
                                  "mvx", "mvy", "loco", "rpPrepared", "rpCapDX", "rpCapDY", "rpCapDYaw", "rpAnimDX", "rpAnimDY",
                                  "rpAnimDYaw", "rpMovingGround", "rpMontage", "rpBeforeX", "rpBeforeY", "rpBeforeYaw", "rpAfterX", "rpAfterY",
                                  "rpAfterYaw", "rpYawAhead", "aoGrid", "aoW", "aoGridShare", "aoYaw", "aoGridYaw", "aoPitch",
-                                 "aoSpineYaw", "aoHcIn", "aoHcGrid", "aoHcOut", "nYaw", "nPitch", "nW", "aimW", "haveAim", "aoSrcYaw"};
+                                 "aoSpineYaw", "aoHcIn", "aoHcGrid", "aoHcOut", "nYaw", "nPitch", "nW", "aimW", "haveAim", "aoSrcYaw",
+                                 "barrelEx", "leanBarrelBefore", "leanBarrelAfter", "leanApplied"};
 constexpr size_t kMetaFloats = sizeof(kMeta) / sizeof(kMeta[0]);
 
 motionhost::MotionSetFrame g_tail;
@@ -1730,6 +1731,10 @@ int main(int argc, char** argv)
         }
         float aod[15];
         motiondriver::TestAoDiag(aod);
+        // barrel exclusion bits of the last evaluation (-1 = no evaluation / not measured) and the barrel error around the lean layer
+        const motiondriver::BarrelProbe bpr = motiondriver::TestBarrelProbe();
+        const float lbBarrelEx = bpr.evaluated && bpr.measured ? float(bpr.excluded) : -1.0f;
+        const motiondriver::LeanBarrelProbe lb = motiondriver::TestLeanBarrelProbe();
         if (selOut)
         {
             const motiondriver::SelectionDiag sd = motiondriver::SelectionDiagnostics();
@@ -1749,7 +1754,9 @@ int main(int argc, char** argv)
                                          rp.capsuleYawDelta, rp.animDelta[0], rp.animDelta[1], rp.animYawDelta, rp.movingGround ? 1.f : 0.f,
                                          rp.montage ? 1.f : 0.f, rp.before[0], rp.before[1], rp.before[2], rp.after[0], rp.after[1], rp.after[2],
                                          rp.yawAhead, motiondriver::TestAoGridShare(), aod[0], aod[1], aod[2], aod[3], aod[4], aod[5],
-                                         aod[6], aod[7], aod[8], aod[9], aod[10], aod[11], aod[12], aod[13], aod[14]};
+                                         aod[6], aod[7], aod[8], aod[9], aod[10], aod[11], aod[12], aod[13], aod[14],
+                                         lbBarrelEx, lb.measured ? lb.beforeDeg : std::nanf(""), lb.measured ? lb.afterDeg : std::nanf(""),
+                                         lb.applied ? 1.f : 0.f};
         std::copy(meta, meta + kMetaFloats, rec.begin());
         std::fill(rec.begin() + kMetaFloats, rec.end(), std::nanf(""));
         if (g_tailValid && g_driverPose.size() == size_t(nb) * 7)

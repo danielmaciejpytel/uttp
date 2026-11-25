@@ -288,6 +288,7 @@ float g_barrelMuzzle = aim::Params{}.muzzleOffset;
 BarrelProbe g_barrelProbe; // the last v2 evaluation (TestBarrelProbe)
 RootProbe g_rootProbe;     // the last root frame step (TestRootProbe)
 DodgeProbe g_dodgeProbe;   // the last dodge decision (TestDodgeProbe)
+LeanBarrelProbe g_leanBarrelProbe; // barrel elevation error around the lean layer of the last feed (TestLeanBarrelProbe)
 #endif
 // Ground dodge clips (mm/Dodge.hpp): per v2 Step on the standing ground the player picks a clip on the dodge's impulse feed; its frames
 // replace the database pose of the motion layer (the matcher keeps running underneath, MatcherConfig::dodgeHold holds its clip) and
@@ -2597,6 +2598,12 @@ BarrelProbe TestBarrelProbe()
 {
     std::lock_guard lock(g_m);
     return g_barrelProbe;
+}
+
+LeanBarrelProbe TestLeanBarrelProbe()
+{
+    std::lock_guard lock(g_m);
+    return g_leanBarrelProbe;
 }
 
 RootProbe TestRootProbe()
@@ -5060,6 +5067,22 @@ void BodyOffsetStepLocked(const Bundle& aB, const adapter::MotionFeed& aF, bool 
 // foot locker) sees it. OFF and faded out: returns before touching anything (pose bit-identical).
 void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::MatchResult& aR, const adapter::MotionFeed& aF, float aDt)
 {
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+    // test targets only: the barrel error of the evaluator pose before the lean layer (after = before unless the lean is applied)
+    g_leanBarrelProbe = LeanBarrelProbe{};
+    const math::Vec3 leanProbePoint{g_barrelProbe.visual[0], g_barrelProbe.visual[1], g_barrelProbe.visual[2]};
+    if (g_barrelProbe.evaluated && g_barrelProbe.haveVisual)
+    {
+        ov::Pose tp;
+        aB.eval.ToOv(aB.pose.data(), tp);
+        float e = 0.0f;
+        if (aB.eval.BarrelErrOf(tp, g_barrelAxis, g_barrelMuzzle, leanProbePoint, e))
+        {
+            g_leanBarrelProbe.measured = true;
+            g_leanBarrelProbe.beforeDeg = g_leanBarrelProbe.afterDeg = e;
+        }
+    }
+#endif
     const bool headOwns = g_leanSetting && g_leanHeadSetting && aB.leanOk && aB.lean.HasHead();
     g_leanHeadOwns = headOwns; // HeadLeadStepLocked of this feed blocks the head lead in favour of the lean head layer
     if (!aB.leanOk || (!g_leanSetting && aB.lean.Idle()))
@@ -5113,6 +5136,12 @@ void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::M
         if (gridW > 0.0f)
             aB.eval.LimitLeanHeadChest(p, hcBefore);
         aB.eval.FromOv(p, aB.pose.data());
+#if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
+        float e = 0.0f;
+        g_leanBarrelProbe.applied = true;
+        if (g_leanBarrelProbe.measured && aB.eval.BarrelErrOf(p, g_barrelAxis, g_barrelMuzzle, leanProbePoint, e))
+            g_leanBarrelProbe.afterDeg = e;
+#endif
     }
 }
 

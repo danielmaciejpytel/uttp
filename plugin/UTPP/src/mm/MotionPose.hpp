@@ -1650,6 +1650,21 @@ public:
         ov::MeshRotations(m_ov->Skel(), aPose, ms);
         return ov::HeadChestYawDeg(ms[m_gridChest], ms[m_gridHead], m_gridChestRef, m_gridHeadRef);
     }
+    // barrel elevation error (deg, + = above the point, MeasureBarrel) of a pose in the overlay space (ToOv) against a point of the
+    // pose frame; false without the weapon bone or for a degenerate measurement (offline measurement of the layers after the evaluator)
+    bool BarrelErrOf(const ov::Pose& aPose, int32_t aAxis, float aMuzzle, const math::Vec3& aPoint, float& aErrDeg) const
+    {
+        if (!m_ov || m_rig.weaponRight < 0)
+            return false;
+        math::Vec3 pos[ov::kMaxBones];
+        math::Quat rot[ov::kMaxBones];
+        ov::MeshPositions(m_ov->Skel(), aPose, pos, rot);
+        BarrelMeasure m;
+        if (!MeasureBarrel(rot[m_rig.weaponRight], pos[m_rig.weaponRight], aAxis, aMuzzle, aPoint, m))
+            return false;
+        aErrDeg = m.errDeg;
+        return true;
+    }
 
 private:
     // motionfix item 2 (report 3.11 / 3.12, motion ABP order): on the layered pose m_lay
