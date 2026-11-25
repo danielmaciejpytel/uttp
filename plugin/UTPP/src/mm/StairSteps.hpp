@@ -15,6 +15,8 @@
 //     by L / (n x tread) (the cadence), the stride warp (StrideWarp.hpp, scale = capsule speed / clip root speed) then shortens the
 //     step by the same factor. A step shorter than minScale x L is not reachable (the knees and the shin skinning of a step shorter
 //     than about half of the clip's own) and a step is never lengthened: no whole n fits = no change.
+//   - A flight going down is only fitted at a walk: a faster descent (Config::descentFastOn / descentFastOff) gets no weight and
+//     moves as without the option (the landing of a run or a sprint going down was worse with the fit than without it).
 //   - The weight fades in / out over weightTime; the matcher ramps the cadence in on a slower time constant than the stride warp, so
 //     the step shortens before the rate leaves it behind.
 //   - Landing spot: the n x tread fit keeps the landing spot from step to step but does not choose it. At every landing the matcher
@@ -55,6 +57,10 @@ struct Config
     float lostS = 0.3f;       // s without a valid fit before the weight falls
     float weightTime = 0.3f;  // s, full-scale rise / fall of the weight
     float minScale = UTPP_STAIR_MIN_SCALE; // shortest step on stairs (fraction of the clip's own)
+    // A fast descent (a run or a sprint) is left as it is without the option: from above descentFastOn (m/s) until below
+    // descentFastOff a flight going down gets no weight (no cadence, no planned swing, no pelvis drop, no deeper traces).
+    float descentFastOn = 2.6f;
+    float descentFastOff = 2.3f;
 };
 
 struct Point
@@ -742,6 +748,7 @@ public:
         m_sinceFit = 1.0e9f;
         m_sinceValid = 1.0e9f;
         m_weight = 0.0f;
+        m_fast = false;
         m_est = Estimate{};
         m_footOk[0] = m_footOk[1] = false;
     }
@@ -788,13 +795,16 @@ public:
             }
             ++m_fits;
         }
-        const bool on = moving && m_est.valid && m_sinceValid <= m_cfg.lostS;
+        const bool found = moving && m_est.valid && m_sinceValid <= m_cfg.lostS;
+        // the speed gate of the descents (Config::descentFastOn): the estimate stays, only the weight goes
+        m_fast = moving && speed > (m_fast ? m_cfg.descentFastOff : m_cfg.descentFastOn);
+        const bool on = found && !(m_fast && m_est.rise < 0.0f);
         const float step = m_cfg.weightTime > 0.0f ? dt / m_cfg.weightTime : 1.0f;
         m_weight = std::clamp(on ? m_weight + step : m_weight - step, 0.0f, 1.0f);
         if (m_weight <= 0.0f)
         {
             m_weight = 0.0f;
-            if (!on)
+            if (!found)
                 m_est = Estimate{};
         }
         if (m_weight > 0.0f && m_est.valid)
@@ -811,6 +821,8 @@ public:
     }
     const Estimate& Current() const { return m_est; }
     float Weight() const { return m_weight; }
+    // true while the speed is in the range in which a flight going down gets no weight
+    bool FastDescentSpeed() const { return m_fast; }
     uint64_t Fits() const { return m_fits; }
     int LastFail() const { return m_lastFail; } // Estimate::fail of the last fit (0 = it found a flight)
     uint64_t ValidFits() const { return m_valid; }
@@ -822,6 +834,7 @@ private:
     Estimate m_est;
     uint64_t m_fits = 0, m_valid = 0;
     int m_lastFail = 0;
+    bool m_fast = false; // the speed gate of the descents is on
     float m_foot[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}}; // last traced foot middle (x, y) per side
     bool m_footOk[2] = {false, false};
 };
