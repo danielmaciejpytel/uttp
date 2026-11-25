@@ -151,6 +151,7 @@ return {
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stairSteps"] = "false",
+    ["mm.steadyAirPicks"] = "false",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -190,7 +191,9 @@ return {
     ["ragdoll.getUpPush"] = "true",
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
+    ["traversal.dropVault"] = "false",
     ["traversal.jumpStartGround"] = "true",
+    ["traversal.obstacleReach"] = "false",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
     ["vehicle.forceTppOnEnter"] = "true",
@@ -314,6 +317,9 @@ return {
     "native UTPPSetMMFastTurnExit(false)",
     "native UTPPSetMMTraversalJumpStartGround(true)",
     "native UTPPSetMMTraversalRejectedFallback(true)",
+    "native UTPPSetObstacleReach(false)",
+    "native UTPPSetDropVault(false)",
+    "native UTPPSetMMSteadyAirPicks(false)",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
@@ -332,8 +338,11 @@ return {
     "apply mm.leanScale(0.20000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
     "apply mm.fastTurnExit(false,\"ok\")",
+    "apply mm.steadyAirPicks(false,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
+    "apply traversal.obstacleReach(false,\"ok\")",
+    "apply traversal.dropVault(false,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -544,8 +553,11 @@ return {
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
     "apply mm.fastTurnExit(false,\"ok\")",
+    "apply mm.steadyAirPicks(false,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
+    "apply traversal.obstacleReach(false,\"ok\")",
+    "apply traversal.dropVault(false,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -1984,6 +1996,14 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
+    ["mm.steadyAirPicks"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["mm.stepDownReach"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -2327,8 +2347,24 @@ return {
       ["step"] = 0.10000000000000001,
       ["type"] = "float"
     },
+    ["traversal.dropVault"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
     ["traversal.jumpStartGround"] = {
       ["default"] = "true",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
+      ["type"] = "bool"
+    },
+    ["traversal.obstacleReach"] = {
+      ["default"] = "false",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2559,6 +2595,7 @@ return {
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stairSteps"] = "false",
+    ["mm.steadyAirPicks"] = "false",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -2598,7 +2635,9 @@ return {
     ["ragdoll.getUpPush"] = "true",
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
+    ["traversal.dropVault"] = "false",
     ["traversal.jumpStartGround"] = "true",
+    ["traversal.obstacleReach"] = "false",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
     ["vehicle.forceTppOnEnter"] = "true",
@@ -2731,8 +2770,11 @@ return {
     "mm.leanScale",
     "mm.leanHeadScale",
     "mm.fastTurnExit",
+    "mm.steadyAirPicks",
     "traversal.jumpStartGround",
     "traversal.rejectedFallback",
+    "traversal.obstacleReach",
+    "traversal.dropVault",
     "mm.aimWorldSmooth",
     "mm.neutralAim",
     "mm.pelvisPlacement",
@@ -2931,8 +2973,11 @@ return {
     "mm.leanScale",
     "mm.leanHeadScale",
     "mm.fastTurnExit",
+    "mm.steadyAirPicks",
     "traversal.jumpStartGround",
     "traversal.rejectedFallback",
+    "traversal.obstacleReach",
+    "traversal.dropVault",
     "mm.aimWorldSmooth",
     "mm.neutralAim",
     "mm.pelvisPlacement",
@@ -3121,8 +3166,11 @@ return {
     "apply mm.leanScale(0.20000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
     "apply mm.fastTurnExit(false,\"ok\")",
+    "apply mm.steadyAirPicks(false,\"ok\")",
     "apply traversal.jumpStartGround(true,\"ok\")",
     "apply traversal.rejectedFallback(true,\"ok\")",
+    "apply traversal.obstacleReach(false,\"ok\")",
+    "apply traversal.dropVault(false,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -3321,8 +3369,11 @@ mm.leanHead=true\r\
 mm.leanScale=0.2\r\
 mm.leanHeadScale=0.2\r\
 mm.fastTurnExit=false\r\
+mm.steadyAirPicks=false\r\
 traversal.jumpStartGround=true\r\
 traversal.rejectedFallback=true\r\
+traversal.obstacleReach=false\r\
+traversal.dropVault=false\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
@@ -3474,8 +3525,11 @@ vehicle.jumpOutSidePush=true\r\
       "mm.stickSpeed",
       "mm.aimAtCrosshair",
       "mm.fastTurnExit",
+      "mm.steadyAirPicks",
       "traversal.jumpStartGround",
-      "traversal.rejectedFallback"
+      "traversal.rejectedFallback",
+      "traversal.obstacleReach",
+      "traversal.dropVault"
     },
     ["body"] = {
       "body.impl",
@@ -3828,6 +3882,7 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.shoulderWidth"] = "0",
     ["mm.slide"] = "true",
     ["mm.stairSteps"] = "false",
+    ["mm.steadyAirPicks"] = "false",
     ["mm.stepDownReach"] = "false",
     ["mm.stickSpeed"] = "\"fixed\"",
     ["mm.strideWarp"] = "true",
@@ -3867,7 +3922,9 @@ vehicle.jumpOutSidePush=true\r\
     ["ragdoll.getUpPush"] = "true",
     ["ragdoll.impulseScale"] = "1",
     ["ragdoll.maxSeconds"] = "2.5",
+    ["traversal.dropVault"] = "false",
     ["traversal.jumpStartGround"] = "true",
+    ["traversal.obstacleReach"] = "false",
     ["traversal.rejectedFallback"] = "true",
     ["vehicle.approachWalk"] = "true",
     ["vehicle.forceTppOnEnter"] = "true",
@@ -3969,8 +4026,11 @@ mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.2\r\
 mm.fastTurnExit=false\r\
+mm.steadyAirPicks=false\r\
 traversal.jumpStartGround=true\r\
 traversal.rejectedFallback=true\r\
+traversal.obstacleReach=false\r\
+traversal.dropVault=false\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
@@ -4136,8 +4196,11 @@ other.module=42\r\
     "/utpp/animation|switch|mm.aimRootAccumulate",
     "/utpp/animation|selector|mm.stickSpeed",
     "/utpp/animation|switch|mm.fastTurnExit",
+    "/utpp/animation|switch|mm.steadyAirPicks",
     "/utpp/animation|switch|traversal.jumpStartGround",
     "/utpp/animation|switch|traversal.rejectedFallback",
+    "/utpp/animation|switch|traversal.obstacleReach",
+    "/utpp/animation|switch|traversal.dropVault",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",
     "/utpp/bodyturn|switch|bodyturn.aimStrafe",
     "/utpp/bodyturn|switch|bodyturn.aimStrafeUnarmed",

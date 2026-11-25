@@ -96,6 +96,21 @@ local function mock()
       t.travFallback[#t.travFallback + 1] = on
       return true
     end,
+    setTravObstacleReach = function(on)
+      t.travReach = t.travReach or {}
+      t.travReach[#t.travReach + 1] = on
+      return not t.travScriptReject
+    end,
+    setTravDropVault = function(on)
+      t.travDrop = t.travDrop or {}
+      t.travDrop[#t.travDrop + 1] = on
+      return not t.travScriptReject
+    end,
+    setSteadyAirPicks = function(on)
+      t.steadyAir = t.steadyAir or {}
+      t.steadyAir[#t.steadyAir + 1] = on
+      return true
+    end,
     setFastTurnExit = function(on)
       t.turnExit[#t.turnExit + 1] = on
       return not t.turnExitReject
@@ -707,6 +722,46 @@ do
     #t.travFallback == 2 and t.travFallback[2] == false and v.Sync(t.api) == "same" and #t.travFallback == 2 and #t.travJump == 2)
 end
 
+-- traversal.obstacleReach / traversal.dropVault (script switches) and mm.steadyAirPicks (M.OPTIONS, all default off): refused
+-- before a game session exists and sent again, sent to every new session, the script switches off with the motion driver
+do
+  local v, t = fresh(), mock()
+  v.SetEnabled(true)
+  check("optional traversal and air picks start off and are sent when motion comes on",
+    v.want.travObstacleReach == false and v.want.travDropVault == false and v.want.steadyAirPicks == false
+    and v.Sync(t.api) == "enabled" and #t.travReach == 1 and t.travReach[1] == false and #t.travDrop == 1
+    and t.travDrop[1] == false and #t.steadyAir == 1 and t.steadyAir[1] == false)
+  t.travScriptReject = true -- the script system is not there yet
+  v.SetOption("travObstacleReach", true, t.api)
+  v.SetOption("travDropVault", true, t.api)
+  check("refused script switches are not acknowledged",
+    v.rt.optionsApplied.travObstacleReach == false and v.rt.optionsApplied.travDropVault == false)
+  t.travScriptReject = false
+  v.Sync(t.api)
+  check("refused script switches are sent again",
+    t.travReach[#t.travReach] == true and t.travDrop[#t.travDrop] == true and v.rt.optionsApplied.travObstacleReach == true
+    and v.rt.optionsApplied.travDropVault == true)
+  local reach, drop = #t.travReach, #t.travDrop
+  check("accepted script switches are not resent", v.Sync(t.api) == "same" and #t.travReach == reach and #t.travDrop == drop)
+  v.SetOption("steadyAirPicks", true, t.api)
+  check("steadyAirPicks switched on is sent once", #t.steadyAir == 2 and t.steadyAir[2] == true and v.Sync(t.api) == "same"
+    and #t.steadyAir == 2)
+  t.enabled = false -- load / respawn: a new session, its script switches start off
+  check("a new session gets the switched-on options again",
+    v.Sync(t.api) == "enabled" and #t.travReach == reach + 1 and t.travReach[reach + 1] == true and #t.travDrop == drop + 1
+    and t.travDrop[drop + 1] == true and t.steadyAir[#t.steadyAir] == true)
+  reach, drop = #t.travReach, #t.travDrop
+  local steady = #t.steadyAir
+  v.SetEnabled(false)
+  check("motion driver off switches the two script switches off once and leaves the DLL option alone",
+    v.Sync(t.api) == "disabled" and #t.travReach == reach + 1 and t.travReach[reach + 1] == false and #t.travDrop == drop + 1
+    and t.travDrop[drop + 1] == false and v.Sync(t.api) == "off" and #t.travReach == reach + 1 and #t.travDrop == drop + 1
+    and #t.steadyAir == steady)
+  v.SetEnabled(true)
+  check("motion driver on again sends the wanted values", v.Sync(t.api) == "enabled" and t.travReach[#t.travReach] == true
+    and t.travDrop[#t.travDrop] == true)
+end
+
 -- mm.firmFeet (one of M.OPTIONS; DLL default on): on is sent once when motion comes on, then only on a change
 do
   local v, t = fresh(), mock()
@@ -1158,6 +1213,8 @@ do
     core.diag.api[f] = function(on) nat[#nat + 1] = f .. "=" .. tostring(on) end
   end
   local reload, vault, feet = {}, {}, {}
+  local jump = {}
+  t.api.setJumpProbeLog = function(on) jump[#jump + 1] = on; return true end
   local g = t.api.glue()
   function g:SetReloadDiag(on) reload[#reload + 1] = on end
   t.api.setVehicleVaultLog = function(on) vault[#vault + 1] = on; return true end
@@ -1166,7 +1223,8 @@ do
   v.RegisterSettings(core)
   v.SetEnabled(true)
   check("diagnostic logs off: fresh session enabled", v.Sync(t.api) == "enabled")
-  check("diagnostic logs off: fresh session arms no session diagnostic", #reload == 0 and #vault == 0 and #feet == 0 and #nat == 0)
+  check("diagnostic logs off: fresh session arms no session diagnostic",
+    #reload == 0 and #vault == 0 and #feet == 0 and #nat == 0 and #jump == 0)
   core.Set("core.diagnosticLogs", "until")
   check("diagnostic logs on: core switches the natives on at once", table.concat(nat, ",") == "setReloadDiag=true,setVaultLog=true,setFeetDiag=true")
   check("diagnostic logs on: mm.debug NOT held (no UTPP motion window)", core.Get("mm.debug") == false and v.want.debug ~= true)
@@ -1175,7 +1233,8 @@ do
   local errors0 = v.rt.errors
   check("diagnostic logs on: fresh session enabled", v.Sync(t.api) == "enabled")
   check("diagnostic logs on: fresh session re-arms reload diagnostic, vehicle vault log and feet diagnostic",
-    reload[1] == true and vault[1] == true and feet[1] == true and #reload == 1 and #vault == 1 and #feet == 1)
+    reload[1] == true and vault[1] == true and feet[1] == true and #reload == 1 and #vault == 1 and #feet == 1
+    and jump[1] == true and #jump == 1)
   t.api.setVehicleVaultLog, t.api.setFeetDiag = nil, nil
   t.enabled = false
   check("diagnostic logs on: missing session natives are skipped", v.Sync(t.api) == "enabled" and #reload == 2 and #vault == 1)

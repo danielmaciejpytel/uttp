@@ -104,7 +104,9 @@ M.PACK_DEPENDENT = {}
 for _, k in ipairs({ "mm.pelvisYawTrim", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
   "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale", "mm.fastTurnExit", "mm.shoulderWidth", "mm.feminineFigure", "mm.shinobiBonusReload", "mm.aimAtCrosshair", "melee.fullBody", "melee.aimTilt", "bodyturn.shooterMode", "camera.idleOrbit",
   "camera.followHoldOnFlip", "vehicle.approachWalk", "mm.headLead", "mm.neutralAim", "traversal.jumpStartGround",
-  "traversal.rejectedFallback" }) do M.PACK_DEPENDENT[k] = true end
+  "traversal.rejectedFallback", "traversal.obstacleReach", "traversal.dropVault", "mm.steadyAirPicks" }) do
+  M.PACK_DEPENDENT[k] = true
+end
 -- applied: pack in force; requested: value of the setting; pending: a change waits for a safe moment; sent: what the game
 -- scripts of the session were told last (nil = unknown, a fresh session starts with the mod's animations)
 M.pack = { requested = "utpp", applied = "utpp", pending = false, sent = nil, sentAt = -1e9, safeFor = 0, inSession = false,
@@ -590,16 +592,18 @@ local LAYOUT = {
   -- in turns on the spot" (mm.turnFootPin, utpp_motion: the pivot foot of a turn in place stays fixed, default on), then "Natural body turn
   -- while aiming on the move" (mm.aimRootAccumulate, utpp_motion: the lower body turns with its steps while aiming, default on), then "Body lean" and
   -- "Head lean" (mm.leanScale / mm.leanHeadScale, utpp_motion: how much the body and the head lean into turns), then "Quick
-  -- straighten after turns" (mm.fastTurnExit, utpp_motion: V runs straight as soon as a turn ends, default off)
+  -- straighten after turns" (mm.fastTurnExit, utpp_motion: V runs straight as soon as a turn ends, default off), then
+  -- "Steadier jump and landing animations" (mm.steadyAirPicks, utpp_motion, default off)
   --   Advanced camera options: "Camera rise over obstacles (m)" (camera.vaultRise, utpp_camera, default 0 = off). The
   -- advanced interaction options end with "Climbing straight after a jump" and "Try other climb animations"
-  -- (traversal.jumpStartGround / traversal.rejectedFallback, utpp_motion, both default on)
+  -- (traversal.jumpStartGround / traversal.rejectedFallback, utpp_motion, both default on), then "Vault and climb from
+  -- farther away" and "Vault into a drop" (traversal.obstacleReach / traversal.dropVault, utpp_motion, both default off)
   --   "Shoulder width (female V, cm)" (mm.shoulderWidth, utpp_motion) last: the menu has no body category and the
   -- other options that shape how V looks in the third-person view are here
   { "player", "frame", { "camera.sens", "camera.invertX", "camera.invertY", "camera.zoomUnarmed.enabled", "mm.pelvisYawTrim",
                          "mm.headLead", "mm.walkToggleSpeed", "mm.minAnalogWalkSpeed",
                          "mm.strideWarp", "mm.firmFeet", "mm.groundFeet", "mm.stairSteps", "mm.footYawLock", "mm.turnFootPin", "mm.aimRootAccumulate", "mm.leanScale", "mm.leanHeadScale",
-                         "mm.fastTurnExit", "mm.shoulderWidth", "mm.feminineFigure" } },
+                         "mm.fastTurnExit", "mm.steadyAirPicks", "mm.shoulderWidth", "mm.feminineFigure" } },
   { "advanced", "frame", { "camera.idleOrbit", "camera.followHoldOnFlip", "camera.vaultRise", "camera.collision", "perspective.animate",
                            "perspective.blend", "camera.body", "camera.audio" } },
   { "developer", "frame", { "body.impl", "headGuard.impl" } },
@@ -627,7 +631,8 @@ local LAYOUT = {
                            "headLook.chest", "interactRange.scale", "lootRange.impl", "lootRange.scale", "lootView.zoom",
                            "lootView.radius", "perspective.sceneTier", "perspective.sceneExit", "perspective.interaction",
                            "perspective.interactionExit", "perspective.workspot", "perspective.traversal",
-                           "perspective.scanner", "traversal.jumpStartGround", "traversal.rejectedFallback" } },
+                           "perspective.scanner", "traversal.jumpStartGround", "traversal.rejectedFallback",
+                           "traversal.obstacleReach", "traversal.dropVault" } },
   -- Vehicles (vehicle.safeTeleportExit: registered by utpp_vehiclecam)
   --   Release scope: the ragdoll after a car hit is not part of the release (no ragdoll archives are shipped), so
   -- ragdoll.enabled is developer level (not in Mod Settings) and defaults to off
@@ -1785,8 +1790,8 @@ M.Register({ key = "core.log", section = "general", type = "bool", default = tru
 -- game restart it is always off) | "until" ("On until switched off": stays on after a restart).
 -- On: core.log, mm.trace, mm.feedDump, camera.trace and perspective.log are set on through M.Set (their apply callbacks run)
 -- and held on (Register / Set keep them true, also for modules that register later and for stored values); the session
--- diagnostics UTPPMotionSetReloadDiag, UTPPSetVehicleVaultLog and UTPPSetMMFeetDiag are switched on when the option is switched
--- during play (utpp_motion re-arms them for every new game session / player entity, also after a restart with the option on; that
+-- diagnostics UTPPMotionSetReloadDiag, UTPPSetVehicleVaultLog, UTPPSetMMFeetDiag and UTPPSetJumpProbeLog are switched on when
+-- the option is switched during play (utpp_motion re-arms them for every new game session / player entity, also after a restart with the option on; that
 -- needs mm.motionDriver on); the compact pose recording starts on the first gameplay frame (Game.UTPPPoseCaptureStart(keepMinutes):
 -- 0 = the whole recording for "timed", 10 = only the last 10 minutes for "until").
 -- Off (a switch during the session, by hand or when the time is up): each held switch goes back to its registered default
@@ -1795,8 +1800,8 @@ M.Register({ key = "core.log", section = "general", type = "bool", default = tru
 -- the game folder, separated by "|") and the instruction file is written (Game.UTPPDiagWriteReport(body) ->
 -- red4ext\logs\utpp-report-<date>.txt, relative path or ""); a message on the screen (Game.UTPPShowMessage) tells the file name.
 -- Every game call goes through M.diag.api (injected by the tests: setReloadDiag(on), setVaultLog(on), setFeetDiag(on),
--- poseStart(keepMinutes) -> bool, poseStop() -> string, report(body) -> string, notify(text, seconds)); without it the Game
--- natives are called in pcall: a missing native is one log line, the rest keeps working.
+-- setJumpLog(on), poseStart(keepMinutes) -> bool, poseStop() -> string, report(body) -> string, notify(text, seconds));
+-- without it the Game natives are called in pcall: a missing native is one log line, the rest keeps working.
 -- The continuous helper-bone CSV (Game.UTPPBodyPoseTraceContinuous, hundreds of MB per minute) is NOT part of this list: it
 -- stays an explicit diagnostic native, called by hand from the CET console.
 M.DIAG_TIMED_SECONDS = 300
@@ -1807,6 +1812,7 @@ local DIAG_NATIVES = {
   setReloadDiag = { "UTPPMotionSetReloadDiag", "reload diagnostic" },
   setVaultLog = { "UTPPSetVehicleVaultLog", "vehicle vault log" },
   setFeetDiag = { "UTPPSetMMFeetDiag", "feet diagnostic" },
+  setJumpLog = { "UTPPSetJumpProbeLog", "jump probe log" },
   poseStart = { "UTPPPoseCaptureStart", "pose recording" },
   poseStop = { "UTPPPoseCaptureStop", "pose recording stop" },
   poseStatus = { "UTPPPoseCaptureStatus", "pose recording status" },
@@ -1889,6 +1895,7 @@ local function diagSetSessionNatives(on)
   diagCall("setReloadDiag", on or M.Effective("mm.trace") == true)
   diagCall("setVaultLog", on)
   diagCall("setFeetDiag", on)
+  diagCall("setJumpLog", on)
 end
 
 -- Starts the pose recording (first gameplay frame after the switch-on or a restart with the option stored on).

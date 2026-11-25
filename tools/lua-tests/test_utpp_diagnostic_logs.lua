@@ -72,6 +72,7 @@ local function mockApi(opts)
     setReloadDiag = function(on) rec("reload=" .. tostring(on)) end,
     setVaultLog = function(on) rec("vault=" .. tostring(on)) end,
     setFeetDiag = function(on) rec("feet=" .. tostring(on)) end,
+    setJumpLog = function(on) rec("jump=" .. tostring(on)) end,
     poseStart = function(keep) rec("poseStart=" .. tostring(keep)); return opts.poseRefuses ~= true end,
     poseStop = function() rec("poseStop"); return m.poseFiles end,
     poseStatus = opts.poseStatus and function() return opts.poseStatus end or nil,
@@ -105,8 +106,8 @@ local function shipped()
   core.Set("core.diagnosticLogs", "timed")
   check("timed: the diagnostic switches are on and held", core.Get("core.log") == true and core.Get("mm.trace") == true
     and core.Get("mm.feedDump") == true and core.Get("camera.trace") == true and core.Get("perspective.log") == true)
-  check("timed: reload diagnostic, vehicle vault log and feet diagnostic switched on at once, pose recording not yet",
-    m.line() == "reload=true,vault=true,feet=true", m.line())
+  check("timed: reload diagnostic, vehicle vault log, feet diagnostic and jump probe log switched on at once, pose recording not yet",
+    m.line() == "reload=true,vault=true,feet=true,jump=true", m.line())
   check("timed: nothing is shown or recorded before a gameplay frame", #m.shown == 0 and m.count("poseStart") == 0)
   core.DiagTick(0.5, false)
   check("timed: a frame without gameplay (menu / pause / no player) starts no recording and shows no message",
@@ -134,7 +135,7 @@ local function shipped()
     and core.Get("perspective.log") == true and core.Get("mm.trace") == false and core.Get("mm.feedDump") == false
     and core.Get("camera.trace") == false)
   check("timer: natives off, pose recording stopped, one report written", m.count("reload=false") == 1 and m.count("vault=false") == 1
-    and m.count("feet=false") == 1 and m.count("poseStop") == 1 and m.count("report") == 1, m.line())
+    and m.count("feet=false") == 1 and m.count("jump=false") == 1 and m.count("poseStop") == 1 and m.count("report") == 1, m.line())
   check("timer: Off is saved", string.find(readFile(settingsFile) or "", "core.diagnosticLogs=off", 1, true) ~= nil
     and string.find(readFile(settingsFile) or "", "core.diagnosticLogs=timed", 1, true) == nil)
   check("timer: Off is marked for Mod Settings (pushed to its screen)", core.msync.dirty["core.diagnosticLogs"] == true)

@@ -73,6 +73,15 @@
 --   traversal.rejectedFallback bool, default true ("Try other climb animations"; DLL default on, sent with the other
 --                  M.OPTIONS) - when the chosen traversal animation does not fit the obstacle, other ones are tried before the
 --                  game's own animation plays (native UTPPSetMMTraversalRejectedFallback).
+--   traversal.obstacleReach bool, default false ("Vault and climb from farther away") - a jump press just short of a low obstacle
+--                  waits up to 0.4 s so the game's own vault or climb check can pass (script Game.UTPPSetObstacleReach).
+--   traversal.dropVault bool, default false ("Vault into a drop") - without a floor behind a low obstacle V vaults over it into
+--                  a fall (script Game.UTPPSetDropVault). Both are M.OPTIONS entries held by the game scripts
+--                  (utpp_traversal.reds): refused before a game session exists (sent again), off again on every load (sent to
+--                  every new session) and switched off with the motion driver.
+--   mm.steadyAirPicks bool, default false ("Steadier jump and landing animations"; DLL default off, sent with the other
+--                  M.OPTIONS) - steadier animation picks in jumps, landings and after a vault or climb (native
+--                  UTPPSetMMSteadyAirPicks).
 --   mm.footYawLock bool, default true ("Planted feet keep their direction"; DLL default on, the value is sent with the other
 --                  M.OPTIONS) - a planted foot keeps the direction it points in while the body turns over it (turned about its toe)
 --                  instead of twisting on the ground with the animation; after a large turn it follows the animation through a spring
@@ -124,7 +133,8 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   feminineFigure = true, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, stairSteps = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "wide",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, turnFootPin = true,
-  aimRootAccumulate = true, fastTurnExit = false, travJumpStartGround = true, travRejectedFallback = true }
+  aimRootAccumulate = true, fastTurnExit = false, travJumpStartGround = true, travRejectedFallback = true,
+  travObstacleReach = false, travDropVault = false, steadyAirPicks = false }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -181,6 +191,7 @@ local function defaultApi()
   -- session diagnostics re-armed while the diagnostic logs are on (utpp_core core.diagnosticLogs); errors raise into the caller's pcall
   api.setVehicleVaultLog = function(on) return Game.UTPPSetVehicleVaultLog(on) end
   api.setFeetDiag = function(on) return Game.UTPPSetMMFeetDiag(on) end
+  api.setJumpProbeLog = function(on) return Game.UTPPSetJumpProbeLog(on) end
   return api
 end
 M.api = nil
@@ -209,6 +220,7 @@ function M.Sync(api)
   M.api = api
   if not M.want.enabled then
     if M.rt.aimPointApplied == true then M.ApplyAimPoint(api, false) end -- the crosshair point never without the motion barrel loop
+    M.StopScriptOptions(api)
     if M.rt.applied ~= true then return "off" end
     -- switch off: through the glue when it exists, else the script global (which falls back to the native)
     local ok = callGlue(api, "SetEnabled", false)
@@ -271,7 +283,7 @@ function M.Sync(api)
     -- matching trace on, the RELOAD episode lines must keep coming (a session change silently dropped them)
     local okT, traceOn = pcall(function() return M.core and M.core.Effective and M.core.Effective("mm.trace") end)
     -- the diagnostic logs ("On for 5 minutes" / "On until switched off", core.diagnosticLogs) also re-arm the other session
-    -- diagnostics (vehicle vault log, feet diagnostic) of the new session; each call in pcall, an api without the field
+    -- diagnostics (vehicle vault log, feet diagnostic, jump probe log) of the new session; each call in pcall, an api without the field
     -- (offline harness) skips it
     local okA, mode = pcall(function() return M.core and M.core.Effective and M.core.Effective("core.diagnosticLogs") end)
     local allOn = okA and (mode == "timed" or mode == "until")
@@ -282,11 +294,11 @@ function M.Sync(api)
       local function arm(fn)
         if type(fn) ~= "function" then return false end
         local ok, r = pcall(fn, true)
-        return ok and r ~= false -- UTPPSetVehicleVaultLog returns false while its system is missing; FeetDiag returns nothing
+        return ok and r ~= false -- the script switches return false while their system is missing; FeetDiag returns nothing
       end
-      local okV, okF = arm(api.setVehicleVaultLog), arm(api.setFeetDiag)
-      log(string.format("diagnostic logs: vehicle vault log %s, feet diagnostic %s", okV and "re-armed" or "unavailable",
-        okF and "re-armed" or "unavailable"))
+      local okV, okF, okJ = arm(api.setVehicleVaultLog), arm(api.setFeetDiag), arm(api.setJumpProbeLog)
+      log(string.format("diagnostic logs: vehicle vault log %s, feet diagnostic %s, jump probe log %s",
+        okV and "re-armed" or "unavailable", okF and "re-armed" or "unavailable", okJ and "re-armed" or "unavailable"))
     end
     log("mm.motionDriver -> on")
     return "enabled"
@@ -905,7 +917,30 @@ M.OPTIONS = {
   { want = "fastTurnExit", field = "setFastTurnExit", native = "UTPPSetMMFastTurnExit" },
   { want = "travJumpStartGround", field = "setTravJumpStartGround", native = "UTPPSetMMTraversalJumpStartGround" },
   { want = "travRejectedFallback", field = "setTravRejectedFallback", native = "UTPPSetMMTraversalRejectedFallback" },
+  -- script = held by the game scripts, not by the DLL: they act without the motion driver, so they are switched off with it
+  { want = "travObstacleReach", field = "setTravObstacleReach", native = "UTPPSetObstacleReach", script = true },
+  { want = "travDropVault", field = "setTravDropVault", native = "UTPPSetDropVault", script = true },
+  { want = "steadyAirPicks", field = "setSteadyAirPicks", native = "UTPPSetMMSteadyAirPicks" },
 }
+-- one option call; returns ok (no error), accepted (false = refused: a missing system or a refusing native)
+local function sendOption(api, o, v)
+  local a = o.arg and o.arg(v) or (v == true)
+  if api and api[o.field] then return pcall(api[o.field], a, o.hz) end
+  if Game == nil then return false, nil end -- offline harness without the native: nothing to send
+  return pcall(function() if o.hz then return Game[o.native](a, o.hz) end return Game[o.native](a) end)
+end
+-- The script-side options that this module switched on are switched off (a refused call is tried again on the next sync).
+function M.StopScriptOptions(api)
+  for _, o in ipairs(M.OPTIONS) do
+    if o.script and M.rt.optionsApplied[o.want] == true then
+      local ok, accepted = sendOption(api, o, false)
+      if ok and accepted ~= false then
+        M.rt.optionsApplied[o.want] = nil
+        log("mm." .. o.want .. " -> false (motion driver off)")
+      end
+    end
+  end
+end
 function M.ApplyOptions(api)
   if not M.want.enabled then return false end
   api = api or M.api
@@ -913,15 +948,7 @@ function M.ApplyOptions(api)
   for _, o in ipairs(M.OPTIONS) do
     local v = M.want[o.want]
     if M.rt.optionsApplied[o.want] ~= v then
-      local a = o.arg and o.arg(v) or (v == true)
-      local ok, accepted
-      if api and api[o.field] then
-        ok, accepted = pcall(api[o.field], a, o.hz)
-      elseif Game == nil then
-        ok, accepted = false, nil -- offline harness without the native: nothing to send
-      else
-        ok, accepted = pcall(function() if o.hz then return Game[o.native](a, o.hz) end return Game[o.native](a) end)
-      end
+      local ok, accepted = sendOption(api, o, v)
       if ok and accepted ~= false then
         M.rt.optionsApplied[o.want] = v
         log("mm." .. o.want .. " -> " .. tostring(v))
@@ -1071,6 +1098,12 @@ function M.RegisterSettings(core)
     desc = "When you stop turning with the mouse or stick while V runs, she finishes the turn at once and runs straight right "
       .. "away instead of easing out of the curve. Entering and holding a turn are unchanged. Off (default) = she eases out of it.",
     apply = function(v) M.SetOption("fastTurnExit", v == true) end })
+  core.Register({ key = "mm.steadyAirPicks", section = "animation", type = "bool", default = false,
+    label = "Steadier jump and landing animations",
+    desc = "V's jump and landing animations change less often: brushing the edge of a ledge plays no landing, a fall does not "
+      .. "start a new jump animation, each landing plays once and the move after a vault or climb is not cut short. "
+      .. "Off (default) = the animations are picked as before.",
+    apply = function(v) M.SetOption("steadyAirPicks", v == true) end })
   core.Register({ key = "traversal.jumpStartGround", section = "animation", type = "bool", default = true,
     label = "Climbing straight after a jump",
     desc = "A climb or vault that starts just after a jump uses the same traversal animations as one started from the ground "
@@ -1081,6 +1114,15 @@ function M.RegisterSettings(core)
     desc = "When the chosen climb or vault animation does not fit an obstacle, other ones are tried before the game's own "
       .. "animation plays (default). Off = the game's own animation plays at once.",
     apply = function(v) M.SetOption("travRejectedFallback", v ~= false) end })
+  core.Register({ key = "traversal.obstacleReach", section = "animation", type = "bool", default = false,
+    label = "Vault and climb from farther away",
+    desc = "If you press jump while running at a low obstacle that is still a little too far, the jump waits up to 0.4 s so "
+      .. "the game can vault or climb it. Otherwise you jump as usual.",
+    apply = function(v) M.SetOption("travObstacleReach", v == true) end })
+  core.Register({ key = "traversal.dropVault", section = "animation", type = "bool", default = false,
+    label = "Vault into a drop",
+    desc = "When there is no floor behind a low obstacle, V vaults over it into a fall.",
+    apply = function(v) M.SetOption("travDropVault", v == true) end })
   core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = true,
     label = "motion: steady aim while turning",
     desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns and short camera jerks do not jolt the body (nor the head with Head follows the camera). On (default, 12 Hz); off = the earlier aim.",

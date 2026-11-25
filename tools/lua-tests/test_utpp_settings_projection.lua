@@ -668,7 +668,7 @@ if not WRITE then
     -- Stride matching (player level) after
     -- Minimum walk speed; 2026-11-21: Firm feet in turns and stops (player level) after Stride matching; 2026-11-23: Body lean and
     -- Head lean (player level) after Firm feet; 2026-11-24: Feet on uneven ground (player level) between Firm feet and Body lean; Planted feet keep their direction (player level) after it; Fit steps to stairs (player level) between them
-    check("layout: Camera = (hidden: Run pelvis yaw trim, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Firm feet in turns and stops, Feet on uneven ground, Fit steps to stairs, Planted feet keep their direction, Firm pivot foot in turns on the spot, Natural body turn while aiming on the move, Body lean, Head lean, Quick straighten after turns, Shoulder width, Feminine figure, then the advanced camera options",
+    check("layout: Camera = (hidden: Run pelvis yaw trim, Head follows turns), Walk speed, (hidden: Minimum walk speed), Stride matching, Firm feet in turns and stops, Feet on uneven ground, Fit steps to stairs, Planted feet keep their direction, Firm pivot foot in turns on the spot, Natural body turn while aiming on the move, Body lean, Head lean, Quick straighten after turns, Steadier jump and landing animations, Shoulder width, Feminine figure, then the advanced camera options",
       placeOf("mm.pelvisYawTrim") == "hidden/frame/50" and placeOf("mm.headLead") == "hidden/frame/60"
       and placeOf("mm.walkToggleSpeed") == "player/frame/70" and placeOf("mm.minAnalogWalkSpeed") == "hidden/frame/80"
       and placeOf("mm.strideWarp") == "player/frame/90" and placeOf("mm.firmFeet") == "player/frame/100"
@@ -677,8 +677,9 @@ if not WRITE then
       and placeOf("mm.aimRootAccumulate") == "player/frame/150"
       and placeOf("mm.leanScale") == "player/frame/160" and placeOf("mm.leanHeadScale") == "player/frame/170"
       and placeOf("mm.fastTurnExit") == "player/frame/180"
-      and placeOf("mm.shoulderWidth") == "player/frame/190" and placeOf("mm.feminineFigure") == "player/frame/200"
-      and placeOf("camera.idleOrbit") == "advanced/frame/210",
+      and placeOf("mm.steadyAirPicks") == "player/frame/190"
+      and placeOf("mm.shoulderWidth") == "player/frame/200" and placeOf("mm.feminineFigure") == "player/frame/210"
+      and placeOf("camera.idleOrbit") == "advanced/frame/220",
       placeOf("mm.pelvisYawTrim") .. " " .. placeOf("mm.walkToggleSpeed") .. " " .. placeOf("mm.minAnalogWalkSpeed") .. " " .. placeOf("mm.strideWarp") .. " " .. placeOf("mm.firmFeet") .. " "
         .. placeOf("mm.groundFeet") .. " " .. placeOf("mm.footYawLock") .. " " .. placeOf("mm.turnFootPin") .. " " .. placeOf("mm.aimRootAccumulate") .. " " .. placeOf("mm.shoulderWidth") .. " " .. placeOf("camera.idleOrbit"))
     -- 2026-10-30 aim pitch plan: "Weapon aims at crosshair point" (mm.aimAtCrosshair, utpp_motion) after the crosshair colour, player level

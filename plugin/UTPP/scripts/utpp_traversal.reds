@@ -15,7 +15,8 @@
 //    found, why nothing fired) plus one line per hold start / release and per game climb / vault. On with
 //    Game.UTPPSetJumpProbeLog(true) or while the ground recorder (diagnostic logs) runs.
 // Console: Game.UTPPSetObstacleReach(bool), Game.UTPPSetDropVault(bool), Game.UTPPSetJumpProbeLog(bool),
-// Game.UTPPObstacleStatus().
+// Game.UTPPObstacleStatus(). Menu: CET settings traversal.obstacleReach / traversal.dropVault (utpp_motion sends them to every
+// new game session); the jump probe log is part of "Diagnostic logs".
 
 // DLL: measured floor behind the vaulted obstacle of the NEXT UTPPFeedTraversal call, metres below the obstacle top at two
 // points past the back edge (99 = nothing within the ray, < 0 = not measured; the shallower one counts), and the drop vault
