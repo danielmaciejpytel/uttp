@@ -847,9 +847,16 @@ uint64_t g_timeCount = 0;
 void ClearStageRingsLocked(); // the matcher stage rings of the budget window (defined with them below)
 // Budget pause (FinishFrameLocked trips it, BudgetPauseStepLocked ends it on feed time): g_budgetTripped is the pause flag.
 #ifndef UTPP_MOTION_DRIVER_BUDGET_MUTATION
-#define UTPP_MOTION_DRIVER_BUDGET_MUTATION 0 // test builds only: 1 = a pause never ends, 2 = wall time only
+#define UTPP_MOTION_DRIVER_BUDGET_MUTATION 0 // test builds only: 1 = a pause never ends, 2 = wall time only, 3 = no kept weapon pause
 #endif
 float g_budgetPauseLeft = 0.0f;                             // feed time left in the current pause
+// Pause with a ranged weapon in hand: the base path carries no weapon overlay, aim offset or grip IK (V would hold and fire a
+// two-handed weapon with one hand), so the motion pose keeps running with its weapon layers. Set only by the trip; cleared for
+// the rest of that pause when the weapon is put away / released or a traversal starts (the pause then hands over to the base
+// path as without a weapon), and when the pause ends. While set, the pause records no budget statistics and writes no MOTION
+// trace / pose diagnostic lines.
+bool g_budgetKeepWeapon = false;
+bool g_stepRangedDrawn = false; // this Step: ranged weapon overlay, weapon known and drawn, not released
 float g_budgetPauseS = 0.0f;                                // length of the current / last pause
 float g_budgetNextPauseS = adapter::Budget::kPauseFirstS;   // length of the next pause
 uint64_t g_budgetTrips = 0;
@@ -1790,7 +1797,7 @@ void WorkerMain(Body aBody, Paths aPaths) noexcept
             if (g_bundle->evalOk)
                 g_bundle->eval.SetOverlayInertialSwitch(g_overlayInertialSwitchOn);
             RefreshSlideLocked(); RefreshShooterModeLocked(); RefreshTravActiveLocked(); // UTPP-MOTION SEAM slide camera: the new bundle may not declare the slide section
-            g_budgetTripped = false;
+            g_budgetTripped = g_budgetKeepWeapon = false;
             g_budgetPauseLeft = 0.0f;
             g_timeCount = 0;
             ClearStageRingsLocked(); // the matcher stage rings restart with the window
@@ -1849,7 +1856,7 @@ Fallback ResolveLocked()
         r.topologyMismatches = g_topology;
     r.boneMapOk = g_map.ok;
     r.faulted = g_faulted;
-    r.budgetTripped = g_budgetTripped;
+    r.budgetTripped = g_budgetTripped && !g_budgetKeepWeapon; // a kept weapon pause stays on the motion path
     return adapter::Resolve(r);
 }
 
@@ -2028,7 +2035,7 @@ void SetEnabled(bool aOn)
         g_hiLeft = 0.0f;
         g_pending = false;
         g_wasRunning = false;
-        g_budgetTripped = false; // g_faulted stays: fault = v1 until the end of the session
+        g_budgetTripped = g_budgetKeepWeapon = false; // g_faulted stays: fault = v1 until the end of the session
         g_budgetPauseLeft = 0.0f; // the pause length / trip count stay (session values)
         g_timeCount = 0;
         ClearStageRingsLocked(); // the matcher stage rings restart with the window
@@ -3326,7 +3333,7 @@ motionpose::OverlayFrameInputs FrameInputsLocked(const Bundle& b, const motion::
 #else
     in.machine.airW = g_airLegsFade.Step(cs.movementMode == 1 && !g_trav.active, dt);
 #endif
-    in.capturePoseDiagnostics = g_trace; // selected bone deltas are emitted only by the existing low-rate trace
+    in.capturePoseDiagnostics = g_trace && !g_budgetKeepWeapon; // selected bone deltas are emitted only by the existing low-rate trace
     // UTPP-MOTION SEAM motionfix item 2: aim offset inputs (target of UTPPSetAimTarget); skipped while the upper body is
     // handed back to the game (mm.aimGameUpper)
     // Native ADS remains the sole input for game-upper handback and camera-related state.
@@ -4051,6 +4058,8 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
         return;
     g_traceClock += dt;
     g_traceSince += dt;
+    if (g_budgetKeepWeapon)
+        return; // over budget: the trace clock runs on, the lines wait for the resume
     const ov::OverlayMachine& mach = b.eval.Machine();
     TraceKey k;
     k.db = r.database;
@@ -4195,6 +4204,8 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
 // last kWindow decision times exceeds kTripFactor x kFeedP95Us the motion pose pauses (Resolve -> Budget, the held pose hands
 // over to the base path) for g_budgetPauseS of feed time; then the statistics restart empty and the next Step re-enters with the
 // hand-in from the published pose. One log line per trip and per resume.
+// Exception: with a ranged weapon in hand at the trip the motion pose is not handed over (g_budgetKeepWeapon above). That pause
+// keeps its length, counts as a trip and keeps traversal off; status reads reason=none, budgetPauseS > 0, budgetKeep=1.
 std::array<float, adapter::Budget::kWindow> g_stageContUs{};   // matcher stage times per feed (log on a trip only)
 std::array<float, adapter::Budget::kWindow> g_stageQueryUs{};
 std::array<float, adapter::Budget::kWindow> g_stageSearchUs{};
@@ -4232,6 +4243,18 @@ void BudgetTripLocked(float aP95)
                   static_cast<double>(adapter::Budget::kTripFactor * adapter::Budget::kFeedP95Us), static_cast<double>(g_budgetPauseS),
                   static_cast<double>(g_budgetNextPauseS), g_cyclesPerUs.load(std::memory_order_relaxed) > 0.0f ? 1 : 0);
     BudgetLogLocked(g_budgetBuf);
+#if UTPP_MOTION_DRIVER_BUDGET_MUTATION != 3 // mutation 3: a drawn ranged weapon does not keep the motion pose
+    g_budgetKeepWeapon = g_stepRangedDrawn;
+#endif
+    if (g_budgetKeepWeapon)
+    {
+        // own prefix like matcherStages: readers count the "budget" lines as one trip and one resume line per trip
+        std::snprintf(g_budgetBuf, sizeof(g_budgetBuf),
+                      "UTPP mm.motionDriver budgetKeep #%llu ranged weapon in hand: motion pose and weapon layers keep running, "
+                      "no MOTION trace lines during the pause",
+                      static_cast<unsigned long long>(g_budgetTrips));
+        BudgetLogLocked(g_budgetBuf);
+    }
     // where the matcher spent the window (same slots as the trip statistic; a feed without a matcher update keeps the older value of its
     // slot). Own line prefix: readers count the "budget" lines as one trip and one resume line per trip.
     std::snprintf(g_budgetBuf, sizeof(g_budgetBuf),
@@ -4239,6 +4262,17 @@ void BudgetTripLocked(float aP95)
                   static_cast<unsigned long long>(g_budgetTrips), static_cast<double>(P95Of(g_stageContUs)),
                   static_cast<double>(P95Of(g_stageQueryUs)), static_cast<double>(P95Of(g_stageSearchUs)),
                   static_cast<double>(P95Of(g_stageSelectUs)));
+    BudgetLogLocked(g_budgetBuf);
+}
+
+// The kept weapon pause turns into a plain pause for its remaining time: the next resolve hands over to the base path.
+void BudgetKeepEndLocked(const char* aWhy)
+{
+    if (!g_budgetKeepWeapon)
+        return;
+    g_budgetKeepWeapon = false;
+    std::snprintf(g_budgetBuf, sizeof(g_budgetBuf), "UTPP mm.motionDriver budgetKeep #%llu ended (%s): base path for the last %.1fs",
+                  static_cast<unsigned long long>(g_budgetTrips), aWhy, static_cast<double>(g_budgetPauseLeft));
     BudgetLogLocked(g_budgetBuf);
 }
 
@@ -4265,7 +4299,7 @@ void BudgetPauseStepLocked(float aDt)
 #else
     if (g_budgetPauseLeft > 0.0f)
         return;
-    g_budgetTripped = false;
+    g_budgetTripped = g_budgetKeepWeapon = false;
     g_timeCount = 0; // the statistics window restarts empty
     ClearStageRingsLocked(); // the matcher stage rings restart with the window
     RefreshTravActiveLocked();
@@ -4317,7 +4351,9 @@ bool FinishFrameLocked(std::chrono::steady_clock::time_point t0)
 #if UTPP_MOTION_DRIVER_BUDGET_MUTATION == 2
     us = wallUs; // mutation 2: wall time only
 #endif
-    BudgetRecordLocked(wallUs, us);
+    // a kept weapon pause produces feeds during the pause: they stay out of the window (no second trip, no pause length reset)
+    if (!g_budgetTripped)
+        BudgetRecordLocked(wallUs, us);
     return true;
 }
 
@@ -5452,6 +5488,11 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
 #endif
     MaybeLoadLocked();
     BudgetPauseStepLocked(aDt); // feed budget: a pause ends on feed time, before this Step resolves its path
+    g_stepRangedDrawn = !g_release && ov::RangedPose(OverlayLocked()) && integ::PsmWeaponDrawn(aRaw.psmBlock);
+    if (!g_stepRangedDrawn)
+        BudgetKeepEndLocked("no ranged weapon in hand");
+    else if (g_stepDetail == adapter::kPsmClimb || g_stepDetail == adapter::kPsmVault)
+        BudgetKeepEndLocked("climb / vault");
     const auto t0 = std::chrono::steady_clock::now(); // feed cost only (after a possible worker join / thread start)
     g_feedCyclesOk = QueryThreadCycleTime(GetCurrentThread(), &g_feedCycles0) != 0; // feed budget: the thread's own time
     g_reason = ResolveLocked();
@@ -7178,6 +7219,7 @@ bool FeedTraversal(const TraversalEvent& aEv)
         std::lock_guard lock(g_m);
         if (!g_enabled)
             return false; // v2 off: no state (v1 bit-identical)
+        BudgetKeepEndLocked("traversal event"); // traversal is off during every budget pause
         const bool episodeRuns = g_trav.active || g_trav.episode || g_trav.yielding;
         if (!episodeRuns && g_trav.planned) // a newer event replaces a plan that has not started yet
         {
@@ -7845,11 +7887,11 @@ float AimPoseWeightLocked()
 std::string BudgetStatusSuffixLocked()
 {
     char buf[200];
-    std::snprintf(buf, sizeof buf, " wallP95us=%.1f budgetTrips=%llu budgetPauseS=%.2f budgetCoolS=%.0f threadTime=%d",
+    std::snprintf(buf, sizeof buf, " wallP95us=%.1f budgetTrips=%llu budgetPauseS=%.2f budgetCoolS=%.0f threadTime=%d budgetKeep=%d",
                   static_cast<double>(WallP95Locked()), static_cast<unsigned long long>(g_budgetTrips),
                   static_cast<double>(g_budgetTripped ? g_budgetPauseLeft : 0.0f),
                   static_cast<double>(g_budgetTripped ? g_budgetPauseS : g_budgetNextPauseS),
-                  g_cyclesPerUs.load(std::memory_order_relaxed) > 0.0f ? 1 : 0);
+                  g_cyclesPerUs.load(std::memory_order_relaxed) > 0.0f ? 1 : 0, g_budgetKeepWeapon ? 1 : 0);
     return buf;
 }
 

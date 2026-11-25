@@ -14,6 +14,14 @@ target_compile_options(utpp_motion_driver_unit_test PRIVATE ${UTPP_WARNINGS} /EH
 target_compile_definitions(utpp_motion_driver_unit_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UTPP_MOTION_DRIVER_TEST_FAULTS) # test-only throw (fault path)
 target_compile_features(utpp_motion_driver_unit_test PRIVATE cxx_std_20)
 add_test(NAME utpp_motion_driver_unit_test COMMAND utpp_motion_driver_unit_test "${_utpp_mdmotion_data_native}")
+# Budget mutation 3: a trip hands over to the base path with a ranged weapon in hand too; section 8k2 must FAIL.
+add_executable(utpp_motion_driver_budget_keep_mut tests/MotionDriverTest.cpp src/MotionDriver.cpp)
+target_compile_options(utpp_motion_driver_budget_keep_mut PRIVATE ${UTPP_WARNINGS} /EHsc)
+target_compile_definitions(utpp_motion_driver_budget_keep_mut PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UTPP_MOTION_DRIVER_TEST_FAULTS
+                           UTPP_MOTION_DRIVER_BUDGET_MUTATION=3)
+target_compile_features(utpp_motion_driver_budget_keep_mut PRIVATE cxx_std_20)
+add_test(NAME utpp_motion_driver_budget_keep_mut COMMAND utpp_motion_driver_budget_keep_mut "${_utpp_mdmotion_data_native}")
+set_tests_properties(utpp_motion_driver_budget_keep_mut PROPERTIES PASS_REGULAR_EXPRESSION "FAIL 8k2 trip with the pistol")
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/motiondriverinteg.cmake OPTIONAL) # UTPP-MOTION SEAM: MotionDriver integration test (real MMDriver)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/motiondriverair.cmake OPTIONAL) # air: v2 air consumer test (real MMDriver)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tests/fix2hip.cmake OPTIONAL) # fix2/hip: slide hipfire recoil + weapon-pose legs in the air
