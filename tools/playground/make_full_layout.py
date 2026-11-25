@@ -10,11 +10,11 @@ import os
 
 DROP_PREFIXES = ('Floor', 'BP_ZeroGZone')
 MARGIN_M = 6.0
-RAIL_H_M = 1.1
+RAIL_H_M = 1.1     # default; --wall-height raises the railing into walls that hide the surroundings
 RAIL_T_M = 0.3
 
 
-def build(src):
+def build(src, rail_h=RAIL_H_M):
     boxes = [b for b in src['boxes']
              if b.get('visible', True) and not b['name'].startswith(DROP_PREFIXES)]
     lo_x = min(b['center'][0] - b['half'][0] for b in boxes) - MARGIN_M
@@ -24,7 +24,7 @@ def build(src):
     cx, cy = (lo_x + hi_x) / 2, (lo_y + hi_y) / 2
     hx, hy = (hi_x - lo_x) / 2, (hi_y - lo_y) / 2
     out = [{'name': 'floor', 'center': [cx, cy, -0.5], 'half': [hx, hy, 0.5], 'yaw_deg': 0.0}]
-    r = RAIL_H_M / 2
+    r = rail_h / 2
     out += [
         {'name': 'rail_south', 'center': [cx, lo_y + RAIL_T_M / 2, r], 'half': [hx, RAIL_T_M / 2, r], 'yaw_deg': 0.0},
         {'name': 'rail_north', 'center': [cx, hi_y - RAIL_T_M / 2, r], 'half': [hx, RAIL_T_M / 2, r], 'yaw_deg': 0.0},
@@ -43,9 +43,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--input', required=True, help='playground_boxes.json from ue_to_red.py')
     ap.add_argument('--output', required=True)
+    ap.add_argument('--wall-height', type=float, default=RAIL_H_M, help='height of the border (m)')
     a = ap.parse_args()
     with open(a.input, encoding='utf-8') as f:
-        layout, ext = build(json.load(f))
+        layout, ext = build(json.load(f), a.wall_height)
     os.makedirs(os.path.dirname(os.path.abspath(a.output)), exist_ok=True)
     with open(a.output, 'w', encoding='utf-8') as f:
         json.dump(layout, f, indent=1)
