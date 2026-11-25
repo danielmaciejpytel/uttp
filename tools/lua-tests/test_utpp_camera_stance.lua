@@ -393,5 +393,89 @@ do
   check("F2: the slide exit on the ground (no air flag) is unchanged", same)
 end
 
+-- ================================================================ camera rise over obstacles (cfg.vaultRise, CM.vaultRiseStep)
+do
+  local P = { distance = 2.8, side = 0.45, height = 0.25, fov = 51 }
+  local function run(aCfg, aSecs, aVault, aExtra)
+    local S = CM.newSolver(aCfg)
+    local out = {}
+    for i = 1, math.floor(aSecs * FPS) do
+      local t = i * DT
+      local inp = { dt = DT, playerPos = { x = 0, y = 0, z = 0 }, playerQ = CM.QID, bodyYaw = 0, fppPitch = -17, dyaw = 0, dpitch = 0,
+        moving = true, profile = P, side = 1, w = 1, vault = aVault ~= nil and aVault(t) or false }
+      if aExtra then aExtra(inp, t) end
+      out[i] = CM.solve(S, inp)
+    end
+    return out, S
+  end
+  local function same(a, b)
+    for i = 1, #a do
+      if a[i].world.x ~= b[i].world.x or a[i].world.y ~= b[i].world.y or a[i].world.z ~= b[i].world.z
+        or a[i].shownPitch ~= b[i].shownPitch or a[i].arm ~= b[i].arm then return false, i end
+    end
+    return true
+  end
+  local function oneVault(t) return t >= 1.0 and t < 1.45 end
+  check("vault rise: off by default", CM.config().vaultRise == 0)
+  local base = run(CM.config(), 4)
+  local off, Soff = run(CM.config(), 4, oneVault)
+  check("vault rise: with the setting at 0 a vault changes nothing (bit for bit)", same(base, off) and Soff.vr == nil)
+  local cfg = CM.config({ vaultRise = 0.6 })
+  local idle = run(cfg, 4)
+  check("vault rise: set but no vault = the camera without it (bit for bit)", same(base, idle))
+  local on, Son = run(cfg, 5, oneVault)
+  local peak, maxStep, maxPitchDiff, lookSame, pivotSame = 0, 0, 0, true, true
+  for i = 2, #on do
+    local dz = on[i].world.z - base[math.min(i, #base)].world.z
+    peak = math.max(peak, dz)
+    maxStep = math.max(maxStep, CM.dist(on[i].world, on[i - 1].world))
+    maxPitchDiff = math.max(maxPitchDiff, math.abs(on[i].shownPitch - on[i - 1].shownPitch))
+    lookSame = lookSame and on[i].pitch == base[2].pitch
+    pivotSame = pivotSame and on[i].pivot.z == base[2].pivot.z
+  end
+  check("vault rise: the camera rises by about the set height (0.45 .. 0.65 m for 0.6)", peak > 0.45 and peak < 0.65, peak)
+  check("vault rise: most of it is there 0.3 s into the vault (>= 0.4 m)", on[math.floor(1.3 * FPS)].world.z - base[2].world.z >= 0.4,
+    on[math.floor(1.3 * FPS)].world.z - base[2].world.z)
+  check("vault rise: no jump (camera step <= 5 cm, tilt step <= 1.2 deg per frame at 60 FPS)", maxStep <= 0.05 and maxPitchDiff <= 1.2,
+    string.format("%.3f m %.2f deg", maxStep, maxPitchDiff))
+  check("vault rise: the look pitch and the pivot are unchanged", lookSame and pivotSame)
+  local held = on[math.floor(2.1 * FPS)].vaultRise
+  check("vault rise: still up 0.65 s after the vault (the landing behind the obstacle)", held > 0.55, held)
+  check("vault rise: back down, the camera without it again and no state left", Son.vr == nil and on[#on].vaultRise == 0
+    and math.abs(on[#on].world.z - base[2].world.z) < 1e-9 and on[#on].shownPitch == base[2].shownPitch)
+  -- the framing: the pivot stays where it was on screen (the tilt equals the orbit)
+  local r = on[math.floor(1.9 * FPS)]
+  local _, pitchToPivot = CM.yawPitchFromForward(CM.sub(r.pivot, r.world))
+  local _, basePitchToPivot = CM.yawPitchFromForward(CM.sub(base[2].pivot, base[2].world))
+  check("vault rise: V's pivot keeps its screen height (angle below the view axis within 1.5 deg)",
+    math.abs((pitchToPivot - r.shownPitch) - (basePitchToPivot - base[2].shownPitch)) < 1.5)
+  -- chained hurdles 1.1 s apart: one continuous rise, no dip in between
+  local chain = run(cfg, 4.0, function(t) return oneVault(t) or (t >= 2.1 and t < 2.55) or (t >= 3.2 and t < 3.65) end)
+  local minUp = 1e9
+  for i = math.floor(1.45 * FPS), math.floor(3.6 * FPS) do minUp = math.min(minUp, chain[i].vaultRise) end
+  check("vault rise: chained vaults stay up (never below 0.5 m between them)", minUp > 0.5, minUp)
+  -- looking down already past the floor of the orbit: no rise; aiming: faded out
+  local steep = run(cfg, 2.0, oneVault, function(i) i.fppPitch = -60 end)
+  local steepBase = run(CM.config(), 2.0, nil, function(i) i.fppPitch = -60 end)
+  check("vault rise: none when the player already looks down 60 deg", same(steep, steepBase))
+  local aimed = run(cfg, 2.0, oneVault, function(i) i.aim, i.aimW = true, 1 end)
+  local zeroAim = true
+  for i = 1, #aimed do zeroAim = zeroAim and aimed[i].vaultRise == 0 end
+  check("vault rise: none while aiming", zeroAim)
+  -- walls and ceilings: the collision rays follow the raised boom (a ceiling 0.35 m above the pivot)
+  local ceil = on[2].pivot.z + 0.35
+  local function ray(a, b)
+    if b.z > ceil and b.z > a.z then
+      local u = math.max(0, (ceil - a.z) / (b.z - a.z))
+      return CM.dist(a, b) * u
+    end
+    return nil
+  end
+  local capped = run(cfg, 2.0, oneVault, function(i) i.raycast = ray end)
+  local r2 = capped[math.floor(1.4 * FPS)]
+  check("vault rise: a ceiling still shortens the boom (the camera stays below it)", r2.arm < r2.fullLen and r2.world.z < ceil,
+    string.format("arm %.2f / %.2f z %.2f ceil %.2f", r2.arm, r2.fullLen, r2.world.z, ceil))
+end
+
 print(string.format("utpp_camera stance test: %d passed, %d failed", results.pass, results.fail))
 assert(results.fail == 0, "utpp_camera stance test failed")

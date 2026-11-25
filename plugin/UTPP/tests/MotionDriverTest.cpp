@@ -1905,6 +1905,28 @@ int main(int argc, char** argv)
                   "trav lead foot: the start's foot rank is never worse than row order and better for one foot", fd);
             motiondriver::TestForceTraversal(mantle, false);
         }
+        // route options (CET traversal.jumpStartGround / traversal.rejectedFallback): on by default, each setter reaches the next
+        // plan's config (probe bit 4 / 8 = switched off) and switching back restores the default
+        {
+            motiondriver::TestForceTraversal("", true);
+            const motiondriver::TraversalEvent re = ClimbEvent(0.6f, 1.0f);
+            int32_t ro[4] = {-1, -1, -1, -1};
+            const bool states[4][2] = {{true, true}, {false, true}, {true, false}, {true, true}};
+            for (int i = 0; i < 4; ++i)
+            {
+                if (i > 0)
+                {
+                    motiondriver::SetTraversalJumpStartGround(states[i][0]);
+                    motiondriver::SetTraversalRejectedFallback(states[i][1]);
+                }
+                (void)motiondriver::FeedTraversal(re);
+                ro[i] = motiondriver::ProbeTraversal().startOptions;
+            }
+            char rd[96];
+            std::snprintf(rd, sizeof rd, "default %d, jump start off %d, fallback off %d, on again %d", ro[0], ro[1], ro[2], ro[3]);
+            Check(ro[0] == 0 && ro[1] == 4 && ro[2] == 8 && ro[3] == 0, "trav route options: both on by default, each setter reaches the plan", rd);
+            motiondriver::TestForceTraversal(mantle, false);
+        }
         // (c) montage missing -> MontageFailed, false
         motiondriver::TestForceTraversal("AM_not_a_montage", false);
         (void)motiondriver::FeedTraversal(ClimbEvent(0.6f, 1.0f));

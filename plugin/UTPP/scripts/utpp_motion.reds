@@ -132,6 +132,11 @@ public native func UTPPSetMMFirmFeet(on: Bool) -> Bool
 // body finishes the turn at once and runs straight; entering and holding a turn are unchanged. Always true. Keep in sync with
 // MotionDriverNatives.cpp.
 public native func UTPPSetMMFastTurnExit(on: Bool) -> Bool
+// Traversal route options (both DLL default on; CET settings traversal.jumpStartGround / traversal.rejectedFallback): a climb or
+// vault that starts just after a jump uses the ground rows; after a rejected traversal animation other ones are tried before the
+// game's own animation plays. Always true. Keep in sync with MotionDriverNatives.cpp.
+public native func UTPPSetMMTraversalJumpStartGround(on: Bool) -> Bool
+public native func UTPPSetMMTraversalRejectedFallback(on: Bool) -> Bool
 // Planted foot yaw lock (DLL default on; CET setting mm.footYawLock): a planted foot keeps the direction it points in while the body
 // turns over it, turned about its toe, and follows the animation again only after a large turn. Always true. Keep in sync with
 // MotionDriverNatives.cpp.

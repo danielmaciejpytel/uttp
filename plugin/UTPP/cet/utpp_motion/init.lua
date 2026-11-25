@@ -67,6 +67,12 @@
 --                  M.OPTIONS) - when a mouse or stick turn ends while V runs, the body finishes the turn at once and runs straight
 --                  (the query stops curving, the lean settles quickly); entering and holding a turn are unchanged (native
 --                  UTPPSetMMFastTurnExit).
+--   traversal.jumpStartGround bool, default true ("Climbing straight after a jump"; DLL default on, sent with the other
+--                  M.OPTIONS) - a climb or vault that starts just after a jump uses the mod's ground traversal animations
+--                  (native UTPPSetMMTraversalJumpStartGround).
+--   traversal.rejectedFallback bool, default true ("Try other climb animations"; DLL default on, sent with the other
+--                  M.OPTIONS) - when the chosen traversal animation does not fit the obstacle, other ones are tried before the
+--                  game's own animation plays (native UTPPSetMMTraversalRejectedFallback).
 --   mm.footYawLock bool, default true ("Planted feet keep their direction"; DLL default on, the value is sent with the other
 --                  M.OPTIONS) - a planted foot keeps the direction it points in while the body turns over it (turned about its toe)
 --                  instead of twisting on the ground with the animation; after a large turn it follows the animation through a spring
@@ -118,7 +124,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   feminineFigure = true, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, stairSteps = false, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "wide",
   strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, turnFootPin = true,
-  aimRootAccumulate = true, fastTurnExit = false }
+  aimRootAccumulate = true, fastTurnExit = false, travJumpStartGround = true, travRejectedFallback = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -897,6 +903,8 @@ M.OPTIONS = {
   { want = "aimRootAccumulate", field = "setAimRootAccumulate", native = "UTPPSetMMAimRootAccumulate" },
   { want = "overlayInertialSwitch", field = "setOverlayInertialSwitch", native = "UTPPSetMMOverlayInertialSwitch" },
   { want = "fastTurnExit", field = "setFastTurnExit", native = "UTPPSetMMFastTurnExit" },
+  { want = "travJumpStartGround", field = "setTravJumpStartGround", native = "UTPPSetMMTraversalJumpStartGround" },
+  { want = "travRejectedFallback", field = "setTravRejectedFallback", native = "UTPPSetMMTraversalRejectedFallback" },
 }
 function M.ApplyOptions(api)
   if not M.want.enabled then return false end
@@ -1063,6 +1071,16 @@ function M.RegisterSettings(core)
     desc = "When you stop turning with the mouse or stick while V runs, she finishes the turn at once and runs straight right "
       .. "away instead of easing out of the curve. Entering and holding a turn are unchanged. Off (default) = she eases out of it.",
     apply = function(v) M.SetOption("fastTurnExit", v == true) end })
+  core.Register({ key = "traversal.jumpStartGround", section = "animation", type = "bool", default = true,
+    label = "Climbing straight after a jump",
+    desc = "A climb or vault that starts just after a jump uses the same traversal animations as one started from the ground "
+      .. "(default). Off = only the animations made for the air, so the game's own climb may play there more often.",
+    apply = function(v) M.SetOption("travJumpStartGround", v ~= false) end })
+  core.Register({ key = "traversal.rejectedFallback", section = "animation", type = "bool", default = true,
+    label = "Try other climb animations",
+    desc = "When the chosen climb or vault animation does not fit an obstacle, other ones are tried before the game's own "
+      .. "animation plays (default). Off = the game's own animation plays at once.",
+    apply = function(v) M.SetOption("travRejectedFallback", v ~= false) end })
   core.Register({ key = "mm.aimWorldSmooth", section = "motion", type = "bool", default = true,
     label = "motion: steady aim while turning",
     desc = "Aims the upper body at the camera target instead of along the body, so the spine stays on target while the body turns and short camera jerks do not jolt the body (nor the head with Head follows the camera). On (default, 12 Hz); off = the earlier aim.",
