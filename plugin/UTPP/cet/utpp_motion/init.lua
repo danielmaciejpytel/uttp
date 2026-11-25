@@ -54,7 +54,7 @@
 --   mm.aimRotation bool, default true (DLL default on) - while aiming and moving, a change of the movement direction may pick a
 --                  pivot animation from 10 deg (the strafe threshold is 30 deg), but not within 0.5 s of a pivot or start pick;
 --                  developer option (native UTPPSetMMAimRotation).
---   mm.aimRootAccumulate bool, default false ("Natural body turn while aiming on the move"; DLL default off) - while V aims and moves,
+--   mm.aimRootAccumulate bool, default true ("Natural body turn while aiming on the move"; DLL default off) - while V aims and moves,
 --                  she first turns to the aim as before, then the lower body keeps its own heading and turns with the steps of the
 --                  animations instead of being turned with the camera at once; the upper body still aims at the crosshair, the hips
 --                  never turn further from the aimed direction than the upper body can twist (52 deg) (native UTPPSetMMAimRootAccumulate).
@@ -113,7 +113,7 @@ M.want = { enabled = false, pistol1h = false, pistolAuto = true, debug = false, 
   lean = true, leanHead = true, leanScale = 0.2, leanHeadScale = 0.2, pelvisYawTrim = 2, shoulderNarrow = 2.5,
   feminineFigure = true, bodyYawOffsetFemale = 4, bodyYawOffsetMale = 0, barrelLoop = true, walkSpeed = 1.9, minAnalogWalk = 0.82, stickSpeed = "fixed", selectionGuards = true,
   aimWorldSmooth = true, neutralAim = true, pelvisPlacement = false, bodyHeightSmooth = true, groundFeet = true, handBackBlend = false, stepDownReach = false, farJumpGravity = false, capsuleForecast = false, aimRotation = true, leanCoverage = "standard",
-  strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, aimRootAccumulate = false }
+  strideWarp = true, overlayInertialSwitch = true, firmFeet = true, footYawLock = true, aimRootAccumulate = true }
 -- aimGameUpper / slide / orientWarp / lean / leanHead / lean amounts / pelvis trim / body yaw offsets / barrel loop / walk speeds /
 -- stickSpeed start unknown (nil): the first apply sends the wanted value whatever the DLL holds
 M.rt = { sinceSync = 0, sinceStatus = 0, overlayOpen = false, status = "not read yet", applied = nil,
@@ -1070,12 +1070,12 @@ function M.RegisterSettings(core)
       .. "ground; after a large turn it follows the animation again and plants anew. On (default); off = planted feet turn "
       .. "with the animations.",
     apply = function(v) M.SetOption("footYawLock", v == true) end })
-  core.Register({ key = "mm.aimRootAccumulate", section = "animation", type = "bool", default = false,
+  core.Register({ key = "mm.aimRootAccumulate", section = "animation", type = "bool", default = true,
     label = "Natural body turn while aiming on the move",
     desc = "While V aims and moves, she first turns to the crosshair as before; then her legs and hips keep their own direction "
       .. "and turn with her steps instead of being turned with the camera at once. Her upper body and the weapon still follow the "
       .. "crosshair, and her hips stay within the turn her upper body can twist; after a very fast camera turn they catch up "
-      .. "smoothly. Off (default) = the body turns with the camera at once.",
+      .. "smoothly. On (default); off = the body turns with the camera at once.",
     apply = function(v) M.SetOption("aimRootAccumulate", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },

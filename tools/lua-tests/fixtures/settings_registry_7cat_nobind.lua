@@ -101,7 +101,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRootAccumulate"] = "false",
+    ["mm.aimRootAccumulate"] = "true",
     ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
@@ -306,12 +306,12 @@ return {
     "native UTPPSetMMStrideWarp(true)",
     "native UTPPSetMMFirmFeet(true)",
     "native UTPPSetMMFootYawLock(true)",
-    "native UTPPSetMMAimRootAccumulate(false)",
+    "native UTPPSetMMAimRootAccumulate(true)",
     "native UTPPSetMMOverlayInertialSwitch(true)",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
-    "apply mm.aimRootAccumulate(false,\"ok\")",
+    "apply mm.aimRootAccumulate(true,\"ok\")",
     "native UTPPSetStickSpeedMode(1)",
     "native UTPPSetMotionStickSpeedMode(1)",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
@@ -525,7 +525,7 @@ return {
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
-    "apply mm.aimRootAccumulate(false,\"ok\")",
+    "apply mm.aimRootAccumulate(true,\"ok\")",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -1547,7 +1547,7 @@ return {
       ["type"] = "bool"
     },
     ["mm.aimRootAccumulate"] = {
-      ["default"] = "false",
+      ["default"] = "true",
       ["hasApply"] = true,
       ["hold"] = false,
       ["onOff"] = false,
@@ -2464,7 +2464,7 @@ return {
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRootAccumulate"] = "false",
+    ["mm.aimRootAccumulate"] = "true",
     ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
@@ -3057,7 +3057,7 @@ return {
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
-    "apply mm.aimRootAccumulate(false,\"ok\")",
+    "apply mm.aimRootAccumulate(true,\"ok\")",
     "apply mm.stickSpeed(\"fixed\",\"ok\")",
     "apply mm.aimAtCrosshair(true,\"ok\")",
     "apply mm.lean(true,\"ok\")",
@@ -3253,7 +3253,7 @@ mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
 mm.footYawLock=true\r\
-mm.aimRootAccumulate=false\r\
+mm.aimRootAccumulate=true\r\
 mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
@@ -3709,7 +3709,7 @@ vehicle.jumpOutSidePush=true\r\
     ["melee.switchBlend"] = "false",
     ["mm.aimAtCrosshair"] = "true",
     ["mm.aimGameUpper"] = "false",
-    ["mm.aimRootAccumulate"] = "false",
+    ["mm.aimRootAccumulate"] = "true",
     ["mm.aimRotation"] = "true",
     ["mm.aimUpperFade"] = "true",
     ["mm.aimWorldSmooth"] = "true",
@@ -3889,7 +3889,7 @@ mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
 mm.firmFeet=true\r\
 mm.footYawLock=true\r\
-mm.aimRootAccumulate=false\r\
+mm.aimRootAccumulate=true\r\
 mm.stickSpeed=fixed\r\
 mm.aimAtCrosshair=true\r\
 mm.lean=true\r\
