@@ -1019,7 +1019,7 @@ add_test(NAME utpp_headlook_replay_test COMMAND utpp_headlook_replay "${CMAKE_CU
 # it assumes utpp_nue_reload.archive is installed, make_release.py ships it as its own group); scripts/utpp_vehicle_door.reds +
 # utpp_vehicle_door_timing.reds (door hold for the car entry clips of utpp_vehicle_car.archive, not part of the release yet).
 set(_utpp_pkg_rt_reds)
-foreach(_n utpp_authored_recoil utpp_gamelook_exit utpp_melee utpp_ragdoll utpp_vehicle_anim utpp_vehicle_exit)
+foreach(_n utpp_authored_recoil utpp_gamelook_exit utpp_melee utpp_ragdoll utpp_traversal utpp_vehicle_anim utpp_vehicle_exit)
   list(APPEND _utpp_pkg_rt_reds "${CMAKE_CURRENT_SOURCE_DIR}/scripts/${_n}.reds")
 endforeach()
 set(_utpp_pkg_rt_camera "${CMAKE_CURRENT_SOURCE_DIR}/cet/utpp_camera/init.lua" "${CMAKE_CURRENT_SOURCE_DIR}/cet/utpp_camera/camera_math.lua")

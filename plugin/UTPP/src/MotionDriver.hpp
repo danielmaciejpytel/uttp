@@ -614,6 +614,12 @@ struct TraversalEvent
     // Vehicle batch (TRAV-1 B): descResult.climbedEntity of the event, sent by UTPPFeedTraversalObstacleKind right before
     // UTPPFeedTraversal (MotionDriverNatives.cpp keeps it pending for exactly one event). kObstacle* values; other = static.
     int32_t obstacleKind = 0;
+    // The script's measured floor behind a vaulted obstacle (UTPPFeedTraversalBackFloor right before UTPPFeedTraversal, one
+    // event): metres below the obstacle top, motiontrav::kNoFloorDepthM = nothing within the ray, < 0 = not measured.
+    // dropVault = the "vault before a drop" menu option at that moment (motiontrav::Config::dropVault).
+    float floorDepth = -1.0f;
+    float floorSample[2] = {-1.0f, -1.0f}; // the two rays behind the back edge (log only; floorDepth = the shallower one)
+    bool dropVault = false;
 };
 inline constexpr int32_t kObstacleStatic = 0;      // no climbed entity (world geometry)
 inline constexpr int32_t kObstacleVehicle = 1;     // VehicleObject

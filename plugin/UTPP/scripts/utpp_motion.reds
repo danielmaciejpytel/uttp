@@ -1735,6 +1735,9 @@ public func UTPPMotionFeedTraversalFrom(action: Int32, scriptInterface: ref<Stat
     kind = IsDefined(veh) ? 1 : 2;
   }
   UTPPFeedTraversalObstacleKind(kind);
+  if action == 9 {
+    UTPPTraversalSendBackFloor(scriptInterface, climbInfo); // measured floor behind (utpp_traversal.reds)
+  }
   UTPPFeedTraversal(action, d.topPoint, d.collisionNormal, d.topExtent, d.behindPoint, climbInfo.obstacleEnd,
     climbInfo.inputDirection, ikHands, UTPPMotionTraversalHand(d.leftHandData), UTPPMotionTraversalHand(d.rightHandData),
     DefaultTransition.GetPlayerPosition(scriptInterface), scriptInterface.GetOwnerForward(), Vector4.Length(vel), airborne,

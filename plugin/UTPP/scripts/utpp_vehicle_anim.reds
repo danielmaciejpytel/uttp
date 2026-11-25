@@ -665,6 +665,10 @@ protected const func EnterCondition(const stateContext: ref<StateContext>, const
   // read before vanilla: the latch (OnAction) is what allowed this evaluation; it is also cleared by dodge presses
   let latched: Bool = !this.m_shouldDisableEnterCondition;
   let result: Bool = wrappedMethod(stateContext, scriptInterface);
+  // obstacle reach: the game checks once per press and switches the check off; keep it on while the press is held
+  if !result && UTPPObstacleKeepVaultCheck(scriptInterface) {
+    this.EnableOnEnterCondition(true);
+  }
   if !IsDefined(scriptInterface) || !IsDefined(scriptInterface.owner) {
     return result;
   }

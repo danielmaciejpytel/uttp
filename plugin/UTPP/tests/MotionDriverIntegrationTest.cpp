@@ -4639,6 +4639,44 @@ int main(int argc, char** argv)
                               lineStat.find(" decision=Hurdle ") != std::string::npos && lineStat.find(" result=Ok(-) montage=") != std::string::npos,
                           "8v TRAV-1 D: one always-on 'UTPP trav:' info line per traversal event (action / kind / decision / result / montage)", d);
                     {
+                        // drop vault wiring: the event's measured floor and option bit reach the plan; off = the Hurdle as before
+                        auto dropOnce = [&](bool aOption, std::string& aLine) {
+                            g_travInfoLines.clear();
+                            motiondriver::SetLogger(&TravInfoCapture);
+                            capPos[0] = capPos[1] = capPos[2] = 0.0f;
+                            for (int i = 0; i < 60; ++i)
+                                feedAt(-1, run);
+                            const trv::V3 p0{capPos[0], capPos[1], capPos[2]};
+                            motiontrav::GameObstacle o = okV;
+                            o.topPoint = o.topPoint + p0;
+                            o.obstacleEnd = o.obstacleEnd + p0;
+                            o.behindPoint = o.behindPoint + p0;
+                            motiondriver::TraversalEvent ev = toEvent(o, p0, vSpeed);
+                            ev.floorDepth = 4.5f;
+                            ev.floorSample[0] = 4.5f;
+                            ev.floorSample[1] = 99.0f;
+                            ev.dropVault = aOption;
+                            const bool fed = motiondriver::FeedTraversal(ev);
+                            for (int i = 0; i < 40; ++i)
+                                feedAt(9, run);
+                            for (int i = 0; i < 20; ++i)
+                                feedAt(-1, run);
+                            aLine = g_travInfoLines.empty() ? std::string("-") : g_travInfoLines.front();
+                            motiondriver::SetLogger(nullptr);
+                            return fed;
+                        };
+                        std::string onLine, offLine;
+                        const bool fedOn = dropOnce(true, onLine), fedDropOff = dropOnce(false, offLine);
+                        const std::string both = "on '" + onLine + "' | off '" + offLine + "'";
+                        std::printf("8v drop wiring: %s\n", both.c_str());
+                        Check(fedOn && onLine.find(" decision=Vault ") != std::string::npos && onLine.find(" back=4.50 ") != std::string::npos &&
+                                  onLine.find(" floor=4.50 rays=4.50/99.00 ") != std::string::npos && onLine.find(" drop=1") != std::string::npos,
+                              "8v drop vault on: the measured floor picks the table's Vault row", both);
+                        Check(fedDropOff && offLine.find(" decision=Hurdle ") != std::string::npos &&
+                                  offLine.find(" floor=4.50 ") != std::string::npos && offLine.find(" drop=0") != std::string::npos,
+                              "8v drop vault off: the same event keeps the Hurdle", both);
+                    }
+                    {
                         // TRAV-1 A + B end to end: the vault over a vehicle with mm.climbRelease off (the saved value) - v2 does not
                         // own it and v2 traversal is active, so the v1 gate releases all 40 detail-9 feeds to the game's vault animation
                         motionhost::SetClimbRelease(false);

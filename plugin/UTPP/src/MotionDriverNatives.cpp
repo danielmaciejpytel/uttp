@@ -144,6 +144,9 @@ void Native_GetMotionStatus(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame,
 // obstacle of the next traversal event (TraversalEvent::obstacleKind). Game thread only (both natives run in the script VM of
 // the same state OnEnter); an atomic anyway, so a stray caller cannot tear it. Consumed and reset by Native_FeedTraversal.
 std::atomic<int32_t> g_pendingObstacleKind{0};
+// UTPPFeedTraversalBackFloor: the same one-event pending value. The two ray depths (cm, -1 = not measured) and the option bit.
+std::atomic<int32_t> g_pendingBackFloorCm[2] = {-1, -1};
+std::atomic<bool> g_pendingDropVault{false};
 
 void Native_FeedTraversalObstacleKind(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
 {
@@ -152,6 +155,24 @@ void Native_FeedTraversalObstacleKind(RED4ext::IScriptable*, RED4ext::CStackFram
     aFrame->code++; // ParamEnd
     g_pendingObstacleKind.store(kind >= kObstacleStatic && kind <= kObstacleOtherEntity ? kind : kObstacleStatic,
                                 std::memory_order_relaxed);
+}
+
+// UTPPFeedTraversalBackFloor(nearM: Float, farM: Float, dropVault: Bool) -> Void (scripts/utpp_traversal.reds, right before
+// UTPPFeedTraversal of a vault): TraversalEvent::floorSample / floorDepth (the shallower sample) / dropVault of that event.
+void Native_FeedTraversalBackFloor(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, void*, int64_t)
+{
+    float depth[2] = {-1.0f, -1.0f};
+    bool drop = false;
+    RED4ext::GetParameter(aFrame, &depth[0]);
+    RED4ext::GetParameter(aFrame, &depth[1]);
+    RED4ext::GetParameter(aFrame, &drop);
+    aFrame->code++; // ParamEnd
+    for (int k = 0; k < 2; ++k)
+        g_pendingBackFloorCm[k].store(std::isfinite(depth[k]) && depth[k] >= 0.0f
+                                          ? static_cast<int32_t>((depth[k] < 99.0f ? depth[k] : 99.0f) * 100.0f + 0.5f)
+                                          : -1,
+                                      std::memory_order_relaxed);
+    g_pendingDropVault.store(drop, std::memory_order_relaxed);
 }
 
 // UTPP-MOTION SEAM trav: UTPPFeedTraversal (scripts/utpp_motion.reds ClimbEvents / VaultEvents OnEnter wraps). Parameter order =
@@ -220,6 +241,14 @@ void Native_FeedTraversal(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, b
     ev.horizontalDuration[2] = hL;
     ev.forwardStep = fwdStep;
     ev.obstacleKind = g_pendingObstacleKind.exchange(kObstacleStatic, std::memory_order_relaxed); // one event only
+    for (int k = 0; k < 2; ++k)
+    {
+        const int32_t cm = g_pendingBackFloorCm[k].exchange(-1, std::memory_order_relaxed);
+        ev.floorSample[k] = cm >= 0 ? static_cast<float>(cm) * 0.01f : -1.0f;
+        if (cm >= 0 && (ev.floorDepth < 0.0f || ev.floorSample[k] < ev.floorDepth))
+            ev.floorDepth = ev.floorSample[k];
+    }
+    ev.dropVault = g_pendingDropVault.exchange(false, std::memory_order_relaxed);
     bool ok = false;
     try // natives run inside the game's script VM: no exception may leave them
     {
@@ -948,6 +977,13 @@ void RegisterNatives()
     f6->flags = flags;
     f6->AddParam("Int32", "kind");
     rtti->RegisterFunction(f6);
+    auto* f7 = RED4ext::CGlobalFunction::Create("UTPPFeedTraversalBackFloor", "UTPPFeedTraversalBackFloor",
+                                                &Native_FeedTraversalBackFloor);
+    f7->flags = flags;
+    f7->AddParam("Float", "nearM");
+    f7->AddParam("Float", "farM");
+    f7->AddParam("Bool", "dropVault");
+    rtti->RegisterFunction(f7);
 
     // ragdoll R0 probe
     auto* r1 = RED4ext::CGlobalFunction::Create("UTPPRagdollGetUpProbe", "UTPPRagdollGetUpProbe", &Native_RagdollGetUpProbe);

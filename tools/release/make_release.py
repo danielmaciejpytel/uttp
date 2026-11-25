@@ -219,7 +219,7 @@ CODE = [
     (P_REDS + n, "scripts/" + n, "core")
     for n in ["utpp.reds", "utpp_motion.reds", "utpp_authored_recoil.reds", "utpp_body.reds", "utpp_bodyturn.reds",
               "utpp_crosshair.reds", "utpp_reticle.reds", "utpp_itemplane.reds", "utpp_loothead.reds", "utpp_locomotion.reds",
-              "utpp_weapon_restriction.reds", "utpp_vehicle_exit.reds", "utpp_vehicle_anim.reds",
+              "utpp_weapon_restriction.reds", "utpp_vehicle_exit.reds", "utpp_vehicle_anim.reds", "utpp_traversal.reds",
               "utpp_gamelook_exit.reds", "utpp_modsettings.reds", "utpp_modsettings_bridge.reds", "utpp_shoulder_input.reds",
               "utpp_ragdoll.reds"]   # utpp.reds / utpp_bodyturn.reds call UTPPRgBusy / UTPPRgKnockdownFeed (2026-11-03)
 ] + [
