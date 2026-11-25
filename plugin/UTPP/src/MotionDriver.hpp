@@ -203,9 +203,9 @@ void SetCapsuleForecast(bool aOn);
 // chooser's IsPivoting uses the Aim pivot threshold and the pivot / start elapsed-time gate (motiontraj::IsPivotingAim). Read on
 // every Step.
 void SetAimRotation(bool aOn);
-// Moving-aim root accumulate (CET mm.aimRootAccumulate, default off): while V aims on the move the visual root keeps accumulating the steered
-// clip yaw instead of the lock onto the capsule; its lag behind the aimed direction stays within the aim offset's reach (spine yaw clamp
-// minus a margin, 52 deg; MotionOffsetRoot.hpp item 6).
+// Moving-aim root accumulate (CET mm.aimRootAccumulate, default off): while V aims on the move the visual root first squares up to the aim
+// like the lock, then keeps accumulating the steered clip yaw instead of the lock onto the capsule; its lag behind the aimed direction
+// stays within the aim offset's reach (spine yaw clamp minus a margin, 52 deg; MotionOffsetRoot.hpp item 6).
 // Read on every Step.
 void SetAimRootAccumulate(bool aOn);
 // Tier2 Slow flag (GameplayRestriction.Tier2LocomotionSlow; reds UTPPFeedMotionTier2Slow, sent right before every UTPPFeedLocomotion): the next

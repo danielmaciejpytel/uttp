@@ -30,10 +30,10 @@
 //     With UTPP_OFFSET_ROOT_FORWARD_LIMIT 2 the driver passes the limit only outside turning and start clips while standing (a turn
 //     keeps the forward offset that absorbs it).
 //  6. Moving-aim accumulate (Step::aimAccumulate, opt-in). Instead of the moving-aim lock the rotation accumulates as in locomotion
-//     (the visible heading keeps its world yaw and turns with the clip's steered yaw). The lag behind aimLagTarget is held inside
-//     aimLagMax: once it has been inside the band it is clamped at the band edge (a camera turn of any speed never pushes it past the
-//     aim offset's reach); a lag beyond the band when the accumulate begins (V faced away) is taken back at most at the lock rate and
-//     never grows meanwhile. The aim offset turns the upper body over the remaining lag.
+//     (the visible heading keeps its world yaw and turns with the clip's steered yaw). When it begins, V first squares up to the aim
+//     like the lock does (half-life kAimEntryHalfLife, at most the lock rate; the lag never grows meanwhile, also while the camera keeps
+//     turning) until the lag is within kAimEntryDone. From then on the lag behind aimLagTarget is clamped at the band edge aimLagMax,
+//     so a camera turn of any speed never pushes it past the aim offset's reach. The aim offset turns the upper body over the lag.
 // (RootMontage.hpp: a reload that began on the spot is not montage once V moves.)
 #pragma once
 #include "MMMath.hpp"
@@ -96,8 +96,11 @@ inline constexpr float kForwardLimit = UTPP_OFFSET_ROOT_FORWARD_LIMIT_M;
 inline constexpr float kForwardLimitDriver = UTPP_OFFSET_ROOT_FORWARD_LIMIT_DRIVER_M;
 inline constexpr float kForwardHalflife = .15f;
 inline constexpr float kForwardMinSpeed = .5f;
-// Rate of the moving-aim lock (ADS while moving) and of the lag bound of the moving-aim accumulate (header item 6).
+// Rate of the moving-aim lock (ADS while moving) and of the squaring up of the moving-aim accumulate (header item 6).
 inline constexpr float kAimLockRate = 540.f * math::kPi / 180.f; // the original expression (bit-identical lock)
+// Moving-aim accumulate (header item 6): half-life of the squaring up (the moving-aim lock's), the lag at which it is done.
+inline constexpr float kAimEntryHalfLife = .1f;
+inline constexpr float kAimEntryDone = 2.f * math::kPi / 180.f;
 struct Step
 {
     float dt = 0;
@@ -146,8 +149,8 @@ struct State
     bool translationRelease = true, rotationRelease = false;
     // rest recentering: speed (rad/s, towards zero), seconds the offset waited for a turn, authored-yaw hold (s), yaw moved this step (rad)
     float restSpeed = 0, restIdle = 0, restHold = 0, restStep = 0, turnAge = 0;
-    // moving-aim accumulate (header item 6): it ran on the last step, its lag has been inside the band since, the lag after the step
-    // (rad, continuous across steps: the band side is never flipped by a wrap)
+    // moving-aim accumulate (header item 6): it ran on the last step, the squaring up is done, the lag after the step (rad, continuous
+    // across steps: the band side is never flipped by a wrap)
     bool aimActive = false, aimLatched = false;
     float aimLag = 0;
 };
@@ -356,24 +359,27 @@ class OffsetRoot
         next.aimLag = 0;
         if (aimMoving && s.aimAccumulate && std::isfinite(s.aimLagTarget) && std::isfinite(s.aimLagMax) && s.aimLagMax > 0)
         {
-            // header item 6: accumulate; the lag is clamped at the band edge once inside it, a lag from before the band shrinks at the
-            // lock rate at most (and never grows)
+            // header item 6: square up to the aim first, then accumulate with the lag clamped at the band edge
             next.rotationRelease = false;
             const float yaw = math::WrapAngle(m.yaw + s.animationYawDelta - s.capsuleYawDelta);
             // the lag before this step (the first step: the offset so far against the current target) and after it, continuous
             const float prev = m.aimActive ? m.aimLag : math::WrapAngle(m.yaw - s.aimLagTarget);
             const float lag = prev + math::WrapAngle(yaw - s.aimLagTarget - prev);
-            const float excess = std::fabs(lag) - s.aimLagMax;
             const float rate = std::isfinite(s.lockMaxRate) && s.lockMaxRate > 0 ? s.lockMaxRate : kAimLockRate;
-            float allowed = 0.f; // excess left after this step
-            if (!m.aimLatched)
-                allowed = std::fmax(0.f, std::fmin(excess, std::fabs(prev) - s.aimLagMax) - rate * s.dt);
             float lagNext = lag;
-            if (excess > allowed)
-                lagNext = std::copysign(s.aimLagMax + allowed, lag);
+            bool latched = m.aimLatched;
+            if (!latched)
+            {
+                const float mag = std::fmin(std::fabs(lag), std::fabs(prev));
+                const float magNext = mag - std::fmin(mag * DampingAlpha(kAimEntryHalfLife, s.dt), rate * s.dt);
+                lagNext = std::copysign(magNext, lag);
+                latched = magNext <= kAimEntryDone;
+            }
+            else if (std::fabs(lag) > s.aimLagMax)
+                lagNext = std::copysign(s.aimLagMax, lag);
             next.yaw = lagNext == lag ? yaw : math::WrapAngle(s.aimLagTarget + lagNext);
             next.aimActive = true;
-            next.aimLatched = m.aimLatched || std::fabs(lagNext) <= s.aimLagMax;
+            next.aimLatched = latched;
             next.aimLag = lagNext;
         }
         else if (aimMoving)

@@ -55,9 +55,9 @@
 --                  pivot animation from 10 deg (the strafe threshold is 30 deg), but not within 0.5 s of a pivot or start pick;
 --                  developer option (native UTPPSetMMAimRotation).
 --   mm.aimRootAccumulate bool, default false ("Natural body turn while aiming on the move"; DLL default off) - while V aims and moves,
---                  the lower body keeps its own heading and turns with the steps of the animations instead of being turned with the
---                  camera at once; the upper body still aims at the crosshair, the hips never turn further from the aimed direction
---                  than the upper body can twist (52 deg) (native UTPPSetMMAimRootAccumulate).
+--                  she first turns to the aim as before, then the lower body keeps its own heading and turns with the steps of the
+--                  animations instead of being turned with the camera at once; the upper body still aims at the crosshair, the hips
+--                  never turn further from the aimed direction than the upper body can twist (52 deg) (native UTPPSetMMAimRootAccumulate).
 --   mm.strideWarp bool, default true ("Stride matching"; DLL default on, the value is sent with the other M.OPTIONS) - the steps of
 --                  the walk / run / crouch loops on the ground are shortened to the movement speed, so the feet slide less (with the
 --                  knee limit of the DLL; starts, stops, turns, air, slide and traversal are untouched). Switching it fades in / out
@@ -1072,10 +1072,10 @@ function M.RegisterSettings(core)
     apply = function(v) M.SetOption("footYawLock", v == true) end })
   core.Register({ key = "mm.aimRootAccumulate", section = "animation", type = "bool", default = false,
     label = "Natural body turn while aiming on the move",
-    desc = "While V aims and moves, her legs and hips keep their own direction and turn with her steps instead of being turned "
-      .. "with the camera at once, so her feet slide less when you turn while aiming. Her upper body and the weapon still follow "
-      .. "the crosshair: her hips never turn further away from where she aims than her upper body can twist. Off (default) = "
-      .. "the body turns with the camera at once.",
+    desc = "While V aims and moves, she first turns to the crosshair as before; then her legs and hips keep their own direction "
+      .. "and turn with her steps instead of being turned with the camera at once. Her upper body and the weapon still follow the "
+      .. "crosshair, and her hips never turn further away from where she aims than her upper body can twist. Off (default) = the "
+      .. "body turns with the camera at once.",
     apply = function(v) M.SetOption("aimRootAccumulate", v == true) end })
   core.Register({ key = "mm.stickSpeed", section = "animation", type = "choice", default = "fixed",
     choices = { { "fixed", "Walk or run" }, { "analog", "Follows the stick" } },
