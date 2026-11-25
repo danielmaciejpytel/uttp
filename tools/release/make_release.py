@@ -521,8 +521,8 @@ Steam version. TweakXL is not needed.
 Install: extract into the Cyberpunk 2077 folder (the one with bin, archive, r6 and red4ext), or install with Vortex.
 Settings: Mod Settings > Ultimate Third Person (or the UTPP tab of Native Settings UI when Mod Settings is not
 installed), or the CET console: GetMod('utpp_core').Set('key', value). Values set in either place are kept in sync.
-Updating from 0.1.0: at the first start of 0.1.1 or later the settings of the mod are reset to their defaults once, and a
-message on the screen says so. The shoulder-switch key and controller button are not changed.
+Updating from 0.1.x: at the first start of 0.2.0 the settings of the mod are reset to their defaults once, and a message
+on the screen says so (a new installation shows no message). The shoulder-switch key and controller button are not changed.
 Logs: red4ext\\logs\\utpp-*.log. The mod always writes a small basic log there; the detailed "Diagnostic logs" are off
 by default (see "How to report a problem" below).
 Shoulder switch: one key that the game itself does not use - L on the keyboard, right stick click held for 0.5 s on a
