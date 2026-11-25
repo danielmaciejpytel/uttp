@@ -147,6 +147,8 @@ def mesh_node(debug_name, mesh_path=MESH_PATH):
     n = _node_base('worldStaticMeshNode', debug_name)
     n['mesh'] = _path(mesh_path)
     n['meshAppearance'] = _cname('default')
+    # The 1 m source cube gets a tiny automatic hide distance; scaled boxes need a fixed one.
+    n['forceAutoHideDistance'] = STREAMING_DISTANCE
     return n
 
 
