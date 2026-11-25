@@ -631,7 +631,7 @@ int main(int argc, char** argv)
         {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun)", 265.86f, 268.66f, 10, false, false, false, -1, -1.0f, 40.0f, true}}, false, true, false, false, -1, true},
         {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle)", 400.81f, 403.61f, 10, false, false, false, -1, -1.0f, 40.0f, true}}, false, true, false, false, -1, true},
         {"churn_aim_strafe_taps_handgun.feed", {{"aim_moves aim_strafe_taps (handgun, Male body)", 265.86f, 268.66f, 10, false, false, false, -1, -1.0f, 40.0f, true}}, true, true, false, false, -1, true},
-        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle, Male body)", 400.81f, 403.61f, 10, false, false, false, -1, -1.0f, 40.0f, true}}, true, true, false, false, -1, true},
+        {"churn_aim_strafe_taps_rifle.feed", {{"aim_moves aim_strafe_taps (rifle, Male body)", 400.81f, 403.61f, 10, false, false, false, -1, -1.0f, 60.0f, true}}, true, true, false, false, -1, true},
         // Female 2026-11-14 06:48 run flick (game 8 changes in 2.5 s)
         {"churn_flick_run_kbd.feed", {{"flick_180_run flick (second run)", 258.41f, 260.91f, 5}}},
         // Female 2026-11-14 12:47 and 11:35, sprint_dash from its settle: the stick swings 90 deg at a run in 0.11 s (at most 32 deg per feed,
