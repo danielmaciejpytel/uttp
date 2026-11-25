@@ -95,8 +95,11 @@ static void Detection()
                                   g == Ground::Up ? "up" : "down", double(st.first), double(st.second), double(hz), double(speed),
                                   double(w.est.tread), double(w.est.rise), double(w.out.weight));
                     const float riseSigned = g == Ground::Up ? st.first : -st.first;
+                    // a fast descent is left unchanged by design (Config::descentFastOn): the estimate stays, the weight is zero
+                    const bool gated = g == Ground::Down && speed > Config().descentFastOn;
                     Check(w.est.valid && std::fabs(w.est.tread - st.second) < 0.01f && std::fabs(w.est.rise - riseSigned) < 0.01f &&
-                              w.out.weight == 1.0f && std::fabs(w.out.treadM - st.second) < 0.01f,
+                              (gated ? w.out.weight == 0.0f
+                                     : w.out.weight == 1.0f && std::fabs(w.out.treadM - st.second) < 0.01f),
                           name);
                     // the nose line of the estimate lies on a real nose (distance from the nearest nose along the travel)
                     const float s0 = (w.est.noseX - 5.0f) * 0.6f + (w.est.noseY + 3.0f) * 0.8f + 0.1f;
