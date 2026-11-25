@@ -23,7 +23,7 @@ COLLISION_PRESET = 'World Static'
 # physics material used by box shapes of the "World Static" preset in the base game sectors
 COLLISION_MATERIAL_HASH = '12468419275653881673'
 FIXED_POINT_ONE = 131072          # WorldPosition FixedPoint: bits = metres * 2^17
-STREAMING_DISTANCE = 300.0
+STREAMING_DISTANCE = 2000.0
 FLT_MAX = 3.40282347e+38
 BUFFER_TYPE = 'WolvenKit.RED4.%s, WolvenKit.RED4, Version=10.0.0.0, Culture=neutral, PublicKeyToken=null'
 
@@ -219,7 +219,7 @@ def build_sector(boxes, sector_path, mesh_path=MESH_PATH):
     return doc, _aabb(boxes)
 
 
-def build_block(sector_path, bbox, margin=100.0):
+def build_block(sector_path, bbox, margin=2000.0):
     lo, hi = bbox
     box = {'$type': 'Box',
            'Max': {'$type': 'Vector4', 'W': -FLT_MAX, 'X': hi[0] + margin, 'Y': hi[1] + margin, 'Z': hi[2] + margin},
