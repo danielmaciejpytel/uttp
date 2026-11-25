@@ -349,21 +349,6 @@ bool SetPelvisYawTrim(float aDeg);
 float PelvisYawTrim();
 float PelvisYawTrimWeight();
 std::string PelvisYawTrimReason();
-// Body yaw offset (CET mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale; mm/OrientWarp.hpp BodyYawOffset): deg (+ = left, -20..20,
-// default 0) per body; the value of the installed bundle's body turns the WHOLE v2 character (pelvis, torso, head, legs and feet as one
-// rigid pose) about the visual root: added to the visual root yaw of the leg-tail frame only; entity / capsule yaw, movement direction,
-// matcher state and pose are untouched. On foot in every stance / gait, weapon holstered or drawn; not while aiming, during a weapon
-// action (shot, reload, hip-fire pose, melee), traversal / release / no root frame (weight fades 0.25 s). False on NaN / out of range
-// (nothing changed). MMTRACE: bo=<deg>/<weight>/<reason> while set; reason = the first gate holding the weight down (aim, melee,
-// wpnact, trav, release, noroot) or ok. Weight / reason of the last Step: BodyYawOffsetWeight / BodyYawOffsetReason (diagnostics,
-// tests). SetBodyYawOffset sets the same value for both bodies; BodyYawOffset = the value of the installed bundle's body (female V
-// without a bundle), BodyYawOffsetFor = the value of one body.
-bool SetBodyYawOffset(float aDeg);
-bool SetBodyYawOffsets(float aFemaleDeg, float aMaleDeg);
-float BodyYawOffset();
-float BodyYawOffsetFor(bool aMale);
-float BodyYawOffsetWeight();
-std::string BodyYawOffsetReason();
 // Barrel pitch loop of the v2 aim offset (aim pitch plan 2026-10-30; CET mm.aimAtCrosshair, DLL default ON; off = the open-loop aim offset
 // bit for bit; mm/BarrelPitchLoop.hpp): closes the loop on the barrel elevation of WeaponRight against the aim point (UTPPSetAimTarget /
 // UTPPSetCameraTarget, P in the pose frame). Off: a running loop fades out (bias / residual at most 1 deg per frame). Always true.

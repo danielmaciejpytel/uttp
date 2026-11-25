@@ -144,6 +144,11 @@ struct Step
     // interpolates (moving on the ground, no montage) and the capsule moves faster than kForwardMinSpeed.
     float forwardLimit = -1.f;
     float forwardHalflife = kForwardHalflife; // s
+    // Follow the capsule (turn exit, mm/TurnExit.hpp): the yaw offset decays to zero at followCapsuleHalfLife (s), at most at
+    // releaseMaxRate, and the clip's root turn is not added: the drawn heading rides the capsule. The moving-aim modes, the yaw
+    // alignment and the montage release keep priority. Off (the default) = the contract.
+    bool followCapsule = false;
+    float followCapsuleHalfLife = .06f;
     // Moving-aim accumulate (header item 6): replaces the moving-aim lock while aimFacing and movingGround. aimLagTarget = the aimed
     // heading relative to the capsule (rad, visual minus capsule convention), aimLagMax = the band edge the lag is pulled back to (rad,
     // > 0), aimLagHard = the edge it never passes (rad, >= aimLagMax), aimFollowRate = the bound of the heading's world turn while a
@@ -435,6 +440,13 @@ class OffsetRoot
             const float lim = s.yawAlignMaxRate * s.dt;
             const float step = std::clamp(math::WrapAngle(s.yawAlignTarget - base) * DampingAlpha(s.yawAlignHalfLife, s.dt), -lim, lim);
             next.yaw = math::WrapAngle(base + step);
+        }
+        else if (s.followCapsule && !next.rotationRelease)
+        {
+            const float released = m.yaw * (1 - DampingAlpha(s.followCapsuleHalfLife, s.dt));
+            const float bound = std::isfinite(s.releaseMaxRate) && s.releaseMaxRate > 0 ? s.releaseMaxRate * s.dt
+                                                                                        : std::numeric_limits<float>::infinity();
+            next.yaw = std::fabs(m.yaw - released) > bound ? m.yaw - std::copysign(bound, m.yaw) : released;
         }
         else if (s.airFollow && std::isfinite(s.lockMaxRate) && s.lockMaxRate > 0)
         {

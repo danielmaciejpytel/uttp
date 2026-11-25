@@ -2269,18 +2269,6 @@ void Native_SetMotionPelvisYawTrim(RED4ext::IScriptable*, RED4ext::CStackFrame* 
         *aOut = ok;
 }
 
-// ---- body yaw offset of both bodies (motiondriver::SetBodyYawOffset, default 0; CET uses UTPPSetMotionBodyYawOffsets): deg, + = left, -20..20
-void Native_SetMotionBodyYawOffset(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
-{
-    float deg = 0.0f;
-    RED4ext::GetParameter(aFrame, &deg);
-    aFrame->code++;
-    const bool ok = motiondriver::SetBodyYawOffset(deg);
-    LogInfo("UTPPSetMotionBodyYawOffset(%.2f) -> %d", static_cast<double>(deg), ok ? 1 : 0);
-    if (aOut)
-        *aOut = ok;
-}
-
 // ---- v2 barrel pitch loop (motiondriver::SetBarrelLoop; CET mm.aimAtCrosshair, DLL default off) and muzzle length (0.05..1.0 m)
 void Native_SetMotionBarrelLoop(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
 {
@@ -3935,15 +3923,6 @@ void PostRegisterTypes()
         pt->AddParam("Float", "deg");
         pt->SetReturnType("Bool");
         rtti->RegisterFunction(pt);
-    }
-
-    // body yaw offset
-    {
-        auto* bo = RED4ext::CGlobalFunction::Create("UTPPSetMotionBodyYawOffset", "UTPPSetMotionBodyYawOffset", &Native_SetMotionBodyYawOffset);
-        bo->flags = flags;
-        bo->AddParam("Float", "deg");
-        bo->SetReturnType("Bool");
-        rtti->RegisterFunction(bo);
     }
 
     // v2 barrel pitch loop + muzzle length

@@ -1427,6 +1427,9 @@ struct MapContext
     // fix/jumpout-cam: inside the exit window of a vehicle JUMP-OUT (MMDriver g_jumpOutExit: the launch of the cool exit, double F while driving). The
     // chooser state then carries ChooserState::jumpOutFlight, which ChooserMatcher reads in the air only. A hand-built context leaves it false.
     bool jumpOutFlight = false;
+    // Turn exit window (mm/TurnExit.hpp): the query velocity is the game velocity (the speed converter stops curving it) and the
+    // chooser state carries ChooserState::turnExit. A hand-built context leaves it false.
+    bool turnExit = false;
 };
 
 // [P] database tag "Pivots" from the motion database name (PSD_*_Pivots); the tag arrays are not exported to the chooser data.
@@ -2280,6 +2283,8 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
                                              ground, dt, lim.maxTurnCos) &&
                       ((input && sp > motiontraj::kHasVelocity) || shapeSpeed)) ||
                      active;
+        if (x.turnExit)
+            speedconv::Straighten(m.speedConverter, velConv); // turn exit: no curved query, the converter takes the game heading
         velQ = speedconv::Step(m.speedConverter, velConv, input, active, dt, lim, shapeSpeed, (c.speedConverter & speedconv::kDirectionOnly) != 0);
         if (c.speedConverter & speedconv::kGaitRamp)
             velQ = speedconv::GaitStep(m.speedConverterGait, velQ, vel, gait, active && input, dt,
@@ -2585,6 +2590,7 @@ inline motion::ChooserState MapToChooserCore(const MotionFeed& f, const MapConfi
 #endif
     s.aimStrafeRotation = st.aimRotation && mode == 0 && !slideActive; // MatcherConfig::strafePivotTailS (aimed strafe only)
     s.jumpOutFlight = jumpOutFlight; // fix/jumpout-cam (MatcherConfig::jumpOutNoBack / jumpOutFallHandover)
+    s.turnExit = x.turnExit;
     // Chooser MovementMode / MovementMode_LastFrame / MovementDirection. Slide off: movementMode = st.movementMode (0 / 1) as
     // before and movementModeLast its previous-frame value. Slide on: MovementMode Sliding and Stance Crouch for the whole PSM
     // detail 5 (the game puts V into the crouch capsule; the stance stays Stand for the speed calibration above, which keeps the

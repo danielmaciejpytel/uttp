@@ -104,6 +104,8 @@ struct FeedInput
     // Recorded replays: the coming tick's turn in degrees (the next feed's yaw minus this one). NaN = the host derives it from its last
     // body yaw command (BodyYawCommand issued since the previous feed for the yaw of this feed).
     float yawAheadDeg = std::numeric_limits<float>::quiet_NaN();
+    // Native host -> MOTION only: a turn exit window is open (mm/TurnExit.hpp, SetFastTurnExit; false with the setting off).
+    bool turnExit = false;
 };
 
 // Loads <aPath> (wide path). Fail closed: on error MM stays unavailable, reason kept for the status.
@@ -441,6 +443,10 @@ int32_t FootReplantMask();
 // releases it through the blend-out, a standing capsule after those clips hands the hold back at the hand-back speed. Off = the previous
 // leg tail bit for bit. Always true.
 bool SetFirmFeet(bool aOn);
+// Quick straightening after turns (CET mm.fastTurnExit, default off; mm/TurnExit.hpp). TurnExitCount: exit windows opened.
+bool SetFastTurnExit(bool aOn);
+bool FastTurnExit();
+uint64_t TurnExitCount();
 bool FirmFeet();
 // Hold limit (m, 0.01..0.35), hand-back speed (m/s, 0.01..10), knee fold margin (deg above the animated flexion, 0..57), release
 // speed (m/s, 0.1..100), latch capsule speed (m/s, 0..100) and the knee fold margin of a latch in a turn-in-place clip (deg, 0..57;

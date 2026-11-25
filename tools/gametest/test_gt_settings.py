@@ -409,7 +409,7 @@ class SessionSettingsTests(unittest.TestCase):
     """--settings author | shipped: the values of the session, what differs from the shipped defaults, and the way back."""
 
     # a player who changed every locomotion setting: the session pins them and puts the player's values back
-    PLAYER = {'mm.bodyYawOffsetFemale': 8, 'mm.bodyYawOffsetMale': -3, 'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
+    PLAYER = {'mm.pelvisYawTrim': 5, 'camera.side': 1, 'mm.shinobiBonusReload': False,
               'perspective.scene': True, 'perspective.blend': 0.8,
               'mm.walkToggleSpeed': 2.4, 'mm.minAnalogWalkSpeed': 0.5, 'mm.stickSpeed': 'analog', 'mm.lean': False, 'mm.leanHead': False, 'mm.leanScale': 1.5,
               'mm.leanHeadScale': 0.3, 'mm.leanCoverage': 'standard', 'mm.orientWarp': False, 'mm.strideWarp': False, 'mm.footReplant': 'always',
@@ -425,10 +425,10 @@ class SessionSettingsTests(unittest.TestCase):
 
     def test_plans(self):
         self.assertEqual(dict(gs.session_plan('author')),
-                         {'mm.bodyYawOffsetFemale': 4, 'mm.bodyYawOffsetMale': 0, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+                         {'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
                           'perspective.scene': False, 'perspective.blend': 0.6, **self.LOCO})
         shipped = dict(gs.session_plan('shipped'))
-        self.assertEqual(shipped, {'mm.bodyYawOffsetFemale': 4, 'mm.bodyYawOffsetMale': 0, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+        self.assertEqual(shipped, {'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
                                    'perspective.scene': False, 'perspective.blend': 0.8, **self.LOCO})
 
     def test_locomotion_keys_are_pinned_at_the_registered_defaults(self):
@@ -468,7 +468,7 @@ class SessionSettingsTests(unittest.TestCase):
 
     def test_difference_from_shipped(self):
         diff = {d['key']: d for d in gs.differs_from_shipped(dict(gs.session_plan('author')))}
-        # the body yaw offset, the pelvis trim, the Shinobi reload animation, third person in scenes and the 1 m shoulder offset
+        # the pelvis trim, the Shinobi reload animation, third person in scenes and the 1 m shoulder offset
         # are shipped with the author's values; only the hidden transition time differs
         self.assertEqual(set(diff), {'perspective.blend'})
         self.assertEqual((diff['perspective.blend']['value'], diff['perspective.blend']['shipped']), (0.6, 0.8))
@@ -479,8 +479,7 @@ class SessionSettingsTests(unittest.TestCase):
                          ['perspective.scene', 'camera.side'])
         line = gs.settings_line('author', dict(gs.session_plan('author')))
         self.assertEqual(line, 'settings author: differ from the shipped defaults: perspective.blend 0.6 (shipped 0.8); ' + self.LOCO_TEXT)
-        self.assertNotIn('mm.bodyYawOffsetFemale', line)
-        self.assertNotIn('mm.bodyYawOffsetMale', line)
+        self.assertNotIn('mm.pelvisYawTrim', line)
         # a key whose default the harness does not know cannot be called equal: it is listed as unknown
         unknown = gs.differs_from_shipped({'camera.aim.side': 0.5})
         self.assertEqual([(d['key'], d['shipped']) for d in unknown], [('camera.aim.side', None)])
@@ -520,10 +519,10 @@ class SessionSettingsTests(unittest.TestCase):
 
     def test_a_cet_command_that_sets_the_same_keys_is_warned_about(self):
         n, io = self.make_night('author', self.PLAYER)
-        n.args.cet = "for k,v in pairs({['mm.bodyYawOffsetFemale']=4}) do c.Set(k,v) end"
+        n.args.cet = "for k,v in pairs({['mm.pelvisYawTrim']=4}) do c.Set(k,v) end"
         info = {}
         n.apply_session_settings(None, info)
-        self.assertEqual(info['session_settings_conflict'], ['mm.bodyYawOffsetFemale'])
+        self.assertEqual(info['session_settings_conflict'], ['mm.pelvisYawTrim'])
         n2, io2 = self.make_night('author', self.PLAYER)
         info2 = {}
         n2.apply_session_settings(None, info2)

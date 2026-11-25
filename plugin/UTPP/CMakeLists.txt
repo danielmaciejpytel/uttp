@@ -721,6 +721,13 @@ if(EXISTS "${_utpp_hl_db}")
 else()
     add_test(NAME utpp_orientwarp_test COMMAND utpp_orientwarp_test)
 endif()
+# quick straightening after turns (mm/TurnExit.hpp, CET mm.fastTurnExit): end-of-turn detector, arc to straight loop pair and the exit
+# rate of the body follow law
+add_executable(utpp_turnexit_test tests/TurnExitTest.cpp src/mm/TurnExit.hpp src/mm/BodyTurn.hpp)
+target_include_directories(utpp_turnexit_test PRIVATE src)
+target_compile_features(utpp_turnexit_test PRIVATE cxx_std_20)
+target_compile_options(utpp_turnexit_test PRIVATE ${UTPP_WARNINGS} /EHsc)
+add_test(NAME utpp_turnexit_test COMMAND utpp_turnexit_test)
 add_executable(utpp_orientwarp_replay EXCLUDE_FROM_ALL tests/OrientWarpReplay.cpp src/mm/OrientWarp.hpp src/mm/HeadLead.hpp)
 target_compile_features(utpp_orientwarp_replay PRIVATE cxx_std_20)
 target_compile_options(utpp_orientwarp_replay PRIVATE ${UTPP_WARNINGS} /EHsc)

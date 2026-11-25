@@ -122,6 +122,18 @@ inline void Reset(State& s, motiontraj::V3 aGame)
     s.turning = false;
 }
 
+// The converted velocity takes the game heading at once and keeps its own speed (turn exit, mm/TurnExit.hpp: the query stops curving
+// without a speed jump). No state or no game direction: unchanged.
+inline void Straighten(State& s, motiontraj::V3 aGame)
+{
+    const float target = motiontraj::SizeXY(aGame), own = motiontraj::SizeXY(s.vel);
+    if (!s.valid || !(target > motiontraj::kHasVelocity) || !(own > motiontraj::kHasVelocity))
+        return;
+    const float k = own / target;
+    s.vel = motiontraj::V3{aGame.x * k, aGame.y * k, s.vel.z};
+    s.turning = false;
+}
+
 // Below this angle between the converted and the game velocity the two count as aligned: without aShapeSpeed the converted speed is
 // then the game speed (a straight start, speed-up or slow-down is not reshaped; only a turn is).
 inline constexpr float kAlignedCos = 0.9659258f; // 15 deg

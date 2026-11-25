@@ -128,6 +128,10 @@ public native func UTPPSetMMStrideWarp(on: Bool) -> Bool
 // Firm feet in turns and stops (DLL default on; CET setting mm.firmFeet): a planted foot stays fixed on the ground through turns and
 // stops (larger leg correction, limited by the leg reach and knee bend). Always true. Keep in sync with MotionDriverNatives.cpp.
 public native func UTPPSetMMFirmFeet(on: Bool) -> Bool
+// Quick straightening after turns (DLL default off; CET setting mm.fastTurnExit): when a mouse or stick turn ends while V runs, the
+// body finishes the turn at once and runs straight; entering and holding a turn are unchanged. Always true. Keep in sync with
+// MotionDriverNatives.cpp.
+public native func UTPPSetMMFastTurnExit(on: Bool) -> Bool
 // Planted foot yaw lock (DLL default on; CET setting mm.footYawLock): a planted foot keeps the direction it points in while the body
 // turns over it, turned about its toe, and follows the animation again only after a large turn. Always true. Keep in sync with
 // MotionDriverNatives.cpp.
@@ -140,10 +144,6 @@ public native func UTPPSetMMTurnFootPin(on: Bool) -> Bool
 // pelvis and root over 0.4 s). Always true. Keep in sync with
 // MotionDriverNatives.cpp.
 public native func UTPPSetMMOverlayInertialSwitch(on: Bool) -> Bool
-// Body yaw offset per body (motion poses; CET settings mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale, DLL default 0 / 0): the value of
-// the body in use turns the whole character by deg (+ = left, -20..20) about its visual root; the movement direction is unchanged; off
-// while aiming / during weapon actions. False = NaN / out of range (nothing changed). Keep in sync with MotionDriverNatives.cpp.
-public native func UTPPSetMotionBodyYawOffsets(female: Float, male: Float) -> Bool
 // the motion set-trav (MotionTraversal): obstacle of a game climb (action 8) / vault (action 9) start, sent once from the
 // ClimbEvents / VaultEvents OnEnter wraps below (only while motion is on). The DLL plans one motion set traversal montage from it
 // (MotionDriver.hpp FeedTraversal); false = rejected input (invalid action / non-finite value).

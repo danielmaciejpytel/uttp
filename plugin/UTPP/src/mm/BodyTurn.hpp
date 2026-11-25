@@ -290,10 +290,13 @@ public:
     // (spring + rate / acceleration limits) instead of the animation-led law; aFollow false = 0.3.4 bit for bit.
     // aRateCap (AIR STEER stage, rad/s, follow law only): > 0 also caps the applied follow rate (hard, after the acceleration
     // limit); 0 (default) = the configured maxFollowRate only, bit for bit as before.
-    float Command(float aCurrent, float aTarget, float aDt, bool aFollow = false, float aRateCap = 0.0f)
+    // aExitRate (turn exit, mm/TurnExit.hpp, rad/s, follow law only): > 0 closes the remaining error at that rate or at
+    // error / aExitTime, whichever is faster, capped at maxFollowRate and without the rate change limit; 0 (default) = unchanged.
+    float Command(float aCurrent, float aTarget, float aDt, bool aFollow = false, float aRateCap = 0.0f, float aExitRate = 0.0f,
+                  float aExitTime = 0.0f)
     {
         if (aFollow && std::isfinite(aCurrent) && std::isfinite(aTarget))
-            return CommandFollow(aCurrent, aTarget, aDt, aRateCap);
+            return CommandFollow(aCurrent, aTarget, aDt, aRateCap, aExitRate, aExitTime);
         const float out = CommandAnim(aCurrent, aTarget, aDt);
         m_rate = std::isfinite(m_diag.rate) ? m_diag.rate : 0.0f;
         return out;
@@ -302,7 +305,7 @@ public:
     const ControllerDiagnostics& Diagnostics() const { return m_diag; }
 
 private:
-    float CommandFollow(float aCurrent, float aTarget, float aDt, float aRateCap)
+    float CommandFollow(float aCurrent, float aTarget, float aDt, float aRateCap, float aExitRate, float aExitTime)
     {
         ++m_diag.commands;
         ++m_diag.followCommands;
@@ -327,6 +330,11 @@ private:
         const float want = std::fmax(-m_cfg.maxFollowRate, std::fmin(m_cfg.maxFollowRate, err / m_cfg.followTime));
         const float dv = m_cfg.maxFollowAccel * dt;
         float rate = std::fmax(m_rate - dv, std::fmin(m_rate + dv, want));
+        if (aExitRate > 0.0f && aExitTime > 0.0f && std::isfinite(aExitRate))
+        {
+            const float mag = std::fmin(m_cfg.maxFollowRate, std::fmax(aExitRate, std::fabs(err) / aExitTime));
+            rate = err > 0.0f ? mag : -mag;
+        }
         if (rate * err < 0.0f)
             rate = 0.0f; // never turn away from the target
         if (aRateCap > 0.0f && std::isfinite(aRateCap))
