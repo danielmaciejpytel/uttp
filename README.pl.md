@@ -51,7 +51,7 @@ Bazy Motion Matching są takie same jak w 0.1.2. Wersja 0.2.0 zmienia sposób do
 - **Tempo animacji:** na ziemi animacje ruchu dopasowują się do rzeczywistej prędkości V, aby ograniczyć ślizganie stóp, a przewidywany ruch, według którego dobierane są animacje, jest kształtowany dla ruszania, zatrzymań, zmian chodu, obrotów, kroków w bok, kucania, celowania, schodów, skoków i lądowań.
 - **Dopasowanie kroku:** kroki V są skracane do jej prędkości w pętlach chodu, biegu i ruchu w kucki.
 - **Stopy:** postawione stopy mocniej trzymają się ziemi przy obrotach i zatrzymaniach i zachowują swój kierunek, a stopa, na której V obraca się w miejscu, zostaje na miejscu. Stopy są stawiane na zboczach, stopniach, schodach i krawężnikach, a biodra w razie potrzeby się obniżają. To opcje w menu, domyślnie włączone. **Fit steps to stairs** (krótsze, szybsze kroki przy tej samej prędkości) jest opcją dodatkową, domyślnie wyłączoną.
-- **Obroty, zatrzymania i uniki:** przy zawracaniu o 180 stopni w ruchu ciało V obraca się w tę samą stronę co animacja obrotu, kolana podążają za kierunkiem bioder, V mniej wybiega do przodu przy zatrzymaniu, a sprint w ścianę utrzymuje pozę bezczynną zamiast migotać między animacjami zwrotów. Kierunek uniku jest liczony względem postaci, a nie obróconej sylwetki, animacja uniku jest obracana w stronę ruchu (maksymalnie o 90 stopni), a ciało V nie skręca się już w jej trakcie.
+- **Obroty, zatrzymania i uniki:** przy zawracaniu o 180 stopni w ruchu ciało V obraca się w tę samą stronę co animacja obrotu, kolana podążają za kierunkiem bioder, V mniej wybiega do przodu przy zatrzymaniu, a sprint w ścianę utrzymuje pozę bezczynną zamiast migotać między animacjami zwrotów. Kierunek uniku jest liczony względem postaci, a nie obróconej sylwetki, animacja uniku jest obracana w stronę ruchu (maksymalnie o 90 stopni), a korekta kierunku nie skręca już ciała V w jej trakcie.
 - **Kucanie:** ruch w kucki odtwarza się w rzeczywistym tempie V; zmienił się też wybór zatrzymania w kucki i ułożenie stóp na jego końcu.
 - **Pochylenie:** domyślnie znacznie lżejsze, działa teraz także z wyjętą bronią, przy celowaniu (tylko ciało) i w kucki. W trybie Shooter i podczas obrócenia w stronę celu zależy od bocznego przyspieszenia samej V, więc V nie przechyla się już względem złej osi.
 - **Chód i pad:** po włączeniu chodu V porusza się z prędkością 1,9 m/s. **Na padzie zmienia to prędkość poruszania:** domyślnie drążek wychylony mniej niż w około dwóch trzecich daje równy chód, dalej — pełny bieg, a w kucki zawsze używana jest pełna prędkość. Opcja **Follows the stick** przywraca płynną prędkość zależną od wychylenia.
@@ -59,8 +59,8 @@ Bazy Motion Matching są takie same jak w 0.1.2. Wersja 0.2.0 zmienia sposób do
 - **Naturalny obrót ciała przy celowaniu w ruchu:** gdy V obróci się już w stronę celownika, jej nogi i biodra zachowują własny kierunek i obracają się razem z krokami, a górna część ciała i broń pozostają na celowniku.
 - **Głowa podąża za kamerą:** w trybie Shooter i przy ruchu bokiem bez celowania głowa i szyja V obracają się i pochylają w stronę, w którą patrzy kamera (do 45 stopni w bok), a dalej dołącza górna część ciała.
 - **Broń i tryb Shooter:** wyjęcie, schowanie lub zmiana rodzaju broni płynnie przechodzi do nowej pozy bez przestrzelenia; jeśli mod wstrzyma się, by chronić liczbę klatek, gdy V trzyma broń dystansową, poza broni zostaje zachowana. Tryb Shooter (nadal domyślnie wyłączony) utrzymuje każdą animację kierunku przez minimalny czas, aby ograniczyć przeskakiwanie tam i z powrotem.
-- **Kamera i windy:** krawężniki i stopnie nie powinny już przełączać kamery w tryb szybkiego opadania, a w windach i na ruchomych platformach V nie powinna już odtwarzać animacji skoku ani spadania; kamera i wysokość ciała poruszają się razem z kabiną.
-- **Menu:** każda wartość na listach w Mod Settings ma teraz czytelną nazwę.
+- **Kamera i windy:** krawężniki i stopnie nie powinny już przełączać kamery w tryb szybkiego opadania, a w windach i na ruchomych platformach V nie powinna już odtwarzać animacji skoku ani spadania; kamera i wysokość ciała powinny poruszać się razem z kabiną.
+- **Menu:** każda wartość na listach w Mod Settings powinna mieć teraz czytelną nazwę.
 
 ### Nowe i zmienione ustawienia
 
@@ -326,6 +326,8 @@ Te problemy są znane w wersji 0.2.0 i planowane do poprawy w kolejnych aktualiz
 - Celowanie: przy szarpnięciach kamery i szybkich obrotach lufa może nieco bardziej zostawać za celownikiem, ponieważ celowanie jest wygładzane
 - Głowa podążająca za kamerą: szyja V może się bardziej deformować, głównie u V z męskim ciałem (opcję można wyłączyć); pochylenie działające w większej liczbie stanów nieznacznie to powiększa
 - Stopy: przy schodzeniu po schodach kolano może w pojedynczych klatkach mocno się zgiąć; przy ruszaniu V może częściej zmieniać nogę prowadzącą; przy części obrotów i krótkich stuknięciach w bok podczas celowania mogą pojawić się większe korekty lub ślizganie stóp, głównie u V z męskim ciałem
+- Stabilne stopy przy zwrotach i zatrzymaniach: obrót V z męskim ciałem w biegu może wyglądać nieco gorzej
+- Naturalny obrót ciała przy celowaniu w ruchu: przy niektórych ruszeniach stopy mogą bardziej się ślizgać, a część dużych zmian kierunku wypada gorzej
 - Rzadki crash kilka sekund po wczytaniu zapisu, w którym V siedzi w pojeździe; ponowne wczytanie działa
 - Nóż: gdy kolejny cios kombinacji zaczyna się późno podczas chodzenia, ramiona mogą gwałtownie przeskoczyć między ciosami
 - Ostrza Modliszkowe i Ręce Goryla: wyjęcie odtwarza oryginalną animację gry
@@ -374,7 +376,7 @@ Dziękuję twórcom licencjonowanych animacji i materiałów technicznych, na kt
 <details>
 <summary><b>Szczegóły</b></summary>
 
-Projekt UTPP jest opracowywany, kierowany i testowany w grze przez autora. Przy jego tworzeniu korzystano z generatywnej AI:
+Projekt UTPP jest opracowywany i kierowany przez autora. Przy jego tworzeniu korzystano z generatywnej AI:
 
 - Kod: większość pluginu, skryptów i narzędzi napisali agenci programistyczni AI pod kierunkiem autora
 - Animacje: część przejść, wysiadania z pojazdów i animacji walki wręcz wygenerowano lokalnie przy użyciu NVIDIA Kimodo i MotionBricks

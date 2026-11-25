@@ -51,16 +51,16 @@ The motion-matching databases are the same as in 0.1.2. Version 0.2.0 changes ho
 - **Playback speed:** on the ground the movement animations follow V's actual speed to reduce foot sliding, and the movement predicted for picking animations is shaped for starts, stops, gait changes, turns, strafing, crouching, aiming, stairs, jumps and landings.
 - **Stride matching:** V's steps are shortened to her speed in the walking, running and crouched movement loops.
 - **Feet:** planted feet are held more firmly in turns and stops and keep their direction, and the pivot foot stays in place in turns on the spot. Feet are placed on slopes, steps, stairs and curbs, with the hips lowered as needed. These are menu options, on by default. **Fit steps to stairs** (shorter, quicker steps at the same speed) is opt-in and off by default.
-- **Turns, stops and dodges:** in 180-degree turns on the move V's body turns the same way as the turn animation, the knees follow the direction of the hips, stops overshoot less, and sprinting into a wall holds the idle pose instead of flickering between turn animations. Dodges take their direction relative to the character rather than the turned body, the dodge animation is turned towards the travel direction (up to 90 degrees) and V's body is no longer twisted during it.
+- **Turns, stops and dodges:** in 180-degree turns on the move V's body turns the same way as the turn animation, the knees follow the direction of the hips, stops overshoot less, and sprinting into a wall holds the idle pose instead of flickering between turn animations. Dodges take their direction relative to the character rather than the turned body, the dodge animation is turned towards the travel direction (up to 90 degrees) and the direction warping no longer twists V's body during it.
 - **Crouch:** crouched movement plays at V's actual speed, with changes to the choice of the crouched stop and to the feet at the end of it.
 - **Lean:** much lighter by default, now also with a weapon drawn, while aiming (body only) and while crouched. In Shooter mode and while facing the aim it follows V's own sideways acceleration, so she no longer rolls along the wrong axis.
 - **Walking and gamepad:** the walk toggle moves V at 1.9 m/s. **On a gamepad this changes how fast V moves:** by default, a stick pushed less than about two thirds of the way gives a steady walk, further gives a full run, and crouching always uses the full crouch speed. Choose **Follows the stick** to get the analog speed back.
-- **Aiming:** the barrel is also corrected sideways towards the crosshair, the upper body is steadier while V turns and during camera jerks, a change of direction while aiming and moving can play a turn animation from a smaller angle, and quick left and right taps stay on turn-around animations with firmer feet. The supporting hand stays on two-handed weapons and the pistol, for example in an aimed slide or while crouched. Moving forward while aiming is faster (3.85 m/s, was 3.3), with sideways and backwards movement scaled to it.
+- **Aiming:** the barrel is also corrected sideways towards the crosshair, the upper body is steadier while V turns and during camera jerks, a change of direction while aiming and moving can play a turn animation from a smaller angle, and quick left and right taps stay on turn-step animations with firmer feet. The supporting hand stays on two-handed weapons and the pistol, for example in an aimed slide or while crouched. Moving forward while aiming is faster (3.85 m/s, was 3.3), with sideways and backwards movement scaled to it.
 - **Natural body turn while aiming on the move:** after V has turned to the crosshair, her legs and hips keep their own direction and turn with her steps, while the upper body and the weapon stay on the crosshair.
 - **Head follows the camera:** in Shooter mode and while strafing without aiming, V's head and neck turn and tilt towards where the camera looks (up to 45 degrees to the side), then the upper body follows.
 - **Weapons and Shooter mode:** drawing, holstering or changing the weapon type blends into the new weapon pose without overshooting; if the mod pauses itself to protect the frame rate while a ranged weapon is drawn, the weapon pose is kept. Shooter mode (still off by default) holds each direction animation for a minimum time, to reduce back-and-forth changes.
-- **Camera and elevators:** curbs and stair steps should no longer switch the camera into its fast-fall mode, and in elevators and on moving platforms V should no longer play jump or fall animations; the camera and body height ride with the cabin.
-- **Menu:** the lists in Mod Settings now have a readable label for every value.
+- **Camera and elevators:** curbs and stair steps should no longer switch the camera into its fast-fall mode, and in elevators and on moving platforms V should no longer play jump or fall animations, and the camera and body height should ride with the cabin.
+- **Menu:** the lists in Mod Settings should now show a readable label for every value.
 
 ### New and changed settings
 
@@ -326,6 +326,8 @@ These problems are known in version 0.2.0 and are planned to be fixed in the nex
 - Aiming: during camera jerks and fast turns the muzzle can trail the crosshair a little more, because the aim is smoothed
 - Head follows the camera: V's neck can deform more, mainly with male V (the option can be switched off); the lean in more states adds a little to this
 - Feet: going down stairs a knee can bend sharply for single frames; V can change the leading leg more often when starting to move; some turns and quick aimed left and right taps can show larger foot corrections or sliding, mostly with male V
+- Firm feet in turns and stops: male V's turn while running can look slightly worse
+- Natural body turn while aiming on the move: the feet can slide more on some starts, and some wide direction changes are handled less well
 - Rare game crash a few seconds after loading a save in which V sits on a vehicle; loading again works
 - Knife: when the next strike of a combo starts late while V walks, the arms can snap between the two strikes
 - Mantis Blades and Gorilla Arms: drawing them plays the game's own animation
@@ -374,7 +376,7 @@ Thanks to the creators of the licensed animation content and the technical refer
 <details>
 <summary><b>Details</b></summary>
 
-UTPP is designed, directed and tested in game by its author. Generative AI was used in its making:
+UTPP is designed and directed by its author. Generative AI was used in its making:
 
 - Code: most of the plugin, scripts and tools were written with AI coding agents under the author's direction
 - Animation: some transition, vehicle-exit and melee clips were generated locally with NVIDIA Kimodo and MotionBricks

@@ -29,7 +29,7 @@ For Cyberpunk 2077 2.5 with Phantom Liberty. The requirements are the same as fo
 - **Lean:** much lighter by default (body and head 0.2; before 0.85 and 0.9). It now also works with a weapon drawn, while aiming (body only) and while crouched.
 - **Walking:** the walk toggle speed is 1.9 m/s by default (was 1.6).
 - **Gamepad:** by default a stick pushed less than about two thirds of the way gives a steady walk, further gives a full run, and crouching uses the full crouch speed. This changes how fast V moves; Follows the stick restores the analog speed.
-- **Aiming:** the barrel is also corrected sideways towards the crosshair; the upper body is steadier while V turns and during camera jerks; a change of direction while aiming and moving can play a turn animation from 10 degrees; quick left and right taps stay on turn-around animations with firmer feet.
+- **Aiming:** the barrel is also corrected sideways towards the crosshair; the upper body is steadier while V turns and during camera jerks; a change of direction while aiming and moving can play a turn animation from 10 degrees; quick left and right taps stay on turn-step animations with firmer feet.
 - Moving forward while aiming is faster (3.85 m/s, was 3.3), with sideways and backwards movement scaled to it.
 - The supporting hand stays on two-handed weapons and the pistol, for example in an aimed slide or while crouched.
 - If the mod pauses itself to protect the frame rate while a ranged weapon is drawn, the weapon pose is kept.
@@ -41,13 +41,13 @@ For Cyberpunk 2077 2.5 with Phantom Liberty. The requirements are the same as fo
 ### Fixed
 
 - **Lean:** in Shooter mode and while facing the aim, V no longer rolls along the wrong axis.
-- **Feet:** no more large foot correction peaks on reversals and run stops.
+- **Feet:** smaller foot correction peaks on reversals and run stops.
 - **Walls:** sprinting into a wall, or being pinned against it, holds the idle pose instead of flickering between turn animations.
-- **Dodge:** no more twisting of the body during the dodge, which was most visible at 30 FPS.
+- **Dodge:** the direction warping no longer twists V's body during a dodge; this mattered most at 30 FPS.
 - **Weapons:** drawing, holstering or changing the weapon type blends into the new pose without overshooting.
 - **Camera:** curbs and stair steps should no longer switch the camera into its fast-fall mode.
-- **Elevators and moving platforms:** V should no longer play jump or fall animations during the ride; the camera and body height ride with the cabin.
-- **Mod Settings:** the lists have a readable label for every value.
+- **Elevators and moving platforms:** V should no longer play jump or fall animations during the ride, and the camera and body height should ride with the cabin.
+- **Mod Settings:** the lists should now show a readable label for every value.
 
 ### Notes
 
