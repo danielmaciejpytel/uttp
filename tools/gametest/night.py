@@ -5155,7 +5155,7 @@ def build_parser() -> argparse.ArgumentParser:
                         'module utpp_testcmd, confirmed by its ACK in the UTPP log (no overlay, no keys, no clicks); '
                         'auto = file when the module logged READY in the session, else console')
     p.add_argument('--settings', default='author', choices=list(gs.SETTINGS_MODES),
-                   help='mod settings of the session: author = the author\'s own values (body yaw offset 4 female V / 0 male V, pelvis yaw trim 2, camera '
+                   help='mod settings of the session: author = the author\'s own values (pelvis yaw trim 2, camera '
                         'side 1, Shinobi bonus reload on, first person in scenes off, blend 0.6), set after arming and put back before '
                         'ExitGame; shipped = the registered defaults of the same keys. The run record lists what differs from shipped.')
     p.add_argument('--stride-warp', default='', choices=['', 'on', 'off'],

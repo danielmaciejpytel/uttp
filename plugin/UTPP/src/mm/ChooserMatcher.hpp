@@ -45,6 +45,7 @@
 #include "MotionPlayRate.hpp"
 #include "StairSteps.hpp"
 #include "Steering.hpp"
+#include "TurnExit.hpp"
 
 // Offline mutation switch of the fix/slide-exit changes (tests build a mutated copy of SlideExitTest with -DUTPP_SLIDEEXIT_MUTATION=k;
 // 0 / undefined = production code): 1 the Dodge keeps the FILTERED stance (pending change dropped), 2 the stance filter restarts its
@@ -155,6 +156,9 @@ struct ChooserState
     // adapter::MapToChooser from MapContext::jumpOutFlight; a hand-built state leaves it false (MatcherConfig::jumpOutNoBack /
     // jumpOutFallHandover then never act). Every other flight is untouched.
     bool jumpOutFlight = false;
+    // Turn exit window (mm/TurnExit.hpp): a straight forward loop may replace an arc loop before the loop dwell is over. Written by
+    // adapter::MapToChooser; a hand-built state leaves it false.
+    bool turnExit = false;
     // Gravity of this feed in m/s^2 (adapter::MapToChooser: the learned game gravity; 0 = unknown, MatcherConfig::farJumpGravityScale then
     // never acts).
     float gravityMs2 = 0.0f;
@@ -2495,7 +2499,19 @@ public:
                 ((cl.flags & kClipLoop) ||
                  (UTPP_AND_NOT(JUMPPICK, 45) m_cfg.loopDwellShuffle && bestDb == contDb && m_dbDirectionLoops[static_cast<uint32_t>(bestDb)] &&
                   ShuffleOffLoopSide(db.ClipName(en.clip), db.ClipName(static_cast<uint32_t>(m_cur.clip))))) &&
-                (db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) && bestCost > contBestCost - m_cfg.loopDwellOverride)
+                (db.Clip(static_cast<uint32_t>(m_cur.clip)).flags & kClipLoop) && bestCost > contBestCost - m_cfg.loopDwellOverride &&
+                !(aState.turnExit && turnexit::ArcToStraightLoop(db.ClipName(static_cast<uint32_t>(m_cur.clip)), db.ClipName(en.clip))))
+            {
+                jump = false;
+                bestDb = contDb;
+                bestRow = contRow;
+                bestEntry = contEntry;
+            }
+            // turn exit window (ChooserState::turnExit): a playing straight forward loop is kept while no stick edge arrived; the body
+            // finishing the turn quickly would otherwise pull the search to an arc or transition clip for a run that is already straight
+            if (jump && aState.turnExit && res.interrupt == Interrupt::DoNotInterrupt && contDb >= 0 && m_cur.valid && !aForce &&
+                aState.movementMode == 0 && last.movementMode == 0 &&
+                turnexit::StraightForwardLoop(db.ClipName(static_cast<uint32_t>(m_cur.clip))))
             {
                 jump = false;
                 bestDb = contDb;

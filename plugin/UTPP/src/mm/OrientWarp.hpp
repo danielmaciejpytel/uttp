@@ -593,41 +593,4 @@ private:
     const char* m_motion = "idle";
 };
 
-// Body yaw offset (CET mm.bodyYawOffset, deg, + = left, default 0 = nothing). The camera sits over the right shoulder, so V reads
-// as turned to the right; the offset turns the WHOLE character (pelvis, torso, head, legs and feet as one rigid pose) about the
-// visual root by a constant yaw. The caller only adds it to the visual root yaw of the leg-tail frame (no ApplyAngles: no leg hold,
-// no torso counter twist); the entity / capsule yaw, the movement direction, the matcher / processor state and the bundle pose are
-// untouched. Weight: 1 on foot in every stance and gait (idle, walk, run, sprint, crouch, slide, air), weapon holstered or drawn;
-// 0 while aiming, during a weapon action (shot, reload, hip-fire pose, melee) so the aim pose points at the crosshair, and while
-// blocked (traversal, release, no root frame); linear fades (feed dt). Signals.air / crouch / velocity / yaw are not used.
-inline constexpr float kBodyYawOffsetMaxDeg = 20.0f;
-inline bool ValidBodyYawOffset(float aDeg) { return std::isfinite(aDeg) && aDeg >= -kBodyYawOffsetMaxDeg && aDeg <= kBodyYawOffsetMaxDeg; }
-
-struct BodyOffsetParams
-{
-    float fadeIn = 0.25f, fadeOut = 0.25f; // s
-};
-
-class BodyYawOffset
-{
-public:
-    void Reset() { m_w = 0.0f; }
-
-    // Feed rate (feed dt: replays stay deterministic).
-    void Step(const BodyOffsetParams& aP, const Signals& aS, float aDt)
-    {
-        if (!std::isfinite(aDt) || aDt <= 0.0f)
-            return;
-        const float dt = std::fmin(aDt, 0.25f);
-        const float target = (aS.aiming || aS.weaponBusy || aS.blocked) ? 0.0f : 1.0f;
-        const float fade = std::fmax(target > m_w ? aP.fadeIn : aP.fadeOut, 0.05f);
-        m_w = Approach(m_w, target, dt / fade);
-    }
-    float Weight() const { return m_w; }
-    // effective offset (deg) for the user value aOffsetDeg; 0 for an invalid value or weight 0
-    float Deg(float aOffsetDeg) const { return ValidBodyYawOffset(aOffsetDeg) ? m_w * aOffsetDeg : 0.0f; }
-
-private:
-    float m_w = 0.0f;
-};
 } // namespace utpp::mm::orientwarp

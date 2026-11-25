@@ -29,6 +29,7 @@
 #include "MotionHost.hpp"
 #include "MutationSelect.hpp"
 #include "State.hpp"
+#include "mm/TurnExit.hpp"
 #include "mm/AirState.hpp" // AIR HOLD stage
 #include "mm/AirTable.hpp" // AIR CLIPS stage
 #include "mm/BodyTurn.hpp"
@@ -338,6 +339,9 @@ float g_stopHalflife = 0.05f;    // s (matcher time); chosen offline (stop test 
 bool g_steerOn = true;           // kill switch UTPPSetMMSteerFollow: animation-led turns only for sharp changes
 steer::Steering g_steer;
 bool g_followFed = false;        // last feed used the follow mode (body spring + curved trajectory)
+bool g_fastTurnExitOn = false;   // quick straightening after turns (CET mm.fastTurnExit, default off)
+turnexit::Detector g_turnExit;   // mm/TurnExit.hpp: end of a sustained turn of the input heading while running
+constexpr float kTurnExitMinSpeed = 2.0f; // m/s, planar capsule speed of a run
 bool g_dwellOn = true;           // kill switch UTPPSetMMDwell: minimum segment dwell + relative cost threshold
 float g_minDwell = 0.3f, g_dwellRatio = 0.5f;
 bool g_curationOn = true;        // kill switch UTPPSetMMCuration: per-search clip-class exclusion
@@ -1652,6 +1656,7 @@ const MotionSetFrame* MotionStepLocked(const FeedInput& aRaw, float aDt, float c
     raw.capsuleDeltaCurrent[1] = capY * aDt;
     raw.capsuleYawDelta = capYaw;
     raw.capsuleYawAhead = g_yawAhead; // the pose is drawn with the capsule turned by the coming tick's request
+    raw.turnExit = g_turnExit.Active();
     if (!g_motion || !g_motion->step || !g_motion->step(raw, g_effGate, aDt)) // UTPP-MOTION SEAM
         return nullptr; // UTPP-MOTION SEAM
     // UTPP-MOTION SEAM no leg stage ready -> PipelineOutputLocked would be the v1 matcher pose: v2 publishes its raw pose (apply)
@@ -2658,6 +2663,7 @@ void ResetSessionStateLocked()
     g_targetYaw = 0.0f;
     g_bodyTurnFed = false;
     g_followFed = false;
+    g_turnExit.Reset();
     g_lastCmdTicks = 0;
     g_lastCmdDeg = g_lastCmdCurDeg = g_lastCmdBaseDeg = g_lastCmdDt = 0.0f;
     g_cmdFeed = ~0ull;
@@ -4033,6 +4039,8 @@ void Feed(const FeedInput& aRawIn)
     if (strafeS)
         animLed = false;
     g_followFed = g_steerOn && g_bodyTurnOn && g_haveTarget && !animLed && !strafeS;
+    if (g_fastTurnExitOn)
+        g_turnExit.Step(dt, g_followFed && capsuleSpeed >= kTurnExitMinSpeed && (!aIn.haveAir || aIn.onGround), aIn.targetYawDeg);
     if (g_followFed || strafeS)
         g_latch.Reset();
     // Target latch (0.3.1): while a turn is in progress (|latched target - body| > kLatchTurnDeg) and the stick angle
@@ -6398,7 +6406,10 @@ float BodyYawCommand(float aCurrentYawDeg, float aBaseYawDeg)
         if (e * float(g_bodyFollowDir) < 0.0f && std::fabs(e) >= 150.0f * kDegToRad)
             target = WrapPi(cur + float(g_bodyFollowDir) * 179.0f * kDegToRad);
     }
-    const float cmd = g_bodyCtl.Command(aCurrentYawDeg * kDegToRad, target, dt, g_followFed); // 5.3c follow law
+    // turn exit window (off: rate 0, the follow law unchanged)
+    const float exitRate = g_followFed && g_turnExit.Active() ? g_turnExit.TurnRateDegS() * turnexit::kBodyRateGain * kDegToRad : 0.0f;
+    const float cmd = g_bodyCtl.Command(aCurrentYawDeg * kDegToRad, target, dt, g_followFed, 0.0f, exitRate,
+                                        turnexit::kBodyFollowS); // 5.3c follow law
     ++g_bodyCmds;
     g_cmdFeed = g_feedCalls;
     g_lastCmdCurDeg = aCurrentYawDeg;
@@ -7469,6 +7480,27 @@ void SetPelvisPlacement(bool aOn)
 {
     std::lock_guard lock(g_mutex);
     g_pelvisPlacementOn = aOn; // read at the next feed
+}
+
+bool SetFastTurnExit(bool aOn)
+{
+    std::lock_guard lock(g_mutex);
+    if (g_fastTurnExitOn != aOn)
+        g_turnExit.Reset();
+    g_fastTurnExitOn = aOn;
+    return true;
+}
+
+bool FastTurnExit()
+{
+    std::lock_guard lock(g_mutex);
+    return g_fastTurnExitOn;
+}
+
+uint64_t TurnExitCount()
+{
+    std::lock_guard lock(g_mutex);
+    return g_turnExit.Exits();
 }
 
 bool SetFirmFeet(bool aOn)

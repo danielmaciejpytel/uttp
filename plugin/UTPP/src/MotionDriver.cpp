@@ -268,14 +268,6 @@ owarp::PelvisTrim g_pt;
 owarp::Skeleton g_ptSk;
 const void* g_ptSkBundle = nullptr;
 const char* g_ptWhy = "off"; // trace pt=<deg>/<weight>/<reason>: first gate that holds the weight down, else the motion reason
-// Body yaw offset (CET mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale -> SetBodyYawOffsets, deg, default 4 / 0 like the settings; 0 = nothing): mm/OrientWarp.hpp
-// BodyYawOffset. One value per body (BodyIndex of the installed bundle: 0 = female V, 1 = male V), the one of the bundle's body is used
-// (BodyOffsetDegLocked). Step per v2 feed (gates, feed dt), applied in FrameLocked as an addition to the visual root yaw of the leg-tail
-// frame only (the whole pose turns as one rigid unit; no pose edit). 0: no code path touches the frame, the root yaw is bit-identical.
-float g_bodyOffsetDeg[2] = {4.0f, 0.0f};
-owarp::BodyOffsetParams g_boParams;
-owarp::BodyYawOffset g_bo;
-const char* g_boWhy = "off"; // trace bo=<deg>/<weight>/<reason>: first gate that holds the weight down, else "ok"
 // Aim pitch plan 2026-10-30 seam C: closed barrel pitch loop of the v2 aim offset (MotionPose OverlayFrameInputs::barrelLoop; CET
 // mm.aimAtCrosshair -> SetBarrelLoop, DLL default ON like the setting; off = the open-loop aim offset bit for bit). Barrel axis of WeaponRight (the same id
 // as aimofs, UTPPSetAimOffsetAxis) and the muzzle length along it (UTPPSetMotionBarrelMuzzle). The aim point P reaches the evaluator in
@@ -329,6 +321,7 @@ static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "dodge::SampleDodge wr
 // acceleration of the feed velocity (Step + Apply per v2 feed on b.pose in StepLocked, before the orientation warp and the leg tail).
 // The state lives in the Bundle. OFF and idle (weight 0): no code path touches the pose, it is bit-identical.
 bool g_leanSetting = true;
+bool g_turnExitNow = false; // this Step: the host's turn exit window (FeedInput::turnExit), read by the lean step
 bool g_leanHeadSetting = true; // mm.leanHead (default ON like the setting): the motion head layer replaces the head lead while the lean is on
 lrt::Params g_leanParams = [] {
     lrt::Params p;
@@ -1297,8 +1290,6 @@ void TravResetLocked(bool aDropPending)
 
 const char* BodyName(Body b) { return b == Body::Woman ? "woman" : (b == Body::Man ? "man" : "unknown"); }
 int BodyIndex(Body b) { return b == Body::Man ? 1 : 0; }
-// body yaw offset of the bundle's body (deg, SetBodyYawOffsets)
-float BodyOffsetDegLocked(const Bundle& aB) { return g_bodyOffsetDeg[BodyIndex(aB.body)]; }
 
 bool ReadText(const std::string& aPath, std::string& aOut)
 {
@@ -2278,46 +2269,6 @@ std::string PelvisYawTrimReason()
 {
     std::lock_guard lock(g_m);
     return g_ptWhy;
-}
-
-bool SetBodyYawOffset(float aDeg)
-{
-    return SetBodyYawOffsets(aDeg, aDeg);
-}
-
-bool SetBodyYawOffsets(float aFemaleDeg, float aMaleDeg)
-{
-    if (!owarp::ValidBodyYawOffset(aFemaleDeg) || !owarp::ValidBodyYawOffset(aMaleDeg))
-        return false;
-    std::lock_guard lock(g_m);
-    // the CET slider moves in 0.5 deg steps; the weight fade covers on / off, a step is applied as set
-    g_bodyOffsetDeg[0] = aFemaleDeg;
-    g_bodyOffsetDeg[1] = aMaleDeg;
-    return true;
-}
-
-float BodyYawOffset()
-{
-    std::lock_guard lock(g_m);
-    return g_bodyOffsetDeg[BodyIndex(g_bundle ? g_bundle->body : g_body)];
-}
-
-float BodyYawOffsetFor(bool aMale)
-{
-    std::lock_guard lock(g_m);
-    return g_bodyOffsetDeg[aMale ? 1 : 0];
-}
-
-float BodyYawOffsetWeight()
-{
-    std::lock_guard lock(g_m);
-    return g_bo.Weight();
-}
-
-std::string BodyYawOffsetReason()
-{
-    std::lock_guard lock(g_m);
-    return g_boWhy;
 }
 
 bool SetBarrelLoop(bool aOn)
@@ -4222,9 +4173,6 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
     char ptTxt[48] = ""; // only with a pelvis trim set or still fading: the default trace line is unchanged
     if (g_pelvisTrimDeg != 0.0f || g_pt.Weight() != 0.0f)
         std::snprintf(ptTxt, sizeof(ptTxt), " pt=%.1f/%.2f/%s", static_cast<double>(g_pelvisTrimDeg), static_cast<double>(g_pt.Weight()), g_ptWhy);
-    char boTxt[48] = ""; // only with a body yaw offset set or still fading: the default trace line is unchanged
-    if (BodyOffsetDegLocked(b) != 0.0f || g_bo.Weight() != 0.0f)
-        std::snprintf(boTxt, sizeof(boTxt), " bo=%.1f/%.2f/%s", static_cast<double>(BodyOffsetDegLocked(b)), static_cast<double>(g_bo.Weight()), g_boWhy);
     char hipTxt[48] = ""; // P9: only on hipfire frames (the other trace lines are unchanged): the native first-burst fallback and its route
     if (g_hipFirePoseNow) // shotWait only while the Shoot state waits for its first shot event (the former line otherwise)
         std::snprintf(hipTxt, sizeof(hipTxt), " hipNative=%d route=%d%s", g_weaponUpperFrame ? 1 : 0, g_shootRouteNow ? 1 : 0,
@@ -4251,7 +4199,7 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
     std::snprintf(g_traceBuf, sizeof(g_traceBuf),
                   "UTPP MOTION t=%.3f db=%d:%.*s clip=%d:%.*s ct=%.3f cost=%.3f blend=%.2f%s rot=%s start=%d pivot=%d inYaw=%.1f velYaw=%.1f"
                   " target=%d ov=%s lay=spine%.2f,armL%.2f,armR%.2f,legs%.2f,head%.2f,pelvis%.2f aimW=%.2f"
-                  " air=mode%d,ttl%.2f,land%d%d trav=%d:%s@%.2f act=%d reloadUpper=%.2f shot=%d:%d/%d:%d:%.3f:%llu%s brake=%s/%.2f accel=%s/%.2f support=%d%s headLead=%d lead=%.2f corr=%.2f%s%s%s%s%s%s%s%s%s",
+                  " air=mode%d,ttl%.2f,land%d%d trav=%d:%s@%.2f act=%d reloadUpper=%.2f shot=%d:%d/%d:%d:%.3f:%llu%s brake=%s/%.2f accel=%s/%.2f support=%d%s headLead=%d lead=%.2f corr=%.2f%s%s%s%s%s%s%s%s",
                   static_cast<double>(g_traceClock), r.database, static_cast<int>(dn.size()), dn.data(), r.clip,
                   static_cast<int>(cn.size()), cn.data(), static_cast<double>(r.clipTime),
                   static_cast<double>(r.cost < 1e30f ? r.cost : -1.0f),
@@ -4270,7 +4218,7 @@ void TraceLocked(const Bundle& b, const motion::ChooserState& cs, const motion::
                   b.map.capsuleBrakeModel > 0.0f ? "cp" : "motion", static_cast<double>(b.map.capsuleBrakeModel),
                   b.map.capsuleAccelModel > 0.0f ? "cp" : "motion", static_cast<double>(b.map.capsuleAccelModel),
                   b.eval.CancelledStartSupport(), changed ? " chg" : "", g_headLeadOn ? 1 : 0, static_cast<double>(g_hl.Lead()),
-                  static_cast<double>(g_hl.Corr()), slideTxt, owTxt, leanTxt, ptTxt, boTxt, hipTxt, shooterTxt, magTxt, bpTxt);
+                  static_cast<double>(g_hl.Corr()), slideTxt, owTxt, leanTxt, ptTxt, hipTxt, shooterTxt, magTxt, bpTxt);
     ++g_traceLines;
     g_log(g_traceBuf);
     if (info.poseDiagValid)
@@ -5141,7 +5089,10 @@ void OrientWarpStepLocked(Bundle& aB, const adapter::MotionFeed& aF, int32_t aCl
     g_ow.Step(g_owParams, sg, aDt);
     const float rootYawDeg = aB.rootFrameValid ? aB.rootFrame.Frame().yaw / integ::kDegToRad : 0.0f;
     static_assert(sizeof(BoneTransform) == 7 * sizeof(float), "pose layout: p.xyz q.xyzw");
-    g_ow.Measure(g_owParams, g_owSk, reinterpret_cast<const float*>(aB.pose.data()), n, rootYawDeg, aDt);
+    owarp::Params owp = g_owParams;
+    if (g_turnExitNow) // turn exit window: the applied pelvis and torso yaw go back to zero quickly
+        turnexit::ReleaseWarp(owp);
+    g_ow.Measure(owp, g_owSk, reinterpret_cast<const float*>(aB.pose.data()), n, rootYawDeg, aDt);
 }
 
 // Run pelvis yaw trim, feed rate: the forward-locomotion weight of this feed (same gates as the orientation warp, no turn-rate window,
@@ -5174,29 +5125,6 @@ void PelvisTrimStepLocked(const Bundle& aB, const adapter::MotionFeed& aF, float
             : g_release ? "release" : !aB.rootFrameValid ? "noroot" : !g_ptSk.ok ? "noskel" : g_pt.MotionReason();
 }
 
-// Body yaw offset, feed rate: weight 1 on foot (every stance / gait, weapon holstered or drawn), 0 while aiming, during a weapon action
-// (shot, reload, hip-fire pose or its hold, melee: aMelee = the melee definition of the H2 inputs) and blocked (traversal, release, no
-// root frame). Offset 0 and faded: nothing runs.
-void BodyOffsetStepLocked(const Bundle& aB, const adapter::MotionFeed& aF, bool aMelee, float aDt)
-{
-    if (BodyOffsetDegLocked(aB) == 0.0f && g_bo.Weight() == 0.0f)
-    {
-        g_boWhy = "off";
-        return;
-    }
-    owarp::Signals sg;
-    sg.aiming = g_aimingNow || aF.aiming;
-    sg.weaponBusy = g_weaponAction == 2 || g_weaponAction == 8 || g_hipFirePoseNow || g_hipFirePoseHold.Active() ||
-                    g_reloadUpperWeight > 0.0f || aMelee;
-    // traversal: the montage branch resets the weight; after the handback it stays 0 while the handback blend runs (no foot contacts /
-    // the montage root yaw turned back, kTravBlendOut), so the offset never snaps in on top of that blend
-    const bool trav = g_trav.active || g_trav.noContactLeft > 0.0f || g_trav.yawBackT >= 0.0f;
-    sg.blocked = trav || g_release || g_meleeMasked || !aB.rootFrameValid;
-    g_bo.Step(g_boParams, sg, aDt);
-    g_boWhy = sg.aiming ? "aim" : aMelee ? "melee" : sg.weaponBusy ? "wpnact" : trav ? "trav" : g_release ? "release"
-            : !aB.rootFrameValid ? "noroot" : "ok";
-}
-
 // motion lean, feed rate: estimator + gates + blend space weights (Step) and the additive on the v2 pose of this feed (Apply). Called
 // right after the pose evaluator and the root commit, so the orientation warp measures the leaned pose and the leg tail (stance guard,
 // foot locker) sees it. OFF and faded out: returns before touching anything (pose bit-identical).
@@ -5223,6 +5151,7 @@ void LeanStepLocked(Bundle& aB, const motion::ChooserState& aCs, const motion::M
     if (!aB.leanOk || (!g_leanSetting && aB.lean.Idle()))
         return; // unavailable, or off and fully faded: nothing runs
     lrt::Signals sg;
+    sg.quickSettle = g_turnExitNow;
     sg.vx = aF.velWorld[0];
     sg.vy = aF.velWorld[1];
     sg.velValid = std::isfinite(sg.vx) && std::isfinite(sg.vy);
@@ -5711,7 +5640,6 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         g_hl.Reset(); // head lead: a re-entry starts without a carried correction
         g_hlHaveApply = false;
         g_pt.Reset(); // pelvis trim: the weight fades in again
-        g_bo.Reset(); // body yaw offset: the yielded frames had none, the weight fades in again
         g_prevDb = -1;
         g_airEpisode = false; // air: a new air episode starts with the re-entry
         g_airPrevLanded = false;
@@ -5909,6 +5837,8 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     // the exit window of the gate can close on the first open feed; the grace keeps its own short tail
     g_exitAirTail = aRaw.vehicleExitWindow ? 0.6f : std::fmax(0.0f, g_exitAirTail - std::fmax(aRaw.dt, 0.0f));
     ctx.vehicleExit = g_exitAirTail > 0.0f;
+    ctx.turnExit = aRaw.turnExit;
+    g_turnExitNow = aRaw.turnExit;
     // after a ragdoll: a small drop to the floor is no fall (a running / just finished get-up, a running episode, the 1.5 s after the
     // knockdown detail ended - also on the vanilla recovery path). false everywhere else = unchanged.
     ctx.ragdollRecover = g_guGraceLeft > 0.0f || rag::RagdollRecoverActive();
@@ -6053,11 +5983,9 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         b.root.Reset(aRaw.playerYawDeg * integ::kDegToRad);
         b.eval.SetGraphInputs({});
         b.locomotion.Reset();
-        // pelvis trim / body yaw offset: a montage frame carries neither (FrameLocked's traversal path); weight 0 for the episode, the
-        // body offset gate also holds it through the handback blend (reason trav), then both fade in again
+        // pelvis trim: a montage frame carries none (FrameLocked's traversal path); weight 0 for the episode, then it fades in again
         g_pt.Reset();
-        g_bo.Reset();
-        g_ptWhy = g_boWhy = "trav";
+        g_ptWhy = "trav";
         return TravFrameLocked(b, aRaw, cs, f, dt, t0);
     }
     if (travHandback) // UTPP-MOTION SEAM trav: back to MM with JustTraversed, fresh search, inertialized
@@ -6068,8 +5996,7 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
         b.locomotion.Reset();
         g_rootYawDeg = aRaw.playerYawDeg; // root yaw re-seeded as on re-entry (not integrated over the montage)
         g_prevDb = -1;
-        g_pt.Reset(); // pelvis trim / body yaw offset: no snap back in on the handback feed (montage cut short: no montage-branch reset)
-        g_bo.Reset();
+        g_pt.Reset(); // pelvis trim: no snap back in on the handback feed (montage cut short: no montage-branch reset)
     }
     const uint32_t nt = adapter::BuildQueryTrajectory(b.map, b.qtimes, g_traj.data(), static_cast<uint32_t>(g_traj.size()));
     if (nt == 0)
@@ -6470,6 +6397,12 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
             rootEvaluation.input.yawAlignMaxRate = dodge::kAlignMaxRateDeg * integ::kDegToRad;
         }
 #endif
+        // turn exit window: the drawn heading rides the capsule again, so the finished turn does not linger in the root offset
+        if (aRaw.turnExit)
+        {
+            rootEvaluation.input.followCapsule = true;
+            rootEvaluation.input.followCapsuleHalfLife = turnexit::kRootHalfLifeS;
+        }
         rootEvaluation.haveActorAim = in.haveAim && in.haveActorAimPoint;
         rootEvaluation.actorAim = in.actorAimPoint;
         in.preOverlay = &PrepareRootOverlay;
@@ -6683,7 +6616,6 @@ bool StepLocked(const motionhost::FeedInput& aRaw, uint32_t aEffGate, float aDt)
     HeadLeadStepLocked(f, dt);
     OrientWarpStepLocked(b, f, r.clip, dt);
     PelvisTrimStepLocked(b, f, dt);
-    BodyOffsetStepLocked(b, f, integ::PsmMeleeBits(aRaw.psmBlock) != 0 || integ::PsmMeleeStateOf(aRaw.psmBlock) >= 5, dt);
     DualWieldMirrorStepLocked(b, info, dt); // dual wield left arm (chest-relative; before the reload edits of the pose)
     const bool mmOwnsArms = MMOwnsArmsLocked(aRaw, aEffGate, f);
     SlideReloadTorsoStepLocked(b, mmOwnsArms, dt);
@@ -6757,14 +6689,9 @@ bool FrameLocked(const int32_t* aBaseGameIndex, uint32_t aBaseBones, motionhost:
             if (g_ow.TorsoDeg() != 0.0f || g_ow.RootDeg() != 0.0f)
                 g_ow.Apply(g_owParams, g_owSk, reinterpret_cast<float*>(aOut.buf), n); // spine twist + leg counter-rotation
         }
-        // body yaw offset (mm.bodyYawOffsetFemale / Male): the whole pose turns as one rigid unit about the visual root, added on top of
-        // the warp / trim root yaw only (their leg hold / torso twist never see it; no pose edit). Offset 0 / weight 0: exactly 0, skipped.
-        const float body = g_bo.Deg(BodyOffsetDegLocked(b));
-        if (body != 0.0f)
-            aOut.rootOffsetYaw += body * integ::kDegToRad;
 #if defined(UTPP_MOTION_DRIVER_TEST_FAULTS) || defined(UTPP_MOTION_DRIVER_TEST_TRAV)
         g_dodgeProbe.extraDeg = static_cast<float>((static_cast<double>(aOut.rootOffsetYaw) - static_cast<double>(root.yaw)) / integ::kDegToRad);
-        g_dodgeProbe.presentDeg = trim + body;
+        g_dodgeProbe.presentDeg = trim;
 #endif
     }
     const auto& signals = b.locomotion.Output();

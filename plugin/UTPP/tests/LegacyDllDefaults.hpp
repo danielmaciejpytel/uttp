@@ -12,7 +12,6 @@ void SetAimGameUpper(bool aOn);
 bool SetAimWorldSmoothing(bool aOn, float aHz);
 bool SetHeadLead(bool aOn);
 bool SetPelvisYawTrim(float aDeg);
-bool SetBodyYawOffsets(float aFemaleDeg, float aMaleDeg);
 bool SetBarrelLoop(bool aOn);
 bool SetLeanParams(float aScale, float aHeadScale);
 bool SetWalkSpeed(float aMs);
@@ -42,7 +41,7 @@ bool SetParams(float aMaxUpDeg, float aMaxDownDeg, float aSmoothHz);
 
 namespace utpp::testdefaults
 {
-// Driver: aim game upper body on, world aim smoothing off, head lead off, pelvis trim 0, body yaw offsets 0 / 0, barrel loop off,
+// Driver: aim game upper body on, world aim smoothing off, head lead off, pelvis trim 0, barrel loop off,
 // lean amounts 1 / 1, walk speeds off, weapon upper body on, Pistol2H shot transfer off, magazine top-up off, inertialized overlay
 // switch off.
 inline void LegacyDriverDefaults()
@@ -51,7 +50,6 @@ inline void LegacyDriverDefaults()
     motiondriver::SetAimWorldSmoothing(false, 0.0f);
     motiondriver::SetHeadLead(false);
     motiondriver::SetPelvisYawTrim(0.0f);
-    motiondriver::SetBodyYawOffsets(0.0f, 0.0f);
     motiondriver::SetBarrelLoop(false);
     motiondriver::SetLeanParams(1.0f, 1.0f);
     motiondriver::SetWalkSpeed(0.0f);

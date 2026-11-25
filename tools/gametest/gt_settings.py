@@ -50,12 +50,12 @@ LOCO_VALUES = (('mm.walkToggleSpeed', 1.9), ('mm.minAnalogWalkSpeed', 0.82), ('m
                ('bodyturn.aimJogSpeed', 3.85), ('bodyturn.aimSmooth', True), ('bodyturn.shooterMode', False),
                ('mm.overlayInertialSwitch', True))
 LOCO_KEYS = tuple(k for k, _ in LOCO_VALUES)
-AUTHOR_VALUES = (('mm.bodyYawOffsetFemale', 4), ('mm.bodyYawOffsetMale', 0), ('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
+AUTHOR_VALUES = (('mm.pelvisYawTrim', 2), ('camera.side', 1), ('mm.shinobiBonusReload', True),
                  ('perspective.scene', False), ('perspective.blend', 0.6)) + LOCO_VALUES
 # registered defaults (the `default =` of each Register call; camera.side = the shoulder offset of the camera's fixed profile);
 # a key without an entry, or with None, is not known to the harness (nothing is applied for it in 'shipped' mode and a
 # difference cannot be named)
-SHIPPED_DEFAULTS = {'mm.bodyYawOffsetFemale': 4, 'mm.bodyYawOffsetMale': 0, 'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
+SHIPPED_DEFAULTS = {'mm.pelvisYawTrim': 2, 'camera.side': 1, 'mm.shinobiBonusReload': True,
                     'perspective.scene': False, 'perspective.blend': 0.8, **dict(LOCO_VALUES)}
 
 

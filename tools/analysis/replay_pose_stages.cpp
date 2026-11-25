@@ -11,6 +11,9 @@
 // --from / --to limit the written records to feed times in [T0, T1]; every feed is still stepped.
 // --settings-log applies the setting calls of a game log of the session (the ones this tool knows, in their order) before the first feed.
 // --ahead recorded passes the recorded turn of the coming tick (next feed's yaw minus this one) as the drawn capsule's turn.
+// --closed-yaw 1 closes the capsule yaw loop: each feed gets the yaw the driver's own body yaw command (motionhost::BodyYawCommand,
+// as the script applies it) gave after the previous feed; where no command applies (pass-through) the recorded turn is kept. The
+// recorded yaw ahead is not passed. Off / not passed: output unchanged.
 // --body man replays with the male motion database and rig (default: woman); the clip dump (--clips) is always the woman database.
 // --history 1 turns the live pose history on (mm/LivePoseHistory.hpp; default off as in the game): the published pose after the leg
 // tail is fed back to the next search through the same host hook the game uses.
@@ -69,6 +72,9 @@
 //                       (motionhost::SetStancePoleMode)
 //   --stick-speed 0|1   stick speed model of the driver analog / fixed after --settings-log (motiondriver::SetStickSpeedMode, the
 //                       mm.stickSpeed setting; the settings log call MotionStickSpeedMode of later sessions is applied as well)
+//   --fast-turn-exit 0|1 quick straightening after turns off / on after --settings-log (motionhost::SetFastTurnExit, the
+//                       mm.fastTurnExit setting; the settings log call MMFastTurnExit is applied as well); adds one TURNEXIT line
+//                       (exit windows opened). Use with --closed-yaw 1 so the body turns as the command asks.
 //   --firm-feet 0|1     firm feet in turns and stops off / on after --settings-log (motionhost::SetFirmFeet, the mm.firmFeet setting;
 //                       the settings log call MMFirmFeet is applied as well); adds one FIRMFEET line (latches, held updates, of them
 //                       lowered by a leg limit, hand-backs)
@@ -358,8 +364,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         bool known = true;
         if (name == "MotionOrientWarp") motiondriver::SetOrientWarp(arg(0) != 0);
         else if (name == "MotionPelvisYawTrim") motiondriver::SetPelvisYawTrim(arg(0));
-        else if (name == "MotionBodyYawOffset") motiondriver::SetBodyYawOffset(arg(0));
-        else if (name == "MotionBodyYawOffsets") motiondriver::SetBodyYawOffsets(arg(0), arg(1));
+        else if (name == "MotionBodyYawOffset" || name == "MotionBodyYawOffsets") {} // setting of earlier builds: no option now
         else if (name == "MMStrideWarp") motiondriver::SetStrideWarp(flag(0));
         else if (name == "MMOverlayInertialSwitch") motiondriver::SetOverlayInertialSwitch(flag(0));
         else if (name == "MMSteerMode" || name == "MMSteerActiveOnly") {} // turn steering options of test builds: no option now
@@ -380,6 +385,7 @@ void ApplyLoggedSettings(const std::string& aLog, int& aApplied, int& aUnknown)
         else if (name == "MMKneeFix") motionhost::SetKneeFix(static_cast<int32_t>(arg(0)));
         else if (name == "MMClimbRelease") motionhost::SetClimbRelease(arg(0) != 0);
         else if (name == "MMFirmFeet") motionhost::SetFirmFeet(flag(0));
+        else if (name == "MMFastTurnExit") motionhost::SetFastTurnExit(flag(0));
         else if (name == "MMFootYawLock") motionhost::SetFootYawLock(flag(0));
         else if (name == "MMTurnFootPin") motionhost::SetTurnFootPin(flag(0));
         else if (name == "MMNeutralAimOffset") motiondriver::SetNeutralAimOffset(flag(0));
@@ -603,7 +609,8 @@ int main(int argc, char** argv)
     const std::string data = argv[1], feedPath = argv[3], out = argv[4];
     float from = -1e30f, to = 1e30f;
     std::string settingsLog;
-    bool aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
+    int fastTurnExit = -1;
+    bool closedYaw = false, aheadRecorded = false, man = false, liveHistory = false, pelvis = false, pickDump = false;
     int turnFootPhase = -1; // -1 = build default
     int32_t capsuleQuery = -1, velocityPredicates = -1, capsuleRate = -1, capsuleRateScope = -1;
     int32_t capsuleRateGuards = -1; // -1 = not passed
@@ -680,6 +687,8 @@ int main(int argc, char** argv)
             settingsLog = argv[i + 1];
         else if (std::strcmp(argv[i], "--ahead") == 0)
             aheadRecorded = std::strcmp(argv[i + 1], "recorded") == 0;
+        else if (std::strcmp(argv[i], "--closed-yaw") == 0)
+            closedYaw = std::atoi(argv[i + 1]) != 0;
         else if (std::strcmp(argv[i], "--body") == 0)
             man = std::strcmp(argv[i + 1], "man") == 0;
         else if (std::strcmp(argv[i], "--history") == 0)
@@ -758,6 +767,8 @@ int main(int argc, char** argv)
             overlayInertialSwitch = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--stick-speed") == 0)
             stickSpeed = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
+        else if (std::strcmp(argv[i], "--fast-turn-exit") == 0)
+            fastTurnExit = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--firm-feet") == 0)
             firmFeet = std::atoi(argv[i + 1]) != 0 ? 1 : 0;
         else if (std::strcmp(argv[i], "--foot-lock") == 0)
@@ -1005,7 +1016,7 @@ int main(int argc, char** argv)
                           integ::kPsmWeaponKnown | integ::kPsmWeaponDrawn;
     // --ahead recorded: the body turn of the coming tick is the next feed's yaw minus this one (what the game applied after the feed);
     // without it the host derives it from its own body yaw command, which an open-loop replay never issues (0).
-    if (aheadRecorded)
+    if (aheadRecorded && !closedYaw)
         for (size_t i = 0; i + 1 < inputs.size(); ++i)
             inputs[i].yawAheadDeg = std::remainder(rows[i + 1].yawDeg - rows[i].yawDeg, 360.0f);
     motionhost::MotionHooks hooks{&WStep, &WApply, &motiondriver::OnArmed, &motiondriver::OnDisarmed, &CaptureTail,
@@ -1049,6 +1060,8 @@ int main(int argc, char** argv)
         motiondriver::SetStickSpeedMode(stickSpeed);
     if (firmFeet >= 0)
         motionhost::SetFirmFeet(firmFeet != 0);
+    if (fastTurnExit >= 0)
+        motionhost::SetFastTurnExit(fastTurnExit != 0);
     if (footLock >= 0)
         motionhost::SetFootLock(footLock != 0);
     if (footYawLock >= 0)
@@ -1303,6 +1316,10 @@ int main(int argc, char** argv)
     const auto& steerProbe = mm::motionstack::g_testSteeringProbe;
     double steerPrevAbs = 0, steerSum = 0, procSumAll = 0, sxy = 0, sxx = 0, syy = 0, sx = 0, sy = 0, steerTurnSum = 0, steerTurn = 0, lastSteerDeg = 0;
     uint64_t steerFeeds = 0;
+    std::vector<float> recordedYaw;
+    for (const auto& row : rows)
+        recordedYaw.push_back(row.yawDeg);
+    float closedYawDeg = recordedYaw.empty() ? 0.0f : recordedYaw.front();
     float prevContact[2] = {0.0f, 0.0f};
     math::Vec3 shownFeet[2];
     bool haveShownFeet = false, driftAnchor[2] = {false, false};
@@ -1336,6 +1353,8 @@ int main(int argc, char** argv)
     };
     for (size_t i = 0; i < inputs.size(); ++i)
     {
+        if (closedYaw)
+            inputs[i].playerYawDeg = rows[i].yawDeg = closedYawDeg;
         if (speedEmu)
         {
             // the multiplier the script applied after the previous feed (MaxSpeed): this feed's velocity is scaled by it and V covers
@@ -1472,6 +1491,11 @@ int main(int argc, char** argv)
             aimJogOnFeeds += jog > 0.0f ? 1 : 0;
         }
         const bool published = ReadPublished();
+        if (closedYaw && i + 1 < inputs.size())
+        {
+            const float base = std::remainder(closedYawDeg + std::remainder(recordedYaw[i + 1] - recordedYaw[i], 360.0f), 360.0f);
+            closedYawDeg = motionhost::BodyYawCommand(closedYawDeg, base);
+        }
         const size_t zi = drawZNext ? std::min(i + 1, inputs.size() - 1) : i; // the feed whose capsule draws this pose
         // ground feet sole error: the animation's own ball heights above its floor (published pose, before the stages)
         math::Vec3 toePre[2];
@@ -2029,6 +2053,9 @@ int main(int argc, char** argv)
             std::printf("FIRMFEET run=%s on=%d latches=%llu heldUpdates=%llu legBoundUpdates=%llu handBacks=%llu\n", name.c_str(), firmFeet,
                         static_cast<unsigned long long>(firmTotal[0]), static_cast<unsigned long long>(firmTotal[1]),
                         static_cast<unsigned long long>(firmTotal[2]), static_cast<unsigned long long>(firmTotal[3]));
+        if (fastTurnExit >= 0)
+            std::printf("TURNEXIT run=%s on=%d exits=%llu\n", name.c_str(), fastTurnExit,
+                        static_cast<unsigned long long>(motionhost::TurnExitCount()));
         if (footYawLock >= 0)
             std::printf("YAWLOCK run=%s on=%d updates=%llu unplants=%llu replants=%llu bounds=%llu\n", name.c_str(), footYawLock,
                         static_cast<unsigned long long>(yawTotal[0]), static_cast<unsigned long long>(yawTotal[1]),

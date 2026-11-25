@@ -626,6 +626,18 @@ void Native_SetMMFirmFeet(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, b
     if (aOut)
         *aOut = ok;
 }
+// quick straightening after turns (CET utpp_motion mm.fastTurnExit; DLL default off). Logged in the setting-call form the offline
+// replay applies.
+void Native_SetMMFastTurnExit(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+{
+    bool on = false;
+    RED4ext::GetParameter(aFrame, &on);
+    aFrame->code++;
+    const bool ok = motionhost::SetFastTurnExit(on);
+    pluginlog::LogInfo("UTPPSetMMFastTurnExit(%d) -> %d", on ? 1 : 0, ok ? 1 : 0);
+    if (aOut)
+        *aOut = ok;
+}
 // firm pivot foot in turns in place (CET utpp_motion mm.turnFootPin; DLL default off). Logged in the setting-call form the offline
 // replay applies.
 void Native_SetMMTurnFootPin(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
@@ -845,19 +857,6 @@ void Native_GroundRecorderOn(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame
     if (aOut)
         *aOut = mm::groundfeet::rt::Recording();
 }
-// body yaw offset per body (CET utpp_motion mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale): deg, + = left, -20..20 each
-void Native_SetMotionBodyYawOffsets(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
-{
-    float female = 0.0f, male = 0.0f;
-    RED4ext::GetParameter(aFrame, &female);
-    RED4ext::GetParameter(aFrame, &male);
-    aFrame->code++;
-    const bool ok = SetBodyYawOffsets(female, male);
-    pluginlog::LogInfo("UTPPSetMotionBodyYawOffsets(%.2f,%.2f) -> %d", static_cast<double>(female), static_cast<double>(male), ok ? 1 : 0);
-    if (aOut)
-        *aOut = ok;
-}
-
 void RegisterNatives()
 {
     auto* rtti = RED4ext::CRTTISystem::Get();
@@ -1036,9 +1035,8 @@ void RegisterNatives()
     o7->flags = flags; o7->AddParam("Bool", "on"); o7->SetReturnType("Bool"); rtti->RegisterFunction(o7);
     auto* o8 = RED4ext::CGlobalFunction::Create("UTPPSetMMStrideWarp", "UTPPSetMMStrideWarp", &Native_SetMMStrideWarp);
     o8->flags = flags; o8->AddParam("Bool", "on"); o8->SetReturnType("Bool"); rtti->RegisterFunction(o8);
-    auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMotionBodyYawOffsets", "UTPPSetMotionBodyYawOffsets", &Native_SetMotionBodyYawOffsets);
-    o9->flags = flags; o9->AddParam("Float", "female"); o9->AddParam("Float", "male"); o9->SetReturnType("Bool");
-    rtti->RegisterFunction(o9);
+    auto* o9 = RED4ext::CGlobalFunction::Create("UTPPSetMMFastTurnExit", "UTPPSetMMFastTurnExit", &Native_SetMMFastTurnExit);
+    o9->flags = flags; o9->AddParam("Bool", "on"); o9->SetReturnType("Bool"); rtti->RegisterFunction(o9);
     auto* o10 = RED4ext::CGlobalFunction::Create("UTPPSetMMOverlayInertialSwitch", "UTPPSetMMOverlayInertialSwitch",
                                                  &Native_SetMMOverlayInertialSwitch);
     o10->flags = flags; o10->AddParam("Bool", "on"); o10->SetReturnType("Bool"); rtti->RegisterFunction(o10);

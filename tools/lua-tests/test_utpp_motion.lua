@@ -10,8 +10,8 @@ local function fresh()
   return v
 end
 local function mock()
-  local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, bodyOffset = {},
-    stride = {}, firm = {}, yawLock = {}, turnPin = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
+  local t = { enabled = false, calls = {}, mode = "ok", aim = {}, slide = {}, orient = {}, guards = {}, lean = {}, leanHead = {}, leanParams = {}, trim = {}, shoulder = {}, 
+    stride = {}, firm = {}, turnExit = {}, yawLock = {}, turnPin = {}, walk = {}, minWalk = {}, stick = {}, motionStick = {}, barrel = {}, camCalls = {}, camOn = false }
   -- utpp_camera stand-in: SetAimPoint drives CM.AIM_POINT.enabled (t.camOn)
   local cam = { SetAimPoint = function(on)
     t.camCalls[#t.camCalls + 1] = on
@@ -81,15 +81,14 @@ local function mock()
       if t.trimError then error("pelvis trim native failure") end
       return not t.trimReject
     end,
-    setBodyYawOffsets = function(female, male)
-      t.bodyOffset[#t.bodyOffset + 1] = { female, male }
-      if t.bodyOffsetError then error("body yaw offset native failure") end
-      return not t.bodyOffsetReject
-    end,
     setStrideWarp = function(on)
       t.stride[#t.stride + 1] = on
       if t.strideError then error("stride warp native failure") end
       return not t.strideReject
+    end,
+    setFastTurnExit = function(on)
+      t.turnExit[#t.turnExit + 1] = on
+      return not t.turnExitReject
     end,
     setFirmFeet = function(on)
       t.firm[#t.firm + 1] = on
@@ -231,23 +230,18 @@ do
     ss ~= nil and ss.type == "choice" and ss.default == "fixed" and type(ss.choices) == "table" and #ss.choices == 2
     and ss.choices[1][1] == "fixed" and ss.choices[2][1] == "analog" and ss.section == "animation" and #ss.label <= 38
     and type(ss.desc) == "string", ss and ss.label)
-  local bo = defs["mm.bodyYawOffsetFemale"]
-  check("registered mm.bodyYawOffsetFemale: float -20..20 step 0.5, default 4, animation section, label 'Body yaw offset (female V, deg)'",
-    bo ~= nil and bo.type == "float" and bo.default == 4 and bo.min == -20 and bo.max == 20 and bo.step == 0.5
-    and bo.section == "animation" and bo.label == "Body yaw offset (female V, deg)" and type(bo.desc) == "string"
-    and bo.desc:find("movement direction is unchanged", 1, true) ~= nil and bo.desc:find("Not while aiming", 1, true) ~= nil)
-  local bm = defs["mm.bodyYawOffsetMale"]
-  check("registered mm.bodyYawOffsetMale: float -20..20 step 0.5, default 0, animation section, label 'Body yaw offset (male V, deg)'",
-    bm ~= nil and bm.type == "float" and bm.default == 0 and bm.min == -20 and bm.max == 20 and bm.step == 0.5
-    and bm.section == "animation" and bm.label == "Body yaw offset (male V, deg)" and type(bm.desc) == "string"
-    and bm.desc:find("movement direction is unchanged", 1, true) ~= nil and bm.desc:find("Not while aiming", 1, true) ~= nil)
-  check("the single-value key mm.bodyYawOffset is no longer registered", defs["mm.bodyYawOffset"] == nil)
+  check("no body yaw offset option is registered (removed)",
+    defs["mm.bodyYawOffset"] == nil and defs["mm.bodyYawOffsetFemale"] == nil and defs["mm.bodyYawOffsetMale"] == nil)
   check("the renamed keys mm.walkSpeed / mm.minWalkSpeed are no longer registered",
     defs["mm.walkSpeed"] == nil and defs["mm.minWalkSpeed"] == nil)
   local sw = defs["mm.strideWarp"]
   check("registered mm.strideWarp: bool, on by default, animation section, label 'Stride matching'",
     sw ~= nil and sw.type == "bool" and sw.default == true and sw.section == "animation" and sw.label == "Stride matching"
     and type(sw.desc) == "string" and sw.desc:find("slide less", 1, true) ~= nil)
+  local fx = defs["mm.fastTurnExit"]
+  check("registered mm.fastTurnExit: bool, off by default, animation section, label 'Quick straighten after turns'",
+    fx ~= nil and fx.type == "bool" and fx.default == false and fx.section == "animation" and fx.label == "Quick straighten after turns"
+    and type(fx.desc) == "string" and fx.desc:find("runs straight", 1, true) ~= nil)
   local ff = defs["mm.firmFeet"]
   check("registered mm.firmFeet: bool, on by default, animation section, label 'Firm feet in turns and stops'",
     ff ~= nil and ff.type == "bool" and ff.default == true and ff.section == "animation"
@@ -658,48 +652,6 @@ do
 end
 end
 
--- mm.bodyYawOffsetFemale / mm.bodyYawOffsetMale (2026-10-30, one value per body since 2026-11-18): DLL default 4 / 0 (= the settings);
--- the cache starts unknown, so the first enable sends the wanted pair once, then only a change; both values go in one call;
--- clamped to -20..20, NaN -> 0
-local function pair(p, f, m) return p ~= nil and p[1] == f and p[2] == m end
-do
-  local v, t = fresh(), mock()
-  v.SetEnabled(true)
-  check("bodyYawOffset default 4 / 0: enabling motion sends it once", v.Sync(t.api) == "enabled" and #t.bodyOffset == 1
-    and pair(t.bodyOffset[1], 4, 0) and pair(v.rt.bodyYawOffsetApplied, 4, 0))
-  check("bodyYawOffset default 4 / 0: steady sync makes no call", v.Sync(t.api) == "same" and #t.bodyOffset == 1)
-  v.SetBodyYawOffsetFemale(8, t.api)
-  check("female bodyYawOffset 8 is sent once with the male value", #t.bodyOffset == 2 and pair(t.bodyOffset[2], 8, 0)
-    and pair(v.rt.bodyYawOffsetApplied, 8, 0))
-  check("steady bodyYawOffset is not resent", v.Sync(t.api) == "same" and #t.bodyOffset == 2)
-  v.SetBodyYawOffsetMale(-2.5, t.api)
-  check("male bodyYawOffset is sent with the female value", #t.bodyOffset == 3 and pair(t.bodyOffset[3], 8, -2.5))
-  v.SetBodyYawOffsetFemale(35, t.api)
-  check("bodyYawOffset clamped to 20", #t.bodyOffset == 4 and pair(t.bodyOffset[4], 20, -2.5))
-  v.SetBodyYawOffsetMale(-35, t.api)
-  check("bodyYawOffset clamped to -20", #t.bodyOffset == 5 and pair(t.bodyOffset[5], 20, -20))
-  v.SetBodyYawOffsetFemale(0 / 0, t.api)
-  check("bodyYawOffset NaN -> 0 (sent)", #t.bodyOffset == 6 and pair(t.bodyOffset[6], 0, -20)
-    and v.want.bodyYawOffsetFemale == 0)
-  v.SetBodyYawOffset(0, t.api)
-  check("console SetBodyYawOffset sets both bodies", #t.bodyOffset == 7 and pair(t.bodyOffset[7], 0, 0)
-    and v.want.bodyYawOffsetMale == 0)
-  t.bodyOffsetReject = true
-  v.SetBodyYawOffsetFemale(-3, t.api)
-  check("rejected bodyYawOffset is never acknowledged", pair(v.rt.bodyYawOffsetApplied, 0, 0) and #t.bodyOffset == 8)
-  t.bodyOffsetReject = false
-  v.Sync(t.api)
-  check("rejected bodyYawOffset retries", pair(v.rt.bodyYawOffsetApplied, -3, 0) and #t.bodyOffset == 9 and pair(t.bodyOffset[9], -3, 0))
-  check("bodyYawOffset never touches the pelvis trim native (only its own enable-time send)", #t.trim == 1 and t.trim[1] == 2)
-end
-do
-  local v, t = fresh(), mock()
-  v.SetBodyYawOffsetFemale(6.5, t.api)
-  check("bodyYawOffset while motion is off makes no native call", #t.bodyOffset == 0 and v.want.bodyYawOffsetFemale == 6.5)
-  v.SetEnabled(true)
-  check("bodyYawOffset is applied when motion comes on", v.Sync(t.api) == "enabled" and #t.bodyOffset == 1 and pair(t.bodyOffset[1], 6.5, 0))
-end
-
 -- mm.strideWarp (one of M.OPTIONS; DLL default off): the value goes to the DLL before the glue is enabled, then only on a change
 do
   local v, t = fresh(), mock()
@@ -717,6 +669,16 @@ do
   t.strideReject = false
   v.Sync(t.api)
   check("rejected strideWarp retries", #t.stride == 4 and t.stride[4] == true and v.rt.optionsApplied.strideWarp == true)
+end
+
+-- mm.fastTurnExit (one of M.OPTIONS; DLL default off): off is sent once when motion comes on, then only on a change
+do
+  local v, t = fresh(), mock()
+  v.SetEnabled(true)
+  check("fastTurnExit starts off and is sent when motion comes on",
+    v.want.fastTurnExit == false and v.Sync(t.api) == "enabled" and #t.turnExit == 1 and t.turnExit[1] == false)
+  v.SetOption("fastTurnExit", true, t.api)
+  check("fastTurnExit switched on is sent once", #t.turnExit == 2 and t.turnExit[2] == true and v.Sync(t.api) == "same" and #t.turnExit == 2)
 end
 
 -- mm.firmFeet (one of M.OPTIONS; DLL default on): on is sent once when motion comes on, then only on a change

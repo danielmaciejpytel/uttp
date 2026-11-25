@@ -40,6 +40,7 @@
 #include "LeanPack.hpp"
 #include "LegIk.hpp"
 #include "OverlayFile.hpp"
+#include "TurnExit.hpp"
 
 namespace utpp::mm::leanrt
 {
@@ -86,6 +87,8 @@ struct Signals // one per v2 feed
     // character faces the camera and runs sideways or backwards (strafe rotation), where the heading frame leans the wrong way.
     bool bodyFrame = false;
     float bodyRightX = 1.0f, bodyRightY = 0.0f;
+    // Turn exit window (mm/TurnExit.hpp): the lateral acceleration and the blend space weights settle quickly.
+    bool quickSettle = false;
 };
 
 // Gate coverage of the lean (Params::coverage).
@@ -252,7 +255,8 @@ public:
             const bool body = aS.bodyFrame && std::isfinite(aS.bodyRightX) && std::isfinite(aS.bodyRightY);
             const float rx = body ? aS.bodyRightX : hy, ry = body ? aS.bodyRightY : -hx;
             const float aRight = heading ? std::clamp(m_axHeld * rx + m_ayHeld * ry, -aP.maxAccel, aP.maxAccel) : 0.0f;
-            const float k = aP.accelTc > 1e-4f ? 1.0f - std::exp(-dt / aP.accelTc) : 1.0f;
+            const float tc = aS.quickSettle ? std::min(aP.accelTc, turnexit::kLeanAccelTcS) : aP.accelTc;
+            const float k = tc > 1e-4f ? 1.0f - std::exp(-dt / tc) : 1.0f;
             m_aLP += (aRight - m_aLP) * k;
         }
         m_haveVel = vOk;
@@ -294,12 +298,13 @@ public:
             ln::LeanInput(pp, aS.direction, lat, x, y);
             if (!std::isfinite(x) || !std::isfinite(y))
                 x = y = 0.0f;
-            const float* wr2 = m_runSt.Update(aPack, m_run, x, y, dt);
-            const float* ww2 = m_walkSt.Update(aPack, m_walk, x, y, dt);
+            const float blendDt = aS.quickSettle ? dt * turnexit::kLeanBlendTimeScale : dt;
+            const float* wr2 = m_runSt.Update(aPack, m_run, x, y, blendDt);
+            const float* ww2 = m_walkSt.Update(aPack, m_walk, x, y, blendDt);
             m_runOk = wr2 != nullptr; // Evaluate / Update failure = lean 0 for that layer
             m_walkOk = ww2 != nullptr;
             if (m_head >= 0)
-                m_headOk = m_headSt.Update(aPack, m_head, x, y, dt) != nullptr;
+                m_headOk = m_headSt.Update(aPack, m_head, x, y, blendDt) != nullptr;
             else
                 m_headOk = false;
             m_tel.tri[0] = m_runSt.tri;

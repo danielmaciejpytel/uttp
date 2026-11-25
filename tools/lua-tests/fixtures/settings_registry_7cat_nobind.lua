@@ -110,14 +110,13 @@ return {
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
     ["mm.bodyHeightSmooth"] = "true",
-    ["mm.bodyYawOffsetFemale"] = "4",
-    ["mm.bodyYawOffsetMale"] = "0",
     ["mm.capsuleForecast"] = "false",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.farJumpGravity"] = "false",
+    ["mm.fastTurnExit"] = "false",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.firmFeet"] = "true",
@@ -287,9 +286,6 @@ return {
     "apply mm.feminineFigure(true,\"ok\")",
     "native UTPPSetMotionPelvisYawTrim(2)",
     "apply mm.pelvisYawTrim(2,\"ok\")",
-    "native UTPPSetMotionBodyYawOffsets(4,0)",
-    "apply mm.bodyYawOffsetFemale(4,\"ok\")",
-    "apply mm.bodyYawOffsetMale(0,\"ok\")",
     "native UTPPSetMotionWalkSpeed(1.8999999999999999)",
     "apply mm.walkToggleSpeed(1.8999999999999999,\"ok\")",
     "native UTPPSetMotionMinAnalogWalk(0.81999999999999995)",
@@ -312,6 +308,7 @@ return {
     "native UTPPSetMMTurnFootPin(true)",
     "native UTPPSetMMAimRootAccumulate(true)",
     "native UTPPSetMMOverlayInertialSwitch(true)",
+    "native UTPPSetMMFastTurnExit(false)",
     "apply mm.strideWarp(true,\"ok\")",
     "apply mm.firmFeet(true,\"ok\")",
     "apply mm.footYawLock(true,\"ok\")",
@@ -329,6 +326,7 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(0.20000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
+    "apply mm.fastTurnExit(false,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -524,8 +522,6 @@ return {
     "apply mm.shoulderWidth(0,\"ok\")",
     "apply mm.feminineFigure(true,\"ok\")",
     "apply mm.pelvisYawTrim(2,\"ok\")",
-    "apply mm.bodyYawOffsetFemale(4,\"ok\")",
-    "apply mm.bodyYawOffsetMale(0,\"ok\")",
     "apply mm.walkToggleSpeed(1.8999999999999999,\"ok\")",
     "apply mm.minAnalogWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
@@ -539,6 +535,7 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(1.1000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
+    "apply mm.fastTurnExit(false,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -1627,28 +1624,6 @@ return {
       ["section"] = "motion",
       ["type"] = "bool"
     },
-    ["mm.bodyYawOffsetFemale"] = {
-      ["default"] = "4",
-      ["hasApply"] = true,
-      ["hold"] = false,
-      ["max"] = 20,
-      ["min"] = -20,
-      ["onOff"] = false,
-      ["section"] = "animation",
-      ["step"] = 0.5,
-      ["type"] = "float"
-    },
-    ["mm.bodyYawOffsetMale"] = {
-      ["default"] = "0",
-      ["hasApply"] = true,
-      ["hold"] = false,
-      ["max"] = 20,
-      ["min"] = -20,
-      ["onOff"] = false,
-      ["section"] = "animation",
-      ["step"] = 0.5,
-      ["type"] = "float"
-    },
     ["mm.capsuleForecast"] = {
       ["default"] = "false",
       ["hasApply"] = true,
@@ -1696,6 +1671,14 @@ return {
       ["hold"] = false,
       ["onOff"] = false,
       ["section"] = "motion",
+      ["type"] = "bool"
+    },
+    ["mm.fastTurnExit"] = {
+      ["default"] = "false",
+      ["hasApply"] = true,
+      ["hold"] = false,
+      ["onOff"] = false,
+      ["section"] = "animation",
       ["type"] = "bool"
     },
     ["mm.feedDump"] = {
@@ -2497,14 +2480,13 @@ return {
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
     ["mm.bodyHeightSmooth"] = "true",
-    ["mm.bodyYawOffsetFemale"] = "4",
-    ["mm.bodyYawOffsetMale"] = "0",
     ["mm.capsuleForecast"] = "false",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"utpp_base\"",
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.farJumpGravity"] = "false",
+    ["mm.fastTurnExit"] = "false",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.firmFeet"] = "true",
@@ -2694,8 +2676,6 @@ return {
     "mm.shoulderWidth",
     "mm.feminineFigure",
     "mm.pelvisYawTrim",
-    "mm.bodyYawOffsetFemale",
-    "mm.bodyYawOffsetMale",
     "mm.walkToggleSpeed",
     "mm.minAnalogWalkSpeed",
     "mm.strideWarp",
@@ -2709,6 +2689,7 @@ return {
     "mm.leanHead",
     "mm.leanScale",
     "mm.leanHeadScale",
+    "mm.fastTurnExit",
     "mm.aimWorldSmooth",
     "mm.neutralAim",
     "mm.pelvisPlacement",
@@ -2892,8 +2873,6 @@ return {
     "mm.shoulderWidth",
     "mm.feminineFigure",
     "mm.pelvisYawTrim",
-    "mm.bodyYawOffsetFemale",
-    "mm.bodyYawOffsetMale",
     "mm.walkToggleSpeed",
     "mm.minAnalogWalkSpeed",
     "mm.strideWarp",
@@ -2907,6 +2886,7 @@ return {
     "mm.leanHead",
     "mm.leanScale",
     "mm.leanHeadScale",
+    "mm.fastTurnExit",
     "mm.aimWorldSmooth",
     "mm.neutralAim",
     "mm.pelvisPlacement",
@@ -3080,8 +3060,6 @@ return {
     "apply mm.shoulderWidth(0,\"ok\")",
     "apply mm.feminineFigure(true,\"ok\")",
     "apply mm.pelvisYawTrim(2,\"ok\")",
-    "apply mm.bodyYawOffsetFemale(4,\"ok\")",
-    "apply mm.bodyYawOffsetMale(0,\"ok\")",
     "apply mm.walkToggleSpeed(1.8999999999999999,\"ok\")",
     "apply mm.minAnalogWalkSpeed(0.81999999999999995,\"ok\")",
     "apply mm.strideWarp(true,\"ok\")",
@@ -3095,6 +3073,7 @@ return {
     "apply mm.leanHead(true,\"ok\")",
     "apply mm.leanScale(0.20000000000000001,\"ok\")",
     "apply mm.leanHeadScale(0.20000000000000001,\"ok\")",
+    "apply mm.fastTurnExit(false,\"ok\")",
     "apply mm.aimWorldSmooth(true,\"ok\")",
     "apply mm.neutralAim(true,\"ok\")",
     "apply mm.pelvisPlacement(false,\"ok\")",
@@ -3278,8 +3257,6 @@ mm.orientWarp=true\r\
 mm.shoulderWidth=0\r\
 mm.feminineFigure=true\r\
 mm.pelvisYawTrim=2\r\
-mm.bodyYawOffsetFemale=4\r\
-mm.bodyYawOffsetMale=0\r\
 mm.walkToggleSpeed=1.9\r\
 mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
@@ -3293,6 +3270,7 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=0.2\r\
 mm.leanHeadScale=0.2\r\
+mm.fastTurnExit=false\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
@@ -3433,8 +3411,6 @@ vehicle.jumpOutSidePush=true\r\
       "mm.shoulderWidth",
       "mm.feminineFigure",
       "mm.pelvisYawTrim",
-      "mm.bodyYawOffsetFemale",
-      "mm.bodyYawOffsetMale",
       "mm.walkToggleSpeed",
       "mm.minAnalogWalkSpeed",
       "mm.strideWarp",
@@ -3443,7 +3419,8 @@ vehicle.jumpOutSidePush=true\r\
       "mm.turnFootPin",
       "mm.aimRootAccumulate",
       "mm.stickSpeed",
-      "mm.aimAtCrosshair"
+      "mm.aimAtCrosshair",
+      "mm.fastTurnExit"
     },
     ["body"] = {
       "body.impl",
@@ -3754,14 +3731,13 @@ vehicle.jumpOutSidePush=true\r\
     ["mm.airRobust"] = "true",
     ["mm.airSteer"] = "true",
     ["mm.bodyHeightSmooth"] = "true",
-    ["mm.bodyYawOffsetFemale"] = "4",
-    ["mm.bodyYawOffsetMale"] = "0",
     ["mm.capsuleForecast"] = "false",
     ["mm.climbRelease"] = "false",
     ["mm.database"] = "\"alt_db\"",
     ["mm.debug"] = "false",
     ["mm.enabled"] = "true",
     ["mm.farJumpGravity"] = "false",
+    ["mm.fastTurnExit"] = "false",
     ["mm.feedDump"] = "false",
     ["mm.feminineFigure"] = "true",
     ["mm.firmFeet"] = "true",
@@ -3920,8 +3896,6 @@ mm.orientWarp=true\r\
 mm.shoulderWidth=0\r\
 mm.feminineFigure=true\r\
 mm.pelvisYawTrim=2\r\
-mm.bodyYawOffsetFemale=4\r\
-mm.bodyYawOffsetMale=0\r\
 mm.walkToggleSpeed=1.9\r\
 mm.minAnalogWalkSpeed=0.82\r\
 mm.strideWarp=true\r\
@@ -3935,6 +3909,7 @@ mm.lean=true\r\
 mm.leanHead=true\r\
 mm.leanScale=1.1\r\
 mm.leanHeadScale=0.2\r\
+mm.fastTurnExit=false\r\
 mm.aimWorldSmooth=true\r\
 mm.neutralAim=true\r\
 mm.pelvisPlacement=false\r\
@@ -4098,6 +4073,7 @@ other.module=42\r\
     "/utpp/animation|switch|mm.turnFootPin",
     "/utpp/animation|switch|mm.aimRootAccumulate",
     "/utpp/animation|selector|mm.stickSpeed",
+    "/utpp/animation|switch|mm.fastTurnExit",
     "/utpp/bodyturn|switch|bodyturn.weaponTurn",
     "/utpp/bodyturn|switch|bodyturn.aimStrafe",
     "/utpp/bodyturn|switch|bodyturn.aimStrafeUnarmed",
